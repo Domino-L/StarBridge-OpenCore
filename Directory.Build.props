@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Version>0.4.8.1</Version>
+    <FileVersion>0.4.8.1</FileVersion>
+    <AssemblyVersion>0.4.8.1</AssemblyVersion>
+    <Authors>StarBridge contributors</Authors>
+    <Copyright>Copyright 2026 StarBridge contributors</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/Domino-L/StarBridge-OpenCore</RepositoryUrl>
+  </PropertyGroup>
+</Project>

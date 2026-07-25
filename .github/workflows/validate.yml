@@ -1,0 +1,43 @@
+name: Validate Open Core
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Scan tracked files
+        shell: pwsh
+        run: |
+          & "./scripts/Test Repository Safety.ps1"
+
+      - name: Restore
+        run: dotnet restore StarBridge.sln
+
+      - name: Build
+        run: dotnet build StarBridge.sln --configuration Release --no-restore
+
+      - name: Run regression tests
+        run: dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build
