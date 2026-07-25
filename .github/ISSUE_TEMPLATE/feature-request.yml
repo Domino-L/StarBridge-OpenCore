@@ -1,0 +1,24 @@
+name: 功能建议
+description: 提出面向用户的改进想法或使用场景
+title: "[建议] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 你希望解决什么问题
+      description: 请先描述实际使用场景，而不只是功能名称。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你希望如何改进
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在如何处理
+      description: 如果已有临时解决方法，也可以在这里说明。

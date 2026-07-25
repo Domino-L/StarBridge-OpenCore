@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/Domino-L/StarBridge-OpenCore/security
+    about: 请使用私密渠道报告安全问题，不要创建公开 Issue。
+  - name: 星海舰桥官网
+    url: https://scstarbridge.com/
+    about: 查看官方下载、产品说明和联系方式。

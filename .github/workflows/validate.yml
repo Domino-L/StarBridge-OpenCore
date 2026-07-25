@@ -33,6 +33,11 @@ jobs:
         run: |
           & "./scripts/Test Repository Safety.ps1"
 
+      - name: Validate public downloads and help links
+        shell: pwsh
+        run: |
+          & "./scripts/Test StarBridge Public Hub.ps1"
+
       - name: Restore
         run: dotnet restore StarBridge.sln
 
