@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     name: Build and test
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 15
 
     steps:
@@ -42,7 +42,7 @@ jobs:
         run: dotnet restore StarBridge.sln
 
       - name: Build
-        run: dotnet build StarBridge.sln --configuration Release --no-restore
+        run: dotnet build StarBridge.sln --configuration Release --no-restore -p:StarBridgeIncludeCommercialAppearances=false -p:StarBridgeIncludeThirdPartyMedia=false
 
       - name: Run regression tests
         run: dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build

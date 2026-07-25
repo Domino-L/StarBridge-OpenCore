@@ -1,0 +1,101 @@
+# StarBridge verified location name table.
+# UTF-8. Standard localization keys and field-verified runtime aliases share the
+# same canonical Chinese display name.
+
+STANTON system:
+Stanton1_Lorville=罗威尔
+Stanton2_Orison=奥里森
+Stanton3_Area18=18区
+Stanton4_NewBabbage=新巴贝奇
+# Field-confirmed quantum target paired with Stanton4_NewBabbage.
+NewBabbage_LOC=新巴贝奇
+
+Stanton1_Transfer=埃弗勒斯空间站
+RR_HUR_LEO=埃弗勒斯空间站
+Stanton2_Transfer_Seraphim=炽天使空间站
+RR_CRU_LEO=炽天使空间站
+Stanton3_Transfer=拜基尼空间站
+RR_ARC_LEO=拜基尼空间站
+Stanton4_Transfer=特雷斯勒空间站
+RR_MIC_LEO=特雷斯勒空间站
+
+Stanton3_L1=弧 ARC L1
+RR_ARC_L1=弧 ARC L1
+Stanton3_L2=弧 ARC L2
+RR_ARC_L2=弧 ARC L2
+Stanton3_L3=弧 ARC L3
+RR_ARC_L3=弧 ARC L3
+Stanton3_L4=弧 ARC L4
+RR_ARC_L4=弧 ARC L4
+Stanton3_L5=弧 ARC L5
+RR_ARC_L5=弧 ARC L5
+
+Stanton1_L1=赫 HUR L1
+RR_HUR_L1=赫 HUR L1
+Stanton1_L2=赫 HUR L2
+RR_HUR_L2=赫 HUR L2
+Stanton1_L3=赫 HUR L3
+RR_HUR_L3=赫 HUR L3
+Stanton1_L4=赫 HUR L4
+RR_HUR_L4=赫 HUR L4
+Stanton1_L5=赫 HUR L5
+RR_HUR_L5=赫 HUR L5
+
+Stanton4_L1=微 MIC L1
+RR_MIC_L1=微 MIC L1
+Stanton4_L2=微 MIC L2
+RR_MIC_L2=微 MIC L2
+Stanton4_L3=微 MIC L3
+RR_MIC_L3=微 MIC L3
+Stanton4_L4=微 MIC L4
+RR_MIC_L4=微 MIC L4
+Stanton4_L5=微 MIC L5
+RR_MIC_L5=微 MIC L5
+
+Stanton2_L1=十 CRU L1
+RR_CRU_L1=十 CRU L1
+Stanton2_L4=十 CRU L4
+RR_CRU_L4=十 CRU L4
+Stanton2_L5=十 CRU L5
+RR_CRU_L5=十 CRU L5
+
+PYRO system:
+RR_JP_PyroStanton=斯坦顿星门(派罗)
+RR_JP_PyroNyx=尼克斯星门(派罗)
+RR_P2_L4=死局空间站
+RR_P3_LEO=轨道讣闻站
+RR_P6_LEO=废墟空间站
+ab_pyro_final_set_dungeon-001=焰联-监管控制站-3-5
+
+# Quantum-route aliases paired with the field-verified runtime destinations.
+rs_ext_pyro-stanton_jp=斯坦顿星门(派罗)
+rs_ext_pyro-nyx_jp=尼克斯星门(派罗)
+rs_ext_pyro2_l4=死局空间站
+rs_ext_pyro3_leo=轨道讣闻站
+rs_ext_pyro6_leo=废墟空间站
+
+NYX system:
+Nyx_Kaboos=QV物流空间站
+Nyx_TSG_QVExtractionStation=战术打击群地点
+Delamar_Levski=列夫斯基
+Nyx_Levski=列夫斯基
+
+Nyx_SocialStation_001=人民服务空间站 阿尔法
+AsteroidClusterBase_Nyx_Social_Keeger_001=人民服务空间站 阿尔法
+Nyx_SocialStation_002=人民服务空间站 德尔塔
+AsteroidClusterBase_Nyx_Social_Keeger_002=人民服务空间站 德尔塔
+Nyx_SocialStation_003=人民服务空间站 西塔
+AsteroidClusterBase_Nyx_Social_Keeger_003=人民服务空间站 西塔
+Nyx_SocialStation_004=人民服务空间站 拉姆达
+AsteroidClusterBase_Nyx_Social_Keeger_004=人民服务空间站 拉姆达
+
+Nyx_Stanton_JPStation=斯坦顿星门
+RR_JP_NyxStanton=斯坦顿星门(尼克斯)
+Nyx_Pyro_JPStation=派罗星门
+RR_JP_NyxPyro=派罗星门(尼克斯)
+Nyx_JumpPoint_Castra=尼克斯 - 卡斯塔 跳跃点
+# Field observation confirms this runtime code resolves to the Stanton gateway.
+RR_JP_NyxCastra=斯坦顿星门(尼克斯)
+
+# This is a parser placeholder, not a physical location.
+Arrived - awaiting location confirmation=已抵达，等待地点确认

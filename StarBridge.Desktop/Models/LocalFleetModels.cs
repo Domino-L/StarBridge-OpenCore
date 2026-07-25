@@ -1,0 +1,148 @@
+namespace StarBridge.Desktop;
+
+public sealed record LocalFleetState(
+    bool HasFleet,
+    string? FleetName,
+    string? FleetCode,
+    string? FleetChiefCommander,
+    string? FleetDeputyCommander,
+    string? FleetDescription,
+    string? FleetType,
+    string? FleetJoinPolicy,
+    string? FleetActiveTime,
+    string? FleetLogoPath,
+    string? FleetNoticeTitle,
+    string? FleetNoticeContent,
+    string? FleetCurrentTaskTitle,
+    string? FleetCurrentTaskBrief,
+    string? FleetCurrentTaskParticipants,
+    string? FleetCurrentTaskRally,
+    string? FleetCurrentTaskShip,
+    bool FleetCurrentTaskEmailCall,
+    DateTime? FleetCurrentTaskTime,
+    string? FleetCurrentTaskHistoryKey,
+    int FleetCurrentTaskNoticeRevision,
+    LocalFleetTaskHistory[]? TaskHistory,
+    LocalSquadState[]? Squads,
+    string? JoinedSquadName,
+    LocalFleetActionPlan[]? ActionPlans,
+    string[]? JoinedActionPlanIds,
+    LocalFleetEventLog[]? EventLog,
+    LocalFleetMemberPermission[]? MemberPermissions = null,
+    bool FleetEmailNotificationsEnabled = true,
+    string? SelectedSquadName = null,
+    DateTimeOffset FleetJoinedAt = default,
+    string[]? FleetTagIds = null,
+    string? FleetBannerPath = null,
+    string? FleetBannerSourcePath = null,
+    string[]? FleetSystemIds = null,
+    string? FleetLanguage = null,
+    string? FleetTimeZoneId = null,
+    string? FleetWebsiteUrl = null,
+    LocalFleetExternalContact[]? FleetExternalContacts = null,
+    LocalFleetActivityWindow[]? FleetActivityWindows = null,
+    string? FleetActiveDaysDescription = null,
+    string? FleetActivityCadence = null,
+    string? FleetRecruitmentStatus = null,
+    bool FleetRecruitingEnabled = false,
+    string? FleetRecruitingTarget = null,
+    string? FleetRecruitingNote = null,
+    LocalFleetRoleGroup[]? RoleGroups = null,
+    bool FleetPublicListingEnabled = true,
+    string? FleetPublicMemberScaleMode = null,
+    string? FleetPublicShipScaleMode = null,
+    bool FleetPublicProfileEnabled = true,
+    bool FleetPublicShowDescription = true,
+    bool FleetPublicShowTags = true,
+    bool FleetPublicShowActiveSystems = true,
+    bool FleetPublicShowActivityTime = true,
+    bool FleetPublicShowExternalContacts = false,
+    DateTimeOffset? FleetNoticePublishedAt = null,
+    string? FleetInviteCodeCreationPolicy = null,
+    string? FleetInvitationCardPolicy = null);
+
+public sealed record LocalFleetExternalContact(
+    string Platform,
+    string Value);
+
+public sealed record LocalFleetActivityWindow(
+    string[]? Days,
+    string? StartTime,
+    string? EndTime,
+    bool EndsNextDay = false);
+
+public sealed record LocalFleetMemberPermission(
+    string GameName,
+    string? Callsign,
+    string RoleTitle,
+    bool PermissionEnabled,
+    bool CanRemoveMembers,
+    bool CanPublishTasks,
+    bool CanPublishPlans,
+    bool CanManageFleetInfo,
+    DateTimeOffset UpdatedAt,
+    string? RoleGroupKey = null,
+    string[]? ExtraAllowedPermissions = null,
+    string[]? ExtraDeniedPermissions = null);
+
+public sealed record LocalFleetRoleGroup(
+    string Key,
+    string DisplayName,
+    string Description,
+    string Color,
+    int SortOrder,
+    bool IsSystem,
+    bool IsEnabled,
+    int MemberCount,
+    string[]? Permissions,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record LocalFleetTaskHistory(
+    string Key,
+    string Title,
+    string Brief,
+    string Status,
+    string Participants,
+    string Rally,
+    string RequiredShip,
+    string PublishedAtText);
+
+public sealed record LocalSquadState(
+    string Name,
+    string Icon,
+    string Commander,
+    string Mission,
+    string RallyPoint,
+    string Description,
+    string Type,
+    string? EmblemPath,
+    DateTimeOffset UpdatedAt = default,
+    string? Id = null);
+
+public sealed record LocalFleetActionPlan(
+    string Id,
+    string Title,
+    string Content,
+    DateTime StartTime,
+    bool NotifyMembers,
+    ActionPlanParticipantRow[]? Participants,
+    string Status = "Published",
+    DateTimeOffset? CanceledAt = null,
+    string? CanceledBy = null,
+    string? CancelReason = null,
+    DateTimeOffset? ReachedAt = null,
+    DateTimeOffset? CompletedAt = null,
+    string? CompletedBy = null,
+    string? CompletionMode = null,
+    DateTimeOffset UpdatedAt = default,
+    long Version = 1);
+
+public sealed record LocalFleetEventLog(
+    string Id,
+    DateTimeOffset Timestamp,
+    string Type,
+    string Title,
+    string Detail,
+    DateTimeOffset EndTimestamp = default,
+    int OccurrenceCount = 1);

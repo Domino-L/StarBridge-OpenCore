@@ -1,0 +1,69 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <StarBridgeIncludeCommercialAppearances
+      Condition="'$(StarBridgeIncludeCommercialAppearances)' == '' and Exists('..\StarBridge.CommercialAppearances\StarBridge.CommercialAppearances.projitems')">true</StarBridgeIncludeCommercialAppearances>
+    <StarBridgeIncludeCommercialAppearances
+      Condition="'$(StarBridgeIncludeCommercialAppearances)' == ''">false</StarBridgeIncludeCommercialAppearances>
+    <DefineConstants
+      Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true'">$(DefineConstants);STARBRIDGE_COMMERCIAL_APPEARANCES</DefineConstants>
+    <StarBridgeIncludeThirdPartyMedia
+      Condition="'$(StarBridgeIncludeThirdPartyMedia)' == '' and Exists('Data\ShipImages')">true</StarBridgeIncludeThirdPartyMedia>
+    <StarBridgeIncludeThirdPartyMedia
+      Condition="'$(StarBridgeIncludeThirdPartyMedia)' == ''">false</StarBridgeIncludeThirdPartyMedia>
+  </PropertyGroup>
+
+  <Import
+    Project="..\StarBridge.CommercialAppearances\StarBridge.CommercialAppearances.projitems"
+    Label="Shared"
+    Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and Exists('..\StarBridge.CommercialAppearances\StarBridge.CommercialAppearances.projitems')" />
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Star Bridge</AssemblyName>
+    <Product>Star Bridge</Product>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformVersion>10.0.22621.0</TargetPlatformVersion>
+    <TargetPlatformMoniker>Windows,Version=10.0</TargetPlatformMoniker>
+    <TargetPlatformDisplayName>Windows</TargetPlatformDisplayName>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Configurations>Debug;Release;Preview</Configurations>
+    <ApplicationIcon>Assets\Brand\StarBridge_AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Brand\StarBridge_logo.png" />
+    <Resource Include="Assets\Brand\StarBridge_AppIcon.png" />
+    <Resource Include="Assets\Brand\StarBridge_AppIcon.ico" />
+    <Resource Include="Assets\Navigation\MyFleet_Nav.png" />
+    <Resource Include="Assets\Navigation\MySquad_Nav.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Data\ship-names-zh.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Data\ship-catalog.tsv" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Data\ship-loaner-matrix.tsv" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Data\ShipImages\**\*" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true'" />
+    <Content Include="Data\ShipDetailImages\**\*" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true'" />
+    <Content Include="Assets\systems\stanton.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\stanton.png')" />
+    <Content Include="Assets\systems\pyro.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\pyro.png')" />
+    <Content Include="Assets\systems\nyx.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\nyx.png')" />
+    <Content Include="Data\location-names-zh.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Data\location-names-zh-unverified.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="config\overlay.*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

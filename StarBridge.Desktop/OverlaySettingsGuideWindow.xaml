@@ -1,0 +1,199 @@
+<Window x:Class="StarBridge.Desktop.OverlaySettingsGuideWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="游戏浮层设置引导"
+        Width="780"
+        Height="560"
+        MinWidth="680"
+        MinHeight="500"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        AllowsTransparency="True"
+        Background="Transparent">
+    <Border Background="{StaticResource PageBackgroundBrush}"
+            BorderBrush="{StaticResource AccentBrush}"
+            BorderThickness="1"
+            CornerRadius="3">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="62" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="66" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Padding="20,0"
+                    Background="#E00B1C28"
+                    BorderBrush="#28506A"
+                    BorderThickness="0,0,0,1"
+                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="游戏浮层设置引导"
+                                   Foreground="#E6F1F8"
+                                   FontSize="19"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="逐项了解设置目录，所有更改仍需手动保存"
+                                   Margin="0,3,0,0"
+                                   Foreground="#7F9AAA"
+                                   FontSize="10" />
+                    </StackPanel>
+                    <Button Width="32"
+                            Height="32"
+                            HorizontalAlignment="Right"
+                            Style="{StaticResource DialogCloseButton}"
+                            ToolTip="关闭引导"
+                            Click="CloseButton_Click" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="208" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0"
+                        Padding="12"
+                        Background="#C8081722"
+                        BorderBrush="#1C3B4E"
+                        BorderThickness="0,0,1,0">
+                    <ListBox x:Name="GuideStepsList"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             IsHitTestVisible="False"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Height="36" Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Number}"
+                                               Foreground="#637A89"
+                                               FontFamily="Bahnschrift"
+                                               FontSize="9"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Title}"
+                                               Foreground="#B8CBD6"
+                                               FontSize="11.5"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="2,0,0,0" />
+                                <Setter Property="Padding" Value="8,0" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="StepChrome"
+                                                    Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                                    Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="StepChrome" Property="Background" Value="#132E40" />
+                                                    <Setter TargetName="StepChrome" Property="BorderBrush" Value="#36B8F2" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </Border>
+
+                <Grid Grid.Column="1" Margin="24,22">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="GuideStepCounterText"
+                               Text="01 / 10"
+                               Foreground="#5CCBFF"
+                               FontFamily="Bahnschrift"
+                               FontSize="10"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="GuidePageTitleText"
+                               Grid.Row="1"
+                               Margin="0,8,0,0"
+                               Foreground="#E6F1F8"
+                               FontSize="23"
+                               FontWeight="SemiBold" />
+                    <Border Grid.Row="2"
+                            Margin="0,18,0,0"
+                            Padding="18"
+                            Background="#0B1C28"
+                            BorderBrush="#28506A"
+                            BorderThickness="1">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel>
+                                <TextBlock x:Name="GuidePageSummaryText"
+                                           Foreground="#5CCBFF"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap" />
+                                <TextBlock x:Name="GuidePageDetailText"
+                                           Margin="0,13,0,0"
+                                           Foreground="#C7D6DF"
+                                           FontSize="12.5"
+                                           LineHeight="22"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                    <TextBlock Grid.Row="3"
+                               Margin="0,13,0,0"
+                               Text="引导会同步定位左侧设置目录；不会自动修改或保存任何选项。"
+                               Foreground="#637A89"
+                               FontSize="10"
+                               TextWrapping="Wrap" />
+                </Grid>
+            </Grid>
+
+            <Border Grid.Row="2"
+                    Padding="20,0"
+                    Background="#D9081722"
+                    BorderBrush="#234A61"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="132" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="PreviousButton"
+                            Content="上一项"
+                            Height="36"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="PreviousButton_Click" />
+                    <TextBlock x:Name="GuideFooterText"
+                               Grid.Column="1"
+                               Margin="18,0"
+                               Foreground="#7F9AAA"
+                               VerticalAlignment="Center"
+                               TextAlignment="Center" />
+                    <Button x:Name="NextButton"
+                            Grid.Column="2"
+                            Content="下一项"
+                            Height="36"
+                            Style="{StaticResource PrimaryButton}"
+                            Click="NextButton_Click" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

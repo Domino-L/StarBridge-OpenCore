@@ -1,0 +1,207 @@
+<Window x:Class="StarBridge.Desktop.TrayQuickPanel"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="星海舰桥快捷控制"
+        Icon="/Assets/Brand/StarBridge_AppIcon.ico"
+        Width="304"
+        SizeToContent="Height"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Deactivated="TrayQuickPanel_Deactivated"
+        PreviewKeyDown="TrayQuickPanel_PreviewKeyDown">
+    <Window.Resources>
+        <Style x:Key="TrayActionButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="TrayOverlayToggleButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="92" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="True">
+                    <Setter Property="Background" Value="#153425" />
+                    <Setter Property="BorderBrush" Value="#369865" />
+                    <Setter Property="Foreground" Value="#A9F0C5" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="TrayCloseButton" TargetType="Button">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Foreground" Value="#7F95A4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#3A171B" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#8B3B46" />
+                                <Setter Property="Foreground" Value="#FFADB5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="8"
+            Background="#F20A1823"
+            BorderBrush="#2A5871"
+            BorderThickness="1"
+            CornerRadius="2">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" BlurRadius="18" ShadowDepth="5" Opacity="0.58" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="2" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Background="{StaticResource AvionicsGlassPanelBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="48" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Background="#29AFFF" />
+                <Border Grid.Column="1" Margin="3,0" Background="#42CF7C" />
+                <Border Grid.Column="2" Background="#173447" />
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="14,12,12,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="38" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid Width="32" Height="32" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Ellipse Fill="#0D2433" Stroke="#2A5871" StrokeThickness="1" />
+                    <Ellipse Margin="2">
+                        <Ellipse.Fill>
+                            <ImageBrush x:Name="TrayAvatarBrush" Stretch="UniformToFill" />
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <ContentControl x:Name="TrayAvatarInitialText"
+                                    Margin="2"
+                                    Style="{StaticResource IdentityBeaconAvatarPlaceholderStyle}" />
+                </Grid>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="星海舰桥" Foreground="#E6F1F8" FontSize="14" FontWeight="SemiBold" />
+                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                        <Ellipse x:Name="RuntimeStatusDot" Width="6" Height="6" Fill="#29AFFF" VerticalAlignment="Center" />
+                        <TextBlock x:Name="RuntimeStatusText" Text="后台待命" Margin="6,0,0,0" Foreground="#8298A7" FontSize="10" />
+                        <TextBlock Text=" · " Foreground="#465C69" FontSize="10" />
+                        <TextBlock x:Name="VersionText" Text="V--" Foreground="#637A89" FontFamily="Bahnschrift" FontSize="10" />
+                    </StackPanel>
+                </StackPanel>
+                <Button Grid.Column="2"
+                        Style="{StaticResource TrayCloseButton}"
+                        Click="CloseButton_Click"
+                        ToolTip="关闭快捷面板">
+                    <Path x:Name="TrayCloseIcon"
+                          Width="10"
+                          Height="10"
+                          Data="M 1,1 L 9,9 M 9,1 L 1,9"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="1.5"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          Stretch="None" />
+                </Button>
+            </Grid>
+
+            <StackPanel Grid.Row="2" Margin="12,0,12,12">
+                <Border Padding="12,10"
+                        Background="{StaticResource AvionicsGlassRaisedBrush}"
+                        BorderBrush="#25475B"
+                        BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="游戏浮层" Foreground="#637A89" FontFamily="Bahnschrift" FontSize="9.5" FontWeight="SemiBold" />
+                            <TextBlock x:Name="OverlayStatusText" Text="未开启" Margin="0,4,0,0" Foreground="#AFC4D0" FontSize="13" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <Button x:Name="ToggleOverlayButton"
+                                Grid.Column="1"
+                                Content="开启浮层"
+                                Tag="False"
+                                Style="{StaticResource TrayOverlayToggleButton}"
+                                Click="ToggleOverlayButton_Click" />
+                        <Border Grid.Row="1"
+                                Grid.ColumnSpan="2"
+                                Margin="0,10,0,0"
+                                Padding="9,7"
+                                Background="{StaticResource AvionicsGlassPanelBrush}"
+                                BorderBrush="#142B39"
+                                BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="当前场景" Foreground="#637A89" FontSize="10.5" />
+                                <TextBlock x:Name="SceneText"
+                                           Grid.Column="1"
+                                           Text="自动 · 舰队"
+                                           Foreground="#CFE0EA"
+                                           FontSize="10.5"
+                                           FontWeight="SemiBold"
+                                           TextAlignment="Right"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Grid Margin="0,9,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Content="打开星海舰桥"
+                            Style="{StaticResource TrayActionButton}"
+                            Click="OpenApplicationButton_Click" />
+                    <Button Grid.Column="2"
+                            Content="浮层设置"
+                            Style="{StaticResource TrayActionButton}"
+                            Click="OpenOverlaySettingsButton_Click" />
+                </Grid>
+
+                <Border Height="1" Margin="0,10,0,9" Background="#173447" />
+                <Button Content="完全退出星海舰桥"
+                        Height="32"
+                        Style="{StaticResource DangerButton}"
+                        Click="ExitApplicationButton_Click" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

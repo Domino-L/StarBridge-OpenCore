@@ -40,18 +40,21 @@
 
 更多联系方式和产品说明见 [星海舰桥官网](https://scstarbridge.com/)。
 
-## 开放核心源码
+## 开放源码
 
-本仓库同时承担星海舰桥的公开下载、版本说明和开放核心源码维护。
+本仓库同时承担星海舰桥的公开下载、版本说明和桌面客户端源码维护。
 
 当前 Apache-2.0 开放范围包括：
 
+- 可编译、可运行的 Windows 桌面客户端；
+- 舰队、房间、好友、个人资料与机库等客户端功能；
+- 游戏浮层、布局编辑、事件通知与公开外观框架；
 - 只读 `Game.log` 监听与事件解析；
 - 飞船、地点、量子航行和在线状态推断；
 - 核心协作数据契约；
 - 公开算法的回归测试与说明文档。
 
-桌面应用、托管服务、部署配置、商业授权实现，以及“夜影”和 Verdict 等可选商业外观源码不在 Apache-2.0 开放范围内。Releases 中提供的是可直接安装的完整桌面应用，其二进制分发边界见 [完整应用与源码许可](BINARY-DISTRIBUTION-NOTICE.md)。
+托管服务、生产部署配置、商业授权实现，以及“夜影”和 Verdict 等可选商业外观源码不在 Apache-2.0 开放范围内。公开客户端在没有这些私有扩展时仍可独立编译和运行。Releases 中提供的是可直接安装的完整桌面应用，其二进制分发边界见 [完整应用与源码许可](BINARY-DISTRIBUTION-NOTICE.md)。
 
 开发者可查看 [参与贡献](CONTRIBUTING.md) 和 [Game.log 识别算法](docs/GAME_LOG_LISTENING_ALGORITHM.md)。
 
@@ -64,6 +67,8 @@ dotnet build StarBridge.sln
 dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj
 ```
 
+桌面客户端输出位于 `StarBridge.Desktop/bin/Debug/net8.0-windows10.0.22621.0/`。源码包不会附带来源或再分发权尚未确认的舰船图片和星系地图；缺少这些可选媒体不会阻止客户端编译。
+
 ## 许可与名称
 
-本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。产品名称、标志、应用图标、商业外观和第三方游戏素材不随 Apache-2.0 授权，详见 [TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。产品名称、标志、应用图标、商业外观和第三方游戏素材不随 Apache-2.0 授权，详见 [素材与许可边界](ASSET_POLICY.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

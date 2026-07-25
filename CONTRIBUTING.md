@@ -1,24 +1,30 @@
-# Contributing to StarBridge Open Core
+# Contributing to StarBridge
 
 Thank you for helping improve StarBridge Open Core.
 
 ## Scope
 
-The public repository currently accepts changes to:
+The public repository accepts changes to:
 
+- the Windows desktop client and its public user experience;
+- fleet, party-room, friends, profile, hangar, and communication clients;
+- the public overlay framework, layout editor, and built-in open appearances;
 - read-only `Game.log` watching and parsing;
 - ship, location, quantum-travel and presence inference;
 - public state and collaboration contracts;
 - regression tests and public algorithm documentation.
 
-The desktop product, hosted service, deployment configuration, commercial
-entitlement implementation, and the Night Shadow and Verdict appearances are
-maintained outside this repository.
+The hosted service, production deployment configuration, commercial
+entitlement implementation, and the Night Shadow and Verdict appearance source
+are maintained outside this repository. Stable appearance IDs and compatibility
+contracts may remain public so settings can migrate safely.
 
 ## Before submitting a change
 
 1. Do not include personal logs, account identifiers, tokens, private server
-   addresses, game screenshots, or third-party assets.
+   addresses, game screenshots, commercial appearance source, or third-party
+   assets. Follow `ASSET_POLICY.md` for every new image, icon, font, audio, or
+   other media file.
 2. Add or update a regression test when behavior changes.
 3. Run:
 

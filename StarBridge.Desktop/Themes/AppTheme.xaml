@@ -1,0 +1,2295 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:StarBridge.Desktop">
+    <Color x:Key="WindowBackColor">#02070D</Color>
+    <Color x:Key="PanelBackColor">#0A1420</Color>
+    <Color x:Key="FieldBackColor">#060E17</Color>
+    <Color x:Key="PrimaryTextColor">#EEF8FF</Color>
+    <Color x:Key="MutedTextColor">#8FAEC7</Color>
+    <Color x:Key="AccentColor">#69CCFF</Color>
+    <Color x:Key="AccentDimColor">#1A5370</Color>
+    <Color x:Key="StatusInfoColor">#69CCFF</Color>
+    <Color x:Key="StatusSuccessColor">#5FEA9A</Color>
+    <Color x:Key="StatusWarningColor">#FFC95B</Color>
+    <Color x:Key="StatusDangerColor">#FF6974</Color>
+    <Color x:Key="StatusDisabledColor">#6E8AA8</Color>
+
+    <SolidColorBrush x:Key="WindowBackBrush" Color="{StaticResource WindowBackColor}" />
+    <SolidColorBrush x:Key="PanelBackBrush" Color="{StaticResource PanelBackColor}" />
+    <SolidColorBrush x:Key="FieldBackBrush" Color="{StaticResource FieldBackColor}" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="{StaticResource PrimaryTextColor}" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="{StaticResource MutedTextColor}" />
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="AccentDimBrush" Color="{StaticResource AccentDimColor}" />
+    <SolidColorBrush x:Key="StatusInfoBrush" Color="{StaticResource StatusInfoColor}" />
+    <SolidColorBrush x:Key="StatusSuccessBrush" Color="{StaticResource StatusSuccessColor}" />
+    <SolidColorBrush x:Key="StatusWarningBrush" Color="{StaticResource StatusWarningColor}" />
+    <SolidColorBrush x:Key="StatusDangerBrush" Color="{StaticResource StatusDangerColor}" />
+    <SolidColorBrush x:Key="StatusDisabledBrush" Color="{StaticResource StatusDisabledColor}" />
+    <SolidColorBrush x:Key="FleetCommanderNameBrush" Color="#FFFFD95C" />
+    <SolidColorBrush x:Key="SquadCommanderNameBrush" Color="#FF67FFD7" />
+    <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource StatusDangerColor}" />
+    <SolidColorBrush x:Key="TransparentBrush" Color="Transparent" />
+
+    <Style x:Key="IdentityBeaconAvatarPlaceholderStyle"
+           TargetType="ContentControl">
+        <Setter Property="Background" Value="#081923" />
+        <Setter Property="Foreground" Value="#79CFF4" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid ClipToBounds="True">
+                        <Border Background="{TemplateBinding Background}" />
+                        <Viewbox Margin="5"
+                                 Stretch="Uniform">
+                            <Canvas Width="64" Height="64">
+                                <Ellipse Canvas.Left="11"
+                                         Canvas.Top="11"
+                                         Width="42"
+                                         Height="42"
+                                         Fill="Transparent"
+                                         Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                         StrokeThickness="1.35"
+                                         Opacity="0.24" />
+                                <Path Data="M4,18 L4,4 L18,4 M46,4 L60,4 L60,18 M60,46 L60,60 L46,60 M18,60 L4,60 L4,46"
+                                      Fill="Transparent"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                      StrokeThickness="1.6"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Opacity="0.58" />
+                                <Ellipse Canvas.Left="25"
+                                         Canvas.Top="17"
+                                         Width="14"
+                                         Height="14"
+                                         Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                         Opacity="0.88" />
+                                <Path Data="M16,49 C18,39 24,34 32,34 C40,34 46,39 48,49 Z"
+                                      Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                      Opacity="0.78" />
+                                <Path Data="M21,54 L43,54"
+                                      Fill="Transparent"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                      StrokeThickness="1.4"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      Opacity="0.42" />
+                            </Canvas>
+                        </Viewbox>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A real avatar and its fallback are mutually exclusive. Bind Tag to the
+         original avatar value (path, data, or ImageSource); the beacon is only
+         created visually while that value is absent. -->
+    <Style x:Key="IdentityBeaconAvatarFallbackStyle"
+           TargetType="ContentControl"
+           BasedOn="{StaticResource IdentityBeaconAvatarPlaceholderStyle}">
+        <Setter Property="Visibility" Value="Collapsed" />
+        <Style.Triggers>
+            <Trigger Property="Tag" Value="{x:Null}">
+                <Setter Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="Tag" Value="">
+                <Setter Property="Visibility" Value="Visible" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="{x:Type ScrollViewer}">
+        <Setter Property="local:SmoothWheelScrollBehavior.IsEnabled" Value="True" />
+    </Style>
+
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource PrimaryTextColor}" />
+    <SolidColorBrush x:Key="AccentStrongBrush" Color="#29AFFF" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#91A5B5" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#637A89" />
+    <SolidColorBrush x:Key="SurfaceBaseBrush" Color="#060E17" />
+    <SolidColorBrush x:Key="SurfacePanelBrush" Color="#091923" />
+    <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#0D2230" />
+    <SolidColorBrush x:Key="SurfaceRaisedTranslucentBrush" Color="#E80D2230" />
+    <SolidColorBrush x:Key="SurfaceFieldBrush" Color="#0C2230" />
+    <SolidColorBrush x:Key="SurfaceFieldStrongBrush" Color="#113044" />
+    <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#143B50" />
+    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#112D3D" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#542A5C73" />
+    <SolidColorBrush x:Key="BorderDefaultBrush" Color="#79326B86" />
+    <SolidColorBrush x:Key="BorderFocusBrush" Color="#29AFFF" />
+    <SolidColorBrush x:Key="StatusInfoSurfaceBrush" Color="#18233B52" />
+    <SolidColorBrush x:Key="StatusSuccessSurfaceBrush" Color="#18305224" />
+    <SolidColorBrush x:Key="StatusWarningSurfaceBrush" Color="#182A2111" />
+    <SolidColorBrush x:Key="StatusDangerSurfaceBrush" Color="#182A171B" />
+    <SolidColorBrush x:Key="StatusDisabledSurfaceBrush" Color="#14112331" />
+    <SolidColorBrush x:Key="StatusInfoUnifiedBrush" Color="#29AFFF" />
+    <SolidColorBrush x:Key="StatusSuccessUnifiedBrush" Color="#42CF7C" />
+    <SolidColorBrush x:Key="StatusWarningUnifiedBrush" Color="#D9A23B" />
+    <SolidColorBrush x:Key="StatusDangerUnifiedBrush" Color="#F15B65" />
+    <SolidColorBrush x:Key="StatusDisabledUnifiedBrush" Color="#5E7283" />
+
+    <SolidColorBrush x:Key="HudGlassBrush" Color="#07131D" />
+    <SolidColorBrush x:Key="HudGlassHoverBrush" Color="#102737" />
+    <SolidColorBrush x:Key="HudHeaderBrush" Color="#081722" />
+    <SolidColorBrush x:Key="HudFocusBrush" Color="#081923" />
+    <SolidColorBrush x:Key="HudRailBrush" Color="#07141E" />
+
+    <!-- Matte avionics surface system. Stable resource keys keep existing views compatible. -->
+    <SolidColorBrush x:Key="AvionicsGlassPanelBrush" Color="#0A1823" />
+    <SolidColorBrush x:Key="AvionicsGlassRaisedBrush" Color="#0D1F2B" />
+    <SolidColorBrush x:Key="AvionicsGlassHoverBrush" Color="#123143" />
+    <SolidColorBrush x:Key="AvionicsGlassSelectedBrush" Color="#153A4F" />
+
+    <SolidColorBrush x:Key="AvionicsGlassEdgeBrush" Color="#64316A86" />
+    <SolidColorBrush x:Key="AvionicsGlassSoftEdgeBrush" Color="#2428576F" />
+
+    <SolidColorBrush x:Key="AvionicsStructuralFrameBrush" Color="#355C70" />
+    <SolidColorBrush x:Key="AvionicsGuideRailBrush" Color="#3E8EAD" />
+    <SolidColorBrush x:Key="AvionicsSectionWashBrush" Color="#0B1C28" />
+    <SolidColorBrush x:Key="AvionicsDataWellBrush" Color="#07141D" />
+    <!-- Route light is the sole decorative gradient: active navigation only, never a surface fill. -->
+    <LinearGradientBrush x:Key="AvionicsRouteLightBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#0029AFFF" Offset="0" />
+        <GradientStop Color="#B829AFFF" Offset="0.2" />
+        <GradientStop Color="#FF9AE8FF" Offset="0.5" />
+        <GradientStop Color="#B829AFFF" Offset="0.8" />
+        <GradientStop Color="#0029AFFF" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AvionicsHorizonLightBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#0029AFFF" Offset="0" />
+        <GradientStop Color="#A329AFFF" Offset="0.16" />
+        <GradientStop Color="#FF8BE4FF" Offset="0.5" />
+        <GradientStop Color="#A329AFFF" Offset="0.84" />
+        <GradientStop Color="#0029AFFF" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="AvionicsGlassFieldBrush" Color="#0E2535" />
+    <SolidColorBrush x:Key="AvionicsPrimaryActionBrush" Color="#1677A8" />
+    <SolidColorBrush x:Key="AvionicsPrimaryActionHoverBrush" Color="#1B88BC" />
+    <SolidColorBrush x:Key="AvionicsPrimaryActionPressedBrush" Color="#12658E" />
+    <SolidColorBrush x:Key="AvionicsDangerSurfaceBrush" Color="#241319" />
+    <SolidColorBrush x:Key="FleetNotificationChipBrush" Color="#081722" />
+
+    <SolidColorBrush x:Key="PrimaryButtonBackBrush" Color="#1677A8" />
+    <SolidColorBrush x:Key="PrimaryButtonHoverBrush" Color="#1B88BC" />
+    <SolidColorBrush x:Key="PrimaryButtonPressedBrush" Color="#12658E" />
+    <SolidColorBrush x:Key="PrimaryButtonBorderBrush" Color="#38B8F2" />
+    <SolidColorBrush x:Key="PrimaryButtonHoverBorderBrush" Color="#5CCBFF" />
+    <SolidColorBrush x:Key="PrimaryButtonPressedBorderBrush" Color="#2CA2D8" />
+
+    <SolidColorBrush x:Key="ButtonBackBrush" Color="#0C1D29" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#102737" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#091721" />
+    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#28506A" />
+    <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#3B789A" />
+    <SolidColorBrush x:Key="ButtonPressedBorderBrush" Color="#28617E" />
+
+    <SolidColorBrush x:Key="DangerButtonBackBrush" Color="#151B22" />
+    <SolidColorBrush x:Key="DangerButtonHoverBrush" Color="#2A171B" />
+    <SolidColorBrush x:Key="DangerButtonPressedBrush" Color="#1F1115" />
+    <SolidColorBrush x:Key="DangerButtonBorderBrush" Color="#6A343B" />
+    <SolidColorBrush x:Key="DangerButtonHoverBorderBrush" Color="#D65D68" />
+
+    <SolidColorBrush x:Key="ButtonDisabledBackBrush" Color="#0A1117" />
+    <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#192A34" />
+    <SolidColorBrush x:Key="ButtonDisabledTextBrush" Color="#465C69" />
+
+    <Style TargetType="{x:Type ToolTip}">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MaxWidth" Value="360" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToolTip}">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="12"
+                                              ShadowDepth="0"
+                                              Opacity="0.28"
+                                              Color="#29AFFF" />
+                        </Border.Effect>
+                        <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"
+                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                          TextElement.FontSize="{TemplateBinding FontSize}"
+                                          Content="{TemplateBinding Content}"
+                                          MaxWidth="{TemplateBinding MaxWidth}"
+                                          RecognizesAccessKey="True">
+                            <ContentPresenter.Resources>
+                                <Style TargetType="{x:Type TextBlock}">
+                                    <Setter Property="TextWrapping" Value="Wrap" />
+                                    <Setter Property="LineHeight" Value="18" />
+                                </Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeContextMenu" TargetType="{x:Type ContextMenu}">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Background" Value="#07131D" />
+        <Setter Property="BorderBrush" Value="#28506A" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ContextMenu}">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="4"
+                            CornerRadius="6"
+                            SnapsToDevicePixels="True">
+                        <StackPanel IsItemsHost="True"
+                                    KeyboardNavigation.DirectionalNavigation="Cycle" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeContextMenuItem" TargetType="{x:Type MenuItem}">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinWidth" Value="178" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="11,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type MenuItem}">
+                    <Grid>
+                        <Border x:Name="MenuItemChrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="Transparent"
+                                BorderThickness="1"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter ContentSource="Header"
+                                                  VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True" />
+                                <Path x:Name="SubmenuArrow"
+                                      Grid.Column="1"
+                                      Margin="14,0,1,0"
+                                      VerticalAlignment="Center"
+                                      Fill="#91A5B5"
+                                      Data="M 0 0 L 4 4 L 0 8 Z"
+                                      Visibility="Collapsed" />
+                            </Grid>
+                        </Border>
+                        <Popup x:Name="PART_Popup"
+                               AllowsTransparency="True"
+                               Focusable="False"
+                               IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                               Placement="Right"
+                               PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                               PopupAnimation="None">
+                            <Border Background="#07131D"
+                                    BorderBrush="#28506A"
+                                    BorderThickness="1"
+                                    Padding="4"
+                                    CornerRadius="6"
+                                    SnapsToDevicePixels="True">
+                                <ScrollViewer CanContentScroll="True"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="HasItems" Value="True">
+                            <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="MenuItemChrome" Property="Background" Value="#102737" />
+                            <Setter TargetName="MenuItemChrome" Property="BorderBrush" Value="#28506A" />
+                            <Setter Property="Foreground" Value="#E6F1F8" />
+                        </Trigger>
+                        <Trigger Property="IsSubmenuOpen" Value="True">
+                            <Setter TargetName="MenuItemChrome" Property="Background" Value="#102737" />
+                            <Setter TargetName="MenuItemChrome" Property="BorderBrush" Value="#38B8F2" />
+                            <Setter TargetName="SubmenuArrow" Property="Fill" Value="#5CCBFF" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#5E7283" />
+                            <Setter Property="Opacity" Value="0.72" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeContextMenuSeparator" TargetType="{x:Type Separator}">
+        <Setter Property="Height" Value="7" />
+        <Setter Property="Margin" Value="8,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Separator}">
+                    <Grid Height="7">
+                        <Border Height="1"
+                                VerticalAlignment="Center"
+                                Background="#173447" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeScrollRepeatButton" TargetType="{x:Type RepeatButton}">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Opacity" Value="0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type RepeatButton}">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeScrollBar" TargetType="{x:Type ScrollBar}">
+        <Setter Property="Width" Value="10" />
+        <Setter Property="Background" Value="#06101A" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ScrollBar}">
+                    <Grid Background="{TemplateBinding Background}">
+                        <Track x:Name="PART_Track"
+                               IsDirectionReversed="True"
+                               Margin="3,4">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}"
+                                              Style="{StaticResource StarBridgeScrollRepeatButton}" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Background="#24485E"
+                                       BorderBrush="#2B5F79"
+                                       BorderThickness="1">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="{x:Type Thumb}">
+                                            <Border x:Name="ThumbChrome"
+                                                    Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                                    CornerRadius="2" />
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="ThumbChrome" Property="Background" Value="#2E6A88" />
+                                                    <Setter TargetName="ThumbChrome" Property="BorderBrush" Value="#3B89AD" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}"
+                                              Style="{StaticResource StarBridgeScrollRepeatButton}" />
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type ScrollBar}"
+           BasedOn="{StaticResource StarBridgeScrollBar}" />
+
+    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#02070D" />
+
+    <DrawingBrush x:Key="VerticalStreakBrush"
+                  Viewport="0,0,360,1"
+                  ViewportUnits="Absolute"
+                  TileMode="Tile"
+                  Stretch="Fill"
+                  Opacity="0.12">
+        <DrawingBrush.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="#0E0B2B3F">
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="0,0,360,1" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#1F4AB2DC" Thickness="1" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <GeometryGroup>
+                            <LineGeometry StartPoint="42,0" EndPoint="42,1" />
+                            <LineGeometry StartPoint="126,0" EndPoint="126,1" />
+                            <LineGeometry StartPoint="284,0" EndPoint="284,1" />
+                        </GeometryGroup>
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#0F69CCFF" Thickness="7" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <LineGeometry StartPoint="184,0" EndPoint="184,1" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
+    <DrawingBrush x:Key="ScanlineBrush"
+                  Viewport="0,0,1,28"
+                  ViewportUnits="Absolute"
+                  TileMode="Tile"
+                  Stretch="Fill"
+                  Opacity="0.055">
+        <DrawingBrush.Drawing>
+            <GeometryDrawing>
+                <GeometryDrawing.Pen>
+                    <Pen Brush="#3269CCFF" Thickness="1" />
+                </GeometryDrawing.Pen>
+                <GeometryDrawing.Geometry>
+                    <LineGeometry StartPoint="0,0.5" EndPoint="1,0.5" />
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
+    <DrawingBrush x:Key="GeometricBackgroundBrush"
+                  Viewport="0,0,720,420"
+                  ViewportUnits="Absolute"
+                  TileMode="Tile"
+                  Stretch="None"
+                  Opacity="0.18">
+        <DrawingBrush.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#2269CCFF" Thickness="1" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <GeometryGroup>
+                            <LineGeometry StartPoint="42,72" EndPoint="214,72" />
+                            <LineGeometry StartPoint="214,72" EndPoint="254,112" />
+                            <LineGeometry StartPoint="522,314" EndPoint="686,314" />
+                            <LineGeometry StartPoint="482,274" EndPoint="522,314" />
+                            <LineGeometry StartPoint="82,332" EndPoint="178,332" />
+                            <LineGeometry StartPoint="178,332" EndPoint="218,372" />
+                        </GeometryGroup>
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#1469CCFF" Thickness="1" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <GeometryGroup>
+                            <RectangleGeometry Rect="472,52,92,52" />
+                            <LineGeometry StartPoint="564,52" EndPoint="602,14" />
+                            <LineGeometry StartPoint="472,104" EndPoint="434,142" />
+                        </GeometryGroup>
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
+    <DrawingBrush x:Key="HudPanelBackgroundBrush"
+                  Viewport="0,0,1,18"
+                  ViewportUnits="Absolute"
+                  TileMode="Tile"
+                  Stretch="Fill">
+        <DrawingBrush.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="#E507101B">
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="0,0,1,18" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+                <GeometryDrawing>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#1427BFFF" Thickness="1" />
+                    </GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry>
+                        <LineGeometry StartPoint="0,0.5" EndPoint="1,0.5" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
+    <Style TargetType="Window">
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="Background" Value="{StaticResource WindowBackBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    </Style>
+
+    <Style TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+        <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+    </Style>
+
+    <Style x:Key="HudCaptionText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontFamily" Value="Bahnschrift, Microsoft YaHei UI" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="HudValueText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="FontSize" Value="28" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="SectionEyebrowText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="SectionTitleText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="FontSize" Value="22" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="HudPanel" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsStructuralFrameBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="Margin" Value="0,0,12,12" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="FleetHeaderPanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Background" Value="{StaticResource HudHeaderBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsStructuralFrameBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="CornerRadius" Value="0" />
+    </Style>
+
+    <Style x:Key="FleetFocusPanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Background" Value="{StaticResource HudFocusBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsStructuralFrameBrush}" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style x:Key="FleetRightPanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Background" Value="{StaticResource HudRailBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGuideRailBrush}" />
+        <Setter Property="BorderThickness" Value="1,0,0,0" />
+        <Setter Property="CornerRadius" Value="0" />
+    </Style>
+
+    <Style x:Key="FleetLogoFrame" TargetType="Border">
+        <Setter Property="Width" Value="72" />
+        <Setter Property="Height" Value="72" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="BorderBrush" Value="#2E5365" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Background" Value="#0B1D29" />
+    </Style>
+
+    <Style x:Key="FleetHeaderLabelText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="#748B9A" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="FleetHeaderValueText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="#D7E6F0" />
+        <Setter Property="FontFamily" Value="Bahnschrift, Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="FleetHeaderAccentValueText" TargetType="TextBlock" BasedOn="{StaticResource FleetHeaderValueText}">
+        <Setter Property="Foreground" Value="#AEE9FF" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="FleetSideTabControl" TargetType="TabControl" BasedOn="{StaticResource {x:Type TabControl}}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style x:Key="FleetSideTabItem" TargetType="TabItem">
+        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="18,0" />
+        <Setter Property="MinWidth" Value="88" />
+        <Setter Property="Height" Value="52" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Border x:Name="TabChrome"
+                            Margin="0,0,8,8"
+                            Background="{StaticResource AvionicsGlassPanelBrush}"
+                            BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                            BorderThickness="1"
+                            CornerRadius="5">
+                        <Grid>
+                            <Rectangle x:Name="TabEnergy"
+                                       Width="3"
+                                       HorizontalAlignment="Left"
+                                       Fill="{StaticResource AccentBrush}"
+                                       Opacity="0" />
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                            <Setter TargetName="TabChrome" Property="Background" Value="{StaticResource AvionicsGlassSelectedBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter TargetName="TabEnergy" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter TargetName="TabChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="FleetRailPanel" TargetType="Border" BasedOn="{StaticResource FleetRightPanel}">
+        <Setter Property="Padding" Value="0,12,0,10" />
+        <Setter Property="Margin" Value="0,0,10,0" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGuideRailBrush}" />
+        <Setter Property="BorderThickness" Value="1,0,0,0" />
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassPanelBrush}" />
+    </Style>
+
+    <Style x:Key="FleetRailButton" TargetType="Button">
+        <Setter Property="Height" Value="58" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="Foreground" Value="#B8C6D1" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Margin="4,2"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="5"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="HoverWash"
+                                       Fill="#14283A"
+                                       Opacity="0" />
+                            <Rectangle x:Name="ActiveWash"
+                                       Fill="#1E2F4968"
+                                       Opacity="0" />
+                            <Rectangle x:Name="Rail"
+                                       Width="3.5"
+                                       HorizontalAlignment="Left"
+                                       Fill="{StaticResource AvionicsRouteLightBrush}"
+                                       Opacity="0" />
+                            <StackPanel x:Name="MenuContent"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Margin="16,0,0,0">
+                                <TextBlock x:Name="MenuGlyph"
+                                           Width="28"
+                                           Text="{TemplateBinding CommandParameter}"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="22"
+                                           TextAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="{TemplateBinding Foreground}" />
+                                <ContentPresenter x:Name="MenuLabel"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                  Margin="13,0,0,0"
+                                                  RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0.82" />
+                            <Setter Property="Foreground" Value="#EAF6FF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0.5" />
+                            <Setter Property="Foreground" Value="#A9DFFF" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="ActiveWash" Property="Opacity" Value="1" />
+                            <Setter TargetName="Rail" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="#F2FAFF" />
+                            <Setter TargetName="MenuGlyph" Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#69CCFF"
+                                                      BlurRadius="6"
+                                                      ShadowDepth="0"
+                                                      Opacity="0.32" />
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" Value="">
+                            <Setter TargetName="MenuContent" Property="HorizontalAlignment" Value="Center" />
+                            <Setter TargetName="MenuContent" Property="Margin" Value="0" />
+                            <Setter TargetName="MenuLabel" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0" />
+                            <Setter TargetName="ActiveWash" Property="Opacity" Value="0" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="FleetShipRailButton" TargetType="Button" BasedOn="{StaticResource FleetRailButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Margin="4,2"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="5"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="HoverWash"
+                                       Fill="#14283A"
+                                       Opacity="0" />
+                            <Rectangle x:Name="ActiveWash"
+                                       Fill="#1E2F4968"
+                                       Opacity="0" />
+                            <Rectangle x:Name="Rail"
+                                       Width="3.5"
+                                       HorizontalAlignment="Left"
+                                       Fill="{StaticResource AvionicsRouteLightBrush}"
+                                       Opacity="0" />
+                            <StackPanel x:Name="MenuContent"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Margin="16,0,0,0">
+                                <Viewbox x:Name="ShipGlyph"
+                                         Width="28"
+                                         Height="28"
+                                         Stretch="Uniform">
+                                    <Grid Width="24"
+                                          Height="24">
+                                        <Path Data="M4.5,5.5 H15.2 V8.8 H4.5 Z M4.5,10.4 H15.2 V13.7 H4.5 Z M4.5,15.3 H15.2 V18.6 H4.5 Z"
+                                              Fill="Transparent"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                              StrokeThickness="1.45"
+                                              StrokeLineJoin="Round"
+                                              StrokeStartLineCap="Square"
+                                              StrokeEndLineCap="Square" />
+                                        <Path Data="M13.3,6.7 L20.4,12 L13.3,17.3 L14.7,13.6 H9.4 V10.4 H14.7 Z"
+                                              Fill="Transparent"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                              StrokeThickness="1.45"
+                                              StrokeLineJoin="Round"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round" />
+                                    </Grid>
+                                </Viewbox>
+                                <ContentPresenter x:Name="MenuLabel"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                  Margin="13,0,0,0"
+                                                  RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0.82" />
+                            <Setter Property="Foreground" Value="#EAF6FF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0.5" />
+                            <Setter Property="Foreground" Value="#A9DFFF" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="ActiveWash" Property="Opacity" Value="1" />
+                            <Setter TargetName="Rail" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="#F2FAFF" />
+                            <Setter TargetName="ShipGlyph" Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#69CCFF"
+                                                      BlurRadius="6"
+                                                      ShadowDepth="0"
+                                                      Opacity="0.32" />
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" Value="">
+                            <Setter TargetName="MenuContent" Property="HorizontalAlignment" Value="Center" />
+                            <Setter TargetName="MenuContent" Property="Margin" Value="0" />
+                            <Setter TargetName="MenuLabel" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0" />
+                            <Setter TargetName="ActiveWash" Property="Opacity" Value="0" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="FleetRailToggleButton" TargetType="Button" BasedOn="{StaticResource FleetRailButton}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Margin" Value="10,0" />
+        <Setter Property="Background" Value="#181B24" />
+        <Setter Property="BorderBrush" Value="#6A343B" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="#241A22" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#D65D68" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="#120D12" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#A94A54" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="FleetDeckContentPanel" TargetType="Border" BasedOn="{StaticResource FleetFocusPanel}">
+        <Setter Property="Padding" Value="10" />
+        <Setter Property="Margin" Value="0,10,0,0" />
+        <Setter Property="MinHeight" Value="260" />
+    </Style>
+
+    <Style x:Key="FleetContentTabControl" TargetType="TabControl" BasedOn="{StaticResource {x:Type TabControl}}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <Style x:Key="HiddenFleetTabItem" TargetType="TabItem">
+        <Setter Property="Width" Value="0" />
+        <Setter Property="Height" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Border Width="0" Height="0" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ReplicaPanelTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="ReplicaLabelText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style x:Key="ReplicaValueText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="ReplicaRowPanel" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource AvionicsDataWellBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="12,10" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+        <Setter Property="CornerRadius" Value="0" />
+    </Style>
+
+    <Style x:Key="ReplicaStatusPill" TargetType="Border">
+        <Setter Property="Background" Value="#67112230" />
+        <Setter Property="BorderBrush" Value="#553E9BCC" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="CornerRadius" Value="999" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+
+    <Style x:Key="GuidanceCardPanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Padding" Value="14,12" />
+        <Setter Property="Margin" Value="0,0,10,0" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGuideRailBrush}" />
+        <Setter Property="BorderThickness" Value="2,0,0,0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Background" Value="{StaticResource AvionicsSectionWashBrush}" />
+    </Style>
+
+    <Style x:Key="MetricCardPanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Padding" Value="12,9" />
+        <Setter Property="Margin" Value="10,0,0,0" />
+        <Setter Property="MinHeight" Value="64" />
+        <Setter Property="Background" Value="{StaticResource AvionicsDataWellBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsStructuralFrameBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="CornerRadius" Value="0" />
+    </Style>
+
+    <Style x:Key="MetricValueText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="0,6,0,0" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="MetricAccentValueText" TargetType="TextBlock" BasedOn="{StaticResource MetricValueText}">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="FontSize" Value="18" />
+    </Style>
+
+    <Style x:Key="StatusDot" TargetType="Ellipse">
+        <Setter Property="Width" Value="8" />
+        <Setter Property="Height" Value="8" />
+        <Setter Property="Fill" Value="{StaticResource StatusInfoBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,0,7,0" />
+    </Style>
+
+    <Style x:Key="StatusAccentStrip" TargetType="Border">
+        <Setter Property="Width" Value="4" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="Background" Value="{StaticResource StatusInfoBrush}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="StarBridgePanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Background" Value="{StaticResource AvionicsSectionWashBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGuideRailBrush}" />
+        <Setter Property="BorderThickness" Value="2,0,0,0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="14" />
+    </Style>
+
+    <Style x:Key="StarBridgeFieldPanel" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassFieldBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="StarBridgePageTitleText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="StarBridgeSectionTitleText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="StarBridgeLabelText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource TextTertiaryBrush}" />
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="StarBridgeHintText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="StarBridgeValueText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontFamily" Value="Bahnschrift, Microsoft YaHei UI" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="StarBridgeStatusBadge" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource StatusInfoSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource StatusInfoBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource StatusInfoBrush}" />
+    </Style>
+
+    <Style x:Key="StarBridgeSettingsSection" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource AvionicsSectionWashBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGuideRailBrush}" />
+        <Setter Property="BorderThickness" Value="2,0,0,0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="StarBridgeSummaryCard" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource AvionicsDataWellBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="10" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="StarBridgeSettingsDivider" TargetType="Rectangle">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Fill" Value="{StaticResource BorderSubtleBrush}" />
+        <Setter Property="Opacity" Value="0.9" />
+    </Style>
+
+    <Style TargetType="{x:Type CheckBox}">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type CheckBox}">
+                    <Grid x:Name="Root"
+                          MinHeight="22"
+                          SnapsToDevicePixels="True">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="22" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border x:Name="BoxChrome"
+                                Width="15"
+                                Height="15"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource AvionicsGlassFieldBrush}"
+                                BorderBrush="{StaticResource BorderDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4">
+                            <Grid>
+                                <Rectangle x:Name="BoxFill"
+                                           Margin="3"
+                                           Fill="{StaticResource AccentBrush}"
+                                           Opacity="0" />
+                                <Path x:Name="CheckGlyph"
+                                      Data="M3.2,7.3 L6.1,10.1 L11.8,4.1"
+                                      Stroke="{StaticResource PrimaryTextBrush}"
+                                      StrokeThickness="1.6"
+                                      StrokeStartLineCap="Square"
+                                      StrokeEndLineCap="Square"
+                                      StrokeLineJoin="Miter"
+                                      Opacity="0" />
+                                <Rectangle x:Name="MixedGlyph"
+                                           Width="8"
+                                           Height="2"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Fill="{StaticResource StatusWarningBrush}"
+                                           Opacity="0" />
+                            </Grid>
+                        </Border>
+                        <ContentPresenter Grid.Column="1"
+                                          Margin="4,0,0,0"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="BoxChrome" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                            <Setter TargetName="BoxChrome" Property="Background" Value="{StaticResource SurfaceFieldStrongBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="BoxChrome" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="BoxChrome" Property="Background" Value="{StaticResource SurfaceSelectedBrush}" />
+                            <Setter TargetName="BoxChrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="BoxFill" Property="Opacity" Value="0.24" />
+                            <Setter TargetName="CheckGlyph" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="{x:Null}">
+                            <Setter TargetName="BoxChrome" Property="Background" Value="#182A2111" />
+                            <Setter TargetName="BoxChrome" Property="BorderBrush" Value="{StaticResource StatusWarningBrush}" />
+                            <Setter TargetName="BoxFill" Property="Fill" Value="{StaticResource StatusWarningBrush}" />
+                            <Setter TargetName="BoxFill" Property="Opacity" Value="0.18" />
+                            <Setter TargetName="MixedGlyph" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.48" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type RadioButton}">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type RadioButton}">
+                    <Grid x:Name="Root"
+                          MinHeight="22"
+                          SnapsToDevicePixels="True">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="22" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border x:Name="Ring"
+                                Width="15"
+                                Height="15"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Background="#0B1722"
+                                BorderBrush="{StaticResource BorderDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <Ellipse x:Name="Core"
+                                     Width="7"
+                                     Height="7"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Fill="{StaticResource AccentBrush}"
+                                     Opacity="0" />
+                        </Border>
+                        <ContentPresenter Grid.Column="1"
+                                          Margin="4,0,0,0"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                            <Setter TargetName="Ring" Property="Background" Value="{StaticResource SurfaceFieldStrongBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Ring" Property="Background" Value="#12384B" />
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="Core" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.48" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeSliderRepeatButton" TargetType="{x:Type RepeatButton}">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Height" Value="6" />
+        <Setter Property="Background" Value="{StaticResource SurfaceFieldBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type RepeatButton}">
+                    <Border Height="{TemplateBinding Height}"
+                            VerticalAlignment="Center"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="2" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeSliderFilledRepeatButton" TargetType="{x:Type RepeatButton}" BasedOn="{StaticResource StarBridgeSliderRepeatButton}">
+        <Setter Property="Background" Value="#1A5370" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    </Style>
+
+    <Style x:Key="StarBridgeSliderThumb" TargetType="{x:Type Thumb}">
+        <Setter Property="Width" Value="14" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Background" Value="{StaticResource SurfaceFieldStrongBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Thumb}">
+                    <Border x:Name="ThumbChrome"
+                            Width="{TemplateBinding Width}"
+                            Height="{TemplateBinding Height}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="2"
+                            SnapsToDevicePixels="True">
+                        <Grid>
+                            <Rectangle Width="2"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,3"
+                                       Fill="{StaticResource AvionicsRouteLightBrush}"
+                                       Opacity="0.85" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ThumbChrome" Property="Background" Value="#164463" />
+                            <Setter TargetName="ThumbChrome" Property="BorderBrush" Value="#5CCBFF" />
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="ThumbChrome" Property="Background" Value="#1677A8" />
+                            <Setter TargetName="ThumbChrome" Property="BorderBrush" Value="#DFF5FF" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type Slider}">
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Minimum" Value="0" />
+        <Setter Property="Maximum" Value="100" />
+        <Setter Property="Focusable" Value="True" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Slider}">
+                    <Grid x:Name="Root"
+                          Height="{TemplateBinding Height}"
+                          SnapsToDevicePixels="True">
+                        <Border x:Name="FocusRail"
+                                Height="14"
+                                VerticalAlignment="Center"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="1"
+                                CornerRadius="2" />
+                        <Track x:Name="PART_Track"
+                               VerticalAlignment="Center">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                              Style="{StaticResource StarBridgeSliderFilledRepeatButton}" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                              Style="{StaticResource StarBridgeSliderRepeatButton}" />
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource StarBridgeSliderThumb}" />
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="FocusRail" Property="BorderBrush" Value="#223B789A" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRail" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button">
+        <Setter Property="Height" Value="36" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="Background" Value="{StaticResource AvionicsPrimaryActionBrush}" />
+        <Setter Property="Foreground" Value="#F2FAFF" />
+        <Setter Property="BorderBrush" Value="{StaticResource PrimaryButtonBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          Margin="{TemplateBinding Padding}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsPrimaryActionHoverBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource PrimaryButtonHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsPrimaryActionPressedBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource PrimaryButtonPressedBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource PrimaryButtonHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassRaisedBrush}" />
+        <Setter Property="Foreground" Value="#D5E5EF" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          Margin="{TemplateBinding Padding}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource SurfaceSelectedBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonPressedBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StarBridgeToolButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+        <Setter Property="Background" Value="{StaticResource AvionicsDangerSurfaceBrush}" />
+        <Setter Property="Foreground" Value="#ECA4AA" />
+        <Setter Property="BorderBrush" Value="{StaticResource DangerButtonBorderBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          Margin="{TemplateBinding Padding}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource DangerButtonHoverBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource DangerButtonHoverBorderBrush}" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource DangerButtonPressedBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource DangerButtonHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource DangerButtonHoverBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="Foreground" Value="#D5E5EF" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="DialogCloseButton" TargetType="Button">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="#102637" />
+        <Setter Property="BorderBrush" Value="#2B5F79" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="CloseButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5"
+                            SnapsToDevicePixels="True">
+                        <Viewbox Width="12"
+                                 Height="12"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Stretch="Uniform"
+                                 SnapsToDevicePixels="True">
+                            <Path Data="M 1,1 L 9,9 M 9,1 L 1,9"
+                                  Stroke="{TemplateBinding Foreground}"
+                                  StrokeThickness="1.5"
+                                  StrokeStartLineCap="Square"
+                                  StrokeEndLineCap="Square"
+                                  SnapsToDevicePixels="True" />
+                        </Viewbox>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CloseButtonChrome" Property="Background" Value="#173A50" />
+                            <Setter TargetName="CloseButtonChrome" Property="BorderBrush" Value="#38B8F2" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="CloseButtonChrome" Property="Background" Value="#1E4964" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="CloseButtonChrome" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="CloseButtonChrome" Property="Opacity" Value="0.45" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="WindowCaptionButton" TargetType="Button">
+        <Setter Property="Height" Value="50" />
+        <Setter Property="Width" Value="48" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="CaptionChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="Transparent"
+                            BorderThickness="0,0,0,1"
+                            SnapsToDevicePixels="True">
+                        <Grid Width="18"
+                              Height="18"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              UseLayoutRounding="True"
+                              SnapsToDevicePixels="True">
+                            <Rectangle x:Name="MinimizeIcon"
+                                       Height="1"
+                                       Width="12"
+                                       Fill="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="Collapsed" />
+                            <Rectangle x:Name="MaximizeIcon"
+                                       Width="10"
+                                       Height="10"
+                                       Stroke="{TemplateBinding Foreground}"
+                                       StrokeThickness="1"
+                                       Fill="Transparent"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="Collapsed" />
+                            <Grid x:Name="RestoreIcon"
+                                  Width="14"
+                                  Height="14"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Visibility="Collapsed">
+                                <Rectangle Width="8"
+                                           Height="8"
+                                           Stroke="{TemplateBinding Foreground}"
+                                           StrokeThickness="1"
+                                           Fill="Transparent"
+                                           HorizontalAlignment="Left"
+                                           VerticalAlignment="Top"
+                                           Margin="5,2,0,0" />
+                                <Rectangle Width="8"
+                                           Height="8"
+                                           Stroke="{TemplateBinding Foreground}"
+                                           StrokeThickness="1"
+                                           Fill="Transparent"
+                                           HorizontalAlignment="Left"
+                                           VerticalAlignment="Top"
+                                           Margin="2,5,0,0" />
+                            </Grid>
+                            <Grid x:Name="CloseIcon"
+                                  Width="12"
+                                  Height="12"
+                                  Visibility="Collapsed">
+                                <Line X1="2" Y1="2" X2="10" Y2="10"
+                                      Stroke="{TemplateBinding Foreground}"
+                                      StrokeThickness="1"
+                                      StrokeStartLineCap="Square"
+                                      StrokeEndLineCap="Square" />
+                                <Line X1="10" Y1="2" X2="2" Y2="10"
+                                      Stroke="{TemplateBinding Foreground}"
+                                      StrokeThickness="1"
+                                      StrokeStartLineCap="Square"
+                                      StrokeEndLineCap="Square" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Tag" Value="Minimize">
+                            <Setter TargetName="MinimizeIcon" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Maximize">
+                            <Setter TargetName="MaximizeIcon" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Restore">
+                            <Setter TargetName="RestoreIcon" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Close">
+                            <Setter TargetName="CloseIcon" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CaptionChrome" Property="Background" Value="#263C5061" />
+                            <Setter Property="Foreground" Value="#F2FAFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="CaptionChrome" Property="Opacity" Value="0.75" />
+                            <Setter TargetName="CaptionChrome" Property="Background" Value="#1E304250" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="CaptionChrome" Property="BorderBrush" Value="#2E8FBA" />
+                            <Setter Property="Foreground" Value="#F2FAFF" />
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="Close" />
+                                <Condition Property="IsMouseOver" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="CaptionChrome" Property="Background" Value="#2A171B" />
+                            <Setter TargetName="CaptionChrome" Property="BorderBrush" Value="#6A343B" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="Close" />
+                                <Condition Property="IsPressed" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="CaptionChrome" Property="Background" Value="#3A171D" />
+                            <Setter TargetName="CaptionChrome" Property="BorderBrush" Value="#D65D68" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="Close" />
+                                <Condition Property="IsKeyboardFocused" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="CaptionChrome" Property="BorderBrush" Value="#D65D68" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="CloseWindowCaptionButton" TargetType="Button" BasedOn="{StaticResource WindowCaptionButton}">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="Height" Value="44" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="Margin" Value="3,0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="#D5E5EF" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="GlassWash"
+                                       IsHitTestVisible="False"
+                                       Fill="#163246"
+                                       Opacity="0" />
+                            <Rectangle x:Name="TopGlint"
+                                       Height="1"
+                                       VerticalAlignment="Top"
+                                       Fill="#664DCBFF"
+                                       Opacity="0"
+                                       IsHitTestVisible="False" />
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              Margin="{TemplateBinding Padding}"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                            <Setter TargetName="GlassWash" Property="Opacity" Value="0.82" />
+                            <Setter TargetName="TopGlint" Property="Opacity" Value="0.86" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="#A20A1D2D" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#4AA8D8" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsGlassSelectedBrush}" />
+                            <Setter TargetName="GlassWash" Property="Opacity" Value="0.92" />
+                            <Setter TargetName="TopGlint" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="#DFF5FF" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="NavButtonEdgeLeft" TargetType="Button" BasedOn="{StaticResource NavButton}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+
+    <Style x:Key="NavButtonEdgeRight" TargetType="Button" BasedOn="{StaticResource NavButton}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+
+    <Style x:Key="FleetInfoTabButton" TargetType="Button">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="#8298A7" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="TabChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="0">
+                        <Grid>
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="False" />
+                            <Rectangle x:Name="ActiveLine"
+                                       Height="2"
+                                       VerticalAlignment="Bottom"
+                                       Margin="10,0"
+                                       Fill="{StaticResource AvionicsHorizonLightBrush}"
+                                       Opacity="0" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TabChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="TabChrome" Property="Background" Value="{StaticResource AvionicsGlassSelectedBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter TargetName="ActiveLine" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="#DFF5FF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="TabChrome" Property="Background" Value="#091721" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="#28617E" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="TabChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="FleetCommandRailButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="Height" Value="38" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="Foreground" Value="#8298A7" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            CornerRadius="0">
+                        <Grid>
+                            <Rectangle x:Name="Rail"
+                                       Width="3"
+                                       HorizontalAlignment="Left"
+                                       Fill="{StaticResource AvionicsRouteLightBrush}"
+                                       Opacity="0" />
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              Margin="{TemplateBinding Padding}"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter Property="Foreground" Value="#FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="#091721" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#28617E" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource AvionicsGlassSelectedBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter TargetName="Rail" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="#DFF5FF" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource ButtonDisabledBackBrush}" />
+                            <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource ButtonDisabledTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}" />
+
+    <Style TargetType="TextBox">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassFieldBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentDimBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="TextBoxChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TextBoxChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="TextBoxChrome" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                            <Setter TargetName="TextBoxChrome" Property="Background" Value="{StaticResource SurfaceFieldStrongBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="TextBoxChrome" Property="Opacity" Value="0.48" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="PasswordBox">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassFieldBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentDimBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="PasswordBox">
+                    <Border x:Name="PasswordChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PasswordChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="PasswordChrome" Property="BorderBrush" Value="{StaticResource BorderFocusBrush}" />
+                            <Setter TargetName="PasswordChrome" Property="Background" Value="{StaticResource SurfaceFieldStrongBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PasswordChrome" Property="Opacity" Value="0.48" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ComboBox">
+        <Setter Property="Height" Value="36" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="Background" Value="{StaticResource AvionicsGlassFieldBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton x:Name="ToggleButton"
+                                      Focusable="False"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                      ClickMode="Press">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border x:Name="ComboChrome"
+                                            Background="{StaticResource AvionicsGlassFieldBrush}"
+                                            BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="5">
+                                        <Grid>
+                                            <Path Width="8"
+                                                  Height="5"
+                                                  Margin="0,0,10,0"
+                                                  HorizontalAlignment="Right"
+                                                  VerticalAlignment="Center"
+                                                  Fill="{StaticResource AccentBrush}"
+                                                  Data="M 0 0 L 4 5 L 8 0 Z" />
+                                        </Grid>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="ComboChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                                            <Setter TargetName="ComboChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+
+                        <ContentPresenter x:Name="ContentSite"
+                                          IsHitTestVisible="False"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                          Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center"
+                                          HorizontalAlignment="Left" />
+
+                        <Popup x:Name="Popup"
+                               Placement="Bottom"
+                               IsOpen="{TemplateBinding IsDropDownOpen}"
+                               AllowsTransparency="True"
+                               Focusable="False"
+                               PopupAnimation="Fade">
+                            <Border Background="{StaticResource AvionicsGlassRaisedBrush}"
+                                    BorderBrush="{StaticResource AvionicsGlassEdgeBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="5"
+                                    MinWidth="{TemplateBinding ActualWidth}">
+                                <ScrollViewer MaxHeight="240">
+                                    <ItemsPresenter />
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ComboBoxItem">
+        <Setter Property="Background" Value="{StaticResource FieldBackBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="Padding" Value="8,5" />
+        <Style.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter Property="Background" Value="#5536AEFF" />
+                <Setter Property="Foreground" Value="White" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="#6636AEFF" />
+                <Setter Property="Foreground" Value="White" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="TabControl">
+        <Setter Property="Background" Value="{StaticResource TransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentDimBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <Style TargetType="TabItem">
+        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="18,8" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Border x:Name="TabChrome"
+                            Background="Transparent"
+                            BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                            BorderThickness="0,0,0,1"
+                            CornerRadius="0"
+                            Margin="0,0,4,0">
+                        <Grid>
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                            <Rectangle x:Name="TabAccent"
+                                       Height="2"
+                                       VerticalAlignment="Bottom"
+                                       Margin="10,0"
+                                       Fill="{StaticResource AvionicsHorizonLightBrush}"
+                                       Opacity="0" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                            <Setter TargetName="TabChrome" Property="Background" Value="{StaticResource AvionicsGlassSelectedBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter TargetName="TabAccent" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="TabChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ListView">
+        <Setter Property="Background" Value="{StaticResource AvionicsDataWellBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style TargetType="ListViewItem">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="#223E93C2" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListViewItem">
+                    <Border x:Name="RowChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
+                        <GridViewRowPresenter VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="RowChrome" Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                            <Setter TargetName="RowChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="RowChrome" Property="Background" Value="{StaticResource AvionicsGlassSelectedBrush}" />
+                            <Setter TargetName="RowChrome" Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+                            <Setter Property="Foreground" Value="White" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SquadBannerPanel" TargetType="Border" BasedOn="{StaticResource HudPanel}">
+        <Setter Property="Background" Value="{StaticResource AvionicsDataWellBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassSoftEdgeBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource AvionicsGlassHoverBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AvionicsGlassEdgeBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="GridViewColumnHeader">
+        <Setter Property="Background" Value="#DD091522" />
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AccentDimBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,1,1" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="GridViewColumnHeader">
+                    <Border x:Name="HeaderChrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
+                        <Grid>
+                            <Rectangle Height="1"
+                                       VerticalAlignment="Top"
+                                       Fill="#6636AEFF" />
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HeaderChrome" Property="Background" Value="#E3123048" />
+                            <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="HeaderChrome" Property="Background" Value="#AA245D8D" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>
