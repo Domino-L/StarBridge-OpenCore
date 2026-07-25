@@ -63,7 +63,7 @@ $forbiddenPublicData = @(
     "StarBridge.Desktop/Data/ship-names-zh.txt",
     "StarBridge.Desktop/Data/ship-catalog.tsv",
     "StarBridge.Desktop/Data/ship-loaner-matrix.tsv",
-    "StarBridge.Desktop/Data/location-names-zh-unverified.txt"
+    "StarBridge.Desktop/Data/location-names-zh.txt"
 )
 foreach ($relativePath in $forbiddenPublicData) {
     if (Test-Path -LiteralPath (Join-Path $Root $relativePath)) {

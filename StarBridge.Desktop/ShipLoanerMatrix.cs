@@ -8,9 +8,7 @@ public sealed record ShipLoanerMatrixEntry(
     string SourceEnglishName,
     string SourceChineseName,
     string SourceSpec,
-    string UexSourceName,
     string LoanerEnglishName,
-    string UexUpdatedText,
     string DisplayRule,
     string HiddenTag);
 
@@ -98,12 +96,12 @@ public static partial class ShipLoanerMatrix
             }
 
             var parts = line.Split('\t');
-            if (parts.Length < 8)
+            if (parts.Length < 6)
             {
                 continue;
             }
 
-            var displayRule = Clean(parts[6]);
+            var displayRule = Clean(parts[4]);
             if (!displayRule.Equals(ConceptDisplayRule, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -114,10 +112,8 @@ public static partial class ShipLoanerMatrix
                 Clean(parts[1]),
                 Clean(parts[2]),
                 Clean(parts[3]),
-                Clean(parts[4]),
-                Clean(parts[5]),
                 displayRule,
-                Clean(parts[7]));
+                Clean(parts[5]));
 
             var key = NormalizeKey(entry.SourceEnglishName);
             if (string.IsNullOrWhiteSpace(key) ||

@@ -8,11 +8,8 @@ public static partial class LocationNameLocalizer
 {
     private const string Unknown = "Unknown";
     private const string VerifiedLocationFileName = "location-names-zh.txt";
-    private const string UnverifiedLocationFileName = "location-names-zh-unverified.txt";
     private static readonly Lazy<IReadOnlyDictionary<string, string>> ChineseNames =
         new(() => LoadChineseNames(VerifiedLocationFileName));
-    private static readonly Lazy<IReadOnlyDictionary<string, string>> UnverifiedChineseNames =
-        new(LoadUnverifiedChineseNames);
 
     public static string DisplayName(string? location, string language)
     {
@@ -32,24 +29,10 @@ public static partial class LocationNameLocalizer
             return localized;
         }
 
-        if (UnverifiedChineseNames.Value.TryGetValue(normalized, out var unverifiedLocalized))
-        {
-            return unverifiedLocalized;
-        }
-
         return SimplifyHumanReadableLocation(normalized);
     }
 
     public static IReadOnlyDictionary<string, string> KnownChineseNames => ChineseNames.Value;
-    public static IReadOnlyDictionary<string, string> KnownUnverifiedChineseNames => UnverifiedChineseNames.Value;
-
-    public static bool UsesUnverifiedFallback(string? location)
-    {
-        var normalized = NormalizeLocation(location);
-        return !normalized.Equals(Unknown, StringComparison.OrdinalIgnoreCase) &&
-               !ChineseNames.Value.ContainsKey(normalized) &&
-               UnverifiedChineseNames.Value.ContainsKey(normalized);
-    }
 
     public static string NormalizeLocation(string? location)
     {
@@ -64,14 +47,7 @@ public static partial class LocationNameLocalizer
         return string.IsNullOrWhiteSpace(normalized) ? Unknown : normalized;
     }
 
-    private static IReadOnlyDictionary<string, string> LoadUnverifiedChineseNames()
-    {
-        return LoadChineseNames(UnverifiedLocationFileName, ChineseNames.Value);
-    }
-
-    private static IReadOnlyDictionary<string, string> LoadChineseNames(
-        string fileName,
-        IReadOnlyDictionary<string, string>? higherPriorityNames = null)
+    private static IReadOnlyDictionary<string, string> LoadChineseNames(string fileName)
     {
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var path = Path.Combine(AppContext.BaseDirectory, "Data", fileName);
@@ -84,11 +60,6 @@ public static partial class LocationNameLocalizer
         {
             if (TryParseMapping(line, out var code, out var value))
             {
-                if (higherPriorityNames?.ContainsKey(code) == true)
-                {
-                    continue;
-                }
-
                 names[code] = value;
             }
         }

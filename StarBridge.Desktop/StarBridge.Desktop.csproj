@@ -16,7 +16,7 @@
     <StarBridgeIncludeThirdPartyMedia
       Condition="'$(StarBridgeIncludeThirdPartyMedia)' == ''">false</StarBridgeIncludeThirdPartyMedia>
     <StarBridgeIncludeRestrictedGameData
-      Condition="'$(StarBridgeIncludeRestrictedGameData)' == '' and Exists('Data\ship-names-zh.txt') and Exists('Data\ship-catalog.tsv') and Exists('Data\ship-loaner-matrix.tsv') and Exists('Data\location-names-zh-unverified.txt')">true</StarBridgeIncludeRestrictedGameData>
+      Condition="'$(StarBridgeIncludeRestrictedGameData)' == '' and Exists('Data\ship-names-zh.txt') and Exists('Data\ship-catalog.tsv') and Exists('Data\ship-loaner-matrix.tsv') and Exists('Data\location-names-zh.txt')">true</StarBridgeIncludeRestrictedGameData>
     <StarBridgeIncludeRestrictedGameData
       Condition="'$(StarBridgeIncludeRestrictedGameData)' == ''">false</StarBridgeIncludeRestrictedGameData>
   </PropertyGroup>
@@ -66,8 +66,7 @@
     <Content Include="Assets\systems\stanton.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\stanton.png')" />
     <Content Include="Assets\systems\pyro.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\pyro.png')" />
     <Content Include="Assets\systems\nyx.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\nyx.png')" />
-    <Content Include="Data\location-names-zh.txt" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Data\location-names-zh-unverified.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
+    <Content Include="Data\location-names-zh.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
     <Content Include="config\overlay.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
