@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "id": "Microsoft.Web.WebView2",
+      "version": "1.0.2592.51",
+      "licenseFile": "licenses/Microsoft.Web.WebView2-1.0.2592.51.txt",
+      "noticeFiles": [
+        "licenses/Microsoft.Web.WebView2-1.0.2592.51-NOTICE.txt"
+      ]
+    },
+    {
+      "id": "SharpGen.Runtime",
+      "version": "2.4.2-beta",
+      "licenseFile": "licenses/SharpGen.Runtime-2.4.2-beta.txt"
+    },
+    {
+      "id": "SharpGen.Runtime.COM",
+      "version": "2.4.2-beta",
+      "licenseFile": "licenses/SharpGen.Runtime.COM-2.4.2-beta.txt"
+    },
+    {
+      "id": "System.IO.Pipelines",
+      "version": "9.0.1",
+      "licenseFile": "licenses/System.IO.Pipelines-9.0.1.txt"
+    },
+    {
+      "id": "System.Text.Encodings.Web",
+      "version": "9.0.1",
+      "licenseFile": "licenses/System.Text.Encodings.Web-9.0.1.txt"
+    },
+    {
+      "id": "System.Text.Json",
+      "version": "9.0.1",
+      "licenseFile": "licenses/System.Text.Json-9.0.1.txt"
+    },
+    {
+      "id": "Vortice.Direct2D1",
+      "version": "3.8.3",
+      "licenseFile": "licenses/Vortice.Direct2D1-3.8.3.txt"
+    },
+    {
+      "id": "Vortice.Direct3D11",
+      "version": "3.8.3",
+      "licenseFile": "licenses/Vortice.Direct3D11-3.8.3.txt"
+    },
+    {
+      "id": "Vortice.DirectComposition",
+      "version": "3.8.3",
+      "licenseFile": "licenses/Vortice.DirectComposition-3.8.3.txt"
+    },
+    {
+      "id": "Vortice.DirectX",
+      "version": "3.8.3",
+      "licenseFile": "licenses/Vortice.DirectX-3.8.3.txt"
+    },
+    {
+      "id": "Vortice.DXGI",
+      "version": "3.8.3",
+      "licenseFile": "licenses/Vortice.DXGI-3.8.3.txt"
+    },
+    {
+      "id": "Vortice.Mathematics",
+      "version": "2.1.0",
+      "licenseFile": "licenses/Vortice.Mathematics-2.1.0.txt"
+    }
+  ]
+}

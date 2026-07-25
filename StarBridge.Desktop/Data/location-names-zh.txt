@@ -1,6 +1,10 @@
-# StarBridge verified location name table.
-# UTF-8. Standard localization keys and field-verified runtime aliases share the
-# same canonical Chinese display name.
+# StarBridge runtime location mapping.
+# Chinese display mappings in this file were field-observed or independently
+# curated by StarBridge contributors and are licensed under Apache-2.0.
+#
+# Star Citizen location names, identifiers, and related marks remain the
+# property of their respective rights holders.
+# This is an unofficial fan-maintained mapping.
 
 STANTON system:
 Stanton1_Lorville=罗威尔

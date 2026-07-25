@@ -14,7 +14,15 @@ $Root = [IO.Path]::GetFullPath($Root)
 $requiredFiles = @(
     "README.md",
     "LICENSE",
+    "NOTICE",
+    "DCO",
+    "ASSET_POLICY.md",
+    "DATA_RIGHTS.md",
+    "THIRD-PARTY-NOTICES.md",
     "BINARY-DISTRIBUTION-NOTICE.md",
+    "third-party-packages.json",
+    "StarBridge.Desktop/Assets/Brand/LICENSE.txt",
+    "scripts/Test Third Party Licenses.ps1",
     "SUPPORT.md",
     "docs/GETTING_STARTED.md",
     "docs/DOWNLOADS.md",
@@ -39,7 +47,8 @@ if (Test-Path -LiteralPath $readmePath) {
         "releases/latest/download",
         "SHA256SUMS.txt",
         "Apache License 2.0",
-        "BINARY-DISTRIBUTION-NOTICE.md"
+        "BINARY-DISTRIBUTION-NOTICE.md",
+        "DATA_RIGHTS.md"
     )
 
     foreach ($value in $requiredReadmeText) {
@@ -48,6 +57,25 @@ if (Test-Path -LiteralPath $readmePath) {
         }
     }
 
+}
+
+$forbiddenPublicData = @(
+    "StarBridge.Desktop/Data/ship-names-zh.txt",
+    "StarBridge.Desktop/Data/ship-catalog.tsv",
+    "StarBridge.Desktop/Data/ship-loaner-matrix.tsv",
+    "StarBridge.Desktop/Data/location-names-zh-unverified.txt"
+)
+foreach ($relativePath in $forbiddenPublicData) {
+    if (Test-Path -LiteralPath (Join-Path $Root $relativePath)) {
+        $errors.Add("Restricted or unverified game data is present in the public tree: $relativePath")
+    }
+}
+
+$licenseFiles = @(
+    Get-ChildItem -LiteralPath (Join-Path $Root "licenses") -File -ErrorAction SilentlyContinue
+)
+if ($licenseFiles.Count -lt 13) {
+    $errors.Add("The public tree does not contain the complete reviewed third-party license set.")
 }
 
 if ($errors.Count -gt 0) {

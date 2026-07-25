@@ -41,8 +41,13 @@ jobs:
       - name: Restore
         run: dotnet restore StarBridge.sln
 
+      - name: Validate third-party license inventory
+        shell: pwsh
+        run: |
+          & "./scripts/Test Third Party Licenses.ps1"
+
       - name: Build
-        run: dotnet build StarBridge.sln --configuration Release --no-restore -p:StarBridgeIncludeCommercialAppearances=false -p:StarBridgeIncludeThirdPartyMedia=false
+        run: dotnet build StarBridge.sln --configuration Release --no-restore -p:StarBridgeIncludeCommercialAppearances=false -p:StarBridgeIncludeThirdPartyMedia=false -p:StarBridgeIncludeRestrictedGameData=false
 
       - name: Run regression tests
         run: dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build

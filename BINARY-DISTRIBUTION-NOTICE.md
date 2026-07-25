@@ -7,3 +7,10 @@ GitHub Releases 中的安装器用于向用户分发完整的星海舰桥桌面�
 “夜影”、Verdict 及后续可选商业外观不会改变基础功能、数据权限或协作能力。其源码和授权实现不属于本仓库的 Apache-2.0 开放范围。
 
 产品名称、标志、应用图标和第三方游戏素材的使用边界见 [TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+第三方软件组件及其完整许可文本见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与 `licenses/`。游戏数据和翻译映射的来源边界见 [DATA_RIGHTS.md](DATA_RIGHTS.md)。
+
+Nothing in this notice limits or replaces any rights granted under the Apache
+License 2.0 for the Open Components.
+
+在商业外观正式开放购买前，官方完整应用的专有组件使用范围、设备数量、账号绑定、退款、组织部署与授权终止规则将通过单独的正式许可协议明确。本说明只用于划分开放源码与完整二进制包的组成，不替代该协议。

@@ -71,4 +71,4 @@ dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj
 
 ## 许可与名称
 
-本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。产品名称、标志、应用图标、商业外观和第三方游戏素材不随 Apache-2.0 授权，详见 [素材与许可边界](ASSET_POLICY.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。来源未确认的数据不会因进入仓库而自动采用 Apache-2.0。产品名称、标志、应用图标、商业外观、游戏数据和第三方素材适用各自的权利边界，详见 [数据来源与权利](DATA_RIGHTS.md)、[素材与许可边界](ASSET_POLICY.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

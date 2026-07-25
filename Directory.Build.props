@@ -8,5 +8,8 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/Domino-L/StarBridge-OpenCore</RepositoryUrl>
+    <StarBridgeIncludeRestrictedGameData>false</StarBridgeIncludeRestrictedGameData>
+    <StarBridgeIncludeCommercialAppearances>false</StarBridgeIncludeCommercialAppearances>
+    <StarBridgeIncludeThirdPartyMedia>false</StarBridgeIncludeThirdPartyMedia>
   </PropertyGroup>
 </Project>

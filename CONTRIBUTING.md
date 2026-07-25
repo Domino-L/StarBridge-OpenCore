@@ -38,3 +38,13 @@ contracts may remain public so settings can migrate safely.
 
 By submitting a contribution, you agree that your contribution may be
 distributed under the Apache License 2.0 used by this repository.
+
+Every commit must also carry a Developer Certificate of Origin sign-off:
+
+```text
+Signed-off-by: Contributor Name <email@example.com>
+```
+
+Create it with `git commit -s`. By adding the sign-off, you certify the
+statements in the repository's `DCO` file. Use an email address you are
+comfortable recording in the public Git history.
