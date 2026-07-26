@@ -19,6 +19,8 @@
 当前安装包可能尚未使用受公众信任的 Windows 代码签名证书，因此 SmartScreen 可能显示“未知发布者”。请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并在需要时核对 Release 中的 `SHA256SUMS.txt`。
 
 安装与首次使用说明见 [开始使用](docs/GETTING_STARTED.md)。如果下载或更新失败，请先查看 [下载帮助](docs/DOWNLOADS.md)。
+需要核验精确 Release tag、SHA-256、Windows 签名、SBOM 与构建来源时，请按
+[Release 核验指南](docs/RELEASE-VERIFICATION.md) 操作。
 
 ## 主要功能
 
@@ -71,4 +73,4 @@ dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj
 
 ## 许可与名称
 
-本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。来源未确认的数据不会因进入仓库而自动采用 Apache-2.0。产品名称、标志、应用图标、商业外观、游戏数据和第三方素材适用各自的权利边界，详见 [数据来源与权利](DATA_RIGHTS.md)、[素材与许可边界](ASSET_POLICY.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。来源未确认的数据不会因进入仓库而自动采用 Apache-2.0。产品名称、标志、应用图标、商业外观、游戏数据和第三方素材适用各自的权利边界，详见 [数据来源与权利](DATA_RIGHTS.md)、[素材与许可边界](ASSET_POLICY.md)、[第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

@@ -219,6 +219,16 @@ public static partial class ShipCatalog
         return null;
     }
 
+    public static string ResolveImagePath(
+        ShipCatalogEntry? catalog,
+        string? code,
+        string? displayName)
+    {
+        return !string.IsNullOrWhiteSpace(catalog?.ImagePath)
+            ? catalog.ImagePath
+            : ShipMediaManifestCatalog.FindImagePath(code, displayName) ?? "";
+    }
+
     private static IEnumerable<string> BuildLookupCandidates(string? code, string? displayName)
     {
         if (!string.IsNullOrWhiteSpace(displayName))

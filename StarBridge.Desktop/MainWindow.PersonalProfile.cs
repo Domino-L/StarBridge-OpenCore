@@ -2177,7 +2177,10 @@ public partial class MainWindow
             BorderThickness = new Thickness(1),
             ClipToBounds = true
         };
-        var imageSource = TryCreateImageSource(favorite.Catalog?.ImagePath);
+        var imageSource = TryCreateImageSource(ShipCatalog.ResolveImagePath(
+            favorite.Catalog,
+            favorite.Ship.Code,
+            favorite.Ship.DisplayName));
         imageFrame.Child = imageSource is null
             ? new TextBlock
             {
@@ -2359,7 +2362,10 @@ public partial class MainWindow
         else
         {
             var recentCatalog = ShipCatalog.Find(recentShip.Code, recentShip.DisplayName);
-            var recentImage = TryCreateImageSource(recentCatalog?.ImagePath);
+            var recentImage = TryCreateImageSource(ShipCatalog.ResolveImagePath(
+                recentCatalog,
+                recentShip.Code,
+                recentShip.DisplayName));
             var recentImportedAt = recentShip.ImportedAt == default ||
                                    recentShip.ImportedAt == DateTimeOffset.MinValue
                 ? recentShip.AddedToDatabaseAt
@@ -3159,7 +3165,10 @@ public partial class MainWindow
                 BorderThickness = new Thickness(1),
                 ClipToBounds = true
             };
-            var imageSource = TryCreateImageSource(option.Catalog?.ImagePath);
+            var imageSource = TryCreateImageSource(ShipCatalog.ResolveImagePath(
+                option.Catalog,
+                option.Ship.Code,
+                option.Ship.DisplayName));
             imageFrame.Child = imageSource is null
                 ? new TextBlock
                 {

@@ -1058,7 +1058,10 @@ public partial class MainWindow
 
     private System.Windows.Media.Brush GetOverlayEventNotificationPreviewBrush()
     {
-        return ResolveOverlayEditorPreviewPalette(GetEffectiveOverlaySettings().Theme).Title;
+        var settings = GetEffectiveOverlaySettings();
+        var previewTheme =
+            settings.Skin == OverlaySkin.NightShadow ? OverlayVisualTheme.Default : settings.Theme;
+        return ResolveOverlayEditorPreviewPalette(previewTheme).Title;
     }
 
     private static void AddLine(Canvas canvas, double x1, double y1, double x2, double y2, System.Windows.Media.Brush brush, double thickness)
@@ -1120,7 +1123,6 @@ public partial class MainWindow
             OverlayVisualTheme.Aopoa => new SolidColorBrush(Color.FromRgb(126, 255, 237)),
             OverlayVisualTheme.Esperia => new SolidColorBrush(Color.FromRgb(255, 92, 112)),
             OverlayVisualTheme.Gatac => new SolidColorBrush(Color.FromRgb(255, 205, 230)),
-            OverlayVisualTheme.NightShadow => new SolidColorBrush(Color.FromRgb(214, 31, 53)),
             OverlayVisualTheme.LagrangeWeave => new SolidColorBrush(Color.FromRgb(240, 167, 107)),
             _ => new SolidColorBrush(Color.FromRgb(83, 190, 255))
         };

@@ -6,11 +6,18 @@ GitHub Releases 中的安装器用于向用户分发完整的星海舰桥桌面�
 
 “夜影”、Verdict 及后续可选商业外观不会改变基础功能、数据权限或协作能力。其源码和授权实现不属于本仓库的 Apache-2.0 开放范围。
 
-产品名称、标志、应用图标和第三方游戏素材的使用边界见 [TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+官方完整应用中的专有组件适用随安装包提供的
+[`OFFICIAL-BINARY-LICENSE.txt`](docs/OFFICIAL-BINARY-LICENSE.txt)，其个人权利人和许可方为
+Ruiyang Lyu。商业外观的使用资格与获得授权的 StarBridge 账号绑定。
+
+未经书面许可，不得镜像、重新托管或重新分发完整的官方安装包、更新包或便携包；可以分享未经修改的 StarBridge 官方网页、发布页或官方下载链接。该限制只针对完整官方包这一集合及其中的专有组件，不限制依照 Apache License 2.0 单独复制、修改或再分发开放组件。
+
+产品名称、标志、应用图标和第三方游戏素材的使用边界见 [TRADEMARKS.md](TRADEMARKS.md)、[ASSET_POLICY.md](ASSET_POLICY.md)、[THIRD-PARTY-MEDIA-NOTICE.md](THIRD-PARTY-MEDIA-NOTICE.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 第三方软件组件及其完整许可文本见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与 `licenses/`。游戏数据和翻译映射的来源边界见 [DATA_RIGHTS.md](DATA_RIGHTS.md)。
+正式载荷中的第三方媒体还必须随附 `THIRD-PARTY-MEDIA-AUDIT.json`；该报告与来源登记、哈希清单一起进入发布证据，用于证明成品实际通过了再分发权限和文件一致性检查。
 
 Nothing in this notice limits or replaces any rights granted under the Apache
 License 2.0 for the Open Components.
 
-在商业外观正式开放购买前，官方完整应用的专有组件使用范围、设备数量、账号绑定、退款、组织部署与授权终止规则将通过单独的正式许可协议明确。本说明只用于划分开放源码与完整二进制包的组成，不替代该协议。
+本说明用于解释开放源码与完整二进制包的组成；具体的个人设备使用、备份、账号绑定、更新、终止、逆向工程法定例外、免责声明和第三方组件条款以随包的正式许可协议为准。

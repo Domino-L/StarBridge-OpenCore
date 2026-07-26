@@ -11,19 +11,27 @@
 
 ## 品牌素材
 
-`StarBridge.Desktop/Assets/Brand/` 中的 StarBridge 标志和应用图标随源码提供，以便官方客户端能够直接编译和运行。这些文件本身不采用 Apache-2.0，而是适用目录内的 `LICENSE.txt`。该许可仅允许为获取、构建和测试未修改的 StarBridge 开放核心而复制品牌文件，不允许将其作为分支版本、修改版或其他产品的品牌继续使用或分发。名称和商标边界另见 `TRADEMARKS.md`。
+以下三个 StarBridge 运行时品牌文件随源码提供，以便官方客户端能够直接编译和运行：
+
+- `StarBridge.Desktop/Assets/Brand/StarBridge_AppIcon.ico`
+- `StarBridge.Desktop/Assets/Brand/StarBridge_AppIcon.png`
+- `StarBridge.Desktop/Assets/Brand/StarBridge_logo.png`
+
+这些文件本身不采用 Apache-2.0，而是适用同目录内的 `LICENSE.txt`。该许可仅允许为获取、构建和测试未修改的 StarBridge 开放核心而复制这些运行时品牌文件，不允许将其作为分支版本、修改版或其他产品的品牌继续使用或分发。名称和商标边界另见 `TRADEMARKS.md`。
 
 ## 不进入公开源码
 
 以下素材不会进入公开仓库：
 
+- `StarBridge.Desktop/Assets/Brand/Master/` 中的可编辑品牌母版和高分辨率导出稿；
 - 舰船截图和舰船详情图；
 - 星系地图原图；
 - 来源或再分发权尚未确认的游戏媒体；
 - 商业外观专用素材；
 - 测试截图、个人头像、用户上传内容和本地缓存。
 
-它们在内部工作区中可能用于完整应用构建，但不属于 Apache-2.0 源码包。
+它们在内部工作区中可能用于完整应用构建，但不属于 Apache-2.0 源码包。官方客户端中的第三方图片必须先通过来源、再分发范围和文件哈希审计，具体规则见
+[`THIRD-PARTY-MEDIA-NOTICE.md`](THIRD-PARTY-MEDIA-NOTICE.md)。
 
 游戏名称、标识符、翻译表和外部数据库内容不属于媒体素材，统一按照
 `DATA_RIGHTS.md` 记录来源和许可边界。

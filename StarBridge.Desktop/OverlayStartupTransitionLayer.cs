@@ -1309,14 +1309,6 @@ public sealed class OverlayStartupTransitionLayer : FrameworkElement
                     Color.FromRgb(203, 147, 221),
                     Color.FromRgb(255, 190, 230),
                     Color.FromRgb(255, 122, 76)),
-                OverlayVisualTheme.NightShadow => new(
-                    Color.FromRgb(3, 5, 8),
-                    Color.FromRgb(214, 31, 53),
-                    Color.FromRgb(255, 54, 74),
-                    Color.FromRgb(232, 237, 242),
-                    Color.FromRgb(135, 145, 156),
-                    Color.FromRgb(238, 238, 242),
-                    Color.FromRgb(255, 54, 74)),
                 _ => Default
             };
         }

@@ -2932,13 +2932,6 @@ public partial class MainWindow
                 Color.FromRgb(255, 122, 76),
                 Color.FromRgb(255, 190, 230),
                 Color.FromRgb(255, 117, 76)),
-            OverlayVisualTheme.NightShadow => OverlayPalette(
-                Color.FromRgb(232, 237, 242),
-                Color.FromRgb(232, 237, 242),
-                Color.FromRgb(135, 145, 156),
-                Color.FromRgb(255, 54, 74),
-                Color.FromRgb(255, 54, 74),
-                Color.FromRgb(118, 124, 134)),
             OverlayVisualTheme.LagrangeWeave => OverlayPalette(
                 Color.FromRgb(174, 186, 201),
                 Color.FromRgb(229, 235, 241),
@@ -2946,13 +2939,6 @@ public partial class MainWindow
                 Color.FromRgb(240, 167, 107),
                 Color.FromRgb(130, 197, 162),
                 Color.FromRgb(135, 147, 163)),
-            OverlayVisualTheme.Verdict => OverlayPalette(
-                Color.FromRgb(247, 245, 240),
-                Color.FromRgb(247, 245, 240),
-                Color.FromRgb(174, 181, 189),
-                Color.FromRgb(255, 25, 23),
-                Color.FromRgb(247, 245, 240),
-                Color.FromRgb(174, 181, 189)),
             _ => OverlayPalette(
                 Color.FromRgb(83, 190, 255),
                 Color.FromRgb(235, 247, 255),

@@ -1645,7 +1645,6 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
                 OverlayVisualTheme.Aopoa => new(Color(77, 255, 225), Color(230, 255, 250), Color(116, 211, 198), Color(156, 255, 77), Color(171, 255, 67), Color(4, 28, 30)),
                 OverlayVisualTheme.Esperia => new(Color(255, 60, 78), Color(255, 228, 236), Color(211, 125, 162), Color(255, 108, 128), Color(168, 77, 255), Color(30, 6, 20)),
                 OverlayVisualTheme.Gatac => new(Color(255, 176, 210), Color(255, 238, 246), Color(203, 147, 221), Color(255, 190, 230), Color(255, 122, 76), Color(24, 10, 32)),
-                OverlayVisualTheme.NightShadow => new(Color(214, 31, 53), Color(232, 237, 242), Color(135, 145, 156), Color(238, 238, 242), Color(255, 54, 74), Color(3, 5, 8)),
                 _ => TerminalCompositionPalette.Default
             }
             : TerminalCompositionPalette.Default;

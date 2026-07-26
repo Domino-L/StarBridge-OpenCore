@@ -1,10 +1,14 @@
 StarBridge Brand Artwork License
 
-Copyright 2026 StarBridge contributors. All rights reserved.
+Copyright 2026 Ruiyang Lyu. All rights reserved.
 
-Permission is granted to reproduce the files in this directory only as
+Permission is granted to reproduce the following runtime artwork files only as
 necessary to obtain, build, and test an unmodified copy of the StarBridge
-open-core source.
+open-core source:
+
+- StarBridge_AppIcon.ico
+- StarBridge_AppIcon.png
+- StarBridge_logo.png
 
 No permission is granted to use or redistribute these files as the branding of
 a fork, modified build, competing product, or any distribution likely to imply
@@ -12,3 +16,9 @@ official status, affiliation, or endorsement.
 
 This permission does not grant trademark rights in the StarBridge name, logo,
 application icon, or visual identity.
+
+The StarBridge name and artwork are used as unregistered product identifiers.
+No claim is made that they are registered trademarks.
+
+Files under Master/ are proprietary master artwork and are not included in
+this limited build-and-test permission. They are governed by Master/LICENSE.txt.

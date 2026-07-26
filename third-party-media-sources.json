@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "product": "StarBridge",
+  "distributionScope": "official-binary",
+  "sources": [
+    {
+      "id": "ship-thumbnails-historical",
+      "mediaKind": "ship-thumbnail",
+      "sourceRoot": "StarBridge.Desktop/Data/ShipImages",
+      "payloadRoot": "Data/ShipImages",
+      "sourceType": "historical-unverified-collection",
+      "sourceName": "Historical StarBridge ship thumbnail collection",
+      "sourceReference": "git:2e7da91a0a0338eaf7c7cc71c4db78e2898798e3",
+      "snapshotDate": null,
+      "rightsholder": "Unconfirmed",
+      "licenseOrPermission": "Pending provenance and redistribution review",
+      "rightsBasisType": "unverified",
+      "rightsBasis": "Git history records the ingestion commit only; it does not establish the original source or redistribution permission.",
+      "evidencePath": null,
+      "evidenceSha256": null,
+      "permissionExpiresAt": null,
+      "redistributionAllowed": false,
+      "allowedDistributionScopes": [
+        "internal-only"
+      ],
+      "attribution": "Pending rights review",
+      "reviewedBy": null,
+      "reviewedAt": null,
+      "notes": "251 square ship thumbnails. Do not approve this group until every file is covered by traceable rights evidence."
+    },
+    {
+      "id": "ship-details-historical",
+      "mediaKind": "ship-detail",
+      "sourceRoot": "StarBridge.Desktop/Data/ShipDetailImages",
+      "payloadRoot": "Data/ShipDetailImages",
+      "sourceType": "historical-unverified-collection",
+      "sourceName": "Historical StarBridge ship detail image collection",
+      "sourceReference": "git:2e7da91a0a0338eaf7c7cc71c4db78e2898798e3,git:69055d4aace2e2960d359a811f7b132b925246a1",
+      "snapshotDate": null,
+      "rightsholder": "Unconfirmed",
+      "licenseOrPermission": "Pending provenance and redistribution review",
+      "rightsBasisType": "unverified",
+      "rightsBasis": "Git history records two ingestion commits only; it does not establish the original source or redistribution permission.",
+      "evidencePath": null,
+      "evidenceSha256": null,
+      "permissionExpiresAt": null,
+      "redistributionAllowed": false,
+      "allowedDistributionScopes": [
+        "internal-only"
+      ],
+      "attribution": "Pending rights review",
+      "reviewedBy": null,
+      "reviewedAt": null,
+      "notes": "252 wide ship detail images. The Basher image was added in a later batch and may require a separate source entry after provenance is recovered."
+    },
+    {
+      "id": "system-maps-historical",
+      "mediaKind": "system-map",
+      "sourceRoot": "StarBridge.Desktop/Assets/systems",
+      "payloadRoot": "Assets/systems",
+      "sourceType": "historical-unverified-collection",
+      "sourceName": "Historical StarBridge system map collection",
+      "sourceReference": "git:99444a9fb2c2aad5a70672dd38a3fb06cc0177f1",
+      "snapshotDate": null,
+      "rightsholder": "Unconfirmed",
+      "licenseOrPermission": "Pending provenance and redistribution review",
+      "rightsBasisType": "unverified",
+      "rightsBasis": "Git history records the ingestion commit only; it does not establish the original source or redistribution permission.",
+      "evidencePath": null,
+      "evidenceSha256": null,
+      "permissionExpiresAt": null,
+      "redistributionAllowed": false,
+      "allowedDistributionScopes": [
+        "internal-only"
+      ],
+      "attribution": "Pending rights review",
+      "reviewedBy": null,
+      "reviewedAt": null,
+      "notes": "Three system maps: Stanton, Pyro, and Nyx."
+    }
+  ]
+}

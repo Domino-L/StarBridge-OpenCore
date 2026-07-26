@@ -12,11 +12,7 @@
     <DefineConstants
       Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true'">$(DefineConstants);STARBRIDGE_COMMERCIAL_APPEARANCES</DefineConstants>
     <StarBridgeIncludeThirdPartyMedia
-      Condition="'$(StarBridgeIncludeThirdPartyMedia)' == '' and Exists('Data\ShipImages')">true</StarBridgeIncludeThirdPartyMedia>
-    <StarBridgeIncludeThirdPartyMedia
       Condition="'$(StarBridgeIncludeThirdPartyMedia)' == ''">false</StarBridgeIncludeThirdPartyMedia>
-    <StarBridgeIncludeRestrictedGameData
-      Condition="'$(StarBridgeIncludeRestrictedGameData)' == '' and Exists('Data\ship-names-zh.txt') and Exists('Data\ship-catalog.tsv') and Exists('Data\ship-loaner-matrix.tsv') and Exists('Data\location-names-zh.txt')">true</StarBridgeIncludeRestrictedGameData>
     <StarBridgeIncludeRestrictedGameData
       Condition="'$(StarBridgeIncludeRestrictedGameData)' == ''">false</StarBridgeIncludeRestrictedGameData>
   </PropertyGroup>

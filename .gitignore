@@ -8,3 +8,14 @@ TestResults/
 *.suo
 *.log
 *.tmp
+
+# Provenance-reviewed data and media are distributed only through official builds.
+StarBridge.Desktop/Data/location-names-zh-unverified.txt
+StarBridge.Desktop/Data/location-names-zh.txt
+StarBridge.Desktop/Data/ship-names-zh.txt
+StarBridge.Desktop/Data/ship-catalog.tsv
+StarBridge.Desktop/Data/ship-loaner-matrix.tsv
+StarBridge.Desktop/Data/ShipImages/
+StarBridge.Desktop/Data/ShipDetailImages/
+StarBridge.Desktop/Assets/Brand/Master/
+StarBridge.Desktop/Assets/systems/

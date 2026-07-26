@@ -37,6 +37,31 @@ it is placed in an official binary. Exclusion from the public repository does
 not by itself make binary redistribution lawful, and presence in an official
 binary does not place that data under Apache-2.0.
 
+## Official binary media evidence
+
+The public registry uses a controlled `rightsBasisType` vocabulary:
+
+- `unverified`
+- `rights-holder-owned`
+- `redistribution-license`
+- `written-permission`
+- `official-policy`
+- `public-domain`
+
+`unverified` is never sufficient for an official binary. Every approved media
+group must register a repository-relative `evidencePath` below
+`.private-ops/third-party-media-rights/`, the evidence file's SHA-256 in
+`evidenceSha256`, and an optional `permissionExpiresAt`. A null expiry means
+that the recorded grant does not state an expiry; it is not a substitute for
+reviewing revocation or policy changes.
+
+Private evidence files are deliberately ignored by Git and are not distributed
+in source archives, installers, update payloads, or public audit reports. The
+repository-mode audit verifies that each evidence file exists, is not reached
+through a reparse point, matches its registered SHA-256, and is not expired.
+The payload-mode audit validates the public registration fields and expiry
+without requiring the private evidence file to be bundled.
+
 ## Adding or restoring data
 
 Before adding a data file to the public source package, record:

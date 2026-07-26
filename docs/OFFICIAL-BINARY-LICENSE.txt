@@ -1,0 +1,176 @@
+STARBRIDGE OFFICIAL BINARY END USER LICENSE AGREEMENT
+
+Effective date: July 25, 2026
+
+This agreement is between you and Ruiyang Lyu, an individual ("Licensor").
+It governs only the Proprietary Components included in an Official Binary.
+It does not replace or restrict the separate licenses that govern Open
+Components or Third-Party Components.
+
+By installing or using the Proprietary Components, you accept this agreement.
+If you do not accept it, do not install or use those components and remove any
+copies in your possession.
+
+1. Definitions
+
+"Open Components" means StarBridge source code, object code, documentation, or
+assets expressly identified as licensed under the Apache License, Version 2.0.
+The separately published StarBridge Open Core source package identifies the
+principal Open Components. The bundled LICENSE and NOTICE files provide the
+applicable Apache license text and notices.
+
+"Proprietary Components" means StarBridge code, assets, designs, documentation,
+services, and other material controlled by Licensor that are not expressly
+identified as Open Components or Third-Party Components. This includes
+closed-source product implementations, Commercial Appearances and their
+dedicated assets, and proprietary brand artwork.
+
+"Third-Party Components" means software, data, media, names, marks, or other
+material owned or licensed by third parties and governed by their own terms.
+
+"Official Binary" means a complete StarBridge installer, update package,
+portable application package, or other compiled distribution made available
+by Licensor through an official StarBridge distribution channel or expressly
+designated by Licensor as official. An Official Binary may contain Open
+Components, Proprietary Components, and Third-Party Components under different
+licenses.
+
+"Commercial Appearance" means an optional proprietary StarBridge appearance,
+including Night Shadow (夜影), Verdict (裁决), and any later appearance
+identified as commercial.
+
+2. Personal license grant
+
+Subject to this agreement, Licensor grants you a personal, non-exclusive,
+non-transferable, and non-sublicensable license to:
+
+* install and use the Proprietary Components on devices that you personally
+  own or control; and
+* make a reasonable number of backup copies of the Official Binary solely for
+  your own archival, recovery, or device-migration use.
+
+This is a license, not a sale or transfer of ownership. Shared, hosted,
+managed-service, institutional, or organization-wide deployment requires
+separate written permission from Licensor.
+
+3. Commercial Appearances and accounts
+
+A Commercial Appearance may be used only through the authorized StarBridge
+account to which its valid entitlement is assigned. The entitlement is
+personal to that account. You may not share account credentials, lend or sell
+access, transfer an entitlement without Licensor's authorization, or bypass
+an entitlement or account check. Possession of an executable, preset, backup,
+or source snapshot does not create an entitlement or transfer ownership.
+
+4. Complete package distribution and official links
+
+You may not upload, mirror, re-host, redistribute, repack, sell, sublicense, or
+otherwise make an Official Binary or any Proprietary Component available to
+another person without Licensor's prior written permission.
+
+You may share an unmodified link to an official StarBridge website, release
+page, or download location. Sharing an official link does not authorize you to
+host a copy of the installer or package, imply endorsement, or present a
+modified package as official.
+
+This section governs only the complete Official Binary as a collective package
+and the Proprietary Components within it. It does not prevent independent
+redistribution of Open Components in compliance with the Apache License,
+Version 2.0, or exercise of rights granted by a Third-Party Component's own
+license.
+
+5. Restrictions on Proprietary Components
+
+Except for the rights expressly granted in this agreement, you may not:
+
+* copy, modify, adapt, translate, publish, distribute, sublicense, rent, lease,
+  sell, or create derivative works from Proprietary Components;
+* reverse engineer, decompile, disassemble, attempt to derive source code from,
+  or circumvent technical protection for Proprietary Components, except to the
+  limited extent that applicable law mandatorily permits the activity despite
+  this restriction;
+* remove, obscure, or alter copyright, attribution, license, entitlement, or
+  rights-management notices; or
+* use StarBridge names, logos, icons, or visual identity in a way that falsely
+  implies an official, affiliated, or endorsed product or distribution.
+
+These restrictions do not apply to Open Components when you exercise rights
+granted by the Apache License, Version 2.0, and do not override mandatory
+rights under applicable law.
+
+6. Updates, compatibility, and online functions
+
+Licensor may make updates, replacements, or corrections available, but is not
+obligated to provide any particular update, feature, online function, support
+period, or compatibility. An update is governed by this agreement unless it is
+accompanied by different terms. Updating may add, change, replace, or
+discontinue features. Any separate purchase, refund, service, or entitlement
+terms presented at acquisition remain applicable to the subject they cover.
+
+7. Ownership and reservation of rights
+
+Licensor and the applicable third-party owners retain all right, title, and
+interest in their respective components. No rights are granted by implication,
+estoppel, or otherwise. Product names, logos, icons, and brand artwork remain
+subject to the bundled trademark and brand-artwork notices.
+
+8. Third-Party Components
+
+Third-Party Components are governed by their own licenses and notices, which
+are included with or referenced by the Official Binary. This agreement neither
+grants rights that Licensor does not have nor reduces rights granted directly
+by a third-party license. You are responsible for complying with those terms.
+
+9. Termination
+
+The license for Proprietary Components terminates if you materially breach this
+agreement, subject to any notice or cure rights required by applicable law.
+Upon termination, you must stop using and delete the Proprietary Components and
+your backup copies. Provisions that by their nature should survive termination,
+including ownership, disclaimers, limitations of liability, and component
+license boundaries, will survive.
+
+Termination of this agreement does not terminate, narrow, or revoke rights in
+Open Components under the Apache License, Version 2.0, or rights in Third-Party
+Components under their applicable licenses.
+
+10. Disclaimer of warranties
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE PROPRIETARY COMPONENTS
+AND OFFICIAL BINARY ARE PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTIES
+OR CONDITIONS OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT,
+ACCURACY, AVAILABILITY, OR ERROR-FREE OPERATION.
+
+Nothing in this agreement excludes a warranty, remedy, or consumer right that
+applicable law does not permit to be excluded.
+
+11. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, LICENSOR WILL NOT BE LIABLE
+FOR INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE, OR CONSEQUENTIAL
+DAMAGES, OR FOR LOSS OF DATA, PROFITS, REVENUE, GOODWILL, OR BUSINESS
+OPPORTUNITY, ARISING FROM THE OFFICIAL BINARY OR PROPRIETARY COMPONENTS, EVEN
+IF ADVISED THAT SUCH DAMAGE IS POSSIBLE.
+
+Nothing in this agreement limits liability that applicable law does not permit
+to be limited.
+
+12. Apache License rights remain intact
+
+NOTHING IN THIS AGREEMENT LIMITS, CONDITIONS, REPLACES, TERMINATES, OR REVOKES
+ANY RIGHT GRANTED FOR AN OPEN COMPONENT UNDER THE APACHE LICENSE, VERSION 2.0.
+IF A TERM OF THIS AGREEMENT CONFLICTS WITH THE APACHE LICENSE AS APPLIED TO AN
+OPEN COMPONENT, THE APACHE LICENSE CONTROLS FOR THAT OPEN COMPONENT.
+
+13. General
+
+If a provision is unenforceable, it will be enforced to the maximum extent
+permitted and the remaining provisions will continue in effect. A failure to
+enforce a provision is not a waiver. This agreement and any terms expressly
+incorporated into it are the complete agreement for the Proprietary Components,
+unless you and Licensor enter into a separate written agreement that says it
+controls.
+
+Copyright © 2026 Ruiyang Lyu. All rights reserved in the Proprietary
+Components.

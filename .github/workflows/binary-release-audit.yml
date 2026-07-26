@@ -1,0 +1,110 @@
+name: Binary Release Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact immutable Release tag to audit, for example v0.4.8.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binary-release-audit-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Verify immutable Windows release payload
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+
+      - name: Verify release and download the exact update asset
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v(?<version>\d+\.\d+\.\d+(?:\.\d+)?)$') {
+            throw "release_tag must be an exact v-prefixed StarBridge version."
+          }
+          $version = $Matches.version
+          $tagCommit = (& git rev-parse "$($env:RELEASE_TAG)^{commit}").Trim()
+          $headCommit = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $headCommit) {
+            throw "The checked-out source is not bound to the requested tag."
+          }
+
+          $release = & gh release view $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --json tagName,isDraft,isImmutable,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.tagName -ne $env:RELEASE_TAG -or $release.isDraft) {
+            throw "GitHub Release is missing, draft, or bound to a different tag."
+          }
+          if (-not $release.isImmutable) {
+            throw "The requested GitHub Release is not immutable."
+          }
+          & gh release verify $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub could not verify the immutable Release."
+          }
+
+          $assetName = "StarBridge-$version-win-x64-update.zip"
+          $assets = @($release.assets | Where-Object { $_.name -eq $assetName })
+          if ($assets.Count -ne 1 -or [string]$assets[0].digest -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+            throw "The exact update asset is missing or has no verifiable SHA-256 digest."
+          }
+
+          $downloadDirectory = Join-Path $env:RUNNER_TEMP "starbridge-release"
+          New-Item -ItemType Directory -Force -Path $downloadDirectory | Out-Null
+          & gh release download $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $assetName `
+            --dir $downloadDirectory
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release asset download failed."
+          }
+
+          $archivePath = Join-Path $downloadDirectory $assetName
+          & gh release verify-asset $env:RELEASE_TAG $archivePath --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) {
+            throw "The downloaded archive does not match the immutable Release asset."
+          }
+
+          $payloadRoot = Join-Path $env:RUNNER_TEMP "starbridge-payload"
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $payloadRoot -Force
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag_commit=$tagCommit" >> $env:GITHUB_OUTPUT
+          "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
+          "payload_root=$payloadRoot" >> $env:GITHUB_OUTPUT
+
+      - name: Audit signed binary distribution
+        shell: pwsh
+        run: |
+          & "./scripts/Test StarBridge Binary Distribution.ps1" `
+            -PayloadRoot "${{ steps.release.outputs.payload_root }}" `
+            -ArchivePath "${{ steps.release.outputs.archive_path }}" `
+            -ExpectedVersion "${{ steps.release.outputs.version }}" `
+            -ExpectedPublicSourceCommit "${{ steps.release.outputs.tag_commit }}" `
+            -ExpectedReleaseTag "${{ inputs.release_tag }}" `
+            -RequireAuthenticode `
+            -OutputReportPath "$env:RUNNER_TEMP/BINARY-AUDIT-REPORT.json"
+
+      - name: Upload binary audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: binary-audit-${{ inputs.release_tag }}
+          path: ${{ runner.temp }}/BINARY-AUDIT-REPORT.json
+          if-no-files-found: warn
+          retention-days: 30
