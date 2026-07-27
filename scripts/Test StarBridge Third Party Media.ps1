@@ -12,11 +12,24 @@ param(
 
     [switch]$RequireRedistributionPermission,
 
+    [string]$UnverifiedDistributionExceptionVersion = "",
+
     [string]$OutputReportPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if ($RequireRedistributionPermission -and
+    -not [string]::IsNullOrWhiteSpace($UnverifiedDistributionExceptionVersion)) {
+    throw "RequireRedistributionPermission cannot be combined with an unverified media exception."
+}
+if (-not [string]::IsNullOrWhiteSpace($UnverifiedDistributionExceptionVersion) -and
+    $UnverifiedDistributionExceptionVersion -ne "0.4.8.2") {
+    throw "The unverified third-party media exception is restricted to StarBridge 0.4.8.2."
+}
+$usesUnverifiedDistributionException =
+    -not [string]::IsNullOrWhiteSpace($UnverifiedDistributionExceptionVersion)
 
 $startedAtUtc = [DateTime]::UtcNow
 $checks = [Collections.Generic.List[object]]::new()
@@ -133,7 +146,7 @@ function Add-MediaCheck {
         [string]$Name,
 
         [Parameter(Mandatory = $true)]
-        [ValidateSet("passed", "failed", "skipped")]
+        [ValidateSet("passed", "failed", "skipped", "exception")]
         [string]$Status,
 
         [Parameter(Mandatory = $true)]
@@ -1130,6 +1143,12 @@ try {
             -Status "passed" `
             -Details $permissionDetails
     }
+    elseif ($usesUnverifiedDistributionException) {
+        Add-MediaCheck `
+            -Name "redistribution-permission" `
+            -Status "exception" `
+            -Details "Redistribution permission is not verified. Packaging is permitted only by the explicitly documented StarBridge 0.4.8.2 test-release exception; this audit does not assert authorization."
+    }
     else {
         Add-MediaCheck `
             -Name "redistribution-permission" `
@@ -1154,6 +1173,21 @@ $report = [ordered]@{
     startedAtUtc = $startedAtUtc.ToString("o")
     completedAtUtc = [DateTime]::UtcNow.ToString("o")
     requireRedistributionPermission = $RequireRedistributionPermission.IsPresent
+    rightsStatus = if ($RequireRedistributionPermission) {
+        "verified-redistribution-permission"
+    }
+    elseif ($usesUnverifiedDistributionException) {
+        "unverified-distribution-exception"
+    }
+    else {
+        "not-evaluated"
+    }
+    unverifiedDistributionExceptionVersion = if ($usesUnverifiedDistributionException) {
+        $UnverifiedDistributionExceptionVersion
+    }
+    else {
+        $null
+    }
     sourceCount = $sourceCount
     fileCount = $fileCount
     totalBytes = $totalBytes

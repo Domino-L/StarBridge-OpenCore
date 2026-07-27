@@ -11,11 +11,17 @@ param(
 
     [switch]$RequireAuthenticode,
 
+    [switch]$AllowUnverifiedThirdPartyMediaTestRelease,
+
     [string]$OutputReportPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if ($AllowUnverifiedThirdPartyMediaTestRelease -and $ExpectedVersion -ne "0.4.8.2") {
+    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2."
+}
 
 $startedAtUtc = [DateTime]::UtcNow
 $errors = [Collections.Generic.List[string]]::new()
@@ -221,6 +227,7 @@ try {
         -PayloadRoot $ExpectedPayloadRoot `
         -ExpectedVersion $ExpectedVersion `
         -RequireAuthenticode:$RequireAuthenticode `
+        -AllowUnverifiedThirdPartyMediaTestRelease:$AllowUnverifiedThirdPartyMediaTestRelease `
         -OutputReportPath $payloadAuditReport
     Add-InstallerCheck -Name "expected-payload" -Status "passed" -Details "The prepared payload passed the binary distribution audit."
 
@@ -321,10 +328,17 @@ try {
         }
     }
 
+    $installedMediaAuditArguments = @{
+        PayloadRoot = $installDir
+    }
+    if ($AllowUnverifiedThirdPartyMediaTestRelease) {
+        $installedMediaAuditArguments.UnverifiedDistributionExceptionVersion = $ExpectedVersion
+    }
+    else {
+        $installedMediaAuditArguments.RequireRedistributionPermission = $true
+    }
     $installedMediaAuditOutput = @(
-        & $thirdPartyMediaAuditScript `
-            -PayloadRoot $installDir `
-            -RequireRedistributionPermission
+        & $thirdPartyMediaAuditScript @installedMediaAuditArguments
     )
     if ($installedMediaAuditOutput.Count -ne 1) {
         throw "Installed third-party media audit returned $($installedMediaAuditOutput.Count) result objects; expected exactly one."
@@ -342,10 +356,22 @@ try {
         -Raw `
         -Encoding UTF8 |
         ConvertFrom-Json
+    $installedHasVerifiedMediaRights =
+        $bundledInstalledMediaAudit.requireRedistributionPermission -is [bool] -and
+        [bool]$bundledInstalledMediaAudit.requireRedistributionPermission -and
+        [string]$bundledInstalledMediaAudit.rightsStatus -eq "verified-redistribution-permission"
+    $installedHasScopedUnverifiedMediaException =
+        $AllowUnverifiedThirdPartyMediaTestRelease -and
+        $ExpectedVersion -eq "0.4.8.2" -and
+        $bundledInstalledMediaAudit.requireRedistributionPermission -is [bool] -and
+        -not [bool]$bundledInstalledMediaAudit.requireRedistributionPermission -and
+        [string]$bundledInstalledMediaAudit.rightsStatus -eq "unverified-distribution-exception" -and
+        [string]$bundledInstalledMediaAudit.unverifiedDistributionExceptionVersion -eq
+            $ExpectedVersion
     if ([string]$bundledInstalledMediaAudit.auditType -ne "third-party-media" -or
         [string]$bundledInstalledMediaAudit.mode -ne "payload" -or
-        $bundledInstalledMediaAudit.requireRedistributionPermission -isnot [bool] -or
-        -not [bool]$bundledInstalledMediaAudit.requireRedistributionPermission) {
+        (-not $installedHasVerifiedMediaRights -and
+         -not $installedHasScopedUnverifiedMediaException)) {
         throw "Installed THIRD-PARTY-MEDIA-AUDIT.json is not an official payload redistribution audit."
     }
     if ($bundledInstalledMediaAudit.PSObject.Properties.Name -notcontains "passed" -or
@@ -361,11 +387,12 @@ try {
         passed = $true
         fileCount = [int]$liveInstalledMediaAudit.fileCount
         totalBytes = [long]$liveInstalledMediaAudit.totalBytes
+        rightsStatus = [string]$liveInstalledMediaAudit.rightsStatus
     }
     Add-InstallerCheck `
         -Name "installed-third-party-media" `
         -Status "passed" `
-        -Details "$([int]$liveInstalledMediaAudit.fileCount) media files match the bundled audit and live installed media audit."
+        -Details "$([int]$liveInstalledMediaAudit.fileCount) media files match the bundled audit. Rights status: $([string]$liveInstalledMediaAudit.rightsStatus)."
 
     $installedExe = Join-Path $installDir "Star Bridge.exe"
     if ((Get-Item -LiteralPath $installedExe).VersionInfo.FileVersion -ne $ExpectedVersion) {

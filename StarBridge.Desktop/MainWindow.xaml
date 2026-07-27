@@ -29066,6 +29066,11 @@
                                                        TextWrapping="Wrap"
                                                        LineHeight="21"
                                                        Text="截至当前版本，星海舰桥未获得 Cloud Imperium Games 或 Roberts Space Industries 针对本应用的书面许可。请自行查阅并遵守 RSI 当前有效的服务条款、最终用户许可协议和粉丝内容说明；如果官方规则、反作弊要求或明确通知与本应用发生冲突，请停止使用受影响功能。" />
+                                            <TextBlock Margin="0,8,0,0"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="21"
+                                                       Text="0.4.8.2 测试版的官方客户端保留了来源仍待核实的第三方图片，用于舰船与星系资料展示。星海舰桥不主张这些图片的版权或再分发授权，相关权利归原权利人所有；图片可能在后续版本中被替换或移除。" />
                                         </StackPanel>
                                     </Expander>
 

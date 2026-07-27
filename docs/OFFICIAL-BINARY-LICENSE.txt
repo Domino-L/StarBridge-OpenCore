@@ -1,6 +1,6 @@
 STARBRIDGE OFFICIAL BINARY END USER LICENSE AGREEMENT
 
-Terms version: 2026-07-27-v1
+Terms version: 2026-07-27-v2
 Effective date: July 27, 2026
 
 This agreement is between you and Ruiyang Lyu, an individual ("Licensor").
@@ -179,6 +179,14 @@ Third-Party Components are governed by their own licenses and notices, which
 are included with or referenced by the Official Binary. This agreement neither
 grants rights that Licensor does not have nor reduces rights granted directly
 by a third-party license. You are responsible for complying with those terms.
+
+The StarBridge 0.4.8.2 test build retains third-party ship images and system
+maps whose provenance and redistribution authorization have not been verified.
+Their inclusion does not assert ownership or permission, and the associated
+audit records an unverified distribution exception rather than verified
+redistribution rights. All rights in those media remain with their respective
+owners. The media may be removed or replaced in a later update or after a valid
+rights claim or removal request.
 
 13. Termination
 

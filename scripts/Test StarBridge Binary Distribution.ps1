@@ -15,11 +15,17 @@ param(
 
     [string]$ExpectedReleaseTag = "",
 
+    [switch]$AllowUnverifiedThirdPartyMediaTestRelease,
+
     [string]$OutputReportPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if ($AllowUnverifiedThirdPartyMediaTestRelease -and $ExpectedVersion -ne "0.4.8.2") {
+    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2."
+}
 
 $scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $thirdPartyMediaAuditScript = Join-Path $scriptsDir "Test StarBridge Third Party Media.ps1"
@@ -507,11 +513,16 @@ if ($errors.Count -eq 0) {
             throw "Third-party media audit script was not found: $thirdPartyMediaAuditScript"
         }
 
-        $mediaAuditOutput = @(
-            & $thirdPartyMediaAuditScript `
-                -PayloadRoot $PayloadRoot `
-                -RequireRedistributionPermission
-        )
+        $liveMediaAuditArguments = @{
+            PayloadRoot = $PayloadRoot
+        }
+        if ($AllowUnverifiedThirdPartyMediaTestRelease) {
+            $liveMediaAuditArguments.UnverifiedDistributionExceptionVersion = $ExpectedVersion
+        }
+        else {
+            $liveMediaAuditArguments.RequireRedistributionPermission = $true
+        }
+        $mediaAuditOutput = @(& $thirdPartyMediaAuditScript @liveMediaAuditArguments)
         if ($mediaAuditOutput.Count -ne 1) {
             throw "Third-party media audit returned $($mediaAuditOutput.Count) result objects; expected exactly one."
         }
@@ -536,10 +547,21 @@ if ($errors.Count -eq 0) {
             -Raw `
             -Encoding UTF8 |
             ConvertFrom-Json
+        $bundledHasVerifiedMediaRights =
+            $bundledMediaAudit.requireRedistributionPermission -is [bool] -and
+            [bool]$bundledMediaAudit.requireRedistributionPermission -and
+            [string]$bundledMediaAudit.rightsStatus -eq "verified-redistribution-permission"
+        $bundledHasScopedUnverifiedMediaException =
+            $AllowUnverifiedThirdPartyMediaTestRelease -and
+            $ExpectedVersion -eq "0.4.8.2" -and
+            $bundledMediaAudit.requireRedistributionPermission -is [bool] -and
+            -not [bool]$bundledMediaAudit.requireRedistributionPermission -and
+            [string]$bundledMediaAudit.rightsStatus -eq "unverified-distribution-exception" -and
+            [string]$bundledMediaAudit.unverifiedDistributionExceptionVersion -eq $ExpectedVersion
         if ([string]$bundledMediaAudit.auditType -ne "third-party-media" -or
             [string]$bundledMediaAudit.mode -ne "payload" -or
-            $bundledMediaAudit.requireRedistributionPermission -isnot [bool] -or
-            -not [bool]$bundledMediaAudit.requireRedistributionPermission) {
+            (-not $bundledHasVerifiedMediaRights -and
+             -not $bundledHasScopedUnverifiedMediaException)) {
             throw "Bundled THIRD-PARTY-MEDIA-AUDIT.json is not an official payload redistribution audit."
         }
         if ($bundledMediaAudit.PSObject.Properties.Name -notcontains "passed" -or
@@ -559,7 +581,7 @@ if ($errors.Count -eq 0) {
         Add-AuditCheck `
             -Name "third-party-media" `
             -Status "passed" `
-            -Details "$([int]$officialMediaAudit.sourceCount) sources, $([int]$officialMediaAudit.fileCount) files, and $([long]$officialMediaAudit.totalBytes) bytes match the bundled audit and live redistribution audit."
+            -Details "$([int]$officialMediaAudit.sourceCount) sources, $([int]$officialMediaAudit.fileCount) files, and $([long]$officialMediaAudit.totalBytes) bytes match the bundled audit. Rights status: $([string]$officialMediaAudit.rightsStatus)."
     }
     catch {
         Add-AuditCheck -Name "third-party-media" -Status "failed" -Details $_.Exception.Message
@@ -668,6 +690,13 @@ if ($errors.Count -eq 0) {
             [string]$officialMedia.scope -ne "official-binary") {
             throw "BUILD-PROVENANCE.json officialMedia scope is not official-binary."
         }
+        if ([string]$officialMedia.rightsStatus -ne [string]$bundledMediaAudit.rightsStatus -or
+            [bool]$officialMedia.requireRedistributionPermission -ne
+                [bool]$bundledMediaAudit.requireRedistributionPermission -or
+            [string]$officialMedia.unverifiedDistributionExceptionVersion -ne
+                [string]$bundledMediaAudit.unverifiedDistributionExceptionVersion) {
+            throw "BUILD-PROVENANCE.json officialMedia rights status does not match the bundled media audit."
+        }
         if ([int]$officialMedia.sourceCount -le 0 -or
             [int]$officialMedia.fileCount -ne $mediaFiles.Count -or
             [long]$officialMedia.totalBytes -ne $mediaTotalBytes) {
@@ -697,6 +726,10 @@ if ($errors.Count -eq 0) {
                 fileCount = [int]$officialMedia.fileCount
                 totalBytes = [long]$officialMedia.totalBytes
                 scope = [string]$officialMedia.scope
+                rightsStatus = [string]$officialMedia.rightsStatus
+                requireRedistributionPermission = [bool]$officialMedia.requireRedistributionPermission
+                unverifiedDistributionExceptionVersion =
+                    [string]$officialMedia.unverifiedDistributionExceptionVersion
             }
         }
         Add-AuditCheck -Name "build-provenance" -Status "passed" -Details "Clean source provenance is bound to $([string]$provenance.releaseTag)."

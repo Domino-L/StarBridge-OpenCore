@@ -27,6 +27,8 @@
 
 0.4.8.2 是取得代码签名证书前明确发布的未签名测试版，因此 SmartScreen 可能显示“未知发布者”。请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对 Release 中的 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。无法接受未签名程序风险时，请等待后续签名版本。
 
+0.4.8.2 官方客户端还保留了来源待核实的第三方图片，用于舰船与星系资料展示。图片不包含在本开源源码中，也不因随官方客户端分发而获得 Apache-2.0 授权；StarBridge 不主张这些图片的版权或再分发许可。详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
+
 安装与首次使用说明见 [开始使用](docs/GETTING_STARTED.md)。如果下载或更新失败，请先查看 [下载帮助](docs/DOWNLOADS.md)。需要核验精确 Release tag、SHA-256、Windows 签名、SBOM 与构建来源时，请按 [Release 核验指南](docs/RELEASE-VERIFICATION.md) 操作。
 
 ## 功能概览

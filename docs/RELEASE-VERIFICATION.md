@@ -49,7 +49,7 @@ Get-AuthenticodeSignature -LiteralPath ".\release\StarBridge-0.4.8.2-win-x64-set
 - `SBOM.cdx.json`：软件物料清单；
 - `third-party-packages.json` 与 `licenses/`：第三方组件及随包许可；
 - `third-party-media-manifest.json`：官方客户端媒体文件的路径与摘要清单；
-- `THIRD-PARTY-MEDIA-AUDIT.json`：官方客户端媒体审计证据，状态必须为 `passed`；
+- `THIRD-PARTY-MEDIA-AUDIT.json`：官方客户端媒体审计证据；0.4.8.2 应为 `passed`，同时 `rightsStatus` 必须如实为 `unverified-distribution-exception`，而不是已获授权；
 - `BUILD-PROVENANCE.json`：版本、tag、私有源提交、公开源提交、SDK、RID 和构建时间；
 - `PAYLOAD-SHA256SUMS.txt`：载荷内文件摘要。
 
@@ -60,7 +60,8 @@ Expand-Archive ".\release\StarBridge-0.4.8.2-win-x64-update.zip" ".\payload"
 & ".\scripts\Test StarBridge Binary Distribution.ps1" `
     -PayloadRoot ".\payload" `
     -ArchivePath ".\release\StarBridge-0.4.8.2-win-x64-update.zip" `
-    -ExpectedVersion "0.4.8.2"
+    -ExpectedVersion "0.4.8.2" `
+    -AllowUnverifiedThirdPartyMediaTestRelease
 ```
 
 公开 workflow `.github/workflows/binary-release-audit.yml` 也执行同一载荷审计。
@@ -70,3 +71,5 @@ Expand-Archive ".\release\StarBridge-0.4.8.2-win-x64-update.zip" ".\payload"
 公开仓库可以核验 Release 与 tag 的绑定、资产摘要、随包许可、SBOM、provenance、载荷哈希和开放核心代码。正式版本采用 GitHub `immutable Release` 固定资产集合。完整官方客户端还可能包含未公开的商业外观实现，因此公开源码不能做到 `bit-for-bit reproducible`，也不能位级复现完整官方二进制。
 
 对 0.4.8.2 而言，GitHub 不可变 Release、SHA-256、签名更新清单和构建审计共同降低下载被替换的风险，但不能提供 Authenticode 发布者身份保证。后续取得证书后，可信签名会重新成为默认发布门槛。
+
+0.4.8.2 的媒体审计能证明随包图片与公开清单的路径、大小和 SHA-256 一致，但不能证明来源待核实图片已经获得再分发授权。该限制是本版发布证据的一部分，不应被省略或改写为“媒体已授权”。

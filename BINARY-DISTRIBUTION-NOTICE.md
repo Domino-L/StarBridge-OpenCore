@@ -4,7 +4,9 @@ GitHub Releases 中的安装器用于向用户分发完整的星海舰桥桌面�
 
 0.4.8.2 是取得代码签名证书前明确发布的未签名公开测试版。Windows 可能显示“未知发布者”。用户应只从官方网页或本仓库不可变 Release 下载，并核对 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`；无法接受未签名程序风险的用户应等待后续签名版本。
 
-仓库内明确发布的桌面客户端与核心代码采用 Apache License 2.0。Release 安装包还可能包含未在本仓库公开的商业授权实现、可选商业外观和经单独授权分发的媒体资源，因此安装包整体不因存放在本仓库而全部转为 Apache-2.0。
+仓库内明确发布的桌面客户端与核心代码采用 Apache License 2.0。Release 安装包还可能包含未在本仓库公开的商业授权实现、可选商业外观和第三方媒体，因此安装包整体不因存放在本仓库而全部转为 Apache-2.0。
+
+0.4.8.2 测试版保留现有第三方图片，但其来源与再分发授权尚未完成核实。随包审计会将该状态明确记录为 `unverified-distribution-exception`；这不构成 StarBridge 对图片版权或再分发授权的主张。该例外仅限 0.4.8.2，相关权利归各自权利人所有，图片可能在后续版本中替换或移除。
 
 “夜影”、Verdict 及后续可选商业外观不会改变基础功能、数据权限或协作能力。其源码和授权实现不属于本仓库的 Apache-2.0 开放范围。
 
@@ -12,14 +14,14 @@ GitHub Releases 中的安装器用于向用户分发完整的星海舰桥桌面�
 [`OFFICIAL-BINARY-LICENSE.txt`](docs/OFFICIAL-BINARY-LICENSE.txt)，其个人权利人和许可方为
 Ruiyang Lyu。商业外观的使用资格与获得授权的 StarBridge 账号绑定。
 
-当前免费测试版不包含应用内付费购买。完整客户端条款版本为 `2026-07-27-v1`；应用会保存接受时间、应用版本和条款文件 SHA-256，以便在条款发生实质变化时重新提示。
+当前免费测试版不包含应用内付费购买。完整客户端条款版本为 `2026-07-27-v2`；应用会保存接受时间、应用版本和条款文件 SHA-256，以便在条款发生实质变化时重新提示。
 
 未经书面许可，不得镜像、重新托管或重新分发完整的官方安装包、更新包或便携包；可以分享未经修改的 StarBridge 官方网页、发布页或官方下载链接。该限制只针对完整官方包这一集合及其中的专有组件，不限制依照 Apache License 2.0 单独复制、修改或再分发开放组件。
 
 产品名称、标志、应用图标和第三方游戏素材的使用边界见 [TRADEMARKS.md](TRADEMARKS.md)、[ASSET_POLICY.md](ASSET_POLICY.md)、[THIRD-PARTY-MEDIA-NOTICE.md](THIRD-PARTY-MEDIA-NOTICE.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 第三方软件组件及其完整许可文本见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与 `licenses/`。游戏数据和翻译映射的来源边界见 [DATA_RIGHTS.md](DATA_RIGHTS.md)。
-正式载荷中的第三方媒体还必须随附 `THIRD-PARTY-MEDIA-AUDIT.json`；该报告与来源登记、哈希清单一起进入发布证据，用于证明成品实际通过了再分发权限和文件一致性检查。
+正式载荷中的第三方媒体还必须随附 `THIRD-PARTY-MEDIA-AUDIT.json`；该报告与来源登记、哈希清单一起进入发布证据，并分别记录文件一致性和权利核验状态。0.4.8.2 的通过状态只表示载荷完整性审计通过，不表示来源待核实图片已获得再分发许可。
 
 Nothing in this notice limits or replaces any rights granted under the Apache
 License 2.0 for the Open Components.
