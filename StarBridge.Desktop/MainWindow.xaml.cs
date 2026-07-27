@@ -1653,6 +1653,28 @@ public partial class MainWindow : Window, IAppUpdateUi
         SetActiveNav(null);
     }
 
+    private void OfficialBinaryLicenseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var terms = _testBuildNoticeStore.ReadCurrentTerms();
+        if (string.IsNullOrWhiteSpace(terms))
+        {
+            StarBridgeMessageBox.Show(
+                this,
+                "当前安装目录中没有找到《官方客户端许可条款》。请重新安装官方完整版本，或前往官方 GitHub 仓库查看 LICENSES/OFFICIAL-BINARY-LICENSE.txt。",
+                "无法读取客户端许可",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        StarBridgeMessageBox.ShowAcknowledgement(
+            this,
+            terms,
+            "官方客户端许可条款",
+            "关闭",
+            MessageBoxImage.Information);
+    }
+
     private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
     {
         await CheckForUpdatesAsync();

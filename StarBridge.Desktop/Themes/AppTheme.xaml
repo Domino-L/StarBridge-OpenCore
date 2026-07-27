@@ -2054,6 +2054,7 @@
     <Style TargetType="ComboBox">
         <Setter Property="Height" Value="36" />
         <Setter Property="MinHeight" Value="32" />
+        <Setter Property="local:SmoothWheelScrollBehavior.GuardsBackgroundWhileDropDownOpen" Value="True" />
         <Setter Property="Padding" Value="10,4" />
         <Setter Property="Background" Value="{StaticResource AvionicsGlassFieldBrush}" />
         <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
@@ -2116,7 +2117,8 @@
                                     BorderThickness="1"
                                     CornerRadius="5"
                                     MinWidth="{TemplateBinding ActualWidth}">
-                                <ScrollViewer MaxHeight="240">
+                                <ScrollViewer MaxHeight="240"
+                                              local:SmoothWheelScrollBehavior.StopsWheelPropagation="True">
                                     <ItemsPresenter />
                                 </ScrollViewer>
                             </Border>

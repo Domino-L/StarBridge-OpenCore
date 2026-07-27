@@ -1,8 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using WpfComboBox = System.Windows.Controls.ComboBox;
 
 namespace StarBridge.Desktop;
 
@@ -16,6 +18,7 @@ public static class SmoothWheelScrollBehavior
     private const double ScrollResponse = 18;
     private const double CompletionTolerance = 0.3;
     private static readonly ConditionalWeakTable<ScrollViewer, ScrollState> States = new();
+    private static readonly ConditionalWeakTable<WpfComboBox, DropDownBackgroundGuard> DropDownGuards = new();
 
     public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
         "IsEnabled",
@@ -23,11 +26,35 @@ public static class SmoothWheelScrollBehavior
         typeof(SmoothWheelScrollBehavior),
         new PropertyMetadata(false, OnIsEnabledChanged));
 
+    public static readonly DependencyProperty StopsWheelPropagationProperty = DependencyProperty.RegisterAttached(
+        "StopsWheelPropagation",
+        typeof(bool),
+        typeof(SmoothWheelScrollBehavior),
+        new PropertyMetadata(false));
+
+    public static readonly DependencyProperty GuardsBackgroundWhileDropDownOpenProperty = DependencyProperty.RegisterAttached(
+        "GuardsBackgroundWhileDropDownOpen",
+        typeof(bool),
+        typeof(SmoothWheelScrollBehavior),
+        new PropertyMetadata(false, OnGuardsBackgroundWhileDropDownOpenChanged));
+
     public static bool GetIsEnabled(DependencyObject element) =>
         (bool)element.GetValue(IsEnabledProperty);
 
     public static void SetIsEnabled(DependencyObject element, bool value) =>
         element.SetValue(IsEnabledProperty, value);
+
+    public static bool GetStopsWheelPropagation(DependencyObject element) =>
+        (bool)element.GetValue(StopsWheelPropagationProperty);
+
+    public static void SetStopsWheelPropagation(DependencyObject element, bool value) =>
+        element.SetValue(StopsWheelPropagationProperty, value);
+
+    public static bool GetGuardsBackgroundWhileDropDownOpen(DependencyObject element) =>
+        (bool)element.GetValue(GuardsBackgroundWhileDropDownOpenProperty);
+
+    public static void SetGuardsBackgroundWhileDropDownOpen(DependencyObject element, bool value) =>
+        element.SetValue(GuardsBackgroundWhileDropDownOpenProperty, value);
 
     public static void SetVerticalBounds(ScrollViewer viewer, double minimum, double maximum)
     {
@@ -64,6 +91,28 @@ public static class SmoothWheelScrollBehavior
         {
             state.Detach();
             States.Remove(viewer);
+        }
+    }
+
+    private static void OnGuardsBackgroundWhileDropDownOpenChanged(
+        DependencyObject dependencyObject,
+        DependencyPropertyChangedEventArgs e)
+    {
+        if (dependencyObject is not WpfComboBox comboBox)
+        {
+            return;
+        }
+
+        if (e.NewValue is true)
+        {
+            DropDownGuards.GetValue(comboBox, static target => new DropDownBackgroundGuard(target)).Attach();
+            return;
+        }
+
+        if (DropDownGuards.TryGetValue(comboBox, out var guard))
+        {
+            guard.Detach();
+            DropDownGuards.Remove(comboBox);
         }
     }
 
@@ -127,9 +176,19 @@ public static class SmoothWheelScrollBehavior
 
         private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (e.Handled ||
-                FindScrollTarget(e.OriginalSource as DependencyObject, e.Delta) is not { } target ||
-                !ReferenceEquals(target, viewer))
+            if (e.Handled)
+            {
+                return;
+            }
+
+            var route = FindScrollRoute(e.OriginalSource as DependencyObject, e.Delta);
+            if (route.IsBlocked)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            if (route.Target is not { } target || !ReferenceEquals(target, viewer))
             {
                 return;
             }
@@ -262,6 +321,97 @@ public static class SmoothWheelScrollBehavior
         }
     }
 
+    private sealed class DropDownBackgroundGuard
+    {
+        private readonly WpfComboBox _comboBox;
+        private readonly MouseWheelEventHandler _windowWheelHandler;
+        private Window? _window;
+        private bool _isAttached;
+
+        public DropDownBackgroundGuard(WpfComboBox comboBox)
+        {
+            _comboBox = comboBox;
+            _windowWheelHandler = OnWindowPreviewMouseWheel;
+        }
+
+        public void Attach()
+        {
+            if (_isAttached)
+            {
+                return;
+            }
+
+            _isAttached = true;
+            _comboBox.DropDownOpened += OnDropDownOpened;
+            _comboBox.DropDownClosed += OnDropDownClosed;
+            _comboBox.Unloaded += OnUnloaded;
+
+            if (_comboBox.IsDropDownOpen)
+            {
+                AttachToWindow();
+            }
+        }
+
+        public void Detach()
+        {
+            if (!_isAttached)
+            {
+                return;
+            }
+
+            DetachFromWindow();
+            _comboBox.DropDownOpened -= OnDropDownOpened;
+            _comboBox.DropDownClosed -= OnDropDownClosed;
+            _comboBox.Unloaded -= OnUnloaded;
+            _isAttached = false;
+        }
+
+        private void OnDropDownOpened(object? sender, EventArgs e) =>
+            AttachToWindow();
+
+        private void OnDropDownClosed(object? sender, EventArgs e) =>
+            DetachFromWindow();
+
+        private void OnUnloaded(object sender, RoutedEventArgs e) =>
+            DetachFromWindow();
+
+        private void AttachToWindow()
+        {
+            DetachFromWindow();
+            _window = Window.GetWindow(_comboBox);
+            _window?.AddHandler(
+                Mouse.PreviewMouseWheelEvent,
+                _windowWheelHandler,
+                handledEventsToo: true);
+        }
+
+        private void DetachFromWindow()
+        {
+            _window?.RemoveHandler(Mouse.PreviewMouseWheelEvent, _windowWheelHandler);
+            _window = null;
+        }
+
+        private void OnWindowPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (e.Handled || !_comboBox.IsDropDownOpen)
+            {
+                return;
+            }
+
+            var pointerSource = Mouse.DirectlyOver as DependencyObject ??
+                                e.OriginalSource as DependencyObject;
+            var disposition = ResolveOpenDropDownWheelDisposition(
+                IsInsideOpenDropDown(_comboBox, pointerSource));
+            if (disposition == OpenDropDownWheelDisposition.KeepDropDownOpen)
+            {
+                return;
+            }
+
+            _comboBox.IsDropDownOpen = false;
+            e.Handled = true;
+        }
+    }
+
     private static double ResolveWheelDistance(ScrollViewer viewer)
     {
         var configuredLines = SystemParameters.WheelScrollLines;
@@ -273,21 +423,74 @@ public static class SmoothWheelScrollBehavior
         return WheelDistance * Math.Max(1d, configuredLines / 3d);
     }
 
-    private static ScrollViewer? FindScrollTarget(DependencyObject? source, int delta)
+    private static WheelRoute FindScrollRoute(DependencyObject? source, int delta)
     {
         while (source is not null)
         {
-            if (source is ScrollViewer viewer &&
-                viewer.ScrollableHeight > CompletionTolerance &&
-                CanScrollInDirection(viewer, delta))
+            if (source is ScrollViewer viewer)
             {
-                return viewer;
+                var canScroll =
+                    viewer.ScrollableHeight > CompletionTolerance &&
+                    CanScrollInDirection(viewer, delta);
+                switch (ResolveViewerWheelDisposition(
+                            canScroll,
+                            GetStopsWheelPropagation(viewer)))
+                {
+                    case ViewerWheelDisposition.Scroll:
+                        return new WheelRoute(viewer, IsBlocked: false);
+                    case ViewerWheelDisposition.Block:
+                        return new WheelRoute(Target: null, IsBlocked: true);
+                }
             }
 
             source = GetParent(source);
         }
 
-        return null;
+        return default;
+    }
+
+    private static ViewerWheelDisposition ResolveViewerWheelDisposition(
+        bool canScrollInDirection,
+        bool stopsWheelPropagation) =>
+        canScrollInDirection
+            ? ViewerWheelDisposition.Scroll
+            : stopsWheelPropagation
+                ? ViewerWheelDisposition.Block
+                : ViewerWheelDisposition.Continue;
+
+    private static OpenDropDownWheelDisposition ResolveOpenDropDownWheelDisposition(
+        bool pointerInsideDropDown) =>
+        pointerInsideDropDown
+            ? OpenDropDownWheelDisposition.KeepDropDownOpen
+            : OpenDropDownWheelDisposition.CloseAndBlockBackground;
+
+    private static bool IsInsideOpenDropDown(WpfComboBox comboBox, DependencyObject? source)
+    {
+        if (source is null)
+        {
+            return false;
+        }
+
+        comboBox.ApplyTemplate();
+        var popup = comboBox.Template.FindName("Popup", comboBox) as Popup ??
+                    comboBox.Template.FindName("PART_Popup", comboBox) as Popup;
+        var popupRoot = popup?.Child;
+        if (popupRoot is null)
+        {
+            return false;
+        }
+
+        while (source is not null)
+        {
+            if (ReferenceEquals(source, popupRoot))
+            {
+                return true;
+            }
+
+            source = GetParent(source);
+        }
+
+        return false;
     }
 
     private static bool CanScrollInDirection(ScrollViewer viewer, int delta) =>
@@ -310,6 +513,21 @@ public static class SmoothWheelScrollBehavior
             return LogicalTreeHelper.GetParent(source);
         }
     }
+
+    private readonly record struct WheelRoute(ScrollViewer? Target, bool IsBlocked);
+}
+
+internal enum ViewerWheelDisposition
+{
+    Continue,
+    Scroll,
+    Block
+}
+
+internal enum OpenDropDownWheelDisposition
+{
+    KeepDropDownOpen,
+    CloseAndBlockBackground
 }
 
 internal enum WheelInputDisposition

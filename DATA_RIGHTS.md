@@ -7,22 +7,35 @@ Game names, internal identifiers, factual game information, third-party
 database content, and official localization content remain subject to the
 rights and terms of their respective owners.
 
+Chinese ship display names in the runtime pack follow the established Star
+Citizen Chinese community translations used by StarBridge. They are presented
+as an unofficial, fan-maintained mapping. Public inclusion records
+compatibility and display behavior; it does not represent the mapping as an
+official Star Citizen localization or as original StarBridge-authored
+translation.
+
 Unknown or undocumented source material does not become Apache-2.0 merely
 because it is stored in a Git repository.
 
 | Path | Origin | StarBridge contribution | License status |
 | --- | --- | --- | --- |
+| `StarBridge.Desktop/Data/ship-name-pack.json` | Community Chinese ship translations compiled from the historical StarBridge compatibility table; exact per-entry upstream attribution remains pending | Complete normalized runtime-code, readable English-name, Chinese-display-name and alias mappings for the client | Apache-2.0 applies only to the StarBridge-authored schema, selection, normalization and compilation. No Apache-2.0 claim is made for community translations, underlying game identifiers, names or marks. Public or binary redistribution remains subject to documenting upstream permission |
+| `StarBridge.Desktop/Data/ship-name-pack.schema.json` | StarBridge-authored schema | Complete schema and validation contract | Apache-2.0 |
+| `StarBridge.Desktop/Data/ship-name-pack.provenance.json` | Pack-wide provenance coverage plus entry-level overrides for independently verified rows | Records the rights boundary once for the complete pack and preserves stronger evidence where available | Included in the public source package for audit, but not copied into the desktop client output |
 | `StarBridge.Desktop/Data/location-names-zh.txt` | Runtime identifiers are game-derived; runtime-code pairings and field observations are independently compiled by StarBridge; Chinese display names have mixed provenance, including independently authored text and text adapted from the SC Toolbox translation data (`StarCitizenToolBox/LocalizationData`) | Mapping selection and structure, field validation, confidence handling, fallback behavior, and independently authored display text | The original StarBridge contributions may be covered by Apache-2.0, but no Apache-2.0 claim is made for third-party or provenance-pending Chinese translations; the complete file is excluded from the public source package until entry-level review is complete |
-| `StarBridge.Desktop/Data/ship-names-zh.txt` | Not yet documented | Not yet documented | Excluded from the public source package pending provenance review |
+| `StarBridge.Desktop/Data/ship-names-zh.txt` | Historical compatibility table with incomplete entry-level provenance | Private migration source and optional legacy local lookup behavior | Excluded from the public source package. It does not override public pack entries and is not required by the public client |
 | `StarBridge.Desktop/Data/ship-catalog.tsv` | Historical compilation; exact source records are incomplete | Selection, structure, and annotations require row-level review | Excluded from the public source package pending provenance review |
 | `StarBridge.Desktop/Data/ship-loaner-matrix.tsv` | Historical internal compilation; the public RSI Loaner Ship Matrix is the canonical verification reference, but row-level comparison is still pending | Chinese display names, normalization, display rules, hidden tags, and runtime integration | Excluded from the public source package until row-level verification and third-party redistribution review are complete; no Apache-2.0 claim is made for official RSI text or marks |
 
 ## Public build behavior
 
 The public desktop build sets `StarBridgeIncludeRestrictedGameData=false`.
-Missing restricted catalogues are treated as optional data: the client remains
-buildable and runnable, while affected lookups fall back to identifiers,
-English names, or empty optional catalogue sections.
+Missing restricted catalogues are treated as optional data. The client first
+uses the complete public `ship-name-pack.json`, then any explicitly enabled
+local compatibility table, and finally manufacturer-aware English inference
+plus a readable runtime-identifier fallback. The public client therefore keeps
+its complete Chinese ship-name display without shipping the private migration
+source or silently relicensing the historical table as a whole.
 
 The SC Toolbox application repository is GPL-3.0, but its translation data is
 maintained in a separate repository. The translation data repository did not

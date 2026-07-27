@@ -1,0 +1,26 @@
+{
+    "schemaVersion":  1,
+    "packRevision":  "2026-07-26.3",
+    "coverage":  [
+                     {
+                         "selector":  "*",
+                         "sourceType":  "community-translation-compiled-runtime-map",
+                         "sourceName":  "Star Citizen Chinese translation community; exact per-entry origin pending",
+                         "sourceReference":  "Normalized migration from the StarBridge historical compatibility table",
+                         "licenseOrPermission":  "Apache-2.0 covers only the StarBridge-authored schema, selection, normalization and compilation. No Apache-2.0 claim is made for community Chinese translations, underlying game identifiers or game names; redistribution permission remains subject to upstream provenance.",
+                         "maintainer":  "StarBridge contributors"
+                     }
+                 ],
+    "entryOverrides":  [
+                           {
+                               "runtimeId":  "GLSN_Basher",
+                               "sourceType":  "field-observation",
+                               "sourceName":  "StarBridge contributor field observation",
+                               "sourceReference":  "vehicle_NameGLSN_Basher",
+                               "verifiedDate":  "2026-07-16",
+                               "translator":  "Star Citizen Chinese translation community",
+                               "licenseOrPermission":  "The runtime identifier was independently observed by a StarBridge contributor. The Chinese display name remains covered by the pack-wide community-translation provenance and is not claimed as Apache-2.0.",
+                               "maintainer":  "StarBridge contributors"
+                           }
+                       ]
+}

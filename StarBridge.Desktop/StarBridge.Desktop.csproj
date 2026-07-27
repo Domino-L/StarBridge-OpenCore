@@ -54,6 +54,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\LICENSES\OFFICIAL-BINARY-LICENSE.txt"
+             Link="OFFICIAL-BINARY-LICENSE.txt"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Data\ship-name-pack.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Data\ship-names-zh.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
     <Content Include="Data\ship-catalog.tsv" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
     <Content Include="Data\ship-loaner-matrix.tsv" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />

@@ -241,8 +241,17 @@ internal sealed class StarBridgeMessageBoxWindow : Window
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 520
         };
-        Grid.SetColumn(messageText, 1);
-        body.Children.Add(messageText);
+        var messageScroller = new ScrollViewer
+        {
+            Content = messageText,
+            MaxHeight = System.Math.Max(
+                220,
+                System.Math.Min(520, SystemParameters.WorkArea.Height * 0.55)),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        };
+        Grid.SetColumn(messageScroller, 1);
+        body.Children.Add(messageScroller);
         Grid.SetRow(body, 1);
         grid.Children.Add(body);
 

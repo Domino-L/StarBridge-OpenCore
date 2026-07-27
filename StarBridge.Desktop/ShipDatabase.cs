@@ -226,7 +226,7 @@ public static partial class HangarShipImporter
         var bestCode = "";
         var bestScore = int.MinValue;
 
-        foreach (var knownCode in ShipNameLocalizer.KnownChineseNames.Keys)
+        foreach (var knownCode in ShipNameLocalizer.KnownShipCodes)
         {
             var normalizedCode = ShipNameLocalizer.NormalizeCode(knownCode);
             if (normalizedCode.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ||

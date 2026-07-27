@@ -22,7 +22,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\StarBridge-win-x64-setup.exe"
 
 ### Windows 显示“未知发布者”
 
-当前测试版可能尚未使用受公众信任的 Windows 代码签名证书。请确认下载地址属于本仓库 Releases 或星海舰桥官网，并核对 SHA-256。
+0.4.8.2 是取得代码签名证书前明确发布的未签名测试版，Windows 可能显示“未知发布者”。这不等于 Windows 已经验证了发布者身份。请只从本仓库不可变 Release 或星海舰桥官网下载，并同时核对 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。无法接受未签名程序风险时，请等待后续签名版本。
 
 ### 在线安装器无法下载
 

@@ -26641,6 +26641,7 @@
                                         <Style x:Key="NotificationOptionBoxStyle" TargetType="{x:Type ComboBox}">
                                             <Setter Property="Height" Value="28" />
                                             <Setter Property="MinWidth" Value="96" />
+                                            <Setter Property="local:SmoothWheelScrollBehavior.GuardsBackgroundWhileDropDownOpen" Value="True" />
                                             <Setter Property="Background" Value="#081722" />
                                             <Setter Property="Foreground" Value="#D7E6F0" />
                                             <Setter Property="BorderBrush" Value="#28506A" />
@@ -26749,7 +26750,8 @@
                                                                         <ScrollViewer Background="{StaticResource AvionicsGlassPanelBrush}"
                                                                                       VerticalScrollBarVisibility="Auto"
                                                                                       HorizontalScrollBarVisibility="Disabled"
-                                                                                      CanContentScroll="True">
+                                                                                      CanContentScroll="True"
+                                                                                      local:SmoothWheelScrollBehavior.StopsWheelPropagation="True">
                                                                             <ScrollViewer.Resources>
                                                                                 <Style TargetType="{x:Type ScrollBar}"
                                                                                        BasedOn="{StaticResource StarBridgeScrollBar}" />
@@ -28969,14 +28971,14 @@
                                     </Style>
                                 </Border.Resources>
                                 <StackPanel>
-                                    <TextBlock Text="隐私与使用说明"
+                                    <TextBlock Text="说明、风险与非官方声明"
                                                Foreground="{StaticResource PrimaryTextBrush}"
                                                FontSize="18"
                                                FontWeight="SemiBold" />
                                     <TextBlock Margin="0,7,0,0"
                                                Foreground="{StaticResource MutedTextBrush}"
                                                TextWrapping="Wrap"
-                                               Text="查看星海舰桥如何使用信息，以及使用时需要了解的事项。" />
+                                               Text="了解星海舰桥的工作方式、数据边界、非官方性质，以及下载和使用前需要自行判断的风险。" />
 
                                     <Expander Header="星海舰桥如何工作"
                                               Margin="0,18,0,8"
@@ -28987,11 +28989,16 @@
                                                        TextWrapping="Wrap"
                                                        LineHeight="21"
                                                        Text="星海舰桥可以帮助你管理舰队与小队、查看成员状态、舰船和地点信息，并通过游戏浮层提供协作信息。这些内容用于玩家之间的组织和沟通，不属于游戏官方数据。" />
+                                             <TextBlock Margin="0,8,0,0"
+                                                        Foreground="{StaticResource MutedTextBrush}"
+                                                        TextWrapping="Wrap"
+                                                        LineHeight="21"
+                                                        Text="选择 Star Citizen Game.log 后，星海舰桥会从日志中识别玩家身份、舰船、地点和相关状态。登录后，必要信息会通过星海舰桥服务同步，用于展示舰队、小队和游戏浮层内容。" />
                                             <TextBlock Margin="0,8,0,0"
                                                        Foreground="{StaticResource MutedTextBrush}"
                                                        TextWrapping="Wrap"
                                                        LineHeight="21"
-                                                       Text="选择 Star Citizen Game.log 后，星海舰桥会从日志中识别玩家身份、舰船、地点和相关状态。登录后，必要信息会通过星海舰桥服务同步，用于展示舰队、小队和游戏浮层内容。" />
+                                                       Text="游戏浮层由独立的 Windows 透明窗口绘制，不是注入游戏的模组。它只显示应用已经获得的信息，可能受独占全屏、显示缩放、显卡驱动、安全软件或游戏更新影响。" />
                                         </StackPanel>
                                     </Expander>
 
@@ -29015,7 +29022,7 @@
                                               IsExpanded="False"
                                               Style="{StaticResource HelpDisclosureExpanderStyle}">
                                         <StackPanel>
-                                            <TextBlock Text="游戏安全"
+                                            <TextBlock Text="当前实现方式"
                                                        Foreground="{StaticResource PrimaryTextBrush}"
                                                        FontWeight="SemiBold" />
                                             <TextBlock Margin="0,6,0,0"
@@ -29032,6 +29039,15 @@
                                                        TextWrapping="Wrap"
                                                        LineHeight="21"
                                                        Text="游戏更新、日志不完整、网络波动或资料填写错误都可能影响识别结果。舰船、地点、在线状态和成员状态仅供协作参考；涉及游戏资产、账号安全或重要行动时，请以游戏客户端和官方服务显示的信息为准。" />
+                                            <TextBlock Text="反作弊与兼容风险"
+                                                       Margin="0,14,0,0"
+                                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,6,0,0"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="21"
+                                                       Text="只读日志和独立窗口是当前技术实现，不代表官方认可、合规认证或特别豁免。星海舰桥无法保证游戏、反作弊或安全软件永远不会阻止、误报或限制本应用，也无法保证使用本应用不会触发账号调查、限制或其他措施。" />
                                         </StackPanel>
                                     </Expander>
 
@@ -29039,20 +29055,44 @@
                                               Header="非官方说明"
                                               IsExpanded="False"
                                               Style="{StaticResource HelpDisclosureExpanderStyle}">
-                                        <TextBlock x:Name="OfficialAssetDisclaimerText"
+                                        <StackPanel>
+                                            <TextBlock x:Name="OfficialAssetDisclaimerText"
                                                        Foreground="{StaticResource MutedTextBrush}"
                                                        TextWrapping="Wrap"
                                                        LineHeight="21"
                                                        Text="星海舰桥（StarBridge）是由玩家独立开发的非官方社区工具，与 Cloud Imperium 集团及其关联公司不存在隶属、合作、授权、赞助或认可关系。Star Citizen、Squadron 42、Roberts Space Industries、Cloud Imperium 及相关名称、商标、标志、图像、舰船设计和游戏素材的权利归其各自权利人所有。本应用对第三方名称和素材的使用仅用于说明兼容对象和社区工具用途，不表示任何官方关系。" />
-                                    </Expander>
-
-                                    <Expander Header="使用须知"
-                                              IsExpanded="False"
-                                              Style="{StaticResource HelpDisclosureExpanderStyle}">
-                                        <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                                            <TextBlock Margin="0,8,0,0"
+                                                       Foreground="{StaticResource MutedTextBrush}"
                                                        TextWrapping="Wrap"
                                                        LineHeight="21"
-                                                       Text="星海舰桥可能因游戏更新、网络波动或兼容性问题出现中断、延迟或识别错误。请根据实际情况判断信息是否适合当前用途，并承担因依赖不完整、延迟或错误信息而产生的风险。在适用法律允许的范围内，开发者不对因使用或无法使用本应用而产生的游戏内损失、数据损失、协作失误或其他间接损失承担责任。使用星海舰桥时，请遵守游戏、平台及所在社区的规则，不得将其用于违法、侵权、骚扰、作弊或干扰其他用户正常使用的行为。" />
+                                                       Text="截至当前版本，星海舰桥未获得 Cloud Imperium Games 或 Roberts Space Industries 针对本应用的书面许可。请自行查阅并遵守 RSI 当前有效的服务条款、最终用户许可协议和粉丝内容说明；如果官方规则、反作弊要求或明确通知与本应用发生冲突，请停止使用受影响功能。" />
+                                        </StackPanel>
+                                    </Expander>
+
+                                    <Expander Header="使用风险与责任"
+                                              IsExpanded="False"
+                                              Style="{StaticResource HelpDisclosureExpanderStyle}">
+                                        <StackPanel>
+                                            <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="21"
+                                                       Text="星海舰桥按“现状”和“可用状态”提供，不承诺持续可用、完全准确、无错误、无中断或适合任何特定用途。你应自行判断应用提供的信息和功能是否适合当前用途，并自行承担安装、配置、运行或无法运行本应用所产生的风险及后果。" />
+                                            <TextBlock Margin="0,8,0,0"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="21"
+                                                       Text="在适用法律允许的最大范围内，作者、维护者和贡献者不对因使用或无法使用本应用而产生的账号警告、限制、调查、暂停或终止，游戏内资产、进度或机会损失，数据丢失、隐私泄露、设备故障、性能下降、软件冲突、协作失误以及任何间接损失承担责任。" />
+                                            <TextBlock Margin="0,8,0,0"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="21"
+                                                       Text="如果你不接受这些风险，请停止使用并卸载星海舰桥。本说明不排除或限制适用法律不能排除或限制的责任，也不影响开放组件在 Apache License 2.0 下已经授予的权利。使用时请遵守游戏、平台和所在社区的规则，不得用于违法、侵权、骚扰、作弊或干扰其他用户正常使用的行为。" />
+                                            <Button Margin="0,14,0,0"
+                                                    HorizontalAlignment="Left"
+                                                    MinWidth="156"
+                                                    Content="查看完整客户端许可"
+                                                    Click="OfficialBinaryLicenseButton_Click" />
+                                        </StackPanel>
                                     </Expander>
                                 </StackPanel>
                             </Border>

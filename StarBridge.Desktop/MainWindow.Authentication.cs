@@ -15,7 +15,10 @@ public partial class MainWindow
 
     private async Task RunStartupAndGameplayConsentFlowAsync()
     {
-        ShowTestBuildNoticeIfNeeded();
+        if (!ShowTestBuildNoticeIfNeeded())
+        {
+            return;
+        }
 
         var onboardingCompleted = await RunStartupFlowAsync();
         if (!onboardingCompleted || Dispatcher.HasShutdownStarted)
@@ -28,20 +31,43 @@ public partial class MainWindow
         ShowLocationDataContributionConsentIfNeeded();
     }
 
-    private void ShowTestBuildNoticeIfNeeded()
+    private bool ShowTestBuildNoticeIfNeeded()
     {
         if (_testBuildNoticeStore.IsAcknowledged())
         {
-            return;
+            return true;
         }
 
-        StarBridgeMessageBox.ShowAcknowledgement(
+        var accepted = StarBridgeMessageBox.ShowAction(
             this,
-            "当前版本仍处于测试阶段。部分功能、界面和本地设置可能会在后续版本中调整。\n\n如果遇到问题，可前往“帮助与反馈”提交现象和复现步骤。感谢你帮助我们完善星海舰桥。",
-            $"星海舰桥 {GetAppUpdateVersion()} 最终测试版",
-            "我已了解，继续",
+            "当前版本仍处于测试阶段，且暂未进行 Windows 代码签名。Windows 或安全软件可能显示“未知发布者”或要求额外确认。请只从星海舰桥官网或官方 GitHub Release 下载，并在安装前核对官方公布的 SHA-256。\n\n" +
+            "功能、界面、本地设置和联网服务可能继续调整，也可能因游戏、日志、网络、Windows、驱动或安全软件变化而出现中断、延迟、误判或无法使用。\n\n" +
+            "星海舰桥是玩家独立开发的非官方社区工具，未获得 Cloud Imperium Games 或 Roberts Space Industries 针对本应用的书面许可、合规认证或特别豁免。只读 Game.log、使用独立 Windows 浮层且不注入游戏，是当前实现方式，不代表官方认可，也不能完全排除反作弊误报或账号相关风险。\n\n" +
+            "应用提供的舰船、地点、在线状态和事件信息仅供协作参考。请自行判断是否安装和使用，并遵守当时有效的游戏及平台规则；若官方要求与本应用发生冲突，请停止使用受影响功能。\n\n" +
+            "在适用法律允许的最大范围内，作者、维护者和贡献者不对因安装、使用或无法使用本应用而产生的账号措施、游戏内损失、数据损失、软件冲突、协作失误或间接损失承担责任。本声明不排除适用法律不能排除的责任。\n\n" +
+            "继续使用前，请阅读随应用提供的《完整客户端许可条款》。完整条款与上述说明可随时在“帮助与反馈 → 说明与声明”中查看。如果你不接受这些事项，请关闭应用。",
+            $"星海舰桥 {GetAppUpdateVersion()} 测试版",
+            "我已阅读并理解，继续",
+            "退出应用",
             MessageBoxImage.Information);
-        _testBuildNoticeStore.TryAcknowledge(out _);
+
+        if (!accepted)
+        {
+            System.Windows.Application.Current.Shutdown();
+            return false;
+        }
+
+        if (!_testBuildNoticeStore.TryAcknowledge(out var acknowledgementError))
+        {
+            StarBridgeMessageBox.Show(
+                this,
+                $"无法保存本次许可确认记录。为避免下次启动重复询问，请检查应用配置目录是否可写。\n\n{acknowledgementError}",
+                "确认记录未保存",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        return true;
     }
 
     private async Task<bool> RunStartupFlowAsync()

@@ -31,6 +31,7 @@ $requiredFiles = @(
     "docs/DOWNLOADS.md",
     "docs/RELEASE-VERIFICATION.md",
     "docs/OFFICIAL-BINARY-LICENSE.txt",
+    "LICENSES/OFFICIAL-BINARY-LICENSE.txt",
     ".github/ISSUE_TEMPLATE/bug-report.yml",
     ".github/ISSUE_TEMPLATE/feature-request.yml",
     ".github/ISSUE_TEMPLATE/config.yml",
@@ -91,9 +92,79 @@ foreach ($relativePath in $forbiddenPublicPaths) {
     }
 }
 
+foreach ($relativePath in @(
+    "StarBridge.Desktop/Data/ship-name-pack.json",
+    "StarBridge.Desktop/Data/ship-name-pack.schema.json",
+    "StarBridge.Desktop/Data/ship-name-pack.provenance.json"
+)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Root $relativePath) -PathType Leaf)) {
+        $errors.Add("Reviewed public ship-name data contract is missing: $relativePath")
+    }
+}
+
+$shipNamePackPath = Join-Path $Root "StarBridge.Desktop/Data/ship-name-pack.json"
+$shipNameSchemaPath = Join-Path $Root "StarBridge.Desktop/Data/ship-name-pack.schema.json"
+$shipNameProvenancePath = Join-Path $Root "StarBridge.Desktop/Data/ship-name-pack.provenance.json"
+if ((Test-Path -LiteralPath $shipNamePackPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $shipNameSchemaPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $shipNameProvenancePath -PathType Leaf)) {
+    $shipNamePack = [IO.File]::ReadAllText($shipNamePackPath) | ConvertFrom-Json
+    $shipNameSchema = [IO.File]::ReadAllText($shipNameSchemaPath) | ConvertFrom-Json
+    $shipNameProvenance = [IO.File]::ReadAllText($shipNameProvenancePath) | ConvertFrom-Json
+    $auditOnlyShipFields = @(
+        "sourceType",
+        "sourceName",
+        "sourceReference",
+        "verifiedDate",
+        "translator",
+        "licenseOrPermission",
+        "maintainer"
+    )
+    foreach ($entry in @($shipNamePack.entries)) {
+        foreach ($field in $auditOnlyShipFields) {
+            if ($entry.PSObject.Properties.Name -contains $field) {
+                $errors.Add("Runtime ship-name entry contains audit-only field '$field': $($entry.runtimeId)")
+            }
+        }
+    }
+    foreach ($field in $auditOnlyShipFields) {
+        if ($shipNameSchema.properties.entries.items.properties.PSObject.Properties.Name -contains $field) {
+            $errors.Add("Runtime ship-name schema contains audit-only field: $field")
+        }
+    }
+    if ([string]$shipNamePack.revision -ne [string]$shipNameProvenance.packRevision) {
+        $errors.Add("Ship-name runtime pack and provenance manifest revisions do not match.")
+    }
+    $runtimeShipIds = @($shipNamePack.entries | ForEach-Object { [string]$_.runtimeId })
+    $provenanceOverrideIds = @($shipNameProvenance.entryOverrides | ForEach-Object { [string]$_.runtimeId })
+    if ($runtimeShipIds.Count -ne @($runtimeShipIds | Sort-Object -Unique).Count) {
+        $errors.Add("Ship-name runtime pack contains duplicated runtime IDs.")
+    }
+    if ($runtimeShipIds.Count -lt 300) {
+        $errors.Add("Public ship-name runtime pack does not provide complete fleet coverage.")
+    }
+    if (@($shipNamePack.entries | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.chineseName) }).Count -ne 0) {
+        $errors.Add("Every public ship-name entry must provide a Chinese display name.")
+    }
+    if (@($shipNameProvenance.coverage).Count -eq 0 -or
+        @($shipNameProvenance.coverage | Where-Object { [string]$_.selector -eq "*" }).Count -ne 1) {
+        $errors.Add("Ship-name provenance manifest lacks one pack-wide coverage record.")
+    }
+    if ($provenanceOverrideIds.Count -ne @($provenanceOverrideIds | Sort-Object -Unique).Count) {
+        $errors.Add("Ship-name provenance manifest contains duplicated entry overrides.")
+    }
+    if (@($provenanceOverrideIds | Where-Object { $runtimeShipIds -notcontains $_ }).Count -ne 0) {
+        $errors.Add("Ship-name provenance override references a runtime ID outside the public pack.")
+    }
+}
+
 $publicProjectPath = Join-Path $Root "StarBridge.Desktop/StarBridge.Desktop.csproj"
 if (Test-Path -LiteralPath $publicProjectPath) {
     $publicProject = [IO.File]::ReadAllText($publicProjectPath)
+    if ($publicProject.Contains("Data\ship-name-pack.schema.json") -or
+        $publicProject.Contains("Data\ship-name-pack.provenance.json")) {
+        $errors.Add("Ship-name schema or provenance is copied into the desktop client instead of remaining source-only.")
+    }
     $thirdPartyMediaProperties = @(
         [regex]::Matches(
             $publicProject,
