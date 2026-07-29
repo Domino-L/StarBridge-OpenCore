@@ -19,8 +19,10 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-if ($AllowUnverifiedThirdPartyMediaTestRelease -and $ExpectedVersion -ne "0.4.8.2") {
-    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2."
+$approvedTemporaryTestReleaseVersions = @("0.4.8.2", "0.4.8.3")
+if ($AllowUnverifiedThirdPartyMediaTestRelease -and
+    $ExpectedVersion -notin $approvedTemporaryTestReleaseVersions) {
+    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2 or 0.4.8.3."
 }
 
 $startedAtUtc = [DateTime]::UtcNow
@@ -362,7 +364,7 @@ try {
         [string]$bundledInstalledMediaAudit.rightsStatus -eq "verified-redistribution-permission"
     $installedHasScopedUnverifiedMediaException =
         $AllowUnverifiedThirdPartyMediaTestRelease -and
-        $ExpectedVersion -eq "0.4.8.2" -and
+        $ExpectedVersion -in $approvedTemporaryTestReleaseVersions -and
         $bundledInstalledMediaAudit.requireRedistributionPermission -is [bool] -and
         -not [bool]$bundledInstalledMediaAudit.requireRedistributionPermission -and
         [string]$bundledInstalledMediaAudit.rightsStatus -eq "unverified-distribution-exception" -and

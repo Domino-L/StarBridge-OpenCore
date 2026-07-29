@@ -1176,8 +1176,10 @@ public partial class MainWindow
                 if (FleetPassiveRefreshPolicy.ShouldMerge(
                         currentFleetSnapshot.Code,
                         currentFleetSnapshot.LastUpdated,
+                        FleetPassiveRefreshPolicy.BuildMemberPresenceFingerprint(currentFleetSnapshot.Members),
                         _latestFleetSnapshotCode,
-                        _latestFleetSnapshotUpdatedAtUtc))
+                        _latestFleetSnapshotUpdatedAtUtc,
+                        _latestFleetMemberPresenceFingerprint))
                 {
                     MergeNetworkFleetState(currentFleetSnapshot);
                 }

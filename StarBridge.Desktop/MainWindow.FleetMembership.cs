@@ -299,6 +299,8 @@ public partial class MainWindow
         _fleetProfileRevision = snapshot.ProfileRevision;
         _latestFleetSnapshotCode = snapshot.Code;
         _latestFleetSnapshotUpdatedAtUtc = snapshot.LastUpdated;
+        _latestFleetMemberPresenceFingerprint =
+            FleetPassiveRefreshPolicy.BuildMemberPresenceFingerprint(snapshot.Members);
         MarkFleetMembershipChanged();
         _fleetDirectorySyncPending = false;
         _lastFleetDirectorySyncAttemptAtUtc = DateTimeOffset.MinValue;
@@ -561,6 +563,7 @@ public partial class MainWindow
         _fleetProfileRevision = 0;
         _latestFleetSnapshotCode = "";
         _latestFleetSnapshotUpdatedAtUtc = DateTimeOffset.MinValue;
+        _latestFleetMemberPresenceFingerprint = "";
         _fleetDirectorySyncPending = false;
         _fleetMembershipChangedAtUtc = DateTimeOffset.MinValue;
         _fleetJoinedAtUtc = DateTimeOffset.MinValue;

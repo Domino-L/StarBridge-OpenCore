@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace StarBridge.Desktop;
 
 public static class FleetPassiveRefreshPolicy
@@ -36,6 +39,23 @@ public static class FleetPassiveRefreshPolicy
         string? currentFleetCode,
         DateTimeOffset currentUpdatedAt)
     {
+        return ShouldMerge(
+            incomingFleetCode,
+            incomingUpdatedAt,
+            null,
+            currentFleetCode,
+            currentUpdatedAt,
+            null);
+    }
+
+    public static bool ShouldMerge(
+        string? incomingFleetCode,
+        DateTimeOffset incomingUpdatedAt,
+        string? incomingMemberPresenceFingerprint,
+        string? currentFleetCode,
+        DateTimeOffset currentUpdatedAt,
+        string? currentMemberPresenceFingerprint)
+    {
         if (!string.Equals(
                 incomingFleetCode?.Trim(),
                 currentFleetCode?.Trim(),
@@ -44,6 +64,56 @@ public static class FleetPassiveRefreshPolicy
             return true;
         }
 
-        return incomingUpdatedAt > currentUpdatedAt;
+        if (incomingUpdatedAt > currentUpdatedAt)
+        {
+            return true;
+        }
+
+        if (incomingUpdatedAt != default && incomingUpdatedAt < currentUpdatedAt)
+        {
+            return false;
+        }
+
+        return !string.Equals(
+            incomingMemberPresenceFingerprint?.Trim(),
+            currentMemberPresenceFingerprint?.Trim(),
+            StringComparison.Ordinal);
+    }
+
+    public static string BuildMemberPresenceFingerprint(
+        IEnumerable<NetworkFleetMemberSnapshot>? members)
+    {
+        var builder = new StringBuilder();
+        foreach (var member in (members ?? [])
+                     .OrderBy(MemberIdentityKey, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(member => member.GameName, StringComparer.OrdinalIgnoreCase))
+        {
+            AppendFingerprintValue(builder, member.AccountId);
+            AppendFingerprintValue(builder, member.GameName);
+            AppendFingerprintValue(builder, member.Online ? "1" : "0");
+            AppendFingerprintValue(builder, member.LiveStatus);
+            AppendFingerprintValue(builder, member.Ship);
+            AppendFingerprintValue(builder, member.Location);
+            AppendFingerprintValue(builder, member.LocationConfidence);
+            AppendFingerprintValue(builder, member.ServerRegion);
+            AppendFingerprintValue(builder, member.ServerShard);
+        }
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+    }
+
+    private static string MemberIdentityKey(NetworkFleetMemberSnapshot member) =>
+        !string.IsNullOrWhiteSpace(member.AccountId)
+            ? $"account:{member.AccountId.Trim()}"
+            : $"game:{member.GameName.Trim()}";
+
+    private static void AppendFingerprintValue(StringBuilder builder, string? value)
+    {
+        var normalized = value?.Trim() ?? "";
+        builder
+            .Append(normalized.Length)
+            .Append(':')
+            .Append(normalized)
+            .Append('|');
     }
 }

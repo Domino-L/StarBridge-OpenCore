@@ -140,7 +140,8 @@ public static class OverlaySceneResolver
         var name = FirstNonEmpty(member.GameId, member.Callsign, "未知成员");
         var callsign = FirstNonEmpty(member.Callsign, member.GameId, name);
         var online = IsInGame(member.PresenceText);
-        var location = NormalizeRoomValue(member.LocationText, "等待位置同步");
+        var rawLocation = NormalizeRoomValue(member.LocationText, "等待位置同步");
+        var location = FormatRoomLocation(rawLocation);
         var ship = NormalizeRoomValue(member.ShipText, "等待舰船同步");
         var isSelf = MatchesIdentity(member.GameId, localPlayer, localCallsign) ||
                      MatchesIdentity(member.Callsign, localPlayer, localCallsign);
@@ -149,7 +150,7 @@ public static class OverlaySceneResolver
             Status: online ? "Online" : "Offline",
             Ship: ship,
             ShipInfo: $"飞船：{ship}",
-            Location: $"地点：{location}",
+            Location: location,
             Callsign: callsign,
             AvatarPath: member.AvatarImageData,
             Initials: BuildInitials(callsign),
@@ -158,11 +159,24 @@ public static class OverlaySceneResolver
             RawShip: ship,
             ShipConfidence: "PartyRoom",
             LocationConfidence: "PartyRoom",
-            RawLocation: location,
+            RawLocation: rawLocation,
             IsSelf: isSelf,
             ShowMemberActions: false,
             ServerShard: ResolveRoomShard(member.ShardText),
             LiveStatus: member.PresenceText);
+    }
+
+    private static string FormatRoomLocation(string location)
+    {
+        if (location.StartsWith("地点：", StringComparison.OrdinalIgnoreCase) ||
+            location.StartsWith("可能在：", StringComparison.OrdinalIgnoreCase) ||
+            location.StartsWith("可能离开：", StringComparison.OrdinalIgnoreCase) ||
+            location.StartsWith("等待", StringComparison.OrdinalIgnoreCase))
+        {
+            return location;
+        }
+
+        return $"地点：{location}";
     }
 
     private static bool IsInGame(string? value)

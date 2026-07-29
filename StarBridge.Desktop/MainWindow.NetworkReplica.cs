@@ -18,6 +18,7 @@ public partial class MainWindow
         {
             _latestFleetSnapshotCode = snapshotCode;
             _latestFleetSnapshotUpdatedAtUtc = DateTimeOffset.MinValue;
+            _latestFleetMemberPresenceFingerprint = "";
         }
 
         if (!FleetSnapshotOrderingPolicy.ShouldAccept(snapshot.LastUpdated, _latestFleetSnapshotUpdatedAtUtc))
@@ -29,6 +30,8 @@ public partial class MainWindow
         {
             _latestFleetSnapshotUpdatedAtUtc = snapshot.LastUpdated;
         }
+        _latestFleetMemberPresenceFingerprint =
+            FleetPassiveRefreshPolicy.BuildMemberPresenceFingerprint(snapshot.Members);
 
         MergeNetworkFleetSquads(snapshot);
 

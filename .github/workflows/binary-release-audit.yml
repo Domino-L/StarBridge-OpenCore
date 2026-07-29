@@ -39,6 +39,9 @@ jobs:
             throw "release_tag must be an exact v-prefixed StarBridge version."
           }
           $version = $Matches.version
+          $approvedTemporaryTestReleaseVersions = @("0.4.8.2", "0.4.8.3")
+          $usesTemporaryTestReleaseException =
+            $version -in $approvedTemporaryTestReleaseVersions
           $tagCommit = (& git rev-parse "$($env:RELEASE_TAG)^{commit}").Trim()
           $headCommit = (& git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $headCommit) {
@@ -84,6 +87,7 @@ jobs:
           $payloadRoot = Join-Path $env:RUNNER_TEMP "starbridge-payload"
           Expand-Archive -LiteralPath $archivePath -DestinationPath $payloadRoot -Force
           "version=$version" >> $env:GITHUB_OUTPUT
+          "uses_temporary_test_release_exception=$($usesTemporaryTestReleaseException.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "tag_commit=$tagCommit" >> $env:GITHUB_OUTPUT
           "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
           "payload_root=$payloadRoot" >> $env:GITHUB_OUTPUT
@@ -91,14 +95,21 @@ jobs:
       - name: Audit signed binary distribution
         shell: pwsh
         run: |
-          & "./scripts/Test StarBridge Binary Distribution.ps1" `
-            -PayloadRoot "${{ steps.release.outputs.payload_root }}" `
-            -ArchivePath "${{ steps.release.outputs.archive_path }}" `
-            -ExpectedVersion "${{ steps.release.outputs.version }}" `
-            -ExpectedPublicSourceCommit "${{ steps.release.outputs.tag_commit }}" `
-            -ExpectedReleaseTag "${{ inputs.release_tag }}" `
-            -RequireAuthenticode `
-            -OutputReportPath "$env:RUNNER_TEMP/BINARY-AUDIT-REPORT.json"
+          $auditArguments = @{
+            PayloadRoot = "${{ steps.release.outputs.payload_root }}"
+            ArchivePath = "${{ steps.release.outputs.archive_path }}"
+            ExpectedVersion = "${{ steps.release.outputs.version }}"
+            ExpectedPublicSourceCommit = "${{ steps.release.outputs.tag_commit }}"
+            ExpectedReleaseTag = "${{ inputs.release_tag }}"
+            OutputReportPath = "$env:RUNNER_TEMP/BINARY-AUDIT-REPORT.json"
+          }
+          if ("${{ steps.release.outputs.uses_temporary_test_release_exception }}" -eq "true") {
+            $auditArguments.AllowUnverifiedThirdPartyMediaTestRelease = $true
+          }
+          else {
+            $auditArguments.RequireAuthenticode = $true
+          }
+          & "./scripts/Test StarBridge Binary Distribution.ps1" @auditArguments
 
       - name: Upload binary audit report
         if: always()

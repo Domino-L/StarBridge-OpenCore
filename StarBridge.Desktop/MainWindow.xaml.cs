@@ -677,6 +677,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     private long _fleetProfileRevision;
     private string _latestFleetSnapshotCode = "";
     private DateTimeOffset _latestFleetSnapshotUpdatedAtUtc = DateTimeOffset.MinValue;
+    private string _latestFleetMemberPresenceFingerprint = "";
     private string? _pendingFleetProfileDescription;
     private string? _pendingFleetProfileType;
     private string? _pendingFleetProfileActiveTime;

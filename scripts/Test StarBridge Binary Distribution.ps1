@@ -23,8 +23,10 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-if ($AllowUnverifiedThirdPartyMediaTestRelease -and $ExpectedVersion -ne "0.4.8.2") {
-    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2."
+$approvedTemporaryTestReleaseVersions = @("0.4.8.2", "0.4.8.3")
+if ($AllowUnverifiedThirdPartyMediaTestRelease -and
+    $ExpectedVersion -notin $approvedTemporaryTestReleaseVersions) {
+    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2 or 0.4.8.3."
 }
 
 $scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -553,7 +555,7 @@ if ($errors.Count -eq 0) {
             [string]$bundledMediaAudit.rightsStatus -eq "verified-redistribution-permission"
         $bundledHasScopedUnverifiedMediaException =
             $AllowUnverifiedThirdPartyMediaTestRelease -and
-            $ExpectedVersion -eq "0.4.8.2" -and
+            $ExpectedVersion -in $approvedTemporaryTestReleaseVersions -and
             $bundledMediaAudit.requireRedistributionPermission -is [bool] -and
             -not [bool]$bundledMediaAudit.requireRedistributionPermission -and
             [string]$bundledMediaAudit.rightsStatus -eq "unverified-distribution-exception" -and

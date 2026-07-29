@@ -22,11 +22,11 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\StarBridge-win-x64-setup.exe"
 
 ### Windows 显示“未知发布者”
 
-0.4.8.2 是取得代码签名证书前明确发布的未签名测试版，Windows 可能显示“未知发布者”。这不等于 Windows 已经验证了发布者身份。请只从本仓库不可变 Release 或星海舰桥官网下载，并同时核对 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。无法接受未签名程序风险时，请等待后续签名版本。
+0.4.8.2 与 0.4.8.3 是取得代码签名证书前明确发布的未签名测试版，临时例外到 0.4.8.3 为止。Windows 可能显示“未知发布者”。这不等于 Windows 已经验证了发布者身份。请只从本仓库不可变 Release 或星海舰桥官网下载，并同时核对 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。无法接受未签名程序风险时，请等待后续签名版本。
 
 ### 安装包中的第三方图片
 
-0.4.8.2 保留当前舰船图片和星系地图，但其来源与再分发授权尚未完成核实。StarBridge 不主张这些图片的版权或授权，相关权利归各自权利人所有，后续版本可能替换或移除。详情见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md) 和 Release 中的 `THIRD-PARTY-MEDIA-AUDIT.json`。
+0.4.8.2 与 0.4.8.3 保留当前舰船图片和星系地图，但其来源与再分发授权尚未完成核实。该临时例外到 0.4.8.3 为止。StarBridge 不主张这些图片的版权或授权，相关权利归各自权利人所有，后续版本可能替换或移除。详情见 [第三方媒体说明](../THIRD-PARTY-MEDIA-NOTICE.md) 和 Release 中的 `THIRD-PARTY-MEDIA-AUDIT.json`。
 
 ### 在线安装器无法下载
 
