@@ -220,10 +220,13 @@ try {
                 Select-Object -First 1
         )
     }
-    if ($existingInstall) {
-        throw "An existing StarBridge Inno installation was detected. Refusing to overwrite its uninstall registration."
+    $preflightDetails = if ($existingInstall) {
+        "Inputs are valid. An existing StarBridge installation was detected and will remain untouched because the workspace audit disables uninstall registration and shell shortcuts."
     }
-    Add-InstallerCheck -Name "preflight" -Status "passed" -Details "Inputs are valid and no existing installation uses the StarBridge AppId."
+    else {
+        "Inputs are valid. No existing StarBridge installation uses the StarBridge AppId."
+    }
+    Add-InstallerCheck -Name "preflight" -Status "passed" -Details $preflightDetails
 
     & $binaryAuditScript `
         -PayloadRoot $ExpectedPayloadRoot `
@@ -257,6 +260,7 @@ try {
         "/NORESTART",
         "/SP-",
         "/NOICONS",
+        "/STARBRIDGEAUDIT=1",
         ('/DIR="{0}"' -f $installDir),
         ('/LOG="{0}"' -f $installLog)
     )
@@ -271,15 +275,10 @@ try {
     Add-InstallerCheck -Name "silent-install" -Status "passed" -Details "Inno installed into the workspace .artifacts directory without launching StarBridge."
 
     $uninstallers = @(Get-ChildItem -LiteralPath $installDir -File -Filter "unins*.exe")
-    if ($uninstallers.Count -ne 1) {
-        throw "Expected exactly one Inno uninstaller, found $($uninstallers.Count)."
+    if ($uninstallers.Count -ne 0) {
+        throw "The isolated audit mode unexpectedly created an uninstaller."
     }
-    $uninstallerPath = $uninstallers[0].FullName
-    $uninstallerData = [IO.Path]::ChangeExtension($uninstallerPath, ".dat")
-    if (-not (Test-Path -LiteralPath $uninstallerData -PathType Leaf)) {
-        throw "The Inno uninstaller data file is missing."
-    }
-    Add-InstallerCheck -Name "uninstaller-present" -Status "passed" -Details $uninstallers[0].Name
+    Add-InstallerCheck -Name "isolated-audit-mode" -Status "passed" -Details "The signed installer payload was extracted without writing uninstall registration or user shell shortcuts."
 
     $expectedFiles = @(Get-ChildItem -LiteralPath $ExpectedPayloadRoot -File -Force -Recurse)
     $installedFiles = @(
@@ -309,7 +308,7 @@ try {
         }
     }
     if ($installedMap.Count -ne $expectedFiles.Count) {
-        throw "Installer added unexpected files beyond the Inno uninstaller."
+        throw "Installer added unexpected files beyond the prepared payload."
     }
     Add-InstallerCheck -Name "installed-payload" -Status "passed" -Details "$($expectedFiles.Count) installed files exactly match the audited prepared payload."
 
@@ -436,8 +435,14 @@ finally {
             $uninstallCleaned = $true
             Add-InstallerCheck -Name "silent-uninstall" -Status "passed" -Details "The uninstaller removed the isolated installation directory."
         }
-        elseif ($null -ne $installerExitCode -and $installerExitCode -eq 0) {
-            throw "The installer succeeded but no uninstaller was available for cleanup."
+        elseif ($null -ne $installerExitCode -and $installerExitCode -eq 0 -and
+            (Test-Path -LiteralPath $installDir -PathType Container)) {
+            Remove-Item -LiteralPath $installDir -Recurse -Force
+            $uninstallCleaned = -not (Test-Path -LiteralPath $installDir)
+            if (-not $uninstallCleaned) {
+                throw "The isolated audit-mode installation directory remained after cleanup."
+            }
+            Add-InstallerCheck -Name "audit-mode-cleanup" -Status "passed" -Details "The workspace-only audit installation was removed."
         }
     }
     catch {
