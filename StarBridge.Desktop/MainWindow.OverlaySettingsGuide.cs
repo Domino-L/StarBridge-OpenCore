@@ -30,7 +30,7 @@ public partial class MainWindow
             var showGuide = await ShowAppConfirmationAsync(
                 "游戏浮层",
                 "是否查看浮层设置引导？",
-                "引导将依次介绍设置分组、模块控制台和全屏预览编辑。它不会自动修改或保存任何设置。",
+                "引导将依次介绍设置分组、模块设置和全屏预览编辑。它不会自动修改或保存任何设置。",
                 "查看详细引导",
                 "暂时不用",
                 danger: false,
@@ -54,32 +54,99 @@ public partial class MainWindow
             return;
         }
 
-        _overlayGuidePages = new[]
+        SetOverlaySettingsWorkspace(OverlaySettingsArea.Information);
+        var pages = new List<OverlayGuidePage>
         {
             new OverlayGuidePage(OverlayOverviewCategoryButton, "总览", "查看当前预设、启用状态和保存情况。", "overview"),
-            new OverlayGuidePage(OverlayPresetCategoryButton, "预设与布局", "切换预设，并管理当前屏幕布局。", "preset"),
-            new OverlayGuidePage(OverlayPlacementCategoryButton, "画布编辑", "在画布中调整模块位置、尺寸与吸附方式。", "placement"),
-            new OverlayGuidePage(OverlayModulesCategoryButton, "模块", "决定哪些信息进入浮层；具体显示顺序在画布编辑中调整。", "modules"),
+            new OverlayGuidePage(OverlayStartupCategoryButton, "打开方式", "管理浮层热键，并检查热键是否可用。", "startup"),
+            new OverlayGuidePage(OverlayDisplayBehaviorCategoryButton, "跟随游戏", "决定浮层如何跟随游戏窗口和当前协作场景。", "background"),
             new OverlayGuidePage(
-                OverlayInspectorPanel,
-                "模块控制台",
-                "先在预览画布中选择一个模块，再从这里调整位置、尺寸、显示方式和图层顺序；也可以锁定模块，避免编辑布局时误移动。",
+                OverlayModulesCategoryButton,
+                "模块与内容",
+                "这里统一管理通讯提醒、队伍概况、成员信息、场景通讯和事件通知。关闭模块会让它从画面和工作台中隐藏；模块要显示什么、停留多久以及如何排列，则在模块工作台中调整。",
+                "modules"),
+            new OverlayGuidePage(
+                OverlayOpenModuleWorkbenchButton,
+                "打开模块工作台",
+                "工作台顶部用于切换当前模块。选择后，下方只显示这个模块自己的内容、显示规则和停留时间，右侧画布会同步预览结果。",
+                "",
+                IsNavigationTarget: false,
+                ExplanationTarget: OverlayInspectorModulePickerExpander),
+        };
+
+        if (_overlaySettings.ShowEventNotifications)
+        {
+            pages.Add(new OverlayGuidePage(
+                OverlayEventNotificationSettingsPanel,
+                "调整事件通知",
+                "事件通知的播报类型、同时显示数量、重要事件常驻、弹出速度和各类事件停留时间都集中在这里。关闭某类播报只影响事件通知，不会关闭其他模块。",
+                "",
+                RequiresTargetAction: false,
+                IsNavigationTarget: false,
+                InspectorModuleKey: "EventNotifications"));
+        }
+
+        if (_overlaySettings.ShowNotice)
+        {
+            pages.Add(new OverlayGuidePage(
+                OverlayNoticeInspectorPanel,
+                "调整通讯提醒",
+                "通讯提醒可选择是否显示好友事件、是否预览私信正文，并可设置吸附位置和停留时间。这些选项只属于通讯提醒模块。",
+                "",
+                RequiresTargetAction: false,
+                IsNavigationTarget: false,
+                InspectorModuleKey: "Notice"));
+        }
+
+        var adjustableModuleKey = _overlayLayout
+            .Where(IsOverlayEditorItemVisible)
+            .OrderBy(item => GetOverlayInspectorModulePickerOrder(item.Key))
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Key)
+            .FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(adjustableModuleKey))
+        {
+            pages.Add(new OverlayGuidePage(
+                OverlayInspectorModuleAppearancePanel,
+                "调整当前模块的显示",
+                "每个常驻模块都有自己的锁定、文字不透明度和背景不透明度。你调整的是当前选中的模块，不会连带改变其他模块。",
+                "",
+                RequiresTargetAction: false,
+                IsNavigationTarget: false,
+                InspectorModuleKey: adjustableModuleKey));
+            pages.Add(new OverlayGuidePage(
+                OverlayInspectorGeometryExpander,
+                "调整位置与尺寸",
+                "展开“位置与尺寸”后，可以精确设置锚点、坐标、宽度和高度；更直观的方式是在右侧画布中直接拖动和缩放模块。",
+                "",
+                RequiresTargetAction: false,
+                IsNavigationTarget: false,
+                InspectorModuleKey: adjustableModuleKey,
+                ExpandGeometry: true));
+        }
+
+        pages.AddRange(new[]
+        {
+            new OverlayGuidePage(OverlayPlacementCategoryButton, "屏幕布局", "在画布中调整模块位置、尺寸与吸附方式。直接点击画布中的模块，也可以快速回到它的工作台设置。", "placement"),
+            new OverlayGuidePage(OverlayCrosshairCategoryButton, "虚拟准星", "选择准星类型，并调整大小、间距、线宽与颜色。", "crosshair"),
+            new OverlayGuidePage(OverlayAppearanceCategoryButton, "外观", "统一主题、颜色、泛光和其他视觉表现。", "appearance"),
+            new OverlayGuidePage(OverlayMotionCategoryButton, "动画与性能", "选择体验方案，或分别调整转场和常驻动画。", "motion"),
+            new OverlayGuidePage(OverlayPresetCategoryButton, "预设与恢复", "管理当前预设，并在需要时恢复默认布局。", "preset"),
+            new OverlayGuidePage(
+                SaveLayoutButton,
+                "保存设置",
+                "右侧预览会即时显示调整效果；确认无误后点击“保存更改”。如果不想保留本次调整，可以选择“放弃更改”。",
                 "",
                 RequiresTargetAction: false,
                 IsNavigationTarget: false),
-            new OverlayGuidePage(OverlayEventsCategoryButton, "事件通知", "选择要在游戏内事件栏显示的即时消息。", "events"),
-            new OverlayGuidePage(OverlayCrosshairCategoryButton, "虚拟准星", "选择准星类型，并调整大小、间距、线宽与颜色。", "crosshair"),
-            new OverlayGuidePage(OverlayAppearanceCategoryButton, "外观风格", "统一主题、颜色、泛光和其他视觉表现。", "appearance"),
-            new OverlayGuidePage(OverlayMotionCategoryButton, "转场与动效", "设置与当前外观风格配套的转场和反馈效果。", "motion"),
-            new OverlayGuidePage(OverlayStartupCategoryButton, "启动与热键", "管理浮层启动方式和全局热键，并检查热键是否可用。", "startup"),
-            new OverlayGuidePage(OverlayDisplayBehaviorCategoryButton, "显示行为", "决定浮层在游戏窗口、主窗口和不同场景中的显示方式。", "background"),
             new OverlayGuidePage(
                 OverlayEditorFullScreenButton,
                 "全屏预览编辑",
                 "点击高亮按钮进入全屏编辑；在接近实际游戏画面比例的画布中检查布局，完成后可按 Esc 返回。",
                 "placement",
                 IsNavigationTarget: false)
-        };
+        });
+        _overlayGuidePages = pages;
         _overlayGuidePageIndex = 0;
         _overlayGuideShowingExplanation = false;
         _guideMode = GuideMode.OverlaySettings;
@@ -95,20 +162,26 @@ public partial class MainWindow
         }
 
         var page = _overlayGuidePages[_overlayGuidePageIndex];
+        PrepareOverlayGuidePage(page);
         CaptureOverlayGuideLockedScrollOffset();
         _guidedTourTarget = page.Target;
         GuidedTourOverlay.Visibility = Visibility.Visible;
         GuidedTourIntroductionScrollViewer.Visibility = Visibility.Collapsed;
         GuidedTourEyebrowText.Text = "游戏浮层设置引导";
         GuidedTourTitleText.Text = $"打开{page.Title}";
-        GuidedTourBodyText.Text = page.Target == OverlayEditorFullScreenButton
-            ? "点击高亮按钮进入全屏预览编辑。"
-            : $"点击左侧高亮的“{page.Title}”。";
+        GuidedTourBodyText.Text = page.Target switch
+        {
+            var target when ReferenceEquals(target, OverlayEditorFullScreenButton) =>
+                "点击高亮按钮进入全屏预览编辑。",
+            var target when ReferenceEquals(target, OverlayOpenModuleWorkbenchButton) =>
+                "点击高亮的“打开工作台”，开始调整各个模块。",
+            _ => $"点击左侧高亮的“{page.Title}”。"
+        };
         GuidedTourProgressText.Text = $"{_overlayGuidePageIndex + 1} / {_overlayGuidePages.Count}";
         GuidedTourPrimaryButton.Visibility = Visibility.Collapsed;
         GuidedTourSecondaryButton.Content = "结束引导";
         GuidedTourSecondaryButton.Visibility = Visibility.Visible;
-        EnsureOverlayGuideNavigationTargetVisible(page);
+        EnsureOverlayGuideTargetVisible(page);
 
         if (!page.RequiresTargetAction)
         {
@@ -120,9 +193,25 @@ public partial class MainWindow
         ScheduleGuidedTourLayout();
     }
 
-    private void EnsureOverlayGuideNavigationTargetVisible(OverlayGuidePage page)
+    private void PrepareOverlayGuidePage(OverlayGuidePage page)
     {
-        if (!page.IsNavigationTarget || OverlaySettingsNavigationScrollViewer is null)
+        if (string.IsNullOrWhiteSpace(page.InspectorModuleKey))
+        {
+            return;
+        }
+
+        SelectOverlayLayerEntry(page.InspectorModuleKey);
+        SetOverlayInspectorOpen(true);
+        RefreshOverlayInspector();
+        OverlayInspectorModulePickerExpander.IsExpanded = false;
+        OverlayInspectorGeometryExpander.IsExpanded = page.ExpandGeometry;
+        SmoothWheelScrollBehavior.CancelPendingMotion(OverlayInspectorScrollViewer);
+        OverlayInspectorScrollViewer.ScrollToTop();
+    }
+
+    private void EnsureOverlayGuideTargetVisible(OverlayGuidePage page)
+    {
+        if (page.IsNavigationTarget && OverlaySettingsNavigationScrollViewer is null)
         {
             return;
         }
@@ -140,7 +229,8 @@ public partial class MainWindow
             }
 
             page.Target.BringIntoView();
-            OverlaySettingsNavigationScrollViewer.UpdateLayout();
+            OverlaySettingsNavigationScrollViewer?.UpdateLayout();
+            OverlayInspectorScrollViewer?.UpdateLayout();
             ScheduleGuidedTourLayout();
         }));
     }
@@ -152,7 +242,7 @@ public partial class MainWindow
         System.Windows.Controls.Panel.SetZIndex(GuidedTourOverlay, 1000);
         _guidedTourTarget = page.Target == OverlayEditorFullScreenButton
             ? OverlayPreviewCanvasHost
-            : ResolveOverlaySettingsSection(page.SectionKey) ?? page.Target;
+            : page.ExplanationTarget ?? ResolveOverlaySettingsSection(page.SectionKey) ?? page.Target;
         GuidedTourTitleText.Text = page.Title;
         GuidedTourBodyText.Text = page.Body;
         GuidedTourProgressText.Text = $"{_overlayGuidePageIndex + 1} / {_overlayGuidePages.Count} · 已打开";

@@ -17,6 +17,8 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private bool _overlaySettingsWheelInterruptionAttached;
+
     private void OverlaySettingSwitch_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not System.Windows.Controls.CheckBox checkBox)
@@ -210,10 +212,54 @@ public partial class MainWindow
             return;
         }
 
+        if (OverlayInspectorPanel?.Visibility == Visibility.Visible)
+        {
+            SetOverlayInspectorOpen(false);
+        }
+
         _overlaySettingsProgrammaticTargetKey = sectionKey;
         SetActiveOverlaySettingsSection(sectionKey);
         NotifyOverlaySettingsGuideTarget(element);
         ScrollOverlaySettingsToSection(target);
+    }
+
+    private void OverlaySettingsScrollViewer_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_overlaySettingsWheelInterruptionAttached ||
+            sender is not ScrollViewer viewer)
+        {
+            return;
+        }
+
+        viewer.AddHandler(
+            Mouse.PreviewMouseWheelEvent,
+            new MouseWheelEventHandler(OverlaySettingsScrollViewer_PreviewMouseWheel),
+            handledEventsToo: true);
+        _overlaySettingsWheelInterruptionAttached = true;
+    }
+
+    private void OverlaySettingsScrollViewer_PreviewMouseWheel(
+        object sender,
+        MouseWheelEventArgs e)
+    {
+        CancelOverlaySettingsProgrammaticScroll();
+    }
+
+    private void CancelOverlaySettingsProgrammaticScroll()
+    {
+        if (_overlaySettingsSmoothScrollTimer?.IsEnabled != true &&
+            string.IsNullOrWhiteSpace(_overlaySettingsProgrammaticTargetKey))
+        {
+            return;
+        }
+
+        _overlaySettingsSmoothScrollTimer?.Stop();
+        _overlaySettingsProgrammaticTargetKey = null;
+        if (OverlaySettingsScrollViewer is not null)
+        {
+            _overlaySettingsSmoothScrollTarget =
+                OverlaySettingsScrollViewer.VerticalOffset;
+        }
     }
 
     private void OverlaySettingsScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -324,7 +370,10 @@ public partial class MainWindow
             "preset" => OverlaySettingsSectionPreset,
             "modules" => OverlaySettingsSectionModules,
             "placement" => OverlaySettingsSectionPlacement,
-            "events" => OverlaySettingsSectionEvents,
+            // Older saved guide/navigation state may still request the former
+            // standalone events page. Event notification settings now belong
+            // to the module catalogue, so keep the legacy key harmless.
+            "events" => OverlaySettingsSectionModules,
             "appearance" => OverlaySettingsSectionAppearance,
             "motion" => OverlaySettingsSectionMotion,
             "crosshair" => OverlaySettingsSectionCrosshair,
@@ -336,7 +385,7 @@ public partial class MainWindow
 
     private IEnumerable<(string Key, FrameworkElement Section)> EnumerateOverlaySettingsSections()
     {
-        var keys = new[] { "overview", "preset", "placement", "modules", "events", "crosshair", "appearance", "motion", "startup", "background" };
+        var keys = new[] { "overview", "startup", "background", "modules", "placement", "crosshair", "appearance", "motion", "preset" };
         foreach (var key in keys)
         {
             var section = ResolveOverlaySettingsSection(key);
@@ -378,6 +427,7 @@ public partial class MainWindow
             return;
         }
 
+        SmoothWheelScrollBehavior.CancelPendingMotion(OverlaySettingsScrollViewer);
         _overlaySettingsSmoothScrollTarget = ClampOverlaySettingsGuideOffset(targetOffset);
         _overlaySettingsSmoothScrollTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(12) };
         _overlaySettingsSmoothScrollTimer.Tick -= OverlaySettingsSmoothScrollTimer_Tick;
@@ -510,20 +560,21 @@ public partial class MainWindow
             var shouldAnimate = _overlaySettingsActiveRailInitialized &&
                                 !string.Equals(_overlaySettingsActiveKey, activeKey, StringComparison.OrdinalIgnoreCase);
             _overlaySettingsActiveKey = activeKey;
+            activeButton.BringIntoView();
             MoveOverlaySettingsActiveRail(activeButton, shouldAnimate);
         }
     }
 
     private void MoveOverlaySettingsActiveRail(System.Windows.Controls.Button activeButton, bool animate)
     {
-        if (OverlayEditorCategoryGrid is null ||
+        if (OverlaySettingsNavigationContentGrid is null ||
             OverlaySettingsActiveRail is null ||
             OverlaySettingsActiveRailTransform is null)
         {
             return;
         }
 
-        if (!OverlayEditorCategoryGrid.IsLoaded || !activeButton.IsLoaded || activeButton.ActualHeight <= 0)
+        if (!OverlaySettingsNavigationContentGrid.IsLoaded || !activeButton.IsLoaded || activeButton.ActualHeight <= 0)
         {
             Dispatcher.BeginInvoke(
                 () => MoveOverlaySettingsActiveRail(activeButton, animate: false),
@@ -534,9 +585,10 @@ public partial class MainWindow
         try
         {
             var targetPosition = activeButton
-                .TransformToAncestor(OverlayEditorCategoryGrid)
+                .TransformToAncestor(OverlaySettingsNavigationContentGrid)
                 .Transform(new System.Windows.Point(0, 0));
             var targetY = targetPosition.Y + 2;
+            OverlaySettingsActiveRail.Height = Math.Max(0, activeButton.ActualHeight - 4);
             OverlaySettingsActiveRail.Opacity = 1;
 
             var currentY = OverlaySettingsActiveRailTransform.Y;
@@ -585,9 +637,9 @@ public partial class MainWindow
             ShowMembersPanelCheck is null ||
             ShowChatPanelCheck is null ||
             ShowEventNotificationsCheck is null ||
-            OverlayCommunicationFriendEventsCheck is null ||
-            OverlayCommunicationMessagePreviewCheck is null ||
-            OverlayCommunicationDurationSlider is null ||
+            OverlayInspectorCommunicationFriendEventsCheck is null ||
+            OverlayInspectorCommunicationMessagePreviewCheck is null ||
+            OverlayInspectorCommunicationDurationSlider is null ||
             EventNotifyMemberPresenceCheck is null ||
             EventNotifyMemberServerCheck is null ||
             EventNotifySameServerCheck is null ||
@@ -725,9 +777,9 @@ public partial class MainWindow
             _overlaySettings.ChatBarrageDensity,
             _overlaySettings.ChatBarrageAvoidCenter,
             _overlaySettings.ChatTextEdgeStrength,
-            OverlayCommunicationFriendEventsCheck.IsChecked == true,
-            OverlayCommunicationMessagePreviewCheck.IsChecked == true,
-            OverlayDisplaySettings.NormalizeCommunicationEventDuration(OverlayCommunicationDurationSlider.Value),
+            OverlayInspectorCommunicationFriendEventsCheck.IsChecked == true,
+            OverlayInspectorCommunicationMessagePreviewCheck.IsChecked == true,
+            OverlayDisplaySettings.NormalizeCommunicationEventDuration(OverlayInspectorCommunicationDurationSlider.Value),
             _overlaySettings.FleetChatScope,
             _overlaySettings.EventNotificationTextOpacity,
             _overlaySettings.EventNotificationBackgroundOpacity,
@@ -744,6 +796,81 @@ public partial class MainWindow
         SaveCurrentConfig();
         RenderOverlayEditor();
         RefreshOverlayWindow();
+    }
+
+    private void ApplyOverlayExperiencePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingSettings || sender is not FrameworkElement { Tag: string preset })
+        {
+            return;
+        }
+
+        var historyState = CreateOverlayEditorHistoryState();
+        var nextSettings = preset switch
+        {
+            "Smooth" => _overlaySettings with
+            {
+                EnableStartupTransition = true,
+                StartupTransitionFrameRate = OverlayStartupTransitionFrameRate.Fps120,
+                AnimationFrameRate = OverlayAnimationFrameRate.Fps120
+            },
+            "ReducedMotion" => _overlaySettings with
+            {
+                EnableStartupTransition = false,
+                StartupTransitionFrameRate = OverlayStartupTransitionFrameRate.Fps60,
+                AnimationFrameRate = OverlayAnimationFrameRate.Fps60
+            },
+            _ => _overlaySettings with
+            {
+                EnableStartupTransition = true,
+                StartupTransitionFrameRate = OverlayStartupTransitionFrameRate.Fps60,
+                AnimationFrameRate = OverlayAnimationFrameRate.Fps60
+            }
+        };
+
+        if (nextSettings == _overlaySettings)
+        {
+            RefreshOverlayExperiencePresetStatus();
+            return;
+        }
+
+        _overlaySettings = ApplyOverlayFeatureLocks(nextSettings);
+        PushOverlayEditorUndoState(historyState);
+        var wasLoadingSettings = _isLoadingSettings;
+        _isLoadingSettings = true;
+        try
+        {
+            ApplyOverlaySettingsToControls();
+        }
+        finally
+        {
+            _isLoadingSettings = wasLoadingSettings;
+        }
+
+        MarkOverlayEditorLayoutDirty();
+        SaveCurrentConfig();
+        RenderOverlayEditor();
+        RefreshOverlayWindow();
+    }
+
+    private void RefreshOverlayExperiencePresetStatus()
+    {
+        if (OverlayExperiencePresetStatusText is null)
+        {
+            return;
+        }
+
+        var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        var profile = !_overlaySettings.EnableStartupTransition
+            ? zh ? "减少动画" : "Reduced motion"
+            : _overlaySettings.StartupTransitionFrameRate == OverlayStartupTransitionFrameRate.Fps120 &&
+              _overlaySettings.AnimationFrameRate == OverlayAnimationFrameRate.Fps120
+                ? zh ? "流畅优先" : "Smooth"
+                : _overlaySettings.StartupTransitionFrameRate == OverlayStartupTransitionFrameRate.Fps60 &&
+                  _overlaySettings.AnimationFrameRate == OverlayAnimationFrameRate.Fps60
+                    ? zh ? "均衡" : "Balanced"
+                    : zh ? "自定义" : "Custom";
+        OverlayExperiencePresetStatusText.Text = zh ? $"当前：{profile}" : $"Current: {profile}";
     }
 
     private static OverlayCrosshairMode GetOverlayCrosshairModeFromComboBox(System.Windows.Controls.ComboBox? comboBox)

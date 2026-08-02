@@ -21,12 +21,14 @@ public partial class MainWindow
         GameCompatibleOnly,
         DesktopOnly,
         Conflict,
+        ConflictWithMenu,
         Invalid,
         Failed
     }
 
     private const int ErrorHotkeyAlreadyRegistered = 1409;
     private OverlayHotkeyRegistrationState _overlayHotkeyRegistrationState = OverlayHotkeyRegistrationState.Disabled;
+    private bool _applyingOverlayHotkeySettings;
 
     private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
@@ -183,28 +185,88 @@ public partial class MainWindow
     {
         e.Handled = true;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+        if (!OverlayHotkeyBindingPolicy.TryCapture(
+                Keyboard.Modifiers,
+                key,
+                out var captured))
         {
             return;
         }
 
-        OverlayHotkeyBox.Text = FormatHotkey(Keyboard.Modifiers, key);
+        var previousHotkey = OverlayHotkeyBox.Text;
+        OverlayHotkeyBox.Text = captured.StorageText;
+        var plan = OverlayHotkeyBindingPolicy.Build(
+            OverlayHotkeyBox.Text,
+            OverlayGlobalHotkeyEnabledCheck.IsChecked == true,
+            _inGameMenuSettings);
+        if (plan.MenuState ==
+            OverlayHotkeyBindingState.ConflictWithInformation)
+        {
+            OverlayHotkeyBox.Text = previousHotkey;
+            ShowInformationHotkeyValidation(
+                OverlayHotkeyRegistrationState.ConflictWithMenu);
+            return;
+        }
+
         if (!_isLoadingSettings)
         {
             RegisterOverlayHotkey();
+            if (!RequestedHotkeyRoutesAreReady(
+                    OverlayGlobalHotkeyEnabledCheck.IsChecked == true))
+            {
+                RestoreInformationHotkeyRoute(
+                    previousHotkey,
+                    OverlayGlobalHotkeyEnabledCheck.IsChecked == true);
+                return;
+            }
+
             SaveCurrentConfig();
+            UpdateInGameMenuSettingsPresentation();
         }
     }
 
     private void OverlayGlobalHotkeyEnabledCheck_Changed(object sender, RoutedEventArgs e)
     {
-        if (_isLoadingSettings)
+        if (_isLoadingSettings || _applyingOverlayHotkeySettings)
         {
             return;
         }
 
+        var requestedEnabled =
+            OverlayGlobalHotkeyEnabledCheck.IsChecked == true;
+        if (requestedEnabled)
+        {
+            var plan = OverlayHotkeyBindingPolicy.Build(
+                OverlayHotkeyBox.Text,
+                informationEnabled: true,
+                _inGameMenuSettings);
+            if (plan.MenuState ==
+                OverlayHotkeyBindingState.ConflictWithInformation)
+            {
+                _applyingOverlayHotkeySettings = true;
+                OverlayGlobalHotkeyEnabledCheck.IsChecked = false;
+                _applyingOverlayHotkeySettings = false;
+                ShowInformationHotkeyValidation(
+                    OverlayHotkeyRegistrationState.ConflictWithMenu);
+                return;
+            }
+        }
+
         RegisterOverlayHotkey();
+        if (!RequestedHotkeyRoutesAreReady(requestedEnabled))
+        {
+            _applyingOverlayHotkeySettings = true;
+            OverlayGlobalHotkeyEnabledCheck.IsChecked =
+                !requestedEnabled;
+            _applyingOverlayHotkeySettings = false;
+            RegisterOverlayHotkey();
+            OverlayHotkeyRegistrationHintText.Text =
+                "新的信息浮层热键设置未能启用，已恢复原设置。";
+            return;
+        }
+
         SaveCurrentConfig();
+        UpdateInGameMenuSettingsPresentation();
         RefreshPersonalIdentityConsole();
     }
 
@@ -216,6 +278,12 @@ public partial class MainWindow
     private void ToggleOverlayWindow(bool focusGameWindow = true)
     {
         RenderSquads();
+        if (_inGameMenuCoordinator.IsOpen)
+        {
+            _inGameMenuCoordinator.Close(InGameMenuExitMode.SwitchToInformationOverlay);
+            return;
+        }
+
         if (_overlayHiddenForMainWindowMinimize && _overlayWindow is not null)
         {
             CloseOverlayWindow();
@@ -510,7 +578,12 @@ public partial class MainWindow
         if (msg == WmGameCompatibleHotkey)
         {
             handled = true;
-            if (StarCitizenProcessProbe.IsForeground())
+            var commandId = wParam.ToInt32();
+            if (commandId == InGameMenuHotkeyCommand)
+            {
+                HandleInGameMenuHotkeyTrigger("game-compatible");
+            }
+            else if (StarCitizenProcessProbe.IsForeground())
             {
                 HandleOverlayHotkeyTrigger("game-compatible");
             }
@@ -535,6 +608,35 @@ public partial class MainWindow
 
         AppendOutput($"HOTKEY | triggered | source={source}");
         ToggleOverlayWindow();
+    }
+
+    private void HandleInGameMenuHotkeyTrigger(string source)
+    {
+        if (!_inGameMenuSettings.EnableHotkey ||
+            !_inGameMenuCoordinator.IsOpen &&
+            !StarCitizenProcessProbe.IsForeground())
+        {
+            return;
+        }
+
+        if (_inGameMenuCoordinator.IsOpen &&
+            !_inGameMenuSettings.CloseWithHotkey)
+        {
+            _inGameMenuCoordinator.ShowNotice(
+                "菜单热键仅用于打开",
+                "按 Esc 返回游戏。可在菜单浮层设置中改为再次按热键关闭。");
+            return;
+        }
+
+        var messageTimestamp = unchecked((uint)GetMessageTime());
+        if (!_inGameMenuHotkeyTriggerGate.TryAccept(messageTimestamp))
+        {
+            AppendOutput($"GAME MENU HOTKEY | duplicate suppressed | source={source}");
+            return;
+        }
+
+        AppendOutput($"GAME MENU HOTKEY | triggered | source={source}");
+        ToggleInGameMenu(requireGameForeground: !_inGameMenuCoordinator.IsOpen);
     }
 
     private void AdjustMaximizedWindowBounds(IntPtr hwnd, IntPtr lParam)
@@ -571,38 +673,68 @@ public partial class MainWindow
     private void RegisterOverlayHotkey()
     {
         UnregisterOverlayHotkey();
-
-        if (OverlayGlobalHotkeyEnabledCheck.IsChecked != true)
-        {
-            SetOverlayHotkeyRegistrationState(OverlayHotkeyRegistrationState.Disabled);
-            AppendOutput("HOTKEY | disabled");
-            return;
-        }
-
-        if (!TryParseHotkey(OverlayHotkeyBox.Text, out var modifiers, out var key))
-        {
-            SetOverlayHotkeyRegistrationState(OverlayHotkeyRegistrationState.Invalid);
-            AppendOutput($"HOTKEY | invalid={OverlayHotkeyBox.Text}");
-            return;
-        }
-
+        var plan = OverlayHotkeyBindingPolicy.Build(
+            OverlayHotkeyBox.Text,
+            OverlayGlobalHotkeyEnabledCheck.IsChecked == true,
+            _inGameMenuSettings);
         var handle = new WindowInteropHelper(this).Handle;
-        var virtualKey = KeyInterop.VirtualKeyFromKey(key);
-        if (handle == IntPtr.Zero || virtualKey == 0)
+        if (handle == IntPtr.Zero)
         {
-            SetOverlayHotkeyRegistrationState(OverlayHotkeyRegistrationState.Failed);
+            SetOverlayHotkeyRegistrationState(
+                plan.InformationState switch
+                {
+                    OverlayHotkeyBindingState.Disabled =>
+                        OverlayHotkeyRegistrationState.Disabled,
+                    OverlayHotkeyBindingState.Invalid =>
+                        OverlayHotkeyRegistrationState.Invalid,
+                    _ => OverlayHotkeyRegistrationState.Failed
+                });
+            UpdateMenuHotkeyRegistrationPresentation(
+                plan.MenuState,
+                listenerReady: false);
             return;
         }
 
-        _overlayHotkeyTriggerGate.Reset();
-        var compatibleRegistered = _gameCompatibleHotkeyListener.Start(
-            handle,
-            WmGameCompatibleHotkey,
-            new GameCompatibleHotkeyBinding(
-                (uint)virtualKey,
-                modifiers & GameCompatibleHotkeyModifiers.SupportedMask));
+        var compatibleRoutes = plan.CreateGameCompatibleRoutes(
+            InformationOverlayHotkeyCommand,
+            InGameMenuHotkeyCommand);
+        var compatibleRegistered =
+            compatibleRoutes.Count > 0 &&
+            _gameCompatibleHotkeyListener.Start(
+                handle,
+                WmGameCompatibleHotkey,
+                compatibleRoutes);
         var compatibleError = _gameCompatibleHotkeyListener.LastError;
-        _hotkeyRegistered = RegisterHotKey(handle, OverlayHotkeyId, modifiers | ModNoRepeat, (uint)virtualKey);
+        UpdateMenuHotkeyRegistrationPresentation(
+            plan.MenuState,
+            listenerReady:
+                plan.MenuState == OverlayHotkeyBindingState.Ready &&
+                compatibleRegistered);
+        AppendOutput(
+            $"GAME MENU HOTKEY | state={plan.MenuState} | binding={_inGameMenuSettings.Hotkey} | listener={compatibleRegistered}");
+
+        if (plan.InformationState == OverlayHotkeyBindingState.Disabled)
+        {
+            SetOverlayHotkeyRegistrationState(
+                OverlayHotkeyRegistrationState.Disabled);
+            AppendOutput("HOTKEY | information disabled");
+            return;
+        }
+
+        if (plan.InformationState != OverlayHotkeyBindingState.Ready ||
+            plan.InformationHotkey is not { } informationHotkey)
+        {
+            SetOverlayHotkeyRegistrationState(
+                OverlayHotkeyRegistrationState.Invalid);
+            AppendOutput($"HOTKEY | information invalid={OverlayHotkeyBox.Text}");
+            return;
+        }
+
+        _hotkeyRegistered = RegisterHotKey(
+            handle,
+            OverlayHotkeyId,
+            informationHotkey.Modifiers | ModNoRepeat,
+            informationHotkey.VirtualKey);
         var windowsError = _hotkeyRegistered ? 0 : Marshal.GetLastWin32Error();
         if (_hotkeyRegistered && compatibleRegistered)
         {
@@ -674,6 +806,13 @@ public partial class MainWindow
                 zh ? "该组合键已被其他应用占用，请设置其他组合键。" : "Another app is using this shortcut. Choose a different combination.",
                 "StatusWarningSurfaceBrush",
                 "StatusWarningBrush"),
+            OverlayHotkeyRegistrationState.ConflictWithMenu => (
+                zh ? "与菜单热键重复" : "Matches menu shortcut",
+                zh
+                    ? "信息浮层与菜单浮层不能使用同一组合键，请先更改其中一个。"
+                    : "Information and menu overlays cannot use the same shortcut. Change either shortcut first.",
+                "StatusWarningSurfaceBrush",
+                "StatusWarningBrush"),
             OverlayHotkeyRegistrationState.Invalid => (
                 zh ? "按键无效" : "Invalid",
                 zh ? "请按下包含一个非修饰键的有效组合。" : "Press a valid combination containing a non-modifier key.",
@@ -701,10 +840,48 @@ public partial class MainWindow
         OverlayHotkeyRegistrationHintText.Text = hintText;
     }
 
+    private void ShowInformationHotkeyValidation(
+        OverlayHotkeyRegistrationState validationState)
+    {
+        var activeState = _overlayHotkeyRegistrationState;
+        SetOverlayHotkeyRegistrationState(validationState);
+        _overlayHotkeyRegistrationState = activeState;
+    }
+
+    private bool RequestedHotkeyRoutesAreReady(
+        bool informationEnabled)
+    {
+        var informationReady =
+            !informationEnabled ||
+            _overlayHotkeyRegistrationState is
+                OverlayHotkeyRegistrationState.Registered or
+                OverlayHotkeyRegistrationState.GameCompatibleOnly or
+                OverlayHotkeyRegistrationState.DesktopOnly;
+        var menuReady =
+            !_inGameMenuSettings.EnableHotkey ||
+            _menuHotkeyBindingState ==
+                OverlayHotkeyBindingState.Ready &&
+            _menuHotkeyListenerReady;
+        return informationReady && menuReady;
+    }
+
+    private void RestoreInformationHotkeyRoute(
+        string previousHotkey,
+        bool informationEnabled)
+    {
+        OverlayHotkeyBox.Text = previousHotkey;
+        RegisterOverlayHotkey();
+        OverlayHotkeyRegistrationHintText.Text =
+            informationEnabled
+                ? "新的信息浮层热键未能启用，已恢复原设置。"
+                : "信息浮层热键保持关闭，未更改当前菜单热键。";
+    }
+
     private void UnregisterOverlayHotkey()
     {
         _gameCompatibleHotkeyListener.Stop();
         _overlayHotkeyTriggerGate.Reset();
+        _inGameMenuHotkeyTriggerGate.Reset();
 
         var handle = new WindowInteropHelper(this).Handle;
         if (_hotkeyRegistered && handle != IntPtr.Zero)
@@ -713,87 +890,6 @@ public partial class MainWindow
         }
 
         _hotkeyRegistered = false;
-    }
-
-    private static string FormatHotkey(ModifierKeys modifiers, Key key)
-    {
-        var parts = new List<string>();
-        if (modifiers.HasFlag(ModifierKeys.Control))
-        {
-            parts.Add("Ctrl");
-        }
-
-        if (modifiers.HasFlag(ModifierKeys.Alt))
-        {
-            parts.Add("Alt");
-        }
-
-        if (modifiers.HasFlag(ModifierKeys.Shift))
-        {
-            parts.Add("Shift");
-        }
-
-        if (modifiers.HasFlag(ModifierKeys.Windows))
-        {
-            parts.Add("Win");
-        }
-
-        parts.Add(key.ToString());
-        return string.Join("+", parts);
-    }
-
-    private static bool TryParseHotkey(string? text, out uint modifiers, out Key key)
-    {
-        modifiers = 0;
-        key = Key.None;
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
-        foreach (var part in text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (part.Equals("Ctrl", StringComparison.OrdinalIgnoreCase) ||
-                part.Equals("Control", StringComparison.OrdinalIgnoreCase))
-            {
-                modifiers |= ModControl;
-                continue;
-            }
-
-            if (part.Equals("Alt", StringComparison.OrdinalIgnoreCase))
-            {
-                modifiers |= ModAlt;
-                continue;
-            }
-
-            if (part.Equals("Shift", StringComparison.OrdinalIgnoreCase))
-            {
-                modifiers |= ModShift;
-                continue;
-            }
-
-            if (part.Equals("Win", StringComparison.OrdinalIgnoreCase) ||
-                part.Equals("Windows", StringComparison.OrdinalIgnoreCase))
-            {
-                modifiers |= ModWin;
-                continue;
-            }
-
-            if (!Enum.TryParse(part, ignoreCase: true, out key))
-            {
-                return false;
-            }
-        }
-
-        return key is not Key.None
-            and not Key.LeftCtrl
-            and not Key.RightCtrl
-            and not Key.LeftAlt
-            and not Key.RightAlt
-            and not Key.LeftShift
-            and not Key.RightShift
-            and not Key.LWin
-            and not Key.RWin;
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -878,6 +974,7 @@ public partial class MainWindow
 
     private void RefreshOverlayWindow()
     {
+        RefreshInGameMenu();
         if (_overlayWindow is not { IsVisible: true })
         {
             return;

@@ -1,0 +1,651 @@
+<Window x:Class="StarBridge.Desktop.InGameMenuWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="星海舰桥 · 游戏时菜单"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Focusable="True"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Deactivated="Window_Deactivated">
+    <Window.Resources>
+        <SolidColorBrush x:Key="MenuSurfaceBrush" Color="#E30A1A25" />
+        <SolidColorBrush x:Key="MenuSurfaceRaisedBrush" Color="#F20C2230" />
+        <SolidColorBrush x:Key="MenuBorderBrush" Color="#5A3D718A" />
+        <SolidColorBrush x:Key="MenuBorderStrongBrush" Color="#C24DBFEF" />
+        <SolidColorBrush x:Key="MenuAccentBrush" Color="#55C9F6" />
+        <SolidColorBrush x:Key="MenuPrimaryTextBrush" Color="#EAF7FF" />
+        <SolidColorBrush x:Key="MenuSecondaryTextBrush" Color="#9DB5C4" />
+        <SolidColorBrush x:Key="MenuMutedTextBrush" Color="#708A99" />
+        <SolidColorBrush x:Key="MenuSuccessBrush" Color="#55E5A1" />
+
+        <Style x:Key="MenuTopActionButton" TargetType="Button">
+            <Setter Property="Height" Value="42" />
+            <Setter Property="Padding" Value="15,0" />
+            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
+            <Setter Property="Background" Value="#C90A1B26" />
+            <Setter Property="BorderBrush" Value="{StaticResource MenuBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Surface"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="#E3153548" />
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource MenuAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="#F21A435B" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MenuCloseButton"
+               TargetType="Button"
+               BasedOn="{StaticResource MenuTopActionButton}">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="24" />
+            <Setter Property="FontWeight" Value="Normal" />
+        </Style>
+
+        <Style x:Key="MenuDockButton" TargetType="Button">
+            <Setter Property="Width" Value="82" />
+            <Setter Property="Height" Value="76" />
+            <Setter Property="Margin" Value="4,0" />
+            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
+            <Setter Property="Background" Value="#E00A1B26" />
+            <Setter Property="BorderBrush" Value="{StaticResource MenuBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="DockSurface"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="DockSurface" Property="Background" Value="#F2143548" />
+                                <Setter TargetName="DockSurface" Property="BorderBrush" Value="{StaticResource MenuAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="DockSurface" Property="Background" Value="#F21A435B" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="DockSurface" Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MenuDockGlyph" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
+            <Setter Property="FontSize" Value="24" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="MenuDockLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MenuSecondaryTextBrush}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+        </Style>
+
+        <Style x:Key="MenuContextLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MenuMutedTextBrush}" />
+            <Setter Property="FontSize" Value="9" />
+        </Style>
+
+        <Style x:Key="MenuContextValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Margin" Value="0,3,0,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid">
+        <Rectangle x:Name="BackgroundDimLayer"
+                   Fill="#A600060B"
+                   IsHitTestVisible="False"/>
+
+        <Border x:Name="TimeInformationPanel"
+                Width="270"
+                Margin="34,26,0,0"
+                Padding="17,12,18,14"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="#B5081822"
+                BorderBrush="{StaticResource MenuBorderBrush}"
+                BorderThickness="2,0,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="LocalTimeText"
+                           Text="20:23"
+                           Foreground="{StaticResource MenuPrimaryTextBrush}"
+                           FontFamily="Segoe UI Semibold"
+                           FontSize="28"
+                           FontWeight="SemiBold" />
+                <TextBlock x:Name="LocalDateText"
+                           Grid.Row="1"
+                           Text="2026年7月27日 星期一"
+                           Foreground="{StaticResource MenuSecondaryTextBrush}"
+                           FontSize="11"
+                           MinHeight="16"
+                           LineHeight="16"
+                           LineStackingStrategy="BlockLineHeight"
+                           Margin="1,4,0,0" />
+                <StackPanel x:Name="PresencePanel"
+                            Grid.Row="2"
+                            Orientation="Horizontal"
+                            Margin="1,10,0,0">
+                    <Ellipse Width="7"
+                             Height="7"
+                             Fill="{StaticResource MenuSuccessBrush}"
+                             VerticalAlignment="Center"
+                             Margin="0,0,7,0" />
+                    <TextBlock x:Name="PresenceText"
+                               Text="应用在线"
+                               Foreground="{StaticResource MenuSuccessBrush}"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               MinHeight="14"
+                               LineHeight="14"
+                               LineStackingStrategy="BlockLineHeight" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StackPanel x:Name="TopActionsPanel"
+                    Margin="0,26,34,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top">
+            <Button x:Name="MenuSettingsButton"
+                    Width="42"
+                    Margin="0,0,8,0"
+                    Padding="0"
+                    Style="{StaticResource MenuTopActionButton}"
+                    ToolTip="打开游戏浮层设置"
+                    Click="OpenOverlaySettings_Click">
+                <Viewbox Width="17" Height="17">
+                    <Path Data="M12,3 L13.4,3.4 L14.1,5.1 L16,5.6 L17.2,4.8 L19.2,6.8 L18.4,8 L18.9,9.9 L20.6,10.6 L21,12 L20.6,13.4 L18.9,14.1 L18.4,16 L19.2,17.2 L17.2,19.2 L16,18.4 L14.1,18.9 L13.4,20.6 L12,21 L10.6,20.6 L9.9,18.9 L8,18.4 L6.8,19.2 L4.8,17.2 L5.6,16 L5.1,14.1 L3.4,13.4 L3,12 L3.4,10.6 L5.1,9.9 L5.6,8 L4.8,6.8 L6.8,4.8 L8,5.6 L9.9,5.1 L10.6,3.4 Z M12,8.5 A3.5,3.5 0 1 1 11.9,8.5"
+                          Fill="Transparent"
+                          Stroke="{StaticResource MenuPrimaryTextBrush}"
+                          StrokeThickness="1.6"
+                          StrokeLineJoin="Round" />
+                </Viewbox>
+            </Button>
+            <Button x:Name="InformationOverlayTopButton"
+                      Style="{StaticResource MenuTopActionButton}"
+                      Click="SwitchToInformationOverlay_Click"
+                      Content="打开信息浮层" />
+            <Border Height="42"
+                    Margin="8,0,8,0"
+                    Padding="13,0"
+                    Background="#A807151E"
+                    BorderBrush="{StaticResource MenuBorderBrush}"
+                    BorderThickness="1">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="返回游戏"
+                               Foreground="{StaticResource MenuPrimaryTextBrush}"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock x:Name="MenuReturnHotkeyText"
+                               Text="-- / ESC"
+                               Foreground="{StaticResource MenuMutedTextBrush}"
+                               FontSize="8"
+                               HorizontalAlignment="Center"
+                               Margin="0,2,0,0" />
+                </StackPanel>
+            </Border>
+            <Button Style="{StaticResource MenuCloseButton}"
+                    Click="CloseMenu_Click"
+                    Content="&#x00D7;"
+                    ToolTip="返回游戏" />
+        </StackPanel>
+
+        <Border x:Name="LeftRailDockContainer"
+                Margin="28,154,0,78"
+                Padding="7"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Background="#F0081721"
+                BorderBrush="{StaticResource MenuBorderStrongBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="False">
+                <StackPanel x:Name="LeftRailDockPanel"
+                            Orientation="Vertical">
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="SwitchToInformationOverlay_Click"
+                        ToolTip="打开信息浮层">
+                    <StackPanel x:Name="SceneContextPanel">
+                        <TextBlock Text="&#xE946;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="信息"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="OpenFleet_Click"
+                        ToolTip="查看舰队详情与当前信息">
+                    <StackPanel>
+                        <TextBlock Text="&#xE902;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="舰队"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="OpenFriends_Click"
+                        ToolTip="打开好友中心">
+                    <StackPanel>
+                        <TextBlock Text="&#xE716;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="好友"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="OpenChat_Click"
+                        ToolTip="打开私信、舰队与房间通讯">
+                    <StackPanel>
+                        <TextBlock Text="&#xE8BD;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="通讯"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="OpenRooms_Click"
+                        ToolTip="查看、创建和加入组队房间">
+                    <StackPanel>
+                        <TextBlock Text="&#xE7FC;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="房间"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Border Width="48"
+                        Height="1"
+                        Margin="10,7"
+                        Background="{StaticResource MenuBorderBrush}" />
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="CaptureFullscreen_Click"
+                        ToolTip="截取当前游戏所在屏幕并保存到图片文件夹">
+                    <StackPanel>
+                        <TextBlock Text="&#xE722;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="截屏"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="OpenImage_Click"
+                        ToolTip="打开参考图工具">
+                    <StackPanel>
+                        <TextBlock Text="&#xEB9F;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="参考图"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                <Button Width="68"
+                        Height="54"
+                        Margin="0,3"
+                        Style="{StaticResource MenuDockButton}"
+                        Click="OpenBrowser_Click"
+                        ToolTip="打开游戏时浏览器">
+                    <StackPanel>
+                        <TextBlock Text="&#xE774;"
+                                   Style="{StaticResource MenuDockGlyph}"
+                                   FontSize="20" />
+                        <TextBlock Text="浏览器"
+                                   Style="{StaticResource MenuDockLabel}"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Grid x:Name="BottomMenuWorkspacePanel"
+              Margin="28,0,28,26"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Bottom">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border x:Name="MenuContextPanel"
+                    Grid.Row="0"
+                    MaxWidth="980"
+                    Margin="0,0,0,9"
+                    Padding="14,8"
+                    HorizontalAlignment="Stretch"
+                    Background="#C6081822"
+                    BorderBrush="{StaticResource MenuBorderBrush}"
+                    BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="0.55*" />
+                        <ColumnDefinition Width="1.15*" />
+                        <ColumnDefinition Width="1.25*" />
+                        <ColumnDefinition Width="1.4*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="当前协作" Style="{StaticResource MenuContextLabel}" />
+                        <TextBlock x:Name="SceneTitleText"
+                                   Text="当前舰队"
+                                   Style="{StaticResource MenuContextValue}" />
+                    </StackPanel>
+                    <StackPanel x:Name="MemberContextPanel" Grid.Column="1">
+                        <TextBlock Text="成员" Style="{StaticResource MenuContextLabel}" />
+                        <TextBlock x:Name="MemberCountText"
+                                   Text="0 人"
+                                   Style="{StaticResource MenuContextValue}" />
+                    </StackPanel>
+                    <StackPanel x:Name="ShipContextPanel" Grid.Column="2">
+                        <TextBlock Text="当前飞船" Style="{StaticResource MenuContextLabel}" />
+                        <TextBlock x:Name="ShipText"
+                                   Text="等待识别"
+                                   Style="{StaticResource MenuContextValue}" />
+                    </StackPanel>
+                    <StackPanel x:Name="LocationContextPanel" Grid.Column="3">
+                        <TextBlock Text="当前位置" Style="{StaticResource MenuContextLabel}" />
+                        <TextBlock x:Name="LocationText"
+                                   Text="等待识别"
+                                   Style="{StaticResource MenuContextValue}" />
+                    </StackPanel>
+                    <StackPanel x:Name="ServerContextPanel" Grid.Column="4">
+                        <TextBlock Text="游戏服务器" Style="{StaticResource MenuContextLabel}" />
+                        <TextBlock x:Name="ServerText"
+                                   Text="等待连接"
+                                   Style="{StaticResource MenuContextValue}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border x:Name="MenuDockContainer"
+                    Grid.Row="1"
+                    Padding="8"
+                    HorizontalAlignment="Center"
+                    Background="#F0081721"
+                    BorderBrush="{StaticResource MenuBorderStrongBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <StackPanel x:Name="PrimaryDockPanel"
+                            Orientation="Horizontal">
+                    <Button x:Name="InformationOverlayDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="SwitchToInformationOverlay_Click"
+                            ToolTip="打开信息浮层">
+                        <StackPanel>
+                            <TextBlock Text="&#xE946;" Style="{StaticResource MenuDockGlyph}" />
+                            <TextBlock x:Name="InformationOverlayDockLabel"
+                                       Text="打开信息浮层"
+                                       Style="{StaticResource MenuDockLabel}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="FleetDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="OpenFleet_Click"
+                            ToolTip="查看舰队详情与当前信息">
+                        <StackPanel>
+                            <TextBlock Text="&#xE902;" Style="{StaticResource MenuDockGlyph}" />
+                            <TextBlock x:Name="FleetDockLabel" Text="舰队" Style="{StaticResource MenuDockLabel}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="FriendsDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="OpenFriends_Click"
+                            ToolTip="打开好友中心">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Text="&#xE716;" Style="{StaticResource MenuDockGlyph}" />
+                                <TextBlock x:Name="FriendsDockLabel" Text="好友" Style="{StaticResource MenuDockLabel}" />
+                            </StackPanel>
+                            <Border x:Name="FriendsUnreadBadge"
+                                    MinWidth="20"
+                                    Height="20"
+                                    Padding="5,0"
+                                    Margin="0,-8,-14,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Background="#E93C8CC2"
+                                    BorderBrush="#FF7AD8FF"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="FriendsUnreadText"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="White"
+                                           FontSize="9"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="ChatDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="OpenChat_Click"
+                            ToolTip="打开私信、舰队与房间通讯">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Text="&#xE8BD;" Style="{StaticResource MenuDockGlyph}" />
+                                <TextBlock x:Name="ChatDockLabel" Text="通讯" Style="{StaticResource MenuDockLabel}" />
+                            </StackPanel>
+                            <Border x:Name="ChatUnreadBadge"
+                                    MinWidth="20"
+                                    Height="20"
+                                    Padding="5,0"
+                                    Margin="0,-8,-14,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Background="#E93C8CC2"
+                                    BorderBrush="#FF7AD8FF"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="ChatUnreadText"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="White"
+                                           FontSize="9"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="RoomsDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="OpenRooms_Click"
+                            ToolTip="查看、创建和加入组队房间">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Text="&#xE7FC;" Style="{StaticResource MenuDockGlyph}" />
+                                <TextBlock x:Name="RoomsDockLabel" Text="房间" Style="{StaticResource MenuDockLabel}" />
+                            </StackPanel>
+                            <Border x:Name="RoomsUnreadBadge"
+                                    MinWidth="20"
+                                    Height="20"
+                                    Padding="5,0"
+                                    Margin="0,-8,-14,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Background="#E9B56E2D"
+                                    BorderBrush="#FFFFC96B"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="RoomsUnreadText"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="White"
+                                           FontSize="9"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Border x:Name="DockGroupDivider"
+                            Width="1"
+                            Height="50"
+                            Margin="8,13"
+                            Background="{StaticResource MenuBorderBrush}" />
+
+                    <Button x:Name="ScreenshotDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="CaptureFullscreen_Click"
+                            ToolTip="截取当前游戏所在屏幕并保存到图片文件夹">
+                        <StackPanel>
+                            <TextBlock Text="&#xE722;" Style="{StaticResource MenuDockGlyph}" />
+                            <TextBlock x:Name="ScreenshotDockLabel" Text="全屏截屏" Style="{StaticResource MenuDockLabel}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ImageDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="OpenImage_Click"
+                            ToolTip="打开参考图工具">
+                        <StackPanel>
+                            <TextBlock Text="&#xEB9F;" Style="{StaticResource MenuDockGlyph}" />
+                            <TextBlock x:Name="ImageDockLabel" Text="参考图" Style="{StaticResource MenuDockLabel}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="BrowserDockButton"
+                            Style="{StaticResource MenuDockButton}"
+                            Click="OpenBrowser_Click"
+                            ToolTip="打开游戏时浏览器">
+                        <StackPanel>
+                            <TextBlock Text="&#xE774;" Style="{StaticResource MenuDockGlyph}" />
+                            <TextBlock x:Name="BrowserDockLabel" Text="浏览器" Style="{StaticResource MenuDockLabel}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <Grid x:Name="MenuBottomFooterPanel"
+                  Grid.Row="2"
+                  Margin="2,8,2,0">
+                <TextBlock x:Name="NoticeText"
+                           Text="菜单浮层已就绪"
+                           Foreground="{StaticResource MenuAccentBrush}"
+                           FontSize="9"
+                           HorizontalAlignment="Left" />
+                <TextBlock x:Name="MenuFooterHotkeyText"
+                           Text="按 Esc 返回游戏 · 工具窗口会随菜单自动隐藏"
+                           Foreground="{StaticResource MenuMutedTextBrush}"
+                           FontSize="9"
+                           HorizontalAlignment="Right" />
+            </Grid>
+        </Grid>
+
+        <Border x:Name="NoticePopup"
+                Width="580"
+                MaxWidth="720"
+                Margin="0,94,0,0"
+                Padding="16,12"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Background="#FA0C2230"
+                BorderBrush="{StaticResource MenuBorderStrongBrush}"
+                BorderThickness="2,1,1,1"
+                CornerRadius="3"
+                Panel.ZIndex="100"
+                Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="NoticePopupTitle"
+                           Foreground="{StaticResource MenuPrimaryTextBrush}"
+                           FontSize="13"
+                           FontWeight="SemiBold" />
+                <TextBlock x:Name="NoticePopupDetail"
+                           Margin="0,5,0,0"
+                           Foreground="{StaticResource MenuSecondaryTextBrush}"
+                           FontSize="10"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

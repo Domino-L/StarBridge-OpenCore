@@ -1,0 +1,624 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Shared visual language for both game-overlay settings channels.
+        Cyan identifies the information overlay; violet identifies the menu overlay.
+        Surfaces, spacing, type hierarchy, fields and interaction states stay identical.
+    -->
+    <SolidColorBrush x:Key="InformationOverlaySettingsAccentBrush" Color="#69CCFF" />
+    <SolidColorBrush x:Key="InformationOverlaySettingsAccentSurfaceBrush" Color="#26305672" />
+    <SolidColorBrush x:Key="MenuOverlaySettingsAccentBrush" Color="#A79BFF" />
+    <SolidColorBrush x:Key="MenuOverlaySettingsAccentSurfaceBrush" Color="#382F315B" />
+    <SolidColorBrush x:Key="OverlaySettingsPanelBrush" Color="#0A1823" />
+    <SolidColorBrush x:Key="OverlaySettingsFieldBrush" Color="#0E2535" />
+    <SolidColorBrush x:Key="OverlaySettingsHoverBrush" Color="#123143" />
+    <SolidColorBrush x:Key="OverlaySettingsSelectedBrush" Color="#153A4F" />
+    <SolidColorBrush x:Key="OverlaySettingsBorderBrush" Color="#2B536A" />
+    <SolidColorBrush x:Key="OverlaySettingsSoftBorderBrush" Color="#2428576F" />
+    <SolidColorBrush x:Key="OverlaySettingsNavigationHoverWashBrush" Color="#14283A" />
+    <SolidColorBrush x:Key="OverlaySettingsNavigationActiveWashBrush" Color="#1E2F4968" />
+    <SolidColorBrush x:Key="OverlaySettingsNavigationHoverForegroundBrush" Color="#EAF6FF" />
+    <SolidColorBrush x:Key="OverlaySettingsNavigationPressedForegroundBrush" Color="#A9DFFF" />
+    <SolidColorBrush x:Key="OverlaySettingsNavigationActiveForegroundBrush" Color="#F2FAFF" />
+    <Color x:Key="OverlaySettingsNavigationGlyphGlowColor">#69CCFF</Color>
+    <LinearGradientBrush x:Key="OverlaySettingsNavigationRouteLightBrush"
+                         StartPoint="0,0"
+                         EndPoint="0,1">
+        <GradientStop Color="#0029AFFF" Offset="0" />
+        <GradientStop Color="#B829AFFF" Offset="0.2" />
+        <GradientStop Color="#FF9AE8FF" Offset="0.5" />
+        <GradientStop Color="#B829AFFF" Offset="0.8" />
+        <GradientStop Color="#0029AFFF" Offset="1" />
+    </LinearGradientBrush>
+
+    <Style x:Key="OverlaySettingsPanelStyle"
+           TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource OverlaySettingsPanelBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource OverlaySettingsSoftBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsSectionStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource StarBridgeSettingsSection}">
+        <Setter Property="Background" Value="{StaticResource AvionicsSectionWashBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource OverlaySettingsBorderBrush}" />
+        <Setter Property="BorderThickness" Value="2,0,0,0" />
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+
+    <Style x:Key="InformationOverlaySettingsSectionStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource OverlaySettingsSectionStyle}">
+        <Setter Property="BorderBrush" Value="{StaticResource InformationOverlaySettingsAccentBrush}" />
+    </Style>
+
+    <Style x:Key="MenuOverlaySettingsSectionStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource OverlaySettingsSectionStyle}">
+        <Setter Property="BorderBrush" Value="{StaticResource MenuOverlaySettingsAccentBrush}" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsPageTitleTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource StarBridgePageTitleText}">
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsSectionTitleTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource StarBridgeSectionTitleText}">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsLabelTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource StarBridgeLabelText}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Margin" Value="0,8,0,4" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsHintTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource StarBridgeHintText}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsNavigationCategoryTextStyle"
+           TargetType="TextBlock">
+        <Setter Property="Margin" Value="16,10,0,4" />
+        <Setter Property="Foreground" Value="{StaticResource TextTertiaryBrush}" />
+        <Setter Property="FontSize" Value="9.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsNavigationButtonStyle"
+           TargetType="Button">
+        <Setter Property="MinHeight" Value="42" />
+        <Setter Property="Margin" Value="4,2" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="4"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="HoverWash"
+                                       Fill="{StaticResource OverlaySettingsHoverBrush}"
+                                       Opacity="0" />
+                            <Rectangle x:Name="ActiveWash"
+                                       Fill="{StaticResource OverlaySettingsSelectedBrush}"
+                                       Opacity="0" />
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0.62" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="ActiveWash" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.46" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="OverlaySettingsIconNavigationButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource OverlaySettingsNavigationButtonStyle}">
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="4"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="HoverWash"
+                                       Fill="{StaticResource OverlaySettingsHoverBrush}"
+                                       Opacity="0" />
+                            <Rectangle x:Name="ActiveWash"
+                                       Fill="{StaticResource OverlaySettingsSelectedBrush}"
+                                       Opacity="0" />
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Margin="{TemplateBinding Padding}">
+                                <Grid Width="25" Height="25">
+                                    <Path x:Name="MenuGlyph"
+                                          Width="19"
+                                          Height="19"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Data="{TemplateBinding CommandParameter}"
+                                          Fill="Transparent"
+                                          Stroke="{TemplateBinding Foreground}"
+                                          StrokeThickness="1.65"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          Stretch="Uniform"
+                                          SnapsToDevicePixels="False" />
+                                </Grid>
+                                <ContentPresenter Margin="12,0,0,0"
+                                                  VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="HoverWash" Property="Opacity" Value="0.62" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="ActiveWash" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.46" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="OverlaySettingsGlowNavigationButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource OverlaySettingsIconNavigationButtonStyle}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="OverlaySettingsNavigationChrome"
+                            Margin="4,2"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="5"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="OverlaySettingsNavigationHoverWash"
+                                       Fill="{DynamicResource OverlaySettingsNavigationHoverWashBrush}"
+                                       Opacity="0" />
+                            <Rectangle x:Name="OverlaySettingsNavigationActiveWash"
+                                       Fill="{DynamicResource OverlaySettingsNavigationActiveWashBrush}"
+                                       Opacity="0" />
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Margin="16,0,0,0">
+                                <Grid Width="28"
+                                      Height="28"
+                                      VerticalAlignment="Center">
+                                    <Path x:Name="OverlaySettingsNavigationGlyph"
+                                          Width="21"
+                                          Height="21"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Data="{TemplateBinding CommandParameter}"
+                                          Fill="Transparent"
+                                          Stroke="{TemplateBinding Foreground}"
+                                          StrokeThickness="1.65"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          Stretch="Uniform"
+                                          SnapsToDevicePixels="False" />
+                                </Grid>
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                  Margin="13,0,0,0"
+                                                  RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="OverlaySettingsNavigationHoverWash"
+                                    Property="Opacity"
+                                    Value="0.82" />
+                            <Setter Property="Foreground"
+                                    Value="{DynamicResource OverlaySettingsNavigationHoverForegroundBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="OverlaySettingsNavigationHoverWash"
+                                    Property="Opacity"
+                                    Value="0.5" />
+                            <Setter Property="Foreground"
+                                    Value="{DynamicResource OverlaySettingsNavigationPressedForegroundBrush}" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="OverlaySettingsNavigationActiveWash"
+                                    Property="Opacity"
+                                    Value="1" />
+                            <Setter Property="Foreground"
+                                    Value="{DynamicResource OverlaySettingsNavigationActiveForegroundBrush}" />
+                            <Setter TargetName="OverlaySettingsNavigationGlyph"
+                                    Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="{DynamicResource OverlaySettingsNavigationGlyphGlowColor}"
+                                                      BlurRadius="6"
+                                                      ShadowDepth="0"
+                                                      Opacity="0.32" />
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="OverlaySettingsNavigationHoverWash"
+                                    Property="Opacity"
+                                    Value="0" />
+                            <Setter TargetName="OverlaySettingsNavigationActiveWash"
+                                    Property="Opacity"
+                                    Value="0" />
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource ButtonDisabledTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="OverlaySettingsActiveRailStyle"
+           TargetType="Border">
+        <Setter Property="Width" Value="3.5" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Opacity" Value="0" />
+        <Setter Property="Panel.ZIndex" Value="4" />
+        <Setter Property="Background"
+                Value="{DynamicResource OverlaySettingsNavigationRouteLightBrush}" />
+    </Style>
+
+    <Style x:Key="InformationOverlaySettingsActiveRailStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource OverlaySettingsActiveRailStyle}" />
+
+    <Style x:Key="MenuOverlaySettingsActiveRailStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource OverlaySettingsActiveRailStyle}" />
+
+    <Style x:Key="OverlaySettingsInlineCheckStyle"
+           TargetType="CheckBox"
+           BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="Margin" Value="0,5,0,5" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsSwitchRowStyle"
+           TargetType="CheckBox">
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Cursor" Value="Arrow" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="ContentTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <Border Padding="0,5">
+                        <TextBlock Text="{Binding}"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center"
+                                   TextOptions.TextFormattingMode="Display" />
+                    </Border>
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Border x:Name="SettingRow"
+                            MinHeight="{TemplateBinding MinHeight}"
+                            Padding="10,0"
+                            Background="{StaticResource OverlaySettingsFieldBrush}"
+                            BorderBrush="{StaticResource OverlaySettingsSoftBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            SnapsToDevicePixels="True">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                            <Border x:Name="SwitchTrack"
+                                    Grid.Column="1"
+                                    Width="44"
+                                    Height="22"
+                                    Margin="14,0,0,0"
+                                    VerticalAlignment="Center"
+                                    Cursor="Hand"
+                                    Background="#111920"
+                                    BorderBrush="#3A4C58"
+                                    BorderThickness="1"
+                                    CornerRadius="3">
+                                <TextBlock x:Name="SwitchText"
+                                           Text="OFF"
+                                           Foreground="#8298A7"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger SourceName="SwitchTrack"
+                                 Property="IsMouseOver"
+                                 Value="True">
+                            <Setter TargetName="SwitchTrack"
+                                    Property="BorderBrush"
+                                    Value="{StaticResource BorderFocusBrush}" />
+                            <Setter TargetName="SwitchTrack"
+                                    Property="Background"
+                                    Value="{StaticResource OverlaySettingsHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="#102A1D" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="#2C7A51" />
+                            <Setter TargetName="SwitchText" Property="Text" Value="ON" />
+                            <Setter TargetName="SwitchText" Property="Foreground" Value="{StaticResource StatusSuccessUnifiedBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="SettingRow"
+                                    Property="BorderBrush"
+                                    Value="{StaticResource BorderFocusBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="SettingRow" Property="Opacity" Value="0.45" />
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="#0A1117" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="#192A34" />
+                            <Setter TargetName="SwitchText" Property="Foreground" Value="#465C69" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="OverlaySettingsCommandSwitchRowStyle"
+           TargetType="CheckBox"
+           BasedOn="{StaticResource OverlaySettingsSwitchRowStyle}">
+        <Setter Property="MinHeight" Value="40" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="MinWidth" Value="90" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Padding" Value="12,0" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsIconButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="MinWidth" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontFamily" Value="Segoe UI Symbol" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsTextBoxStyle"
+           TargetType="TextBox"
+           BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Padding" Value="10,4" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsComboBoxStyle"
+           TargetType="ComboBox"
+           BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="Height" Value="34" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsSliderStyle"
+           TargetType="Slider"
+           BasedOn="{StaticResource {x:Type Slider}}">
+        <Setter Property="Margin" Value="0,1,0,5" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsPreviewFrameStyle"
+           TargetType="Border">
+        <Setter Property="Background" Value="#0C1B2731" />
+        <Setter Property="BorderBrush" Value="{StaticResource OverlaySettingsBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="MenuOverlaySettingsPreviewFrameStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource OverlaySettingsPreviewFrameStyle}">
+        <Setter Property="BorderBrush" Value="{StaticResource MenuOverlaySettingsAccentBrush}" />
+    </Style>
+
+    <Style x:Key="OverlaySettingsPreviewFooterStyle"
+           TargetType="Border">
+        <Setter Property="Margin" Value="0,10,0,0" />
+        <Setter Property="Padding" Value="12,9" />
+        <Setter Property="Background" Value="{StaticResource OverlaySettingsFieldBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource OverlaySettingsSoftBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+
+    <Style x:Key="MenuOverlaySettingsPreviewFooterStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource OverlaySettingsPreviewFooterStyle}">
+        <Setter Property="BorderBrush" Value="{StaticResource MenuOverlaySettingsAccentBrush}" />
+        <Setter Property="TextElement.Foreground" Value="#CBC5FF" />
+    </Style>
+
+    <Style x:Key="OverlayModulePrecisionExpanderStyle"
+           TargetType="{x:Type Expander}">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="Background" Value="#680A1D28" />
+        <Setter Property="BorderBrush" Value="#36566D" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Expander}">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="3"
+                            SnapsToDevicePixels="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ToggleButton x:Name="HeaderSite"
+                                          Grid.Row="0"
+                                          Height="38"
+                                          Padding="10,0"
+                                          HorizontalContentAlignment="Stretch"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          Content="{Binding Header, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ContentTemplate="{Binding HeaderTemplate, RelativeSource={RelativeSource TemplatedParent}}"
+                                          FocusVisualStyle="{x:Null}"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                        <Border x:Name="HeaderBackground"
+                                                Background="{TemplateBinding Background}"
+                                                Padding="{TemplateBinding Padding}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <ContentPresenter VerticalAlignment="Center"
+                                                                  RecognizesAccessKey="True" />
+                                                <Path x:Name="DisclosureGlyph"
+                                                      Grid.Column="1"
+                                                      Width="9"
+                                                      Height="6"
+                                                      Margin="10,0,2,0"
+                                                      VerticalAlignment="Center"
+                                                      Data="M0,0 L4.5,5 L9,0"
+                                                      Stroke="{StaticResource TextSecondaryBrush}"
+                                                      StrokeThickness="1.4"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="HeaderBackground"
+                                                        Property="Background"
+                                                        Value="#4A173246" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="DisclosureGlyph"
+                                                        Property="RenderTransform">
+                                                    <Setter.Value>
+                                                        <RotateTransform Angle="180"
+                                                                         CenterX="4.5"
+                                                                         CenterY="3" />
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ExpandSite"
+                                              Grid.Row="1"
+                                              ContentSource="Content"
+                                              Visibility="Collapsed"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              Focusable="False" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="ExpandSite"
+                                    Property="Visibility"
+                                    Value="Visible" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

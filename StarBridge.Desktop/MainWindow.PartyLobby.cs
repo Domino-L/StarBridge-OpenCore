@@ -16,6 +16,11 @@ public partial class MainWindow
 {
     private const int MaximumLoadedPartyRoomChatMessages = 500;
 
+    private readonly record struct PartyRoomChatOperationLane(
+        AccountSessionLease Session,
+        string RoomId,
+        long ReceiveSessionVersion);
+
     private static string GetPartyPresenceBrush(PlayerPresenceKind presence) =>
         presence switch
         {
@@ -34,7 +39,9 @@ public partial class MainWindow
     private readonly HashSet<string> _partyRoomCreateContextIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _partyRoomTagDraftGameplayIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _partyRoomTagDraftContextIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<long> _partyRoomChatRefreshRunningSessions = [];
+    private readonly HashSet<PartyRoomChatOperationLane> _partyRoomChatRefreshRunningSessions = [];
+    private readonly HashSet<PartyRoomChatOperationLane> _partyRoomChatSendRunningSessions = [];
+    private readonly HashSet<AccountSessionLease> _partyRoomDirectoryRefreshRunningSessions = [];
     private readonly List<PartyRoomContextTagChoiceGroup> _partyRoomContextTagChoiceGroups = [];
     private readonly OverlayChatReceiveSession _overlayChatReceiveSession = new();
     private ICollectionView? _partyLobbyRoomsView;
@@ -44,7 +51,6 @@ public partial class MainWindow
     private string? _partyRoomJoinInvitationId;
     private DispatcherTimer? _partyRoomRefreshTimer;
     private bool _isPartyRoomCodeVisible;
-    private bool _isPartyRoomRefreshRunning;
     private bool _partyRoomChatHasOlder;
     private bool _isLoadingOlderPartyRoomChat;
     private bool _partyRoomChatFollowLatest = true;
@@ -56,6 +62,12 @@ public partial class MainWindow
     private PartyRoomInvitationSnapshot[] _sentPartyRoomInvitations = [];
     private bool _partyRoomInvitationPanelShowsHostFriends;
     private bool _isPartyRoomInvitationActionRunning;
+
+    private bool IsPartyRoomChatOperationCurrent(PartyRoomChatOperationLane lane) =>
+        _accountSessionCoordinator.IsCurrent(lane.Session) &&
+        _currentPartyRoom is { } room &&
+        room.RoomId.Equals(lane.RoomId, StringComparison.OrdinalIgnoreCase) &&
+        _overlayChatReceiveSession.Version == lane.ReceiveSessionVersion;
 
     private void InitializePartyLobbyShell()
     {
@@ -279,18 +291,27 @@ public partial class MainWindow
 
     private void RenderPartyRoomFriendInviteRows()
     {
+        foreach (var row in BuildPartyRoomFriendInviteRows())
+        {
+            _partyRoomInvitationRows.Add(row);
+        }
+    }
+
+    private PartyRoomInvitationActionRow[] BuildPartyRoomFriendInviteRows()
+    {
         if (_currentPartyRoom is not { } room)
         {
-            return;
+            return [];
         }
 
+        var rows = new List<PartyRoomInvitationActionRow>();
         var memberIds = room.Members
             .Select(member => member.AccountId)
             .Where(accountId => !string.IsNullOrWhiteSpace(accountId))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in _friendCenterSnapshot?.Friends ?? [])
         {
-            var user = FriendCenterAvatarResolver.Resolve(entry.User, _networkSnapshots.Values);
+            var user = FriendCenterUserResolver.Resolve(entry.User, _networkSnapshots.Values);
             if (memberIds.Contains(user.AccountId))
             {
                 continue;
@@ -299,7 +320,7 @@ public partial class MainWindow
             var sent = _sentPartyRoomInvitations.FirstOrDefault(invitation =>
                 invitation.RoomId.Equals(room.RoomId, StringComparison.OrdinalIgnoreCase) &&
                 invitation.RecipientAccountId.Equals(user.AccountId, StringComparison.OrdinalIgnoreCase));
-            _partyRoomInvitationRows.Add(new PartyRoomInvitationActionRow(
+            rows.Add(new PartyRoomInvitationActionRow(
                 user.AccountId,
                 user.Callsign,
                 user.GameId,
@@ -315,6 +336,8 @@ public partial class MainWindow
                 room.RoomId,
                 sent?.InvitationId));
         }
+
+        return rows.ToArray();
     }
 
     private static string FriendPresenceText(string? presence) =>
@@ -353,6 +376,12 @@ public partial class MainWindow
             return;
         }
 
+        if (row.SecondaryAction == "revoke")
+        {
+            await RevokePartyRoomInvitationAsync(row);
+            return;
+        }
+
         if (_isPartyRoomInvitationActionRunning)
         {
             return;
@@ -378,6 +407,57 @@ public partial class MainWindow
         catch
         {
             PartyRoomInvitationStatusText.Text = "无法连接房间服务器，请稍后重试。";
+        }
+        finally
+        {
+            _isPartyRoomInvitationActionRunning = false;
+        }
+    }
+
+    private async Task<bool> RevokePartyRoomInvitationAsync(
+        PartyRoomInvitationActionRow row,
+        TextBlock? statusTarget = null)
+    {
+        var statusText = statusTarget ?? PartyRoomInvitationStatusText;
+        if (_currentPartyRoom is not { ViewerIsHost: true } ||
+            string.IsNullOrWhiteSpace(row.RoomId) ||
+            string.IsNullOrWhiteSpace(row.InvitationId))
+        {
+            statusText.Text = "这条房间邀请已失效，请刷新后重试。";
+            statusText.Foreground = StatusPalette.WarningBrush;
+            return false;
+        }
+
+        if (_isPartyRoomInvitationActionRunning)
+        {
+            return false;
+        }
+
+        _isPartyRoomInvitationActionRunning = true;
+        try
+        {
+            using var response = await _relayClient.PostJsonAsync(
+                "api/party-rooms/invitations/action",
+                new PartyRoomInviteActionRequest(row.RoomId, row.InvitationId, "revoke"));
+            var mutation = await response.Content.ReadFromJsonAsync<PartyRoomInvitationMutationResponse>();
+            if (!response.IsSuccessStatusCode)
+            {
+                statusText.Text = mutation?.Error ?? "邀请未能撤回，请稍后重试。";
+                statusText.Foreground = StatusPalette.DangerBrush;
+                return false;
+            }
+
+            statusText.Text = "邀请已撤回。";
+            statusText.Foreground = StatusPalette.SuccessBrush;
+            await RefreshPartyRoomsFromServerAsync(showErrors: false);
+            RenderPartyRoomInvitationRows();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            statusText.Text = UserFacingError.Describe(ex, "邀请未能撤回，请检查网络后重试。");
+            statusText.Foreground = StatusPalette.DangerBrush;
+            return false;
         }
         finally
         {
@@ -905,20 +985,7 @@ public partial class MainWindow
         var gameId = !string.IsNullOrWhiteSpace(_localPlayer)
             ? _localPlayer.Trim()
             : _localPlayerId ?? "";
-        var currentShip = PersonalCurrentShipText?.Text;
-        if (string.IsNullOrWhiteSpace(currentShip) ||
-            currentShip.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            currentShip = "等待舰船同步";
-        }
-
-        var region = PersonalServerRegionText?.Text;
-        var shard = PersonalShardText?.Text;
-        var serverSummary = IsGameServerRegionCurrent() &&
-                            !string.IsNullOrWhiteSpace(region) &&
-                            !string.IsNullOrWhiteSpace(shard)
-            ? $"{region} · {shard}"
-            : "等待分线同步";
+        var localMemberState = BuildCurrentPartyRoomMemberState();
         var keepsExistingPassword = _isEditingPartyRoom &&
                                     _currentPartyRoom?.PasswordRequired == true &&
                                     draft.PasswordEnabled &&
@@ -932,9 +999,9 @@ public partial class MainWindow
             {
                 PresenceText = PlayerPresencePresentation.Format(GetPartyRoomSharedPresence(), _language),
                 PresenceBrush = GetPartyPresenceBrush(GetPartyRoomSharedPresence()),
-                LocationText = "等待位置同步",
-                ShipText = currentShip,
-                ShardText = serverSummary
+                LocationText = localMemberState.LocationText ?? "等待位置同步",
+                ShipText = localMemberState.ShipText ?? "等待舰船同步",
+                ShardText = localMemberState.ShardText ?? "等待服务器同步"
             },
             DateTimeOffset.UtcNow);
         if (!result.IsSuccess || result.Room is null)
@@ -975,11 +1042,7 @@ public partial class MainWindow
             },
             draft.RecruitmentDurationMinutes,
             draft.AutoDisbandHours,
-            new PartyRoomMemberStateRequest(
-                localHost.PresenceText,
-                localHost.LocationText,
-                localHost.ShipText,
-                localHost.ShardText))
+            localMemberState with { PresenceText = localHost.PresenceText })
         {
             TagCatalogVersion = PartyRoomTagCatalog.Version
         };
@@ -1221,34 +1284,98 @@ public partial class MainWindow
     private async Task PublishCurrentPresenceBeforePartyRoomMutationAsync()
     {
         await SendPresenceHeartbeatAsync();
+        await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
     }
 
     private PlayerPresenceKind GetPartyRoomSharedPresence()
     {
         var projection = GetLocalFleetPresencePrivacyProjection();
-        return PlayerPresence.Normalize(projection.LiveStatus, projection.Online);
+        return PlayerPresence.Normalize(
+            projection.LiveStatus,
+            projection.Online);
     }
 
     private PartyRoomMemberStateRequest BuildCurrentPartyRoomMemberState()
     {
-        var currentShip = PersonalCurrentShipText?.Text;
-        if (string.IsNullOrWhiteSpace(currentShip) || currentShip.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            currentShip = "等待舰船同步";
-        }
+        var sharedState = BuildFleetMemberSnapshots().FirstOrDefault();
+        var presence = GetPartyRoomSharedPresence();
+        var hasServerSession = presence == PlayerPresenceKind.InGame && IsGameServerRegionCurrent();
+        var locationCandidate = IsUnknownPartyRoomState(sharedState?.Location)
+            ? null
+            : FormatPartyRoomLocation(sharedState!.Location);
+        var location = PlayerSessionStatePresentation.ResolveLocation(
+            presence,
+            hasServerSession,
+            locationCandidate);
 
-        var region = PersonalServerRegionText?.Text;
-        var shard = PersonalShardText?.Text;
-        var serverSummary = IsGameServerRegionCurrent() &&
-                            !string.IsNullOrWhiteSpace(region) &&
-                            !string.IsNullOrWhiteSpace(shard)
-            ? $"{region} · {shard}"
-            : "等待分线同步";
+        var currentShip = !IsUnknownPartyRoomState(sharedState?.Ship)
+            ? FormatShipForUser(sharedState!.Ship)
+            : PersonalCurrentShipText?.Text;
+        currentShip = PlayerSessionStatePresentation.ResolveShip(
+            presence,
+            hasServerSession,
+            currentShip);
+
+        var serverSummary = PlayerSessionStatePresentation.ResolveServer(
+            presence,
+            hasServerSession,
+            sharedState?.ServerRegion);
         return new PartyRoomMemberStateRequest(
-            PlayerPresencePresentation.Format(GetPartyRoomSharedPresence(), _language),
-            "等待位置同步",
+            PlayerPresencePresentation.Format(presence, _language),
+            location,
             currentShip,
             serverSummary);
+    }
+
+    private PartyRoomMemberStateRequest BuildCurrentPartyRoomMemberDisplayState()
+    {
+        var sharedState = BuildCurrentPartyRoomMemberState();
+        var local = _players.FirstOrDefault(player => player.IsSelf) ??
+                    _players.FirstOrDefault(player =>
+                        !string.IsNullOrWhiteSpace(_localPlayer) &&
+                        player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
+        if (local is null)
+        {
+            return sharedState;
+        }
+
+        var presence = GetPartyRoomSharedPresence();
+        var hasServerSession = presence == PlayerPresenceKind.InGame && IsGameServerRegionCurrent();
+        var location = PlayerSessionStatePresentation.ResolveLocation(
+            presence,
+            hasServerSession,
+            string.IsNullOrWhiteSpace(local.Location)
+                ? sharedState.LocationText
+                : FormatPartyRoomLocation(local.Location));
+        var shipSource = !string.IsNullOrWhiteSpace(local.RawShip)
+            ? local.RawShip
+            : local.Ship;
+        var currentShip = PlayerSessionStatePresentation.ResolveShip(
+            presence,
+            hasServerSession,
+            FormatShipForUser(shipSource));
+        var serverSummary = PlayerSessionStatePresentation.ResolveServer(
+            presence,
+            hasServerSession,
+            IsGameServerRegionCurrent() && !IsUnknownPartyRoomState(_gameServerRegion)
+                ? _gameServerRegion.Trim()
+                : !string.IsNullOrWhiteSpace(local.ServerRegion)
+                    ? FormatPartyRoomServer(local.ServerRegion)
+                    : sharedState.ShardText);
+
+        return new PartyRoomMemberStateRequest(
+            PlayerPresencePresentation.Format(presence, _language),
+            location,
+            currentShip,
+            serverSummary);
+    }
+
+    private static bool IsUnknownPartyRoomState(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ||
+               value.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("None", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("未知", StringComparison.OrdinalIgnoreCase);
     }
 
     private void PartyCurrentRoomCopyCode_Click(object sender, RoutedEventArgs e)
@@ -1353,11 +1480,6 @@ public partial class MainWindow
 
     private async Task RefreshPartyRoomsFromServerAsync(bool showErrors = false)
     {
-        if (_isPartyRoomRefreshRunning)
-        {
-            return;
-        }
-
         if (!CanSynchronizeUserData)
         {
             ClearPartyRoomState();
@@ -1370,7 +1492,11 @@ public partial class MainWindow
         }
 
         var session = _accountSessionCoordinator.Capture();
-        _isPartyRoomRefreshRunning = true;
+        if (!_partyRoomDirectoryRefreshRunningSessions.Add(session))
+        {
+            return;
+        }
+
         try
         {
             using var response = await _relayClient.GetAsync("api/party-rooms");
@@ -1470,11 +1596,18 @@ public partial class MainWindow
             ProcessPlayerActivityDesktopNotifications();
             await RefreshPartyRoomChatAsync(showErrors: false);
         }
-        catch (Exception ex) when (HandleAuthorizationFailure(ex, "同步临时房间", silent: !showErrors))
+        catch (Exception ex)
         {
-        }
-        catch
-        {
+            if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return;
+            }
+
+            if (HandleAuthorizationFailure(ex, "同步临时房间", silent: !showErrors))
+            {
+                return;
+            }
+
             if (showErrors)
             {
                 StarBridgeMessageBox.Show(
@@ -1487,7 +1620,7 @@ public partial class MainWindow
         }
         finally
         {
-            _isPartyRoomRefreshRunning = false;
+            _partyRoomDirectoryRefreshRunningSessions.Remove(session);
         }
     }
 
@@ -1498,9 +1631,11 @@ public partial class MainWindow
             return;
         }
 
+        var session = _accountSessionCoordinator.Capture();
         var roomId = _currentPartyRoom.RoomId;
         var receiveSessionVersion = _overlayChatReceiveSession.Version;
-        if (!_partyRoomChatRefreshRunningSessions.Add(receiveSessionVersion))
+        var lane = new PartyRoomChatOperationLane(session, roomId, receiveSessionVersion);
+        if (!_partyRoomChatRefreshRunningSessions.Add(lane))
         {
             return;
         }
@@ -1512,8 +1647,13 @@ public partial class MainWindow
             var shouldFollowLatest = wasEmpty || _partyRoomChatFollowLatest;
             using var response = await _relayClient.GetAsync(
                 $"api/party-rooms/chat?roomId={Uri.EscapeDataString(roomId)}" +
-                $"&after={_partyRoomChatLastSequence}&limit=50");
+                     $"&after={_partyRoomChatLastSequence}&limit=50");
             var history = await response.Content.ReadFromJsonAsync<PartyRoomChatResponse>();
+            if (!IsPartyRoomChatOperationCurrent(lane))
+            {
+                return;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 if (HandleAuthorizationFailure(response.StatusCode, "同步房间聊天", silent: !showErrors))
@@ -1525,8 +1665,7 @@ public partial class MainWindow
                 return;
             }
 
-            if (!string.Equals(_currentPartyRoom?.RoomId, roomId, StringComparison.OrdinalIgnoreCase) ||
-                history is null ||
+            if (history is null ||
                 !_overlayChatReceiveSession.TryEstablishBaseline(
                     roomId,
                     receiveSessionVersion,
@@ -1566,16 +1705,27 @@ public partial class MainWindow
             }
             PartyRoomChatStatusText.Text = "房间内可见";
         }
-        catch (Exception ex) when (HandleAuthorizationFailure(ex, "同步房间聊天", silent: !showErrors))
+        catch (Exception ex)
         {
-        }
-        catch
-        {
+            if (!IsPartyRoomChatOperationCurrent(lane))
+            {
+                return;
+            }
+
+            if (HandleAuthorizationFailure(ex, "同步房间聊天", silent: !showErrors))
+            {
+                return;
+            }
+
             PartyRoomChatStatusText.Text = "聊天暂时离线；稍后会自动重试";
         }
         finally
         {
-            _partyRoomChatRefreshRunningSessions.Remove(receiveSessionVersion);
+            _partyRoomChatRefreshRunningSessions.Remove(lane);
+            if (IsPartyRoomChatOperationCurrent(lane))
+            {
+                RefreshInGameRoomSnapshot();
+            }
         }
     }
 
@@ -1586,16 +1736,23 @@ public partial class MainWindow
 
     private async Task SendPartyRoomChatMessageAsync(string text, ChatAttachmentContract? attachment)
     {
-        if (_currentPartyRoom is null)
+        if (_currentPartyRoom is null || !CanSynchronizeUserData)
         {
             return;
         }
 
+        var session = _accountSessionCoordinator.Capture();
         var roomId = _currentPartyRoom.RoomId;
         var receiveSessionVersion = _overlayChatReceiveSession.Version;
         if (string.IsNullOrWhiteSpace(text) && attachment is null)
         {
             PartyRoomChatStatusText.Text = "输入消息后再发送";
+            return;
+        }
+
+        var lane = new PartyRoomChatOperationLane(session, roomId, receiveSessionVersion);
+        if (!_partyRoomChatSendRunningSessions.Add(lane))
+        {
             return;
         }
 
@@ -1606,8 +1763,13 @@ public partial class MainWindow
         {
             using var response = await _relayClient.PostJsonAsync(
                 "api/party-rooms/chat",
-                new PartyRoomChatSendRequest(roomId, text, attachment));
+                 new PartyRoomChatSendRequest(roomId, text, attachment));
             var mutation = await response.Content.ReadFromJsonAsync<PartyRoomChatMutationResponse>();
+            if (!IsPartyRoomChatOperationCurrent(lane))
+            {
+                return;
+            }
+
             if (!response.IsSuccessStatusCode || mutation?.Message is null)
             {
                 if (HandleAuthorizationFailure(response.StatusCode, "发送房间消息"))
@@ -1619,8 +1781,7 @@ public partial class MainWindow
                 return;
             }
 
-            if (!string.Equals(_currentPartyRoom?.RoomId, roomId, StringComparison.OrdinalIgnoreCase) ||
-                !_overlayChatReceiveSession.TryEstablishBaseline(
+            if (!_overlayChatReceiveSession.TryEstablishBaseline(
                     roomId,
                     receiveSessionVersion,
                     Math.Max(0, mutation.Message.Sequence - 1)))
@@ -1637,19 +1798,34 @@ public partial class MainWindow
         }
         catch (TaskCanceledException)
         {
-            PartyRoomChatStatusText.Text = "发送超时，消息未送达";
+            if (IsPartyRoomChatOperationCurrent(lane))
+            {
+                PartyRoomChatStatusText.Text = "发送超时，消息未送达";
+            }
         }
-        catch (Exception ex) when (HandleAuthorizationFailure(ex, "发送房间消息"))
+        catch (Exception ex)
         {
-        }
-        catch
-        {
+            if (!IsPartyRoomChatOperationCurrent(lane))
+            {
+                return;
+            }
+
+            if (HandleAuthorizationFailure(ex, "发送房间消息"))
+            {
+                return;
+            }
+
             PartyRoomChatStatusText.Text = "无法连接聊天服务，消息未发送";
         }
         finally
         {
-            PartyRoomChatSendButton.IsEnabled = true;
-            PartyRoomChatAttachmentButton.IsEnabled = _currentPartyRoom is not null;
+            _partyRoomChatSendRunningSessions.Remove(lane);
+            if (IsPartyRoomChatOperationCurrent(lane))
+            {
+                PartyRoomChatSendButton.IsEnabled = true;
+                PartyRoomChatAttachmentButton.IsEnabled = true;
+                RefreshInGameRoomSnapshot();
+            }
         }
     }
 
@@ -1972,7 +2148,25 @@ public partial class MainWindow
         var members = (snapshot.Members ?? [])
             .Select(member =>
             {
-                var presence = PlayerPresencePresentation.ResolveShared(member.PresenceText, member.PresenceText);
+                var isLocalMember =
+                    !string.IsNullOrWhiteSpace(_accountId) &&
+                    string.Equals(
+                        member.PublicProfileId,
+                        _accountId,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.IsNullOrWhiteSpace(_localPlayer) &&
+                    string.Equals(
+                        member.GameId,
+                        _localPlayer,
+                        StringComparison.OrdinalIgnoreCase);
+                var presence = isLocalMember
+                    ? GetPartyRoomSharedPresence()
+                    : PlayerPresencePresentation.ResolveShared(
+                        member.PresenceText,
+                        member.PresenceText);
+                var localMemberState = isLocalMember
+                    ? BuildCurrentPartyRoomMemberDisplayState()
+                    : null;
                 return new PartyLobbyMemberPreview(
                     member.Callsign,
                     member.GameId,
@@ -1982,9 +2176,10 @@ public partial class MainWindow
                 {
                     PresenceText = PlayerPresencePresentation.Format(presence, _language),
                     PresenceBrush = GetPartyPresenceBrush(presence),
-                    LocationText = string.IsNullOrWhiteSpace(member.LocationText) ? "等待位置同步" : member.LocationText,
-                    ShipText = string.IsNullOrWhiteSpace(member.ShipText) ? "等待舰船同步" : member.ShipText,
-                    ShardText = string.IsNullOrWhiteSpace(member.ShardText) ? "等待分线同步" : member.ShardText
+                    LocationText = localMemberState?.LocationText ?? FormatPartyRoomLocation(member.LocationText),
+                    ShipText = localMemberState?.ShipText ??
+                               (string.IsNullOrWhiteSpace(member.ShipText) ? "等待舰船同步" : member.ShipText),
+                    ShardText = localMemberState?.ShardText ?? FormatPartyRoomServer(member.ShardText)
                 };
             })
             .ToArray();
@@ -2052,6 +2247,50 @@ public partial class MainWindow
                 .ToArray()
         };
         return card;
+    }
+
+    private string FormatPartyRoomLocation(string? value)
+    {
+        if (PlayerSessionStatePresentation.IsSessionStateText(value))
+        {
+            return value!.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Contains("等待", StringComparison.OrdinalIgnoreCase))
+        {
+            return "等待位置同步";
+        }
+
+        return FormatLocationForUser(
+            value.Trim().Replace("地点：", "", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FormatPartyRoomServer(string? value)
+    {
+        if (PlayerSessionStatePresentation.IsSessionStateText(value))
+        {
+            return value!.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Contains("等待", StringComparison.OrdinalIgnoreCase))
+        {
+            return "等待服务器同步";
+        }
+
+        var region = value
+            .Split('·', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? value.Trim();
+        if (region is "美服" or "欧服" or "澳服" or "亚服")
+        {
+            return region;
+        }
+
+        var mapped = MapGameServerRegion(region);
+        return mapped.Equals("未知", StringComparison.OrdinalIgnoreCase)
+            ? region
+            : mapped;
     }
 
     private void ShowCurrentPartyRoom(bool resetRoomCodeVisibility = false)

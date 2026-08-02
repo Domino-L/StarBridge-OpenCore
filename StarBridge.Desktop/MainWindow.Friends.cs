@@ -15,12 +15,19 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private readonly record struct FriendChatOperationLane(
+        AccountSessionLease Session,
+        string TargetAccountId);
+
     private readonly ObservableCollection<FriendCenterRow> _friendCenterRows = [];
     private readonly ObservableCollection<FriendChatConversationRow> _friendChatConversations = [];
     private readonly ObservableCollection<FriendChatMessageRow> _friendChatMessages = [];
     private readonly FriendOverlayNotificationTracker _friendOverlayNotificationTracker = new();
     private readonly DispatcherTimer _friendCenterRefreshTimer = new() { Interval = TimeSpan.FromSeconds(20) };
     private readonly DispatcherTimer _friendChatRefreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly HashSet<AccountSessionLease> _refreshingFriendCenterSessions = [];
+    private readonly HashSet<AccountSessionLease> _refreshingFriendChatSessions = [];
+    private readonly HashSet<FriendChatOperationLane> _sendingFriendChatMessageLanes = [];
     private CancellationTokenSource? _socialActivityCts;
     private Task? _socialActivityLoopTask;
     private string _socialActivityInstanceId = "";
@@ -28,10 +35,7 @@ public partial class MainWindow
     private FriendCenterSnapshotContract? _friendCenterSnapshot;
     private FriendUserContract[] _friendSearchResults = [];
     private FriendCenterSection _friendCenterSection = FriendCenterSection.Friends;
-    private bool _isRefreshingFriendCenter;
-    private bool _isMutatingFriendRelationship;
-    private bool _isRefreshingFriendChat;
-    private bool _isSendingFriendChatMessage;
+    private readonly HashSet<AccountSessionLease> _mutatingFriendRelationshipSessions = [];
     private bool _isSelectingFriendChatConversation;
     private bool _isApplyingDirectMessagePrivacy;
     private bool _isUpdatingDirectMessagePrivacy;
@@ -43,8 +47,25 @@ public partial class MainWindow
     private DirectMessagePrivacyContract _directMessagePrivacy = new(true, default);
     private string _activeFriendChatOrigin = DirectMessageOrigins.Unknown;
     private long _friendChatLatestSequence;
+    private bool _isSendingFriendChatMessage =>
+        _activeFriendChatUser is { } activeUser &&
+        !string.IsNullOrWhiteSpace(activeUser.AccountId) &&
+        _sendingFriendChatMessageLanes.Contains(CreateFriendChatOperationLane(
+            _accountSessionCoordinator.Capture(),
+            activeUser.AccountId));
     private bool CanConfigureDirectMessagePrivacy =>
         DirectMessagePrivacyAvailabilityPolicy.CanConfigure(IsLoggedIn, CanSynchronizeUserData);
+
+    private static FriendChatOperationLane CreateFriendChatOperationLane(
+        AccountSessionLease session,
+        string targetAccountId) =>
+        new(session, targetAccountId.Trim().ToUpperInvariant());
+
+    private bool IsFriendChatOperationCurrent(FriendChatOperationLane lane) =>
+        _accountSessionCoordinator.IsCurrent(lane.Session) &&
+        _activeFriendChatUser is { } activeUser &&
+        CreateFriendChatOperationLane(lane.Session, activeUser.AccountId).TargetAccountId
+            .Equals(lane.TargetAccountId, StringComparison.Ordinal);
 
     private void RefreshDirectMessagePrivacyAuthenticationState()
     {
@@ -76,6 +97,7 @@ public partial class MainWindow
             await RefreshFriendCenterAsync(showErrors: false);
             await RefreshFriendChatAsync(showErrors: false);
             await RefreshDirectMessagePrivacyAsync(showErrors: false);
+            await RefreshNotificationCenterAsync(showErrors: false);
         };
     }
 
@@ -117,8 +139,10 @@ public partial class MainWindow
         RenderFriendCenterSection();
         RenderActiveFriendChat();
         RefreshPersonalProfileFriendAction();
+        ClearNotificationCenterState();
         ApplyDirectMessagePrivacyToControls();
         SetFriendCenterStatus("登录后即可同步好友与私聊。", StatusPalette.DisabledBrush);
+        RefreshInGameSocialSnapshot();
     }
 
     private void StartSocialActivityLoop()
@@ -180,7 +204,8 @@ public partial class MainWindow
                 {
                     await Task.WhenAll(
                         RefreshFriendCenterAsync(showErrors: false),
-                        RefreshFriendChatAsync(showErrors: false));
+                        RefreshFriendChatAsync(showErrors: false),
+                        RefreshNotificationCenterAsync(showErrors: false));
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -353,19 +378,24 @@ public partial class MainWindow
 
     private async Task RefreshFriendCenterAsync(bool showErrors)
     {
-        if (_isRefreshingFriendCenter)
-        {
-            return;
-        }
-
         if (!CanSynchronizeUserData)
         {
             SetFriendCenterStatus("登录后即可同步好友与申请。", StatusPalette.DisabledBrush);
+            _inGameFriendDirectoryState = InGameFriendDirectoryState.Unavailable;
+            _inGameFriendCollectionStatus = "登录后即可同步好友与申请。";
+            RefreshInGameSocialSnapshot();
             return;
         }
 
         var session = _accountSessionCoordinator.Capture();
-        _isRefreshingFriendCenter = true;
+        if (!_refreshingFriendCenterSessions.Add(session))
+        {
+            return;
+        }
+
+        _inGameFriendDirectoryState = InGameFriendDirectoryState.Loading;
+        _inGameFriendCollectionStatus = "正在同步好友与申请…";
+        RefreshInGameSocialSnapshot();
         try
         {
             var includePresence = GetPresenceSharingDecision().CanReceiveRealtime.ToString().ToLowerInvariant();
@@ -381,19 +411,32 @@ public partial class MainWindow
                 return;
             }
 
+            _inGameFriendDirectoryState = InGameFriendDirectoryState.Ready;
+            _inGameFriendCollectionStatus = snapshot.Friends.Length == 0
+                ? "好友列表为空，可以通过上方搜索添加好友。"
+                : $"已加载 {snapshot.Friends.Length} 位好友";
             ApplyFriendCenterSnapshot(snapshot);
             SetFriendCenterStatus($"已同步 · {snapshot.RefreshedAt.ToLocalTime():HH:mm:ss}", StatusPalette.SuccessBrush);
         }
         catch (Exception ex)
         {
-            if (showErrors)
+            if (_accountSessionCoordinator.IsCurrent(session))
             {
-                SetFriendCenterStatus(UserFacingError.Describe(ex, "好友数据暂时无法同步，请稍后重试。"), StatusPalette.DangerBrush);
+                var failure = UserFacingError.Describe(
+                    ex,
+                    "好友数据暂时无法同步，请稍后重试。");
+                _inGameFriendDirectoryState = InGameFriendDirectoryState.Failed;
+                _inGameFriendCollectionStatus = failure;
+                RefreshInGameSocialSnapshot();
+                if (showErrors)
+                {
+                    SetFriendCenterStatus(failure, StatusPalette.DangerBrush);
+                }
             }
         }
         finally
         {
-            _isRefreshingFriendCenter = false;
+            _refreshingFriendCenterSessions.Remove(session);
         }
     }
 
@@ -412,6 +455,7 @@ public partial class MainWindow
         RenderFriendCenterSection();
         RefreshPersonalProfileFriendAction();
         QueueFriendCommunicationEvents(communicationEvents);
+        RefreshInGameSocialSnapshot();
     }
 
     private void FriendCenterSectionButton_Click(object sender, RoutedEventArgs e)
@@ -490,7 +534,7 @@ public partial class MainWindow
         _friendCenterRows.Clear();
         foreach (var entry in entries)
         {
-            var user = FriendCenterAvatarResolver.Resolve(entry.User, _networkSnapshots.Values);
+            var user = FriendCenterUserResolver.Resolve(entry.User, _networkSnapshots.Values);
             _friendCenterRows.Add(new FriendCenterRow(user, entry.RelationshipUpdatedAt));
         }
 
@@ -605,29 +649,44 @@ public partial class MainWindow
         _ => Task.FromResult(true)
     };
 
-    private async Task MutateFriendRelationshipAsync(string targetAccountId, string action)
+    private async Task<bool> MutateFriendRelationshipAsync(string targetAccountId, string action)
     {
-        if (_isMutatingFriendRelationship)
+        var session = _accountSessionCoordinator.Capture();
+        if (!_mutatingFriendRelationshipSessions.Add(session))
         {
-            return;
+            return false;
         }
 
-        _isMutatingFriendRelationship = true;
         try
         {
             using var response = await _relayClient.PostJsonAsync(
                 "api/friends/actions",
                 new FriendActionRequestContract(
-                    action,
-                    targetAccountId,
-                    GetPresenceSharingDecision().CanReceiveRealtime));
+                     action,
+                     targetAccountId,
+                     GetPresenceSharingDecision().CanReceiveRealtime));
+            if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return false;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
-                SetFriendCenterStatus(await ReadResponseErrorAsync(response), StatusPalette.DangerBrush);
-                return;
+                var error = await ReadResponseErrorAsync(response);
+                if (_accountSessionCoordinator.IsCurrent(session))
+                {
+                    SetFriendCenterStatus(error, StatusPalette.DangerBrush);
+                }
+
+                return false;
             }
 
             var snapshot = await response.Content.ReadFromJsonAsync<FriendCenterSnapshotContract>();
+            if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return false;
+            }
+
             if (snapshot is not null)
             {
                 ApplyFriendCenterSnapshot(snapshot);
@@ -643,14 +702,22 @@ public partial class MainWindow
             };
             SetFriendCenterSection(nextSection);
             SetFriendCenterStatus(GetFriendActionSuccessCopy(action), StatusPalette.SuccessBrush);
+            return true;
         }
         catch (Exception ex)
         {
-            SetFriendCenterStatus(UserFacingError.Describe(ex, "好友操作未完成，请稍后重试。"), StatusPalette.DangerBrush);
+            if (_accountSessionCoordinator.IsCurrent(session))
+            {
+                SetFriendCenterStatus(
+                    UserFacingError.Describe(ex, "好友操作未完成，请稍后重试。"),
+                    StatusPalette.DangerBrush);
+            }
+
+            return false;
         }
         finally
         {
-            _isMutatingFriendRelationship = false;
+            _mutatingFriendRelationshipSessions.Remove(session);
         }
     }
 
@@ -684,7 +751,7 @@ public partial class MainWindow
         MainTabs.SelectedItem = FriendCenterTab;
         SetActiveNav(HeaderFriendCenterButton);
         QueueMainPageReveal(previousTab);
-        _activeFriendChatUser = FriendCenterAvatarResolver.Resolve(user, _networkSnapshots.Values);
+        _activeFriendChatUser = FriendCenterUserResolver.Resolve(user, _networkSnapshots.Values);
         _activeFriendChatOrigin = DirectMessageOrigins.Normalize(origin);
         _activeFriendChatConversation = new FriendChatConversationContract(
             _activeFriendChatUser,
@@ -735,13 +802,17 @@ public partial class MainWindow
 
     private async Task RefreshFriendChatAsync(bool showErrors)
     {
-        if (_isRefreshingFriendChat || !CanSynchronizeUserData)
+        if (!CanSynchronizeUserData)
         {
             return;
         }
 
         var session = _accountSessionCoordinator.Capture();
-        _isRefreshingFriendChat = true;
+        if (!_refreshingFriendChatSessions.Add(session))
+        {
+            return;
+        }
+
         try
         {
             var includePresence = GetPresenceSharingDecision().CanReceiveRealtime.ToString().ToLowerInvariant();
@@ -758,9 +829,11 @@ public partial class MainWindow
             }
 
             var activeId = _activeFriendChatUser?.AccountId;
-            var visibleConversationId = ReferenceEquals(MainTabs.SelectedItem, FriendCenterTab) &&
-                                        _friendCenterSection == FriendCenterSection.Conversations &&
-                                        IsActive
+            var visibleConversationId =
+                ReferenceEquals(MainTabs.SelectedItem, FriendCenterTab) &&
+                _friendCenterSection == FriendCenterSection.Conversations &&
+                IsActive ||
+                _inGameMenuCoordinator.IsSocialConversationVisible(activeId)
                 ? activeId
                 : null;
             var communicationEvents = _friendOverlayNotificationTracker.ObserveConversations(
@@ -775,7 +848,7 @@ public partial class MainWindow
             {
                 var resolved = conversation with
                 {
-                    User = FriendCenterAvatarResolver.Resolve(conversation.User, _networkSnapshots.Values)
+                    User = FriendCenterUserResolver.Resolve(conversation.User, _networkSnapshots.Values)
                 };
                 _friendChatConversations.Add(new FriendChatConversationRow(resolved));
                 if (!string.IsNullOrWhiteSpace(activeId) &&
@@ -803,11 +876,16 @@ public partial class MainWindow
                 await RefreshFriendChatMessagesAsync(showErrors);
             }
 
+            if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return;
+            }
+
             QueueFriendCommunicationEvents(communicationEvents);
         }
         catch (Exception ex)
         {
-            if (showErrors)
+            if (_accountSessionCoordinator.IsCurrent(session) && showErrors)
             {
                 FriendChatStatusText.Text = UserFacingError.Describe(ex, "私聊暂时无法同步，请稍后重试。");
                 FriendChatStatusText.Foreground = StatusPalette.DangerBrush;
@@ -815,12 +893,42 @@ public partial class MainWindow
         }
         finally
         {
-            _isRefreshingFriendChat = false;
+            _refreshingFriendChatSessions.Remove(session);
+            if (_accountSessionCoordinator.IsCurrent(session))
+            {
+                RefreshInGameSocialSnapshot();
+            }
         }
     }
 
     private void QueueFriendCommunicationEvents(IEnumerable<FriendCommunicationEvent> communicationEvents)
     {
+        var events = communicationEvents.ToArray();
+        if (_inGameMenuCoordinator.IsOpen &&
+            _inGameMenuSettings.ShowSocialNotifications &&
+            events.Length > 0)
+        {
+            foreach (var communicationEvent in events)
+            {
+                var detail = _inGameMenuSettings.InvitationPreviewMode switch
+                {
+                    InGameMenuInvitationPreviewMode.Hidden => null,
+                    InGameMenuInvitationPreviewMode.SenderOnly =>
+                        communicationEvent.Detail
+                            .Split('·', 2, StringSplitOptions.TrimEntries)[0],
+                    _ => communicationEvent.Detail
+                };
+                _inGameMenuCoordinator.ShowNotice(
+                    communicationEvent.Title,
+                    detail);
+            }
+
+            if (_inGameMenuSettings.SocialNotificationSound)
+            {
+                System.Media.SystemSounds.Asterisk.Play();
+            }
+        }
+
         if (!_overlaySettings.ShowNotice ||
             !_overlaySettings.CommunicationFriendEvents ||
             _overlayWindow is not { IsVisible: true })
@@ -828,7 +936,7 @@ public partial class MainWindow
             return;
         }
 
-        foreach (var communicationEvent in communicationEvents)
+        foreach (var communicationEvent in events)
         {
             _overlayWindow.QueueCommunicationEvent(communicationEvent.Title, communicationEvent.Detail);
         }
@@ -900,9 +1008,10 @@ public partial class MainWindow
         }
 
         var session = _accountSessionCoordinator.Capture();
+        var targetId = _activeFriendChatUser.AccountId;
+        var lane = CreateFriendChatOperationLane(session, targetId);
         try
         {
-            var targetId = _activeFriendChatUser.AccountId;
             var wasEmpty = _friendChatMessages.Count == 0;
             var previousLatestSequence = _friendChatLatestSequence;
             var shouldFollowLatest = wasEmpty || _friendChatFollowLatest;
@@ -980,8 +1089,10 @@ public partial class MainWindow
             }
 
             if (history.CanSend && _friendChatLatestSequence > 0 &&
-                ReferenceEquals(MainTabs.SelectedItem, FriendCenterTab) &&
-                _friendCenterSection == FriendCenterSection.Conversations && IsActive)
+                (ReferenceEquals(MainTabs.SelectedItem, FriendCenterTab) &&
+                 _friendCenterSection == FriendCenterSection.Conversations &&
+                 IsActive ||
+                 _inGameMenuCoordinator.IsSocialConversationVisible(targetId)))
             {
                 using var readResponse = await _relayClient.PostJsonAsync(
                     "api/friends/chat/read",
@@ -990,10 +1101,17 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            if (showErrors)
+            if (IsFriendChatOperationCurrent(lane) && showErrors)
             {
                 FriendChatStatusText.Text = UserFacingError.Describe(ex, "消息暂时无法同步，请稍后重试。");
                 FriendChatStatusText.Foreground = StatusPalette.DangerBrush;
+            }
+        }
+        finally
+        {
+            if (IsFriendChatOperationCurrent(lane))
+            {
+                RefreshInGameSocialSnapshot();
             }
         }
     }
@@ -1110,7 +1228,8 @@ public partial class MainWindow
 
     private async Task SendFriendChatMessageAsync(string text, ChatAttachmentContract? attachment)
     {
-        if (_activeFriendChatUser is null || _isSendingFriendChatMessage)
+        var activeUser = _activeFriendChatUser;
+        if (activeUser is null || !CanSynchronizeUserData)
         {
             return;
         }
@@ -1122,7 +1241,15 @@ public partial class MainWindow
             return;
         }
 
-        _isSendingFriendChatMessage = true;
+        var session = _accountSessionCoordinator.Capture();
+        var targetAccountId = activeUser.AccountId;
+        var origin = _activeFriendChatOrigin;
+        var lane = CreateFriendChatOperationLane(session, targetAccountId);
+        if (!_sendingFriendChatMessageLanes.Add(lane))
+        {
+            return;
+        }
+
         FriendChatSendButton.IsEnabled = false;
         FriendChatAttachmentButton.IsEnabled = false;
         try
@@ -1130,15 +1257,26 @@ public partial class MainWindow
             using var response = await _relayClient.PostJsonAsync(
                 "api/friends/chat/messages",
                 new FriendChatSendRequestContract(
-                    _activeFriendChatUser.AccountId,
+                    targetAccountId,
                     text,
                     Guid.NewGuid().ToString("N"),
-                    _activeFriendChatOrigin,
+                    origin,
                     attachment));
             var mutation = await response.Content.ReadFromJsonAsync<FriendChatMutationResponseContract>();
+            if (!IsFriendChatOperationCurrent(lane))
+            {
+                return;
+            }
+
             if (!response.IsSuccessStatusCode || mutation?.Message is null)
             {
-                FriendChatStatusText.Text = mutation?.Error ?? await ReadResponseErrorAsync(response);
+                var error = mutation?.Error ?? await ReadResponseErrorAsync(response);
+                if (!IsFriendChatOperationCurrent(lane))
+                {
+                    return;
+                }
+
+                FriendChatStatusText.Text = error;
                 FriendChatStatusText.Foreground = StatusPalette.DangerBrush;
                 return;
             }
@@ -1147,7 +1285,7 @@ public partial class MainWindow
             {
                 _friendChatMessages.Add(CreateFriendChatMessageRow(
                     mutation.Message,
-                    _activeFriendChatUser.AccountId));
+                    targetAccountId));
             }
             _friendChatLatestSequence = Math.Max(_friendChatLatestSequence, mutation.Message.Sequence);
             FriendChatInputBox.Clear();
@@ -1159,6 +1297,11 @@ public partial class MainWindow
             FriendChatStatusText.Text = "已发送";
             FriendChatStatusText.Foreground = StatusPalette.SuccessBrush;
             await RefreshFriendChatAsync(showErrors: false);
+            if (!IsFriendChatOperationCurrent(lane))
+            {
+                return;
+            }
+
             if (mutation.Status == "request_sent")
             {
                 FriendChatStatusText.Text = "消息请求已发送，接受前不能继续发送。";
@@ -1171,13 +1314,20 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            FriendChatStatusText.Text = UserFacingError.Describe(ex, "消息未发送，请检查网络后重试。");
-            FriendChatStatusText.Foreground = StatusPalette.DangerBrush;
+            if (IsFriendChatOperationCurrent(lane))
+            {
+                FriendChatStatusText.Text = UserFacingError.Describe(ex, "消息未发送，请检查网络后重试。");
+                FriendChatStatusText.Foreground = StatusPalette.DangerBrush;
+            }
         }
         finally
         {
-            _isSendingFriendChatMessage = false;
-            RenderActiveFriendChat();
+            _sendingFriendChatMessageLanes.Remove(lane);
+            if (IsFriendChatOperationCurrent(lane))
+            {
+                RenderActiveFriendChat();
+                RefreshInGameSocialSnapshot();
+            }
         }
     }
 
@@ -1333,8 +1483,73 @@ public partial class MainWindow
         FriendChatAttachmentButton.IsEnabled = CanSynchronizeUserData && canCompose && !_isSendingFriendChatMessage;
     }
 
+    private void RefreshFriendPresenceFromFleetSnapshots()
+    {
+        var presenceChanged = false;
+        for (var index = 0; index < _friendCenterRows.Count; index++)
+        {
+            var row = _friendCenterRows[index];
+            var resolved = FriendCenterUserResolver.Resolve(row.User, _networkSnapshots.Values);
+            if (!HasFriendPresenceProjectionChanged(row.User, resolved))
+            {
+                continue;
+            }
+
+            _friendCenterRows[index] = row with { User = resolved };
+            presenceChanged = true;
+        }
+
+        for (var index = 0; index < _friendChatConversations.Count; index++)
+        {
+            var row = _friendChatConversations[index];
+            var resolved = FriendCenterUserResolver.Resolve(row.User, _networkSnapshots.Values);
+            if (!HasFriendPresenceProjectionChanged(row.User, resolved))
+            {
+                continue;
+            }
+
+            var conversation = row.Conversation with { User = resolved };
+            _friendChatConversations[index] = new FriendChatConversationRow(conversation);
+            if (_activeFriendChatConversation?.User.AccountId.Equals(
+                    resolved.AccountId,
+                    StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _activeFriendChatConversation = conversation;
+            }
+
+            presenceChanged = true;
+        }
+
+        if (_activeFriendChatUser is not null)
+        {
+            var resolved = FriendCenterUserResolver.Resolve(
+                _activeFriendChatUser,
+                _networkSnapshots.Values);
+            if (HasFriendPresenceProjectionChanged(_activeFriendChatUser, resolved))
+            {
+                _activeFriendChatUser = resolved;
+                presenceChanged = true;
+            }
+        }
+
+        if (!presenceChanged)
+        {
+            return;
+        }
+
+        RenderActiveFriendChat();
+        RefreshInGameSocialSnapshot();
+    }
+
+    private static bool HasFriendPresenceProjectionChanged(
+        FriendUserContract current,
+        FriendUserContract resolved) =>
+        !string.Equals(current.Presence, resolved.Presence, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(current.AvatarImageData, resolved.AvatarImageData, StringComparison.Ordinal);
+
     private void RefreshPersonalProfileFriendAction()
     {
+        RefreshPersonalProfileReportAction();
         if (PersonalProfileFriendActionButton is null || PersonalProfileMessageButton is null)
         {
             return;

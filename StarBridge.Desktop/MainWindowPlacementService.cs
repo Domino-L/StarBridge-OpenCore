@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Runtime.CompilerServices;
 using WinForms = System.Windows.Forms;
 
 namespace StarBridge.Desktop;
@@ -8,10 +9,16 @@ namespace StarBridge.Desktop;
 internal static class MainWindowPlacementService
 {
     private const double WorkAreaMargin = 8;
+    private static readonly ConditionalWeakTable<Window, DesignMinimum>
+        DesignMinimums = new();
 
     internal static void FitInitialWindow(Window window)
+        => FitInitialWindow(window, window);
+
+    internal static void FitInitialWindow(Window window, Window placementReference)
     {
-        if (window.WindowState != WindowState.Normal || !TryGetWorkingArea(window, out var workingArea))
+        if (window.WindowState != WindowState.Normal ||
+            !TryGetWorkingArea(placementReference, out var workingArea))
         {
             return;
         }
@@ -21,14 +28,94 @@ internal static class MainWindowPlacementService
     }
 
     internal static void EnsureVisible(Window window)
+        => EnsureVisible(window, window);
+
+    internal static void EnsureVisible(Window window, Window placementReference)
     {
-        if (window.WindowState != WindowState.Normal || !TryGetWorkingArea(window, out var workingArea))
+        if (window.WindowState != WindowState.Normal ||
+            !TryGetWorkingArea(placementReference, out var workingArea))
         {
             return;
         }
 
         var requested = ReadWindowBounds(window);
         Apply(window, MainWindowPlacementPolicy.EnsureVisible(requested, workingArea, WorkAreaMargin));
+    }
+
+    internal static void Restore(
+        Window window,
+        AppWindowBounds saved,
+        Window placementReference)
+    {
+        if (window.WindowState != WindowState.Normal ||
+            !TryGetWorkingArea(placementReference, out var workingArea))
+        {
+            return;
+        }
+
+        Apply(
+            window,
+            MainWindowPlacementPolicy.EnsureVisible(
+                saved,
+                workingArea,
+                WorkAreaMargin));
+    }
+
+    internal static AppWindowBounds ReadBounds(Window window) =>
+        ReadWindowBounds(window);
+
+    internal static void SnapToWorkingArea(
+        Window window,
+        Window placementReference,
+        double distance)
+    {
+        if (window.WindowState != WindowState.Normal ||
+            distance <= 0 ||
+            !TryGetWorkingArea(placementReference, out var workingArea))
+        {
+            return;
+        }
+
+        var requested = ReadWindowBounds(window);
+        var left = requested.Left;
+        var top = requested.Top;
+        var workingRight = workingArea.Left + workingArea.Width;
+        var workingBottom = workingArea.Top + workingArea.Height;
+        if (Math.Abs(requested.Left - workingArea.Left) <= distance)
+        {
+            left = workingArea.Left;
+        }
+        else if (Math.Abs(
+                     requested.Left + requested.Width - workingRight) <=
+                 distance)
+        {
+            left = workingRight - requested.Width;
+        }
+
+        if (Math.Abs(requested.Top - workingArea.Top) <= distance)
+        {
+            top = workingArea.Top;
+        }
+        else if (Math.Abs(
+                     requested.Top + requested.Height - workingBottom) <=
+                 distance)
+        {
+            top = workingBottom - requested.Height;
+        }
+
+        if (Math.Abs(left - requested.Left) < 0.1 &&
+            Math.Abs(top - requested.Top) < 0.1)
+        {
+            return;
+        }
+
+        Apply(
+            window,
+            requested with
+            {
+                Left = left,
+                Top = top
+            });
     }
 
     private static AppWindowBounds ReadWindowBounds(Window window)
@@ -73,13 +160,19 @@ internal static class MainWindowPlacementService
             return;
         }
 
+        var designMinimum = DesignMinimums.GetValue(
+            window,
+            static candidate => new DesignMinimum(candidate.MinWidth, candidate.MinHeight));
         // On compact or scaled displays, keeping the window operable is more important than
-        // preserving a desktop-size minimum that cannot physically fit the monitor.
-        window.MinWidth = Math.Min(window.MinWidth, bounds.Width);
-        window.MinHeight = Math.Min(window.MinHeight, bounds.Height);
+        // preserving a desktop-size minimum that cannot physically fit the monitor. Restore
+        // the design minimum when the same retained window returns to a larger monitor.
+        window.MinWidth = Math.Min(designMinimum.Width, bounds.Width);
+        window.MinHeight = Math.Min(designMinimum.Height, bounds.Height);
         window.Width = bounds.Width;
         window.Height = bounds.Height;
         window.Left = bounds.Left;
         window.Top = bounds.Top;
     }
+
+    private sealed record DesignMinimum(double Width, double Height);
 }

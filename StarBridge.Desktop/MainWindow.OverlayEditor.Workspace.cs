@@ -368,6 +368,7 @@ public partial class MainWindow
         }
 
         _isOverlayLayoutLocked = isLocked;
+        CancelOverlayEditorLiveEdit();
         _activeOverlayEditorElement?.ReleaseMouseCapture();
         _activeOverlayEventNotificationPreview?.ReleaseMouseCapture();
         _activeOverlayItem = null;
@@ -453,12 +454,7 @@ public partial class MainWindow
         RefreshOverlayFullScreenToolsInspector();
         RefreshOverlayOverviewSummary();
 
-        if (OverlayEditHintText is not null)
-        {
-            OverlayEditHintText.Text = _isOverlayEditorFullScreen
-            ? "全屏编辑按 1:1 对齐真实浮层位置，可直接拖拽调整。"
-            : "拖动模块调整位置，拖拽右下角缩放；进入全屏编辑可按 1:1 对齐浮层。";
-        }
+        ApplyOverlaySettingsWorkspacePresentation();
     }
 
     private void SyncOverlayEditorPlacementControls()
@@ -586,10 +582,10 @@ public partial class MainWindow
                 : FindBrush("MutedTextBrush", Brushes.LightSlateGray);
         }
 
-        if (OverlayPreviewDiscardButton is not null)
+        if (OverlayHeaderDiscardButton is not null)
         {
-            OverlayPreviewDiscardButton.IsEnabled = _isOverlayEditorLayoutDirty;
-            OverlayPreviewDiscardButton.Opacity = _isOverlayEditorLayoutDirty ? 1.0 : 0.52;
+            OverlayHeaderDiscardButton.IsEnabled = _isOverlayEditorLayoutDirty;
+            OverlayHeaderDiscardButton.Opacity = _isOverlayEditorLayoutDirty ? 1.0 : 0.52;
         }
 
         if (OverlayFullScreenDiscardButton is not null)
@@ -643,7 +639,10 @@ public partial class MainWindow
         var focus = _isOverlayEditorFullScreen;
         OverlayEditorCategoryPanel.Visibility = focus ? Visibility.Collapsed : Visibility.Visible;
         OverlayEditorSettingsPanel.Visibility = focus ? Visibility.Collapsed : Visibility.Visible;
-        OverlayInspectorPanel.Visibility = focus ? Visibility.Collapsed : Visibility.Visible;
+        if (focus)
+        {
+            OverlayInspectorPanel.Visibility = Visibility.Collapsed;
+        }
         if (OverlayEditRootGrid is not null)
         {
             OverlayEditRootGrid.Margin = focus ? new Thickness(0) : new Thickness(0, 14, 0, 0);
@@ -660,8 +659,8 @@ public partial class MainWindow
         }
 
         OverlayEditorCategoryColumn.Width = focus ? new GridLength(0) : new GridLength(196);
-        OverlayEditorSettingsColumn.Width = focus ? new GridLength(0) : new GridLength(360);
-        OverlayEditorInspectorColumn.Width = focus ? new GridLength(0) : new GridLength(224);
+        OverlayEditorSettingsColumn.Width = focus ? new GridLength(0) : new GridLength(400);
+        OverlayEditorInspectorColumn.Width = new GridLength(0);
         OverlayEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
 
         Grid.SetColumn(OverlayPreviewPanel, focus ? 0 : 3);
@@ -764,6 +763,7 @@ public partial class MainWindow
         }
 
         _overlayEditorFullScreenSnapshot = CreateOverlayEditorFullScreenSnapshot();
+        _overlayInspectorWasOpenBeforeFullScreen = OverlayInspectorPanel?.Visibility == Visibility.Visible;
         _isOverlayEditorFullScreen = true;
         SetOverlayEditorLivePreviewEnabled(true);
         _isOverlayFullScreenToolsOpen = true;
@@ -799,6 +799,12 @@ public partial class MainWindow
             _isOverlayFullScreenToolsDragging = false;
             OverlayFullScreenToolsDragHandle?.ReleaseMouseCapture();
             ApplyOverlayEditorFullScreenState();
+            if (_overlayInspectorWasOpenBeforeFullScreen)
+            {
+                SetOverlayInspectorOpen(true);
+            }
+
+            _overlayInspectorWasOpenBeforeFullScreen = false;
         }
         finally
         {
@@ -1186,6 +1192,25 @@ public partial class MainWindow
 
     private IEnumerable<(double Start, double Center, double End)> GetOverlayEditorModuleSnapTargets(OverlayLayoutItem activeItem, bool horizontal)
     {
+        if (ReferenceEquals(_overlayEditorSnapTargetOwner, activeItem))
+        {
+            return horizontal
+                ? _overlayEditorHorizontalSnapTargets
+                : _overlayEditorVerticalSnapTargets;
+        }
+
+        return ResolveOverlayEditorModuleSnapTargets(activeItem, horizontal);
+    }
+
+    private (double Start, double Center, double End)[] ResolveOverlayEditorModuleSnapTargets(
+        OverlayLayoutItem activeItem,
+        bool horizontal)
+    {
+        var resolvedItems = OverlaySurfaceLayout.ResolveItems(
+            _overlayLayout,
+            OverlayEditorCanvas.Width,
+            OverlayEditorCanvas.Height);
+        var targets = new List<(double Start, double Center, double End)>();
         foreach (var item in _overlayLayout.Where(ShouldRenderOverlayEditorItem))
         {
             if (ReferenceEquals(item, activeItem))
@@ -1193,11 +1218,20 @@ public partial class MainWindow
                 continue;
             }
 
-            var rect = ResolveOverlayEditorItemDisplayRect(item);
-            yield return horizontal
+            if (!resolvedItems.TryGetValue(item.Key, out var rect))
+            {
+                rect = OverlaySurfaceLayout.ResolveItemRect(
+                    item,
+                    OverlayEditorCanvas.Width,
+                    OverlayEditorCanvas.Height);
+            }
+
+            targets.Add(horizontal
                 ? (rect.Left, rect.Left + rect.Width / 2, rect.Right)
-                : (rect.Top, rect.Top + rect.Height / 2, rect.Bottom);
+                : (rect.Top, rect.Top + rect.Height / 2, rect.Bottom));
         }
+
+        return targets.ToArray();
     }
 
     private Rect ClampOverlayEditorRect(Rect rect)
@@ -1271,6 +1305,8 @@ public partial class MainWindow
         {
             OverlayEditorCanvas.Children.Remove(guide);
         }
+
+        _overlayEditorAlignmentGuides.Clear();
     }
 
     private void AddOverlayEditorGuideLine(double position, bool vertical, System.Windows.Media.Brush brush, double opacity, double thickness)
@@ -1288,6 +1324,7 @@ public partial class MainWindow
         Canvas.SetTop(line, vertical ? 0 : Math.Round(position) - thickness / 2);
         System.Windows.Controls.Panel.SetZIndex(line, 1800);
         OverlayEditorCanvas.Children.Add(line);
+        _overlayEditorAlignmentGuides.Add(line);
     }
 
     private void AddOverlayEditorAnchorPoint(double x, double y, System.Windows.Media.Brush brush)
@@ -1307,6 +1344,53 @@ public partial class MainWindow
         Canvas.SetTop(point, y - size / 2);
         System.Windows.Controls.Panel.SetZIndex(point, 1810);
         OverlayEditorCanvas.Children.Add(point);
+        _overlayEditorAlignmentGuides.Add(point);
+    }
+
+    private void UpdateOverlayEditorAlignmentGuides(OverlayLayoutItem item, Rect rect)
+    {
+        if (OverlayEditorCanvas is null)
+        {
+            return;
+        }
+
+        if (_overlayEditorAlignmentGuides.Count != 5 ||
+            _overlayEditorAlignmentGuides.Any(guide => !OverlayEditorCanvas.Children.Contains(guide)))
+        {
+            RefreshOverlayEditorAlignmentGuides(item);
+            return;
+        }
+
+        var anchorX = GetOverlayEditorHorizontalAnchorPoint(item, rect);
+        var anchorY = GetOverlayEditorVerticalAnchorPoint(item, rect);
+        var anchorVerticalGuide = _overlayEditorAlignmentGuides[2];
+        var anchorHorizontalGuide = _overlayEditorAlignmentGuides[3];
+        var anchorPoint = _overlayEditorAlignmentGuides[4];
+
+        anchorVerticalGuide.Background = item.Brush;
+        anchorHorizontalGuide.Background = item.Brush;
+        anchorPoint.BorderBrush = item.Brush;
+        var anchorVerticalTranslation = GetOverlayEditorGuideTranslation(anchorVerticalGuide);
+        var anchorHorizontalTranslation = GetOverlayEditorGuideTranslation(anchorHorizontalGuide);
+        var anchorPointTranslation = GetOverlayEditorGuideTranslation(anchorPoint);
+        anchorVerticalTranslation.X =
+            Math.Round(anchorX) - anchorVerticalGuide.Width / 2 - Canvas.GetLeft(anchorVerticalGuide);
+        anchorHorizontalTranslation.Y =
+            Math.Round(anchorY) - anchorHorizontalGuide.Height / 2 - Canvas.GetTop(anchorHorizontalGuide);
+        anchorPointTranslation.X = anchorX - anchorPoint.Width / 2 - Canvas.GetLeft(anchorPoint);
+        anchorPointTranslation.Y = anchorY - anchorPoint.Height / 2 - Canvas.GetTop(anchorPoint);
+    }
+
+    private static TranslateTransform GetOverlayEditorGuideTranslation(FrameworkElement guide)
+    {
+        if (guide.RenderTransform is TranslateTransform translation)
+        {
+            return translation;
+        }
+
+        translation = new TranslateTransform();
+        guide.RenderTransform = translation;
+        return translation;
     }
 
     private static SolidColorBrush CreateOverlayEditorPanelBackground(bool isSelected, double backgroundOpacity)
@@ -1802,6 +1886,20 @@ public partial class MainWindow
         string? ShipText = null,
         string? LocationText = null,
         string? ServerShard = null);
+
+    private sealed record OverlayEditorSampleIdentity(string Callsign, string GameName);
+
+    private static readonly OverlayEditorSampleIdentity[] OverlayEditorSampleMemberIdentities =
+    [
+        new("示例", "Demo2"),
+        new("示例三", "Demo03"),
+        new("示例成员", "DemoUser04"),
+        new("示例远航员", "DemoVoyager05"),
+        new("示例深空观察员", "DemoObserver006"),
+        new("示例远程信标协调员", "DemoBeaconCoordinator07"),
+        new("示例超远距航路观察员", "DemoLongRangeRouteObserver08"),
+        new("示例最长呼号压力测试成员", "DemoExtraLongCallsignStressMember09")
+    ];
 
     private IEnumerable<UIElement> CreateOverlayEditorLivePreviewLines(OverlayLayoutItem item)
     {
@@ -2534,14 +2632,14 @@ public partial class MainWindow
             .Where(member => !member.IsSelf)
             .OrderByDescending(member => member.Online)
             .ThenByDescending(member => ResolveOverlayEditorSampleMemberPriorityScore(member))
+            .ThenBy(member => FormatOverlayEditorSampleMemberName(member).Length)
             .ThenBy(member => FormatOverlayEditorSampleMemberName(member), StringComparer.OrdinalIgnoreCase);
         var sampleMembers = selfMember is null
             ? otherMembers.ToArray()
             : new[] { selfMember }.Concat(otherMembers).ToArray();
 
-        for (var index = 0; index < sampleMembers.Length; index++)
+        foreach (var member in sampleMembers)
         {
-            var member = sampleMembers[index];
             var ship = string.IsNullOrWhiteSpace(member.ShipText) ? "Unknown" : member.ShipText!;
             var location = string.IsNullOrWhiteSpace(member.LocationText) ? "Unknown" : member.LocationText!;
             yield return new OverlayEditorMemberPreviewRow(
@@ -2592,17 +2690,18 @@ public partial class MainWindow
     private OverlayEditorSampleMember[] CreateOverlayEditorSampleMembers(string currentSquadName)
     {
         var localShard = ResolveOverlayEditorLocalSampleShard();
+        var identities = OverlayEditorSampleMemberIdentities;
         return
         [
             ResolveOverlayEditorCurrentUserSampleMember(currentSquadName, localShard),
-            new("L", "Li", currentSquadName, true, false, false, ServerShard: localShard),
-            new("NOVA-7", "NovaSeven", currentSquadName, true, false, true, ServerShard: "pub_sc_alpha_4_1_0_usw_999999"),
-            new("北辰", "Beichen", "Bravo", true, false, false, ServerShard: "pub_sc_alpha_4_1_0_eu_222222"),
-            new("Kestrel_Long_Range_Commander", "KestrelLongRangeCommander0217", currentSquadName, true, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_555555"),
-            new("ARGO-12", "ArgoTwelve", "Logistics Long Range", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_ap_333333"),
-            new("VEGA-DEEP-SPACE-RELAY", "VegaDeepSpaceRelayOperator", "Delta Recon", false, false, true, ServerShard: "pub_sc_alpha_4_1_0_usw_444444"),
-            new("MIRAI", "Mirai", "Bravo", true, false, false, ServerShard: "pub_sc_alpha_4_1_0_aus_777777"),
-            new("Echo", "Echo", "Delta Recon", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_888888")
+            new(identities[0].Callsign, identities[0].GameName, currentSquadName, true, false, true, ServerShard: localShard),
+            new(identities[1].Callsign, identities[1].GameName, currentSquadName, true, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_999999"),
+            new(identities[2].Callsign, identities[2].GameName, "Bravo", true, false, false, ServerShard: "pub_sc_alpha_4_1_0_eu_222222"),
+            new(identities[3].Callsign, identities[3].GameName, currentSquadName, true, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_555555"),
+            new(identities[4].Callsign, identities[4].GameName, "Bravo", true, false, false, ServerShard: "pub_sc_alpha_4_1_0_aus_777777"),
+            new(identities[5].Callsign, identities[5].GameName, "Logistics Long Range", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_ap_333333"),
+            new(identities[6].Callsign, identities[6].GameName, "Delta Recon", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_444444"),
+            new(identities[7].Callsign, identities[7].GameName, "Delta Recon", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_888888")
         ];
     }
 
@@ -2785,20 +2884,19 @@ public partial class MainWindow
 
     private static string[] ResolveOverlayEditorSampleLocations(int count)
     {
-        var locations = PublishTaskLocationSuggestions
-            .Concat(
+        IReadOnlyList<string> locations = LocationNameLocalizer.ConfirmedChineseDisplayNames.Count > 0
+            ? LocationNameLocalizer.ConfirmedChineseDisplayNames
+            :
             [
-                "Everus Harbor / Stanton-040",
-                "ARC-L1 空间站",
-                "MicroTech - Shubin Mining Facility SM0-18",
-                "Stanton Gateway / Pyro Jump Point",
-                "Orison 云城",
-                "Grim HEX 外环",
-                "New Babbage Commons",
-                "Baijini Point / Area18 轨道"
-            ])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+                "新巴贝奇",
+                "奥里森",
+                "罗威尔",
+                "18区",
+                "特雷斯勒空间站",
+                "埃弗勒斯空间站",
+                "拜基尼空间站",
+                "炽天使空间站"
+            ];
         return PickOverlayEditorSampleValues(locations, count);
     }
 
@@ -3068,6 +3166,7 @@ public partial class MainWindow
         _overlayEditorDragStartPoint = e.GetPosition(OverlayEditorCanvas);
         _overlayEditorDragStartRect = ResolveOverlayEditorItemDisplayRect(item);
         _overlayEditorActiveDragHistoryState = CreateOverlayEditorHistoryState();
+        BeginOverlayEditorLiveEdit(item, element);
         element.CaptureMouse();
         e.Handled = true;
     }
@@ -3111,6 +3210,7 @@ public partial class MainWindow
         _overlayEditorDragStartPoint = e.GetPosition(OverlayEditorCanvas);
         _overlayEditorDragStartRect = ResolveOverlayEditorItemDisplayRect(item);
         _overlayEditorActiveDragHistoryState = CreateOverlayEditorHistoryState();
+        BeginOverlayEditorLiveEdit(item, panel);
         panel.CaptureMouse();
         e.Handled = true;
     }
@@ -3150,34 +3250,26 @@ public partial class MainWindow
             nextRect = SnapOverlayEditorRectPosition(_activeOverlayItem, nextRect);
         }
 
-        OverlaySurfaceLayout.ApplyRectToItem(
-            _activeOverlayItem,
-            nextRect,
-            OverlayEditorCanvas.Width,
-            OverlayEditorCanvas.Height);
-        if (IsCommunicationEventModule(_activeOverlayItem))
-        {
-            _activeOverlayItem.VerticalAnchor = nextRect.Top <= 0.5
-                ? OverlayVerticalAnchor.Top
-                : OverlayVerticalAnchor.Bottom;
-        }
-        var rect = ResolveOverlayEditorItemDisplayRect(_activeOverlayItem);
-        Canvas.SetLeft(_activeOverlayEditorElement, rect.Left);
-        Canvas.SetTop(_activeOverlayEditorElement, rect.Top);
-        _activeOverlayEditorElement.Width = rect.Width;
-        _activeOverlayEditorElement.Height = rect.Height;
-        RefreshOverlayEditorAlignmentGuides(_activeOverlayItem);
-        RefreshOverlayInspector();
+        nextRect = ClampOverlayEditorRect(nextRect);
+        UpdateOverlayEditorLiveEdit(_activeOverlayItem, nextRect);
         e.Handled = true;
     }
 
     private void OverlayPanel_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        var hadActiveEdit = _activeOverlayItem is not null && _activeOverlayEditorElement is not null;
-        _activeOverlayEditorElement?.ReleaseMouseCapture();
+        var activeItem = _activeOverlayItem;
+        var activeElement = _activeOverlayEditorElement;
+        var hadActiveEdit = activeItem is not null && activeElement is not null;
+        activeElement?.ReleaseMouseCapture();
+        if (activeItem is not null && activeElement is not null)
+        {
+            CommitOverlayEditorLiveEdit(activeItem, activeElement);
+        }
+
         _activeOverlayItem = null;
         _activeOverlayEditorElement = null;
         _isOverlayResize = false;
+        FlushDeferredOverlayEditorRender();
         var historyState = _overlayEditorActiveDragHistoryState;
         _overlayEditorActiveDragHistoryState = null;
         if (!hadActiveEdit)
@@ -3197,8 +3289,125 @@ public partial class MainWindow
             MarkOverlayEditorLayoutDirty();
         }
 
+        RefreshOverlayInspector();
         SaveCurrentConfig();
         RefreshOverlayWindow();
+    }
+
+    private void BeginOverlayEditorLiveEdit(OverlayLayoutItem item, FrameworkElement element)
+    {
+        _overlayEditorLiveEditRect = _overlayEditorDragStartRect;
+        _overlayEditorSnapTargetOwner = item;
+        _overlayEditorHorizontalSnapTargets = ResolveOverlayEditorModuleSnapTargets(item, true);
+        _overlayEditorVerticalSnapTargets = ResolveOverlayEditorModuleSnapTargets(item, false);
+        _overlayEditorPreviousRenderTransform = element.RenderTransform;
+        _overlayEditorPreviousCacheMode = element.CacheMode;
+        element.CacheMode = new BitmapCache
+        {
+            EnableClearType = true,
+            RenderAtScale = 1
+        };
+        _overlayEditorLiveScaleTransform = new ScaleTransform(1, 1);
+        _overlayEditorLiveTranslateTransform = new TranslateTransform();
+        var liveTransform = new TransformGroup();
+        liveTransform.Children.Add(_overlayEditorLiveScaleTransform);
+        liveTransform.Children.Add(_overlayEditorLiveTranslateTransform);
+        element.RenderTransform = liveTransform;
+    }
+
+    private bool IsOverlayEditorLiveEditActive()
+    {
+        return _overlayEditorLiveEditRect is not null &&
+            _activeOverlayItem is not null &&
+            _activeOverlayEditorElement is not null;
+    }
+
+    private void FlushDeferredOverlayEditorRender()
+    {
+        if (!_overlayEditorRenderPendingAfterLiveEdit || IsOverlayEditorLiveEditActive())
+        {
+            return;
+        }
+
+        _overlayEditorRenderPendingAfterLiveEdit = false;
+        RenderOverlayEditor();
+    }
+
+    private void UpdateOverlayEditorLiveEdit(OverlayLayoutItem item, Rect rect)
+    {
+        _overlayEditorLiveEditRect = rect;
+        if (_overlayEditorLiveScaleTransform is null ||
+            _overlayEditorLiveTranslateTransform is null)
+        {
+            return;
+        }
+
+        if (_isOverlayResize)
+        {
+            _overlayEditorLiveScaleTransform.ScaleX = rect.Width / Math.Max(1, _overlayEditorDragStartRect.Width);
+            _overlayEditorLiveScaleTransform.ScaleY = rect.Height / Math.Max(1, _overlayEditorDragStartRect.Height);
+            _overlayEditorLiveTranslateTransform.X = 0;
+            _overlayEditorLiveTranslateTransform.Y = 0;
+        }
+        else
+        {
+            _overlayEditorLiveScaleTransform.ScaleX = 1;
+            _overlayEditorLiveScaleTransform.ScaleY = 1;
+            _overlayEditorLiveTranslateTransform.X = rect.Left - _overlayEditorDragStartRect.Left;
+            _overlayEditorLiveTranslateTransform.Y = rect.Top - _overlayEditorDragStartRect.Top;
+        }
+
+        UpdateOverlayEditorAlignmentGuides(item, rect);
+    }
+
+    private void CommitOverlayEditorLiveEdit(OverlayLayoutItem item, FrameworkElement element)
+    {
+        var finalRect = _overlayEditorLiveEditRect ?? _overlayEditorDragStartRect;
+        element.RenderTransform = _overlayEditorPreviousRenderTransform ?? Transform.Identity;
+        element.CacheMode = _overlayEditorPreviousCacheMode;
+        OverlaySurfaceLayout.ApplyRectToItem(
+            item,
+            finalRect,
+            OverlayEditorCanvas.Width,
+            OverlayEditorCanvas.Height);
+        if (IsCommunicationEventModule(item))
+        {
+            item.VerticalAnchor = finalRect.Top <= 0.5
+                ? OverlayVerticalAnchor.Top
+                : OverlayVerticalAnchor.Bottom;
+        }
+
+        var committedRect = ResolveOverlayEditorItemDisplayRect(item);
+        Canvas.SetLeft(element, committedRect.Left);
+        Canvas.SetTop(element, committedRect.Top);
+        element.Width = committedRect.Width;
+        element.Height = committedRect.Height;
+        UpdateOverlayEditorAlignmentGuides(item, committedRect);
+        ClearOverlayEditorLiveEditState();
+    }
+
+    private void CancelOverlayEditorLiveEdit()
+    {
+        if (_activeOverlayEditorElement is not null)
+        {
+            _activeOverlayEditorElement.RenderTransform =
+                _overlayEditorPreviousRenderTransform ?? Transform.Identity;
+            _activeOverlayEditorElement.CacheMode = _overlayEditorPreviousCacheMode;
+        }
+
+        ClearOverlayEditorLiveEditState();
+    }
+
+    private void ClearOverlayEditorLiveEditState()
+    {
+        _overlayEditorLiveEditRect = null;
+        _overlayEditorPreviousRenderTransform = null;
+        _overlayEditorPreviousCacheMode = null;
+        _overlayEditorLiveScaleTransform = null;
+        _overlayEditorLiveTranslateTransform = null;
+        _overlayEditorSnapTargetOwner = null;
+        _overlayEditorHorizontalSnapTargets = [];
+        _overlayEditorVerticalSnapTargets = [];
     }
 
     private static FrameworkElement? FindParentEditorPanel(DependencyObject element)

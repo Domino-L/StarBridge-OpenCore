@@ -52,6 +52,9 @@ public partial class MainWindow
     {
         _isAccountTransition = true;
         _accountSessionCoordinator.End();
+        BeginInGameWorkspaceAccountSession(
+            _accountSessionCoordinator.Capture(),
+            signedIn: false);
         try
         {
             ResetAccountScopedState("登录后即可查看舰队通讯。");

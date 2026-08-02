@@ -8,9 +8,11 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Brushes = System.Windows.Media.Brushes;
@@ -25,6 +27,8 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private string _overlayInspectorModulePickerSignature = "";
+
     private void RefreshOverlayInspector()
     {
         if (OverlayInspectorTitleText is null ||
@@ -43,6 +47,8 @@ public partial class MainWindow
             return;
         }
 
+        RefreshOverlayInspectorModulePicker();
+
         if (_isOverlayEventNotificationSelected && _overlaySettings.ShowEventNotifications)
         {
             const double previewHeight = 92;
@@ -51,7 +57,7 @@ public partial class MainWindow
             var side = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left
                 ? zh ? "左侧吸附" : "Left snap"
                 : zh ? "右侧吸附" : "Right snap";
-            OverlayInspectorTitleText.Text = zh ? "事件通知栏" : "Event notification rail";
+            OverlayInspectorTitleText.Text = zh ? "事件通知" : "Event notifications";
             OverlayInspectorKeyText.Text = zh ? "侧向事件通知" : "Side event notification";
             if (OverlayInspectorStatusText is not null)
             {
@@ -65,6 +71,7 @@ public partial class MainWindow
             OverlayInspectorWidthBox.Text = $"{previewWidth:0} / 自动贴边";
             OverlayInspectorHeightBox.Text = $"{_overlaySettings.EventNotificationDurationSeconds:0.#} 秒";
             OverlayInspectorGeometryPanel.Visibility = Visibility.Collapsed;
+            OverlayInspectorGeometryExpander.Visibility = Visibility.Collapsed;
             SyncOverlayModuleStyleControls(null);
             SyncOverlayInspectorModuleControls(null, true);
             SetOverlayInspectorInputsEnabled(false);
@@ -77,7 +84,6 @@ public partial class MainWindow
             }
 
             RefreshOverlayHiddenModuleLibrary();
-            RefreshOverlayLayerPanel();
             RefreshOverlayFullScreenToolsInspector();
             return;
         }
@@ -100,6 +106,7 @@ public partial class MainWindow
             OverlayInspectorWidthBox.Text = "";
             OverlayInspectorHeightBox.Text = "";
             OverlayInspectorGeometryPanel.Visibility = Visibility.Collapsed;
+            OverlayInspectorGeometryExpander.Visibility = Visibility.Collapsed;
             SyncOverlayModuleStyleControls(null);
             SetOverlayInspectorModulePanelVisibility("Crosshair");
             SyncOverlayInspectorCrosshairControls();
@@ -113,7 +120,6 @@ public partial class MainWindow
             }
 
             RefreshOverlayHiddenModuleLibrary();
-            RefreshOverlayLayerPanel();
             RefreshOverlayFullScreenToolsInspector();
             return;
         }
@@ -123,11 +129,12 @@ public partial class MainWindow
             !_overlayLayout.Contains(item) ||
             !IsOverlayEditorItemVisible(item))
         {
+            SetOverlayInspectorOpen(false);
             _isOverlayEventNotificationSelected = false;
             _isOverlayCrosshairSelected = false;
             var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
             OverlayInspectorTitleText.Text = zh ? "未选中模块" : "No module selected";
-            OverlayInspectorKeyText.Text = zh ? "点击预览中的模块" : "Select a module in the preview";
+            OverlayInspectorKeyText.Text = zh ? "从模块列表选择" : "Choose from the module list";
             if (OverlayInspectorStatusText is not null)
             {
                 OverlayInspectorStatusText.Text = zh
@@ -140,6 +147,7 @@ public partial class MainWindow
             OverlayInspectorWidthBox.Text = "";
             OverlayInspectorHeightBox.Text = "";
             OverlayInspectorGeometryPanel.Visibility = Visibility.Visible;
+            OverlayInspectorGeometryExpander.Visibility = Visibility.Collapsed;
             SyncOverlayModuleStyleControls(null);
             SyncOverlayInspectorModuleControls(null, false);
             SetOverlayInspectorInputsEnabled(false);
@@ -152,7 +160,6 @@ public partial class MainWindow
             }
 
             RefreshOverlayHiddenModuleLibrary();
-            RefreshOverlayLayerPanel();
             RefreshOverlayFullScreenToolsInspector();
             return;
         }
@@ -175,6 +182,8 @@ public partial class MainWindow
         OverlayInspectorWidthBox.Text = Math.Round(rect.Width).ToString(CultureInfo.InvariantCulture);
         OverlayInspectorHeightBox.Text = Math.Round(rect.Height).ToString(CultureInfo.InvariantCulture);
         OverlayInspectorGeometryPanel.Visibility = Visibility.Visible;
+        OverlayInspectorGeometryExpander.Visibility = Visibility.Visible;
+        OverlayInspectorGeometryExpander.IsEnabled = !item.IsLocked && !_isOverlayLayoutLocked && !IsOverlayChatBarrage(item);
         SyncOverlayModuleStyleControls(item);
         SyncOverlayInspectorModuleControls(item, false);
         SetOverlayInspectorInputsEnabled(!item.IsLocked && !_isOverlayLayoutLocked && !IsOverlayChatBarrage(item));
@@ -187,8 +196,299 @@ public partial class MainWindow
         }
 
         RefreshOverlayHiddenModuleLibrary();
-        RefreshOverlayLayerPanel();
         RefreshOverlayFullScreenToolsInspector();
+    }
+
+    private void RefreshOverlayInspectorModulePicker()
+    {
+        if (OverlayInspectorModulePickerPanel is null)
+        {
+            return;
+        }
+
+        var visibleItems = _overlayLayout
+            .Where(IsOverlayEditorItemVisible)
+            .OrderBy(item => GetOverlayInspectorModulePickerOrder(item.Key))
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var sceneKind = ResolveCurrentOverlayScene().Context.Kind;
+        var selectedKey = _isOverlayEventNotificationSelected
+            ? "EventNotifications"
+            : _isOverlayCrosshairSelected
+                ? "Crosshair"
+                : _selectedOverlayInspectorItem?.Key ?? "";
+        var signature = string.Join(
+            "|",
+            _language,
+            sceneKind,
+            selectedKey,
+            _overlaySettings.Theme,
+            _overlaySettings.CrosshairColor,
+            _overlaySettings.ShowEventNotifications,
+            _overlaySettings.ShowCrosshair,
+            string.Join(",", visibleItems.Select(item => $"{item.Key}:{item.IsLocked}")));
+        if (signature.Equals(_overlayInspectorModulePickerSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _overlayInspectorModulePickerSignature = signature;
+        OverlayInspectorModulePickerPanel.Children.Clear();
+
+        foreach (var item in visibleItems)
+        {
+            OverlayInspectorModulePickerPanel.Children.Add(
+                CreateOverlayInspectorModulePickerEntry(
+                    item.Key,
+                    ResolveOverlayEditorPanelTitle(item),
+                    item.Brush,
+                    item.Key.Equals(selectedKey, StringComparison.OrdinalIgnoreCase),
+                    item.IsLocked));
+        }
+
+        if (_overlaySettings.ShowEventNotifications)
+        {
+            OverlayInspectorModulePickerPanel.Children.Add(
+                CreateOverlayInspectorModulePickerEntry(
+                    "EventNotifications",
+                    _language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "事件通知" : "Event notifications",
+                    GetOverlayEventNotificationPreviewBrush(),
+                    selectedKey.Equals("EventNotifications", StringComparison.OrdinalIgnoreCase),
+                    false));
+        }
+
+        if (_overlaySettings.ShowCrosshair)
+        {
+            OverlayInspectorModulePickerPanel.Children.Add(
+                CreateOverlayInspectorModulePickerEntry(
+                    "Crosshair",
+                    _language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "虚拟准星" : "Crosshair",
+                    GetCrosshairPreviewBrush(GetEffectiveOverlaySettings()),
+                    selectedKey.Equals("Crosshair", StringComparison.OrdinalIgnoreCase),
+                    true));
+        }
+    }
+
+    private static int GetOverlayInspectorModulePickerOrder(string key)
+    {
+        return key switch
+        {
+            "Notice" => 0,
+            "Squads" => 1,
+            "Members" => 2,
+            "Chat" => 3,
+            _ => 100
+        };
+    }
+
+    private Border CreateOverlayInspectorModulePickerEntry(
+        string key,
+        string title,
+        System.Windows.Media.Brush accent,
+        bool selected,
+        bool locked)
+    {
+        var routeLight = new Border
+        {
+            Width = 3,
+            Margin = new Thickness(0, 4, 0, 4),
+            Background = selected
+                ? FindBrush("OverlaySettingsNavigationRouteLightBrush", accent)
+                : Brushes.Transparent,
+            CornerRadius = new CornerRadius(2),
+            Effect = selected
+                ? new DropShadowEffect
+                {
+                    Color = Color.FromRgb(105, 204, 255),
+                    BlurRadius = 8,
+                    ShadowDepth = 0,
+                    Opacity = 0.45
+                }
+                : null
+        };
+
+        var accentSwatch = new Border
+        {
+            Width = 8,
+            Height = 8,
+            Margin = new Thickness(9, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = accent,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(120, 225, 246, 255)),
+            BorderThickness = new Thickness(1)
+        };
+
+        var titleText = new TextBlock
+        {
+            Text = title,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = selected
+                ? FindBrush("TextPrimaryBrush", Brushes.AliceBlue)
+                : FindBrush("TextSecondaryBrush", Brushes.LightSteelBlue),
+            FontSize = 11.5,
+            FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+
+        var stateText = new TextBlock
+        {
+            Text = selected
+                ? (_language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "当前" : "Current")
+                : locked
+                    ? (_language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "已锁定" : "Locked")
+                    : "",
+            Margin = new Thickness(6, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = selected
+                ? FindBrush("AccentBrush", Brushes.DeepSkyBlue)
+                : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+            FontSize = 9.5,
+            FontWeight = FontWeights.SemiBold
+        };
+
+        var content = new Grid();
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.Children.Add(routeLight);
+        Grid.SetColumn(accentSwatch, 1);
+        content.Children.Add(accentSwatch);
+        Grid.SetColumn(titleText, 2);
+        content.Children.Add(titleText);
+        Grid.SetColumn(stateText, 3);
+        content.Children.Add(stateText);
+
+        var entry = new Border
+        {
+            Tag = key,
+            Height = 40,
+            Margin = new Thickness(0, 0, 6, 6),
+            Background = new SolidColorBrush(selected
+                ? Color.FromArgb(220, 17, 47, 66)
+                : Color.FromArgb(150, 6, 22, 32)),
+            BorderBrush = new SolidColorBrush(selected
+                ? Color.FromArgb(235, 78, 175, 224)
+                : Color.FromArgb(115, 54, 86, 109)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Cursor = Cursors.Hand,
+            Focusable = true,
+            ToolTip = _language.Equals("zh", StringComparison.OrdinalIgnoreCase)
+                ? $"切换到{title}"
+                : $"Switch to {title}",
+            Child = content
+        };
+        AutomationProperties.SetName(entry, title);
+        entry.MouseLeftButtonDown += OverlayInspectorModulePickerEntry_MouseLeftButtonDown;
+        entry.KeyDown += OverlayInspectorModulePickerEntry_KeyDown;
+        return entry;
+    }
+
+    private void OverlayInspectorModulePickerEntry_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string key } entry)
+        {
+            return;
+        }
+
+        entry.Focus();
+        ActivateOverlayInspectorModulePickerEntry(key);
+        e.Handled = true;
+    }
+
+    private void OverlayInspectorModulePickerEntry_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string key } ||
+            e.Key is not (Key.Enter or Key.Space))
+        {
+            return;
+        }
+
+        ActivateOverlayInspectorModulePickerEntry(key);
+        e.Handled = true;
+    }
+
+    private void ActivateOverlayInspectorModulePickerEntry(string key)
+    {
+        SelectOverlayLayerEntry(key);
+        SetOverlayInspectorOpen(true);
+        RefreshOverlayInspector();
+        OverlayInspectorModulePickerExpander.IsExpanded = false;
+        SmoothWheelScrollBehavior.CancelPendingMotion(OverlayInspectorScrollViewer);
+        OverlayInspectorScrollViewer.ScrollToTop();
+    }
+
+    private void OpenOverlayModuleWorkbench_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedKey = ResolveSelectedOverlayInspectorModuleKey();
+        if (string.IsNullOrWhiteSpace(selectedKey))
+        {
+            selectedKey = ResolveFirstAvailableOverlayInspectorModuleKey();
+        }
+
+        if (string.IsNullOrWhiteSpace(selectedKey))
+        {
+            StarBridgeMessageBox.Show(
+                this,
+                _language.Equals("zh", StringComparison.OrdinalIgnoreCase)
+                    ? "当前没有可调整的模块。请先在下方“模块开关”中启用至少一个模块。"
+                    : "There are no modules available to adjust. Enable at least one module under Module toggles first.",
+                _language.Equals("zh", StringComparison.OrdinalIgnoreCase)
+                    ? "模块工作台"
+                    : "Module workbench",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        SelectOverlayLayerEntry(selectedKey);
+        SetOverlayInspectorOpen(true);
+        RefreshOverlayInspector();
+        OverlayInspectorModulePickerExpander.IsExpanded = true;
+        SmoothWheelScrollBehavior.CancelPendingMotion(OverlayInspectorScrollViewer);
+        OverlayInspectorScrollViewer.ScrollToTop();
+        NotifyOverlaySettingsGuideTarget(OverlayOpenModuleWorkbenchButton);
+    }
+
+    private string? ResolveSelectedOverlayInspectorModuleKey()
+    {
+        if (_isOverlayEventNotificationSelected && _overlaySettings.ShowEventNotifications)
+        {
+            return "EventNotifications";
+        }
+
+        if (_isOverlayCrosshairSelected && _overlaySettings.ShowCrosshair)
+        {
+            return "Crosshair";
+        }
+
+        return _selectedOverlayInspectorItem is not null &&
+               _overlayLayout.Contains(_selectedOverlayInspectorItem) &&
+               IsOverlayEditorItemVisible(_selectedOverlayInspectorItem)
+            ? _selectedOverlayInspectorItem.Key
+            : null;
+    }
+
+    private string? ResolveFirstAvailableOverlayInspectorModuleKey()
+    {
+        var itemKey = _overlayLayout
+            .Where(IsOverlayEditorItemVisible)
+            .OrderBy(item => GetOverlayInspectorModulePickerOrder(item.Key))
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Key)
+            .FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(itemKey))
+        {
+            return itemKey;
+        }
+
+        if (_overlaySettings.ShowEventNotifications)
+        {
+            return "EventNotifications";
+        }
+
+        return _overlaySettings.ShowCrosshair ? "Crosshair" : null;
     }
 
     private void RefreshOverlayFullScreenToolsInspector()
@@ -211,7 +511,7 @@ public partial class MainWindow
             var side = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left
                 ? zh ? "左侧吸附" : "Left snap"
                 : zh ? "右侧吸附" : "Right snap";
-            OverlayFullScreenInspectorTitleText.Text = zh ? "事件通知栏" : "Event notification rail";
+            OverlayFullScreenInspectorTitleText.Text = zh ? "事件通知" : "Event notifications";
             OverlayFullScreenInspectorStatusText.Text = zh
                 ? $"{side} / 永远置顶 / {_overlaySettings.EventNotificationDurationSeconds:0.#} 秒"
                 : $"{side} / Always on top / {_overlaySettings.EventNotificationDurationSeconds:0.#}s";
@@ -668,9 +968,9 @@ public partial class MainWindow
         {
             var moduleText = item.Key switch
             {
-                "Notice" => "Communication event module",
-                "Squads" => "Squad status module",
-                "Members" => "Member status module",
+                "Notice" => "Communication alerts module",
+                "Squads" => "Team overview module",
+                "Members" => "Member information module",
                 "Chat" => "Scene communication module",
                 _ => item.Key
             };
@@ -679,9 +979,9 @@ public partial class MainWindow
 
         var zhModuleText = item.Key switch
         {
-            "Notice" => "通讯事件模块",
-            "Squads" => "小队态势模块",
-            "Members" => "成员状态模块",
+            "Notice" => "通讯提醒模块",
+            "Squads" => "队伍概况模块",
+            "Members" => "成员信息模块",
             "Chat" => "场景通讯模块",
             _ => item.Title
         };
@@ -925,7 +1225,7 @@ public partial class MainWindow
 
     private int CountAvailableOverlayModules()
     {
-        return 4;
+        return 5;
     }
 
     private int CountEnabledOverlayModules()
@@ -946,6 +1246,11 @@ public partial class MainWindow
             count++;
         }
 
+        if (_overlaySettings.ShowChat)
+        {
+            count++;
+        }
+
         if (_overlaySettings.ShowEventNotifications)
         {
             count++;
@@ -959,17 +1264,17 @@ public partial class MainWindow
         var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
         if (!_overlaySettings.ShowNotice)
         {
-            yield return ("Notice", zh ? "通讯事件" : "Communication events");
+            yield return ("Notice", zh ? "通讯提醒" : "Communication alerts");
         }
 
         if (!_overlaySettings.ShowSquads)
         {
-            yield return ("Squads", zh ? "小队态势" : "Squad status");
+            yield return ("Squads", zh ? "队伍概况" : "Team overview");
         }
 
         if (!_overlaySettings.ShowMembers)
         {
-            yield return ("Members", zh ? "成员状态" : "Member status");
+            yield return ("Members", zh ? "成员信息" : "Member information");
         }
 
         if (!_overlaySettings.ShowChat)
@@ -979,7 +1284,7 @@ public partial class MainWindow
 
         if (!_overlaySettings.ShowEventNotifications)
         {
-            yield return ("EventNotifications", zh ? "事件通知栏" : "Event rail");
+            yield return ("EventNotifications", zh ? "事件通知" : "Event notifications");
         }
     }
 
@@ -1225,9 +1530,16 @@ public partial class MainWindow
             var namePercent = Math.Round(OverlayDisplaySettings.NormalizeMemberNameColumnRatio(_overlaySettings.MemberNameColumnRatio) * 100);
             var locationPercent = 100 - namePercent;
             OverlayInspectorMemberColumnRatioText.Text = _language.Equals("zh", StringComparison.OrdinalIgnoreCase)
-                ? $"字段宽度：名字 {namePercent:0}% / 地点 {locationPercent:0}%，拖动成员行分隔线调整"
-                : $"Field width: Name {namePercent:0}% / Location {locationPercent:0}%. Drag the member-row divider to adjust.";
+                ? $"{namePercent:0}% · 地点 {locationPercent:0}%"
+                : $"{namePercent:0}% · Location {locationPercent:0}%";
             OverlayInspectorMemberColumnRatioText.Opacity = membersEnabled ? 1.0 : 0.52;
+        }
+
+        if (OverlayInspectorMemberColumnRatioSlider is not null)
+        {
+            OverlayInspectorMemberColumnRatioSlider.Value =
+                OverlayDisplaySettings.NormalizeMemberNameColumnRatio(_overlaySettings.MemberNameColumnRatio) * 100;
+            SetOverlayInspectorModuleControlEnabled(OverlayInspectorMemberColumnRatioSlider, membersEnabled);
         }
     }
 
@@ -1774,48 +2086,6 @@ public partial class MainWindow
         RefreshOverlayWindow();
     }
 
-    private void RefreshOverlayLayerPanel()
-    {
-        if (OverlayLayerRowsPanel is null ||
-            OverlayLayerPanelCountText is null)
-        {
-            return;
-        }
-
-        OverlayLayerRowsPanel.Children.Clear();
-        var rows = new List<OverlayEditorLayerRow>();
-        if (_overlaySettings.ShowEventNotifications)
-        {
-            rows.Add(new OverlayEditorLayerRow(
-                "EventNotifications",
-                _language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "事件通知栏" : "Event rail",
-                GetOverlayEventNotificationPreviewBrush(),
-                IsEventRail: true,
-                IsSelected: _isOverlayEventNotificationSelected,
-                IsLocked: true,
-                LayoutIndex: int.MaxValue));
-        }
-
-        foreach (var item in _overlayLayout.Where(IsOverlayEditorItemVisible).Reverse())
-        {
-            rows.Add(new OverlayEditorLayerRow(
-                item.Key,
-                ResolveOverlayEditorPanelTitle(item),
-                item.Brush,
-                IsEventRail: false,
-                IsSelected: !_isOverlayEventNotificationSelected &&
-                    _selectedOverlayInspectorItem?.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase) == true,
-                IsLocked: item.IsLocked,
-                LayoutIndex: _overlayLayout.IndexOf(item)));
-        }
-
-        OverlayLayerPanelCountText.Text = rows.Count.ToString(CultureInfo.InvariantCulture);
-        foreach (var row in rows)
-        {
-            OverlayLayerRowsPanel.Children.Add(CreateOverlayLayerRow(row));
-        }
-    }
-
     private Border CreateOverlayLayerRow(OverlayEditorLayerRow row)
     {
         var accent = row.Brush;
@@ -1997,7 +2267,6 @@ public partial class MainWindow
         item.IsLocked = !item.IsLocked;
         if (historyState.Equals(CreateOverlayEditorHistoryState()))
         {
-            RefreshOverlayLayerPanel();
             return;
         }
 
@@ -2236,6 +2505,26 @@ public partial class MainWindow
         if (OverlayInspectorCommunicationDurationValueText is not null)
         {
             OverlayInspectorCommunicationDurationValueText.Text = $"{e.NewValue:0.#}s";
+        }
+
+        if (_isLoadingSettings || _isSyncingOverlayInspectorModuleControls)
+        {
+            return;
+        }
+
+        ApplyOverlayInspectorModuleControlChanges(sender, new RoutedEventArgs());
+    }
+
+    private void OverlayInspectorMemberColumnRatioSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        var namePercent = Math.Round(Math.Clamp(e.NewValue, 18, 82));
+        if (OverlayInspectorMemberColumnRatioText is not null)
+        {
+            OverlayInspectorMemberColumnRatioText.Text = _language.Equals("zh", StringComparison.OrdinalIgnoreCase)
+                ? $"{namePercent:0}% · 地点 {100 - namePercent:0}%"
+                : $"{namePercent:0}% · Location {100 - namePercent:0}%";
         }
 
         if (_isLoadingSettings || _isSyncingOverlayInspectorModuleControls)
@@ -2531,6 +2820,9 @@ public partial class MainWindow
                 var scopeBox = useFullScreenControls ? OverlayFullScreenMemberScopeBox : OverlayInspectorMemberScopeBox;
                 var priorityBox = useFullScreenControls ? OverlayFullScreenMemberPriorityBox : OverlayInspectorMemberPriorityBox;
                 var nameModeBox = useFullScreenControls ? OverlayFullScreenMemberNameModeBox : OverlayInspectorMemberNameModeBox;
+                var memberNameColumnRatio = !useFullScreenControls && OverlayInspectorMemberColumnRatioSlider is not null
+                    ? OverlayDisplaySettings.NormalizeMemberNameColumnRatio(OverlayInspectorMemberColumnRatioSlider.Value / 100)
+                    : _overlaySettings.MemberNameColumnRatio;
                 var hideOfflineCheck = useFullScreenControls ? OverlayFullScreenHideOfflineMembersCheck : OverlayInspectorHideOfflineMembersCheck;
                 var hideOnlineStatusCheck = useFullScreenControls ? OverlayFullScreenHideMemberOnlineStatusCheck : OverlayInspectorHideMemberOnlineStatusCheck;
                 var hideSelfCheck = useFullScreenControls ? OverlayFullScreenHideSelfMemberCheck : OverlayInspectorHideSelfMemberCheck;
@@ -2555,6 +2847,7 @@ public partial class MainWindow
                         2 => OverlayMemberNameMode.GameNameOnly,
                         _ => OverlayMemberNameMode.CallsignAndGameName
                     },
+                    MemberNameColumnRatio = memberNameColumnRatio,
                     HideOfflineMembers = hideOffline,
                     HideMemberOnlineStatus = hideOffline && hideOnlineStatusCheck?.IsChecked == true,
                     HideSelfMember = hideSelfCheck?.IsChecked == true

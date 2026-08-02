@@ -462,11 +462,12 @@ public partial class MainWindow
         ShowMembersPanelCheck.IsChecked = _overlaySettings.ShowMembers;
         ShowChatPanelCheck.IsChecked = _overlaySettings.ShowChat;
         ShowEventNotificationsCheck.IsChecked = _overlaySettings.ShowEventNotifications;
-        OverlayCommunicationFriendEventsCheck.IsChecked = _overlaySettings.CommunicationFriendEvents;
-        OverlayCommunicationMessagePreviewCheck.IsChecked = _overlaySettings.CommunicationMessagePreview;
-        OverlayCommunicationDurationSlider.Value =
+        OverlayInspectorCommunicationFriendEventsCheck.IsChecked = _overlaySettings.CommunicationFriendEvents;
+        OverlayInspectorCommunicationMessagePreviewCheck.IsChecked = _overlaySettings.CommunicationMessagePreview;
+        OverlayInspectorCommunicationDurationSlider.Value =
             OverlayDisplaySettings.NormalizeCommunicationEventDuration(_overlaySettings.CommunicationEventDurationSeconds);
-        OverlayCommunicationDurationValueText.Text = $"{_overlaySettings.CommunicationEventDurationSeconds:0.#}s";
+        OverlayInspectorCommunicationDurationValueText.Text =
+            $"{_overlaySettings.CommunicationEventDurationSeconds:0.#}s";
         RefreshOverlayCommunicationEventControls();
         ApplyOverlayEventNotificationTypeChecks(_overlaySettings.EventNotificationTypes);
         SetComboBoxSelectedTag(OverlayEventMaxCountBox, OverlayDisplaySettings.NormalizeEventNotificationMaxVisibleCount(_overlaySettings.EventNotificationMaxVisibleCount).ToString(CultureInfo.InvariantCulture));
@@ -567,6 +568,7 @@ public partial class MainWindow
         OverlayTransitionStyleHintText.Text = zh
             ? "随当前外观风格自动切换"
             : "Automatically follows the active appearance";
+        RefreshOverlayExperiencePresetStatus();
     }
 
     private void RefreshOverlaySkinControls()
@@ -613,12 +615,6 @@ public partial class MainWindow
             OverlaySkinLockedHintText.Visibility = skinLocked || !skinAvailable
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-        }
-
-        if (OverlayOverviewSaveButton is not null)
-        {
-            OverlayOverviewSaveButton.IsEnabled = _isOverlayEditorLayoutDirty;
-            OverlayOverviewSaveButton.Opacity = _isOverlayEditorLayoutDirty ? 1.0 : 0.52;
         }
 
         if (OverlayNightShadowBloomBox is not null)
@@ -719,50 +715,108 @@ public partial class MainWindow
         CommitOverlayModuleSettings(BuildOverlayModuleSettingsFromControls("EventNotifications", useFullScreenControls: false));
     }
 
-    private bool IsOverlayRunning => _overlayWindow?.IsVisible == true;
+    private bool IsOverlayRunning =>
+        IsInformationOverlayRunning ||
+        _inGameMenuCoordinator.IsOpen;
 
     private void RefreshOverlayRuntimeStatus()
     {
-        var overlayVisible = IsOverlayRunning;
+        var informationVisible = IsInformationOverlayRunning;
         var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
-        var statusText = zh
-            ? overlayVisible ? "浮层已开启" : "浮层未开启"
-            : overlayVisible ? "Overlay active" : "Overlay inactive";
+        var menuVisible = _inGameMenuCoordinator.IsOpen;
+        var informationStatusText = zh
+            ? informationVisible ? "显示中" : "已隐藏"
+            : informationVisible ? "Visible" : "Hidden";
+        var menuHotkeyReady =
+            _inGameMenuSettings.EnableHotkey &&
+            _menuHotkeyBindingState ==
+                OverlayHotkeyBindingState.Ready &&
+            _menuHotkeyListenerReady;
+        var menuStatusText = zh
+            ? menuVisible
+                ? "已打开"
+                : menuHotkeyReady
+                    ? "热键可用"
+                    : _inGameMenuSettings.EnableHotkey
+                        ? "热键不可用"
+                        : "可手动打开"
+            : menuVisible
+                ? "Open"
+                : menuHotkeyReady
+                    ? "Shortcut ready"
+                    : _inGameMenuSettings.EnableHotkey
+                        ? "Shortcut unavailable"
+                        : "Manual open";
         var summaryText = zh
-            ? overlayVisible ? "已开启" : "未开启"
-            : overlayVisible ? "Active" : "Inactive";
+            ? informationVisible ? "已开启" : "未开启"
+            : informationVisible ? "Active" : "Inactive";
         var actionText = zh
-            ? overlayVisible ? "关闭浮层" : "启动浮层"
-            : overlayVisible ? "Close Overlay" : "Start Overlay";
-        var statusBrush = FindBrush(
-            overlayVisible ? "StatusSuccessBrush" : "StatusDisabledBrush",
-            overlayVisible ? Brushes.SpringGreen : Brushes.LightSlateGray);
+            ? informationVisible ? "关闭信息浮层" : "信息浮层"
+            : informationVisible ? "Close information" : "Information overlay";
+        var informationStatusBrush = FindBrush(
+            informationVisible ? "StatusSuccessBrush" : "StatusDisabledBrush",
+            informationVisible ? Brushes.SpringGreen : Brushes.LightSlateGray);
+        var menuStatusBrush = menuVisible
+            ? FindBrush("StatusSuccessBrush", Brushes.SpringGreen)
+            : menuHotkeyReady
+                ? new SolidColorBrush(Color.FromRgb(139, 124, 255))
+                : FindBrush(
+                    _inGameMenuSettings.EnableHotkey
+                        ? "StatusWarningBrush"
+                        : "StatusDisabledBrush",
+                    _inGameMenuSettings.EnableHotkey
+                        ? Brushes.Goldenrod
+                        : Brushes.LightSlateGray);
 
         if (OverlayHeaderStatusText is not null)
         {
-            OverlayHeaderStatusText.Text = statusText;
-            OverlayHeaderStatusText.Foreground = statusBrush;
+            OverlayHeaderStatusText.Text = informationStatusText;
+            OverlayHeaderStatusText.Foreground = informationStatusBrush;
         }
 
         if (OverlayHeaderStatusDot is not null)
         {
-            OverlayHeaderStatusDot.Fill = statusBrush;
+            OverlayHeaderStatusDot.Fill = informationStatusBrush;
+        }
+
+        if (OverlayHeaderMenuStatusText is not null)
+        {
+            OverlayHeaderMenuStatusText.Text = menuStatusText;
+            OverlayHeaderMenuStatusText.Foreground = menuStatusBrush;
+        }
+
+        if (OverlayHeaderMenuStatusDot is not null)
+        {
+            OverlayHeaderMenuStatusDot.Fill = menuStatusBrush;
         }
 
         if (OverlayOverviewStatusText is not null)
         {
             OverlayOverviewStatusText.Text = summaryText;
-            OverlayOverviewStatusText.Foreground = statusBrush;
+            OverlayOverviewStatusText.Foreground = informationStatusBrush;
         }
 
-        if (OverlayHeaderStartOverlayButton is not null)
+        ApplyOverlaySettingsWorkspacePresentation();
+
+        if (OverlayHeaderInformationPreviewButton is not null)
         {
-            OverlayHeaderStartOverlayButton.Content = actionText;
+            OverlayHeaderInformationPreviewButton.Content = informationVisible
+                ? zh ? "关闭浮层" : "Close overlay"
+                : zh ? "打开浮层" : "Open overlay";
         }
 
-        if (OverlayOverviewStartOverlayButton is not null)
+        if (OverlayHeaderMenuPreviewButton is not null)
         {
-            OverlayOverviewStartOverlayButton.Content = actionText;
+            OverlayHeaderMenuPreviewButton.Content = menuVisible
+                ? zh ? "关闭菜单浮层" : "Close game menu"
+                : zh ? "打开菜单浮层" : "Open game menu";
+        }
+
+        if (MenuOverlayRailPreviewButton is not null)
+        {
+            MenuOverlayRailPreviewButton.Content = menuVisible
+                ? zh ? "关闭菜单浮层" : "Close game menu"
+                : zh ? "打开菜单浮层" : "Open game menu";
         }
 
         if (OverlayFullScreenStartOverlayButton is not null)
@@ -841,21 +895,6 @@ public partial class MainWindow
         }
 
         OverlaySetting_Changed(sender, e);
-    }
-
-    private void OverlayCommunicationDurationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (OverlayCommunicationDurationValueText is not null)
-        {
-            OverlayCommunicationDurationValueText.Text = $"{e.NewValue:0.#}s";
-        }
-
-        if (_isLoadingSettings)
-        {
-            return;
-        }
-
-        OverlaySetting_Changed(sender, new RoutedEventArgs());
     }
 
     private void OverlayEventNotificationDurationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)

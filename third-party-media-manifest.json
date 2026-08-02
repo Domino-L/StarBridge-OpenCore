@@ -4,7 +4,7 @@
     "hashAlgorithm":  "SHA256",
     "distributionScope":  "official-binary",
     "sourceRegistry":  "third-party-media-sources.json",
-    "sourceRegistrySha256":  "8a0048f3a17712a7c9e5d80cb40971ff7d4a46bc762316c2efd814986424f616",
+    "sourceRegistrySha256":  "ef4086c6d735a7dd0fe01ac2f41f244e36f000181a7ec468f05b75af1f8ea66e",
     "files":  [
                   {
                       "sourceId":  "ship-details-historical",

@@ -19,6 +19,15 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private readonly record struct FleetChatDirectoryLane(
+        AccountSessionLease Session,
+        string FleetCode);
+
+    private readonly record struct FleetChatOperationLane(
+        AccountSessionLease Session,
+        string FleetCode,
+        string ChannelId);
+
     private const int FleetChatFullHistoryRefreshIntervalTicks = 15;
     private readonly ObservableCollection<FleetChatChannelRow> _fleetChatChannels = [];
     private readonly ObservableCollection<FleetChatMessageRow> _fleetChatMessages = [];
@@ -27,12 +36,12 @@ public partial class MainWindow
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<OverlayChatMessage> _fleetOverlayChatMessages = [];
     private readonly DispatcherTimer _fleetChatRefreshTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly HashSet<FleetChatDirectoryLane> _refreshingFleetChatDirectoryLanes = [];
+    private readonly HashSet<FleetChatOperationLane> _refreshingFleetChatMessageLanes = [];
+    private readonly HashSet<FleetChatOperationLane> _sendingFleetChatMessageLanes = [];
     private FleetChatChannelRow? _activeFleetChatChannel;
-    private bool _isRefreshingFleetChatChannels;
-    private bool _isRefreshingFleetChatMessages;
     private bool _isRefreshingFleetMemberSidebarChatPreview;
     private bool _fleetMemberSidebarChatPreviewLoaded;
-    private bool _isSendingFleetChatMessage;
     private bool _isSelectingFleetChatChannel;
     private bool _fleetChatNeedsFullHistoryRefresh = true;
     private bool _fleetChatHasOlder;
@@ -48,6 +57,34 @@ public partial class MainWindow
     private string _fleetOverlayChatProjectionSignature = "";
 
     private bool CanUseFleetChat => CanSynchronizeUserData && _hasFleet && !string.IsNullOrWhiteSpace(_fleetCode);
+    private bool _isSendingFleetChatMessage =>
+        _activeFleetChatChannel is { } activeChannel &&
+        _sendingFleetChatMessageLanes.Contains(CreateFleetChatOperationLane(
+            _accountSessionCoordinator.Capture(),
+            _fleetCode,
+            activeChannel.ChannelId));
+
+    private static FleetChatOperationLane CreateFleetChatOperationLane(
+        AccountSessionLease session,
+        string fleetCode,
+        string channelId) =>
+        new(
+            session,
+            fleetCode.Trim().ToUpperInvariant(),
+            channelId.Trim().ToUpperInvariant());
+
+    private bool IsFleetChatOperationCurrent(FleetChatOperationLane lane) =>
+        _accountSessionCoordinator.IsCurrent(lane.Session) &&
+        CanUseFleetChat &&
+        _activeFleetChatChannel is { } activeChannel &&
+        CreateFleetChatOperationLane(lane.Session, _fleetCode, activeChannel.ChannelId) is var current &&
+        current.FleetCode.Equals(lane.FleetCode, StringComparison.Ordinal) &&
+        current.ChannelId.Equals(lane.ChannelId, StringComparison.Ordinal);
+
+    private bool IsFleetChatDirectoryCurrent(FleetChatDirectoryLane lane) =>
+        _accountSessionCoordinator.IsCurrent(lane.Session) &&
+        CanUseFleetChat &&
+        _fleetCode.Trim().Equals(lane.FleetCode, StringComparison.OrdinalIgnoreCase);
 
     private void InitializeFleetChat()
     {
@@ -241,24 +278,30 @@ public partial class MainWindow
 
     private async Task RefreshFleetChatChannelsAsync(bool showErrors)
     {
-        if (_isRefreshingFleetChatChannels || !CanUseFleetChat)
+        if (!CanUseFleetChat)
         {
             return;
         }
 
         var session = _accountSessionCoordinator.Capture();
-        _isRefreshingFleetChatChannels = true;
+        var fleetCode = _fleetCode;
+        var lane = new FleetChatDirectoryLane(session, fleetCode.Trim().ToUpperInvariant());
+        if (!_refreshingFleetChatDirectoryLanes.Add(lane))
+        {
+            return;
+        }
+
         try
         {
-            var fleetCode = Uri.EscapeDataString(_fleetCode);
+            var escapedFleetCode = Uri.EscapeDataString(fleetCode);
             var snapshot = await _relayClient.GetFromJsonAsync<FleetChatChannelListContract>(
-                $"api/fleets/chat/channels?fleetCode={fleetCode}");
+                $"api/fleets/chat/channels?fleetCode={escapedFleetCode}");
             if (snapshot is null)
             {
                 throw new InvalidDataException("通讯频道数据为空。");
             }
 
-            if (!_accountSessionCoordinator.IsCurrent(session))
+            if (!IsFleetChatDirectoryCurrent(lane))
             {
                 return;
             }
@@ -306,6 +349,11 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
+            if (!IsFleetChatDirectoryCurrent(lane))
+            {
+                return;
+            }
+
             if (showErrors)
             {
                 FleetChatStatusText.Text = UserFacingError.Describe(ex, "频道暂时无法同步，请稍后重试。");
@@ -317,7 +365,7 @@ public partial class MainWindow
         }
         finally
         {
-            _isRefreshingFleetChatChannels = false;
+            _refreshingFleetChatDirectoryLanes.Remove(lane);
         }
     }
 
@@ -351,35 +399,37 @@ public partial class MainWindow
 
     private async Task RefreshFleetChatMessagesAsync(bool showErrors, bool forceFullHistory = false)
     {
-        if (_isRefreshingFleetChatMessages || !CanUseFleetChat || _activeFleetChatChannel is null)
+        var activeChannel = _activeFleetChatChannel;
+        if (!CanUseFleetChat || activeChannel is null)
         {
             return;
         }
 
         var session = _accountSessionCoordinator.Capture();
-        _isRefreshingFleetChatMessages = true;
+        var fleetCode = _fleetCode;
+        var activeChannelId = activeChannel.ChannelId;
+        var lane = CreateFleetChatOperationLane(session, fleetCode, activeChannelId);
+        if (!_refreshingFleetChatMessageLanes.Add(lane))
+        {
+            return;
+        }
+
         try
         {
-            var activeChannelId = _activeFleetChatChannel.ChannelId;
             var wasEmpty = _fleetChatMessages.Count == 0;
             var previousLatestSequence = _fleetChatLatestSequence;
             var shouldFollowLatest = wasEmpty || _fleetChatFollowLatest;
             var afterSequence = forceFullHistory ? 0 : _fleetChatLatestSequence;
             var history = await _relayClient.GetFromJsonAsync<FleetChatHistoryContract>(
-                $"api/fleets/chat/messages?fleetCode={Uri.EscapeDataString(_fleetCode)}" +
+                $"api/fleets/chat/messages?fleetCode={Uri.EscapeDataString(fleetCode)}" +
                 $"&channelId={Uri.EscapeDataString(activeChannelId)}&after={afterSequence}&limit=50");
             if (history is null)
             {
                 throw new InvalidDataException("通讯消息数据为空。");
             }
 
-            if (!_accountSessionCoordinator.IsCurrent(session))
-            {
-                return;
-            }
-
-            if (_activeFleetChatChannel is null ||
-                !_activeFleetChatChannel.ChannelId.Equals(history.ChannelId, StringComparison.OrdinalIgnoreCase))
+            if (!IsFleetChatOperationCurrent(lane) ||
+                !activeChannelId.Equals(history.ChannelId, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -399,7 +449,7 @@ public partial class MainWindow
             FleetChatInputBox.IsEnabled = history.CanSend;
             FleetChatSendButton.IsEnabled = history.CanSend && !_isSendingFleetChatMessage;
             FleetChatStatusText.Text = history.CanSend
-                ? _activeFleetChatChannel.Type == FleetChatChannelTypes.Squad
+                ? activeChannel.Type == FleetChatChannelTypes.Squad
                     ? "仅当前小队成员可见 · Enter 发送，Shift+Enter 换行"
                     : "仅当前舰队成员可见 · Enter 发送，Shift+Enter 换行"
                 : history.Error ?? "当前无法发送消息。";
@@ -421,10 +471,12 @@ public partial class MainWindow
             {
                 using var response = await _relayClient.PostJsonAsync(
                     "api/fleets/chat/read",
-                    new FleetChatMarkReadRequestContract(_fleetCode, activeChannelId, _fleetChatLatestSequence));
-                if (response.IsSuccessStatusCode)
+                    new FleetChatMarkReadRequestContract(fleetCode, activeChannelId, _fleetChatLatestSequence));
+                if (response.IsSuccessStatusCode &&
+                    IsFleetChatOperationCurrent(lane) &&
+                    _activeFleetChatChannel is { } currentChannel)
                 {
-                    _activeFleetChatChannel.UnreadCount = 0;
+                    currentChannel.UnreadCount = 0;
                     _fleetChatTotalUnread = _fleetChatChannels.Sum(channel => channel.UnreadCount);
                     UpdateFleetChatRailUnreadLabel();
                 }
@@ -432,7 +484,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            if (showErrors)
+            if (IsFleetChatOperationCurrent(lane) && showErrors)
             {
                 FleetChatStatusText.Text = UserFacingError.Describe(ex, "消息暂时无法同步，请稍后重试。");
                 FleetChatStatusText.Foreground = StatusPalette.DangerBrush;
@@ -440,7 +492,7 @@ public partial class MainWindow
         }
         finally
         {
-            _isRefreshingFleetChatMessages = false;
+            _refreshingFleetChatMessageLanes.Remove(lane);
         }
     }
 
@@ -485,7 +537,8 @@ public partial class MainWindow
 
     private async Task SendFleetChatMessageAsync(string text, ChatAttachmentContract? attachment)
     {
-        if (_activeFleetChatChannel is null || _isSendingFleetChatMessage || !CanUseFleetChat)
+        var activeChannel = _activeFleetChatChannel;
+        if (activeChannel is null || !CanUseFleetChat)
         {
             return;
         }
@@ -497,7 +550,15 @@ public partial class MainWindow
             return;
         }
 
-        _isSendingFleetChatMessage = true;
+        var session = _accountSessionCoordinator.Capture();
+        var fleetCode = _fleetCode;
+        var channelId = activeChannel.ChannelId;
+        var lane = CreateFleetChatOperationLane(session, fleetCode, channelId);
+        if (!_sendingFleetChatMessageLanes.Add(lane))
+        {
+            return;
+        }
+
         FleetChatSendButton.IsEnabled = false;
         FleetChatAttachmentButton.IsEnabled = false;
         FleetChatStatusText.Text = "正在发送…";
@@ -507,15 +568,26 @@ public partial class MainWindow
             using var response = await _relayClient.PostJsonAsync(
                 "api/fleets/chat/messages",
                 new FleetChatSendRequestContract(
-                    _fleetCode,
-                    _activeFleetChatChannel.ChannelId,
+                    fleetCode,
+                    channelId,
                     text,
                     Guid.NewGuid().ToString("N"),
                     attachment));
             var mutation = await response.Content.ReadFromJsonAsync<FleetChatMutationResponseContract>();
+            if (!IsFleetChatOperationCurrent(lane))
+            {
+                return;
+            }
+
             if (!response.IsSuccessStatusCode || mutation?.Message is null)
             {
-                FleetChatStatusText.Text = mutation?.Error ?? await ReadResponseErrorAsync(response);
+                var error = mutation?.Error ?? await ReadResponseErrorAsync(response);
+                if (!IsFleetChatOperationCurrent(lane))
+                {
+                    return;
+                }
+
+                FleetChatStatusText.Text = error;
                 FleetChatStatusText.Foreground = StatusPalette.DangerBrush;
                 return;
             }
@@ -535,14 +607,20 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            FleetChatStatusText.Text = UserFacingError.Describe(ex, "消息未发送，请检查网络后重试。");
-            FleetChatStatusText.Foreground = StatusPalette.DangerBrush;
+            if (IsFleetChatOperationCurrent(lane))
+            {
+                FleetChatStatusText.Text = UserFacingError.Describe(ex, "消息未发送，请检查网络后重试。");
+                FleetChatStatusText.Foreground = StatusPalette.DangerBrush;
+            }
         }
         finally
         {
-            _isSendingFleetChatMessage = false;
-            FleetChatSendButton.IsEnabled = CanUseFleetChat && _activeFleetChatChannel?.CanSend == true;
-            FleetChatAttachmentButton.IsEnabled = CanUseFleetChat && _activeFleetChatChannel?.CanSend == true;
+            _sendingFleetChatMessageLanes.Remove(lane);
+            if (IsFleetChatOperationCurrent(lane))
+            {
+                FleetChatSendButton.IsEnabled = CanUseFleetChat && _activeFleetChatChannel?.CanSend == true;
+                FleetChatAttachmentButton.IsEnabled = CanUseFleetChat && _activeFleetChatChannel?.CanSend == true;
+            }
         }
     }
 

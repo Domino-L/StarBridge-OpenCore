@@ -36,6 +36,16 @@ internal sealed class AppUpdateService
 
     public async Task CheckForInstallerUpdateAsync(bool silent, string currentVersion)
     {
+        if (!AppUpdateExecutionPolicy.IsCurrentBuildAllowed)
+        {
+            if (!silent)
+            {
+                _setStatus(AppUpdateExecutionPolicy.DeveloperBuildMessage);
+            }
+
+            return;
+        }
+
         try
         {
             ReportLastPortableUpdateResult(silent);

@@ -7,6 +7,7 @@ using StarBridge.Core.Parsing;
 using StarBridge.Core.Presence;
 using StarBridge.Core.Profiles;
 using StarBridge.Core.State;
+using StarBridge.Core.TrustSafety;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -56,15 +57,13 @@ public partial class MainWindow : Window, IAppUpdateUi
     private const int OverlayHotkeyId = 0x5343;
     private const int WmHotkey = 0x0312;
     private const int WmGameCompatibleHotkey = 0x8053;
+    private const int InformationOverlayHotkeyCommand = 0;
+    private const int InGameMenuHotkeyCommand = 1;
     private const int WmGetMinMaxInfo = 0x0024;
     private const int MonitorDefaultToNearest = 0x00000002;
     private const int ShowWindowRestore = 9;
     private const int OverlayGameFocusWithoutTransitionDelayMs = 120;
     private const int OverlaySlowOperationThresholdMs = 80;
-    private const uint ModAlt = 0x0001;
-    private const uint ModControl = 0x0002;
-    private const uint ModShift = 0x0004;
-    private const uint ModWin = 0x0008;
     private const uint ModNoRepeat = 0x4000;
     private const string OverlayPresetDefault = "preset1";
     private const string OverlayPresetCombat = "combat";
@@ -773,6 +772,10 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _isOverlayEditorEdgeSnapEnabled = true;
     private bool _isOverlayLayoutLocked;
     private bool _isOverlayEditorFullScreen;
+    private bool _overlayInspectorWasOpenBeforeFullScreen;
+    private bool _overlayInspectorReturnStateCaptured;
+    private double _overlayInspectorReturnScrollOffset;
+    private string? _overlayInspectorReturnSectionKey;
     private bool _isOverlayEditorLivePreviewEnabled;
     private OverlayEditorSimulationSample? _overlayEditorSimulationSample;
     private bool _isOverlayFullScreenToolsOpen = true;
@@ -797,6 +800,16 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _isSyncingOverlaySceneControls;
     private System.Windows.Point _overlayEditorDragStartPoint;
     private Rect _overlayEditorDragStartRect;
+    private Rect? _overlayEditorLiveEditRect;
+    private bool _overlayEditorRenderPendingAfterLiveEdit;
+    private Transform? _overlayEditorPreviousRenderTransform;
+    private CacheMode? _overlayEditorPreviousCacheMode;
+    private ScaleTransform? _overlayEditorLiveScaleTransform;
+    private TranslateTransform? _overlayEditorLiveTranslateTransform;
+    private OverlayLayoutItem? _overlayEditorSnapTargetOwner;
+    private (double Start, double Center, double End)[] _overlayEditorHorizontalSnapTargets = [];
+    private (double Start, double Center, double End)[] _overlayEditorVerticalSnapTargets = [];
+    private readonly List<Border> _overlayEditorAlignmentGuides = [];
     private OverlayEditorHistoryState? _overlayEditorActiveDragHistoryState;
     private bool _isRestoringOverlayEditorHistory;
     private bool _isOverlayEventNotificationDrag;
@@ -926,11 +939,15 @@ public partial class MainWindow : Window, IAppUpdateUi
     private TaskCompletionSource<SquadSuccessorOption?>? _fleetSuccessorSource;
     private TaskCompletionSource<bool>? _updateConfirmationSource;
     private bool _updateOverlayCanClose;
+    private bool _startupUpdateCheckQueued;
     private HwndSource? _hotkeySource;
     private bool _hotkeyRegistered;
     private readonly GameCompatibleHotkeyListener _gameCompatibleHotkeyListener = new();
     private readonly OverlayHotkeyTriggerGate _overlayHotkeyTriggerGate =
         new(TimeSpan.FromMilliseconds(180));
+    private readonly OverlayHotkeyTriggerGate _inGameMenuHotkeyTriggerGate =
+        new(TimeSpan.FromMilliseconds(180));
+    private readonly InGameMenuCoordinator _inGameMenuCoordinator = new();
     private bool _hasFleet;
     private bool _isCreatingFleet;
     private bool _fleetDirectorySyncPending;
@@ -958,6 +975,30 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         _isLoadingSettings = true;
         InitializeComponent();
+        ContentRendered += MainWindow_ContentRendered;
+        _inGameMenuCoordinator.ActionRequested += InGameMenuCoordinator_ActionRequested;
+        _inGameMenuCoordinator.Closed += InGameMenuCoordinator_Closed;
+        _inGameMenuCoordinator.FleetRefreshRequested += InGameMenuCoordinator_FleetRefreshRequested;
+        _inGameMenuCoordinator.FleetCommunicationRequested += InGameMenuCoordinator_FleetCommunicationRequested;
+        _inGameMenuCoordinator.FleetMemberActionRequested += InGameMenuCoordinator_FleetMemberActionRequested;
+        _inGameMenuCoordinator.SocialRefreshRequested += InGameMenuCoordinator_SocialRefreshRequested;
+        _inGameMenuCoordinator.SocialConversationRequested += InGameMenuCoordinator_SocialConversationRequested;
+        _inGameMenuCoordinator.SocialChannelRequested += InGameMenuCoordinator_SocialChannelRequested;
+        _inGameMenuCoordinator.SocialMessageRequested += InGameMenuCoordinator_SocialMessageRequested;
+        _inGameMenuCoordinator.SocialAttachmentRequested += InGameMenuCoordinator_SocialAttachmentRequested;
+        _inGameMenuCoordinator.ChatAttachmentActionRequested += InGameMenuCoordinator_ChatAttachmentActionRequested;
+        _inGameMenuCoordinator.FriendSearchRequested += InGameMenuCoordinator_FriendSearchRequested;
+        _inGameMenuCoordinator.FriendActionRequested += InGameMenuCoordinator_FriendActionRequested;
+        _inGameMenuCoordinator.FriendPresenceChanged += InGameMenuCoordinator_FriendPresenceChanged;
+        _inGameMenuCoordinator.ProfileRequested += InGameMenuCoordinator_ProfileRequested;
+        _inGameMenuCoordinator.RoomRefreshRequested += InGameMenuCoordinator_RoomRefreshRequested;
+        _inGameMenuCoordinator.RoomJoinRequested += InGameMenuCoordinator_RoomJoinRequested;
+        _inGameMenuCoordinator.RoomCreateRequested += InGameMenuCoordinator_RoomCreateRequested;
+        _inGameMenuCoordinator.RoomLeaveRequested += InGameMenuCoordinator_RoomLeaveRequested;
+        _inGameMenuCoordinator.RoomMessageRequested += InGameMenuCoordinator_RoomMessageRequested;
+        _inGameMenuCoordinator.RoomAttachmentRequested += InGameMenuCoordinator_RoomAttachmentRequested;
+        _inGameMenuCoordinator.RoomInvitationActionRequested += InGameMenuCoordinator_RoomInvitationActionRequested;
+        InitializeInGameMenuPreferences();
         UiMotion.InitializeGlobalInteractions();
         InitializePlayerActivityDesktopNotifications();
         InputManager.Current.PreProcessInput += TrackAppInteraction;
@@ -987,9 +1028,8 @@ public partial class MainWindow : Window, IAppUpdateUi
         Title = appDisplayTitle;
         WindowTitleText.Text = appDisplayTitle;
         PlayersList.ItemsSource = _players;
-        FleetMembersDeckList.ItemsSource = _players;
         SquadsList.ItemsSource = _squads;
-        FleetSquadsDeckList.ItemsSource = _squads;
+        InitializeFleetRosterSearch();
         SquadSelectionList.ItemsSource = _squads;
         MySquadMembersList.ItemsSource = _mySquadMembers;
         FindFleetResults.ItemsSource = _networkFleets;
@@ -1107,7 +1147,6 @@ public partial class MainWindow : Window, IAppUpdateUi
             }
 
             _ = RunStartupAndGameplayConsentFlowAsync();
-            _ = _appUpdateService.CheckForInstallerUpdateAsync(silent: true, currentVersion: GetAppUpdateVersion());
             _ = RegisterAppInstallStatsAsync();
             _ = RefreshHomeStatsAsync();
             _ = RefreshPartyRoomsFromServerAsync();
@@ -1149,6 +1188,30 @@ public partial class MainWindow : Window, IAppUpdateUi
         AppendOutput("请选择 Star Citizen 的 Game.log 开始读取。");
         RefreshHeaderStatusBar();
         OpenDefaultStartupPage();
+    }
+
+    private void MainWindow_ContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= MainWindow_ContentRendered;
+        QueueStartupUpdateCheck();
+    }
+
+    private void QueueStartupUpdateCheck()
+    {
+        if (_startupUpdateCheckQueued)
+        {
+            return;
+        }
+
+        _startupUpdateCheckQueued = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() =>
+            {
+                _ = _appUpdateService.CheckForInstallerUpdateAsync(
+                    silent: true,
+                    currentVersion: GetAppUpdateVersion());
+            }));
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -1283,15 +1346,7 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private async void HeaderInboxButton_Click(object sender, RoutedEventArgs e)
     {
-        await ShowAppConfirmationAsync(
-            "收件箱",
-            "收件箱即将开放",
-            "这里将集中显示舰队邀请、系统消息和操作结果。好友申请请前往好友中心处理。",
-            "知道了",
-            "",
-            danger: false,
-            showCancel: false,
-            footerText: "当前没有需要处理的消息。");
+        await ShowNotificationCenterAsync();
     }
 
     private void QueueMainPageReveal(object? previousTab)
@@ -2056,6 +2111,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         var transition = _accountSessionCoordinator.Begin(
             new AccountSessionIdentity(previousAccountId, previousAccount),
             new AccountSessionIdentity(auth.AccountId, incomingAccount));
+        BeginInGameWorkspaceAccountSession(transition.Lease, signedIn: true);
         var sameAccount = !transition.AccountChanged;
         var previousEntitlements = _accountEntitlements.ToArray();
         var previousTemporaryEntitlements = _temporaryEntitlements.ToDictionary(
@@ -2119,6 +2175,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         _entitlementRefreshTimer.Start();
         RefreshPersonalApplicationSettings();
         BeginPersonalProfileAccountSession(sameAccount);
+        RefreshAccountPanel();
 
         foreach (var profile in OverlaySkinCatalog.All.Where(profile => profile.Entitlement is not null))
         {
@@ -2430,21 +2487,26 @@ public partial class MainWindow : Window, IAppUpdateUi
             HeaderFriendCenterButton.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            HeaderInboxButton.Visibility = Visibility.Collapsed;
+            HeaderInboxButton.Visibility = IsLoggedIn
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             HeaderAvatarHost.Visibility = Visibility.Visible;
             HeaderProfileMenuItem.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            HeaderAccountSafetyMenuItem.Visibility = IsLoggedIn
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            HeaderReportModerationMenuItem.Visibility = IsLoggedIn &&
+                                                        _accountEntitlements.Contains(TrustSafetyEntitlements.ModerateReports)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            HeaderAppealModerationMenuItem.Visibility = HeaderReportModerationMenuItem.Visibility;
             HeaderLoginMenuItem.Header = IsLoggedIn ? "切换账号" : "登录 / 注册";
             HeaderLogoutMenuItem.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            if (OverlayLocalModeNotice is not null)
-            {
-                OverlayLocalModeNotice.Visibility = IsLoggedIn
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
-            }
+            RefreshOverlayLocalModeNoticeVisibility();
 
             if (!IsLoggedIn)
             {
@@ -2575,9 +2637,13 @@ public partial class MainWindow : Window, IAppUpdateUi
             ? null
             : _players.FirstOrDefault(player => player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
         var rawShip = local?.RawShip ?? local?.Ship;
-        PersonalCurrentShipText.Text = string.IsNullOrWhiteSpace(rawShip)
-            ? "Unknown"
+        var formattedShip = string.IsNullOrWhiteSpace(rawShip)
+            ? null
             : FormatShipForUser(rawShip);
+        PersonalCurrentShipText.Text = PlayerSessionStatePresentation.ResolveShip(
+            _localPresence,
+            _localPresence == PlayerPresenceKind.InGame && IsGameServerRegionCurrent(),
+            formattedShip);
 
         PersonalOverlayStatusText.Text = IsOverlayRunning ? "已开启" : "未开启";
         PersonalOverlayStatusText.Foreground = IsOverlayRunning ? successBrush : mutedBrush;
@@ -3542,6 +3608,26 @@ public partial class MainWindow : Window, IAppUpdateUi
             ExitOverlayEditorFullScreen();
         }
 
+        _inGameMenuCoordinator.Dispose();
+        _inGameMenuCoordinator.ActionRequested -= InGameMenuCoordinator_ActionRequested;
+        _inGameMenuCoordinator.Closed -= InGameMenuCoordinator_Closed;
+        _inGameMenuCoordinator.SocialRefreshRequested -= InGameMenuCoordinator_SocialRefreshRequested;
+        _inGameMenuCoordinator.SocialConversationRequested -= InGameMenuCoordinator_SocialConversationRequested;
+        _inGameMenuCoordinator.SocialChannelRequested -= InGameMenuCoordinator_SocialChannelRequested;
+        _inGameMenuCoordinator.SocialMessageRequested -= InGameMenuCoordinator_SocialMessageRequested;
+        _inGameMenuCoordinator.SocialAttachmentRequested -= InGameMenuCoordinator_SocialAttachmentRequested;
+        _inGameMenuCoordinator.ChatAttachmentActionRequested -= InGameMenuCoordinator_ChatAttachmentActionRequested;
+        _inGameMenuCoordinator.FriendSearchRequested -= InGameMenuCoordinator_FriendSearchRequested;
+        _inGameMenuCoordinator.FriendActionRequested -= InGameMenuCoordinator_FriendActionRequested;
+        _inGameMenuCoordinator.FriendPresenceChanged -= InGameMenuCoordinator_FriendPresenceChanged;
+        _inGameMenuCoordinator.ProfileRequested -= InGameMenuCoordinator_ProfileRequested;
+        _inGameMenuCoordinator.RoomRefreshRequested -= InGameMenuCoordinator_RoomRefreshRequested;
+        _inGameMenuCoordinator.RoomJoinRequested -= InGameMenuCoordinator_RoomJoinRequested;
+        _inGameMenuCoordinator.RoomCreateRequested -= InGameMenuCoordinator_RoomCreateRequested;
+        _inGameMenuCoordinator.RoomLeaveRequested -= InGameMenuCoordinator_RoomLeaveRequested;
+        _inGameMenuCoordinator.RoomMessageRequested -= InGameMenuCoordinator_RoomMessageRequested;
+        _inGameMenuCoordinator.RoomAttachmentRequested -= InGameMenuCoordinator_RoomAttachmentRequested;
+        _inGameMenuCoordinator.RoomInvitationActionRequested -= InGameMenuCoordinator_RoomInvitationActionRequested;
         UnregisterOverlayHotkey();
         _gameCompatibleHotkeyListener.Dispose();
         _hotkeySource?.RemoveHook(MainWindowProc);
@@ -3966,28 +4052,31 @@ public partial class MainWindow : Window, IAppUpdateUi
                 continue;
             }
 
-            var online = player.Online;
-            var rawShip = online ? ShipNameLocalizer.ResolveCode(player.Ship) : "Unknown";
+            var liveStatus = isLocalPlayer
+                ? PlayerPresence.ToWireValue(_localPresence)
+                : NormalizeNetworkLiveStatus(networkSnapshot?.LiveStatus, player.Online);
+            var presence = isLocalPlayer
+                ? _localPresence
+                : PlayerPresencePresentation.Resolve(liveStatus, player.Online ? "Online" : "Offline");
+            var online = PlayerPresence.IsOnline(presence);
+            var rawShip = ShipNameLocalizer.ResolveCode(player.Ship);
             var shipConfidence = player.ShipConfidence;
             var locationConfidence = player.LocationConfidence;
-            var rawLocation = online ? FormatRawLocation(player.Location, player.NavigationTarget) : "Unknown";
-            var displayLocation = online ? FormatLocationInference(rawLocation, locationConfidence) : "地点：未知星域";
+            var rawLocation = FormatRawLocation(player.Location, player.NavigationTarget);
             if (!isLocalPlayer && networkSnapshot is not null)
             {
-                rawShip = online ? ShipNameLocalizer.ResolveCode(networkSnapshot.Ship) : "Unknown";
+                rawShip = ShipNameLocalizer.ResolveCode(networkSnapshot.Ship);
                 shipConfidence = string.IsNullOrWhiteSpace(networkSnapshot.ShipConfidence)
                     ? "Low"
                     : networkSnapshot.ShipConfidence!;
                 locationConfidence = string.IsNullOrWhiteSpace(networkSnapshot.LocationConfidence)
                     ? "Low"
                     : networkSnapshot.LocationConfidence!;
-                rawLocation = online && !string.IsNullOrWhiteSpace(networkSnapshot.Location)
+                rawLocation = !string.IsNullOrWhiteSpace(networkSnapshot.Location)
                     ? FormatRawLocation(networkSnapshot.Location!, "")
                     : rawLocation;
-                displayLocation = online ? FormatLocationInference(rawLocation, locationConfidence) : "地点：未知星域";
             }
 
-            var displayShip = ShipNameLocalizer.DisplayName(rawShip, _language);
             var playerSquadName = isLocalPlayer
                 ? _joinedSquad?.Name ?? "Unassigned"
                 : networkSnapshot?.Squad ?? "Unassigned";
@@ -4001,28 +4090,43 @@ public partial class MainWindow : Window, IAppUpdateUi
             var serverRegion = isLocalPlayer && IsGameServerRegionCurrent()
                 ? _gameServerRegion
                 : networkSnapshot?.ServerRegion;
-            var liveStatus = isLocalPlayer
-                ? PlayerPresence.ToWireValue(_localPresence)
-                : NormalizeNetworkLiveStatus(networkSnapshot?.LiveStatus, online);
+            bool? hasServerSession = presence != PlayerPresenceKind.InGame
+                ? false
+                : isLocalPlayer
+                    ? IsGameServerRegionCurrent()
+                    : PlayerSessionStatePresentation.HasRecognizedValue(serverShard) ||
+                      PlayerSessionStatePresentation.HasRecognizedValue(serverRegion)
+                        ? true
+                        : networkSnapshot is not null
+                            ? false
+                            : null;
+            var localizedShip = ShipNameLocalizer.DisplayName(rawShip, _language);
+            var inferredLocation = FormatLocationInference(rawLocation, locationConfidence);
+            var displayShip = PlayerSessionStatePresentation.ResolveShip(
+                presence,
+                hasServerSession,
+                localizedShip);
+            var displayLocation = PlayerSessionStatePresentation.ResolveLocation(
+                presence,
+                hasServerSession,
+                inferredLocation);
             var sharedOnlineStatus = isLocalPlayer
                 ? localSharedPresence.Online ? "Online" : "Offline"
                 : null;
             var sharedLiveStatus = isLocalPlayer ? localSharedPresence.LiveStatus : null;
+            // The current user always sees the locally resolved session phase in their own UI.
+            // Outbound fleet snapshots apply the privacy projection separately before publishing.
             var sharedShip = isLocalPlayer
-                ? localSharedPresence.CanShareRealtime && _syncPrivacySettings.SyncShipStatus
-                    ? displayShip
-                    : "Unknown"
+                ? displayShip
                 : null;
             var sharedLocation = isLocalPlayer
-                ? localSharedPresence.CanShareRealtime && _syncPrivacySettings.SyncLocationStatus
-                    ? displayLocation
-                    : "地点：未知星域"
+                ? displayLocation
                 : null;
             nextPlayers.Add(new PlayerRow(
                 displayPlayerName,
                 online ? "Online" : "Offline",
                 displayShip,
-                online ? FormatShipInference(displayShip, shipConfidence) : "飞船：未知",
+                FormatShipInference(displayShip, shipConfidence),
                 displayLocation,
                 playerCallsign,
                 isLocalPlayer ? _avatarPath : networkSnapshot?.AvatarImageData,
@@ -4064,6 +4168,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         RefreshSquadActionButtons();
         RefreshOverlayWindow();
         ProcessPlayerActivityDesktopNotifications();
+        RefreshFriendPresenceFromFleetSnapshots();
 
         var local = _players.FirstOrDefault(player =>
             player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
@@ -4085,6 +4190,11 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private static string FormatShipInference(string ship, string confidence)
     {
+        if (PlayerSessionStatePresentation.IsSessionStateText(ship))
+        {
+            return ship.Trim();
+        }
+
         if (string.IsNullOrWhiteSpace(ship) ||
             ship.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
         {

@@ -24,9 +24,10 @@ internal sealed partial class OverlayCompositionHudWindow
             var x = (float)rect.X + row.SlideOffsetX;
             var backgroundAlpha = state.Opacity * state.EventStyle.BackgroundOpacity * fade;
             var textAlpha = state.Opacity * state.EventStyle.TextOpacity * fade;
+            var chromeAlpha = state.Opacity * fade;
             FillRect(target, x, y, (float)rect.Width, itemHeight, state.Palette.PanelBackground, backgroundAlpha);
-            DrawRectangle(target, x, y, (float)rect.Width, itemHeight, state.Palette.PanelBorder, backgroundAlpha, 1);
-            FillRect(target, x + 12, y + 12, 4, itemHeight - 24, row.AccentColor, textAlpha * 0.9f);
+            DrawRectangle(target, x, y, (float)rect.Width, itemHeight, state.Palette.PanelBorder, chromeAlpha, 1);
+            FillRect(target, x + 12, y + 12, 4, itemHeight - 24, row.AccentColor, chromeAlpha * 0.9f);
             DrawWrappedText(target, row.Title, _eventTitleFormat, x + 28, y + 8, contentWidth, 34, row.AccentColor, textAlpha);
             DrawWrappedText(target, row.Detail, _eventDetailFormat, x + 28, y + 10 + titleHeight + 6, contentWidth, 48, state.Palette.Text, textAlpha);
             DrawText(target, row.Timestamp, _mutedRightFormat, x + (float)rect.Width - 58, y + 8, 46, 16, state.Palette.Muted, textAlpha);

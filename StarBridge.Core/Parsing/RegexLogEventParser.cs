@@ -169,10 +169,26 @@ public sealed class RegexLogEventParser : ILogEventParser
         {
             if (_respawn.IsSameDownedEpisode(timestamp))
             {
+                if (downedContext != LifeEventContext.SafeZoneMedicalResponse ||
+                    _respawn.DownedEventPublished)
+                {
+                    return null;
+                }
+            }
+            else
+            {
+                _respawn.ResetForDowned(timestamp);
+            }
+
+            // Generic incapacitation remains internal evidence for the later
+            // death/revival decision. Only an explicit local medical response
+            // is reliable enough to publish as a safe-zone downed event.
+            if (downedContext != LifeEventContext.SafeZoneMedicalResponse)
+            {
                 return null;
             }
 
-            _respawn.ResetForDowned(timestamp);
+            _respawn.DownedEventPublished = true;
             return new FleetEvent(
                 FleetEventType.PlayerDowned,
                 "LocalPlayer",
@@ -538,6 +554,7 @@ public sealed class RegexLogEventParser : ILogEventParser
     {
         public DateTimeOffset? DownedAt { get; private set; }
         public DateTimeOffset? DeathAt { get; private set; }
+        public bool DownedEventPublished { get; set; }
         public DateTimeOffset? DownedNotificationRemovedAt { get; set; }
         public DateTimeOffset? InventoryTerminatedAt { get; set; }
         public DateTimeOffset? UnbindAt { get; set; }
@@ -573,6 +590,7 @@ public sealed class RegexLogEventParser : ILogEventParser
         {
             DownedAt = null;
             DeathAt = null;
+            DownedEventPublished = false;
             DownedNotificationRemovedAt = null;
             InventoryTerminatedAt = null;
             UnbindAt = null;

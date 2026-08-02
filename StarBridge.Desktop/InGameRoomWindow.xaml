@@ -1,0 +1,1856 @@
+<Window x:Class="StarBridge.Desktop.InGameRoomWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:StarBridge.Desktop"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="组队大厅"
+        Icon="/Assets/Brand/StarBridge_AppIcon.ico"
+        Width="1100"
+        Height="720"
+        MinWidth="880"
+        MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Background="{StaticResource PageBackgroundBrush}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Deactivated="Window_Deactivated">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            ResizeBorderThickness="7"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <local:ImagePathConverter x:Key="ImagePathConverter" />
+        <local:ImageDataConverter x:Key="RoomChatImageDataConverter" />
+        <DataTemplate x:Key="UnifiedChatMessageTemplate">
+            <Grid Margin="0,3,0,8">
+                <Border x:Name="MessagePanel"
+                        MaxWidth="650"
+                        Padding="8,6"
+                        HorizontalAlignment="Left"
+                        Background="Transparent"
+                        BorderBrush="{Binding SenderRoleBrush}"
+                        BorderThickness="2,0,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="MessageAvatar"
+                              Width="34"
+                              Height="34"
+                              VerticalAlignment="Center">
+                            <ContentControl Tag="{Binding SenderAvatarImageData}"
+                                            Style="{StaticResource IdentityBeaconAvatarFallbackStyle}"
+                                            Foreground="{Binding SenderRoleBrush}" />
+                            <Image Source="{Binding SenderAvatarImageData, Converter={StaticResource RoomChatImageDataConverter}, ConverterParameter=68}"
+                                   Stretch="UniformToFill" />
+                        </Grid>
+                        <StackPanel x:Name="MessageBody"
+                                    Grid.Column="2"
+                                    MaxWidth="590">
+                            <Grid x:Name="MessageMetadata"
+                                  HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="MessageSender"
+                                           Text="{Binding SenderCallsign}"
+                                           Foreground="{Binding SenderRoleBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="MessageGameId"
+                                           Grid.Column="1"
+                                           Text="{Binding SenderGameIdText}"
+                                           Margin="7,0,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10" />
+                                <Border x:Name="MessageRoleBadge"
+                                        Grid.Column="2"
+                                        Margin="8,0,0,0"
+                                        Padding="6,1"
+                                        Background="#102536"
+                                        BorderBrush="{Binding SenderRoleBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding RoleVisibility}">
+                                    <TextBlock Text="{Binding SenderRoleTitle}"
+                                               Foreground="{Binding SenderRoleBrush}"
+                                               FontSize="9" />
+                                </Border>
+                                <TextBlock x:Name="MessageTime"
+                                           Grid.Column="3"
+                                           Text="{Binding TimeText}"
+                                           Margin="9,0,0,0"
+                                           Foreground="#637A89"
+                                           FontFamily="Bahnschrift"
+                                           FontSize="10" />
+                            </Grid>
+                            <TextBlock x:Name="MessageText"
+                                       Text="{Binding Text}"
+                                       Visibility="{Binding TextVisibility}"
+                                       MaxWidth="590"
+                                       Margin="0,6,0,0"
+                                       Foreground="#D8E5EC"
+                                       FontSize="12"
+                                       TextWrapping="Wrap" />
+                            <Border x:Name="MessageAttachmentCard"
+                                    Width="410"
+                                    MaxWidth="590"
+                                    Margin="0,8,0,0"
+                                    Padding="12,10"
+                                    HorizontalAlignment="Left"
+                                    Background="#C10A1823"
+                                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Visibility="{Binding AttachmentVisibility}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding AttachmentTypeText}"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               FontFamily="Bahnschrift"
+                                               FontSize="9"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding AttachmentTitle}"
+                                               Margin="0,5,0,0"
+                                               Foreground="{StaticResource PrimaryTextBrush}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding AttachmentSummary}"
+                                               Margin="0,4,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10"
+                                               LineHeight="17"
+                                               TextWrapping="Wrap" />
+                                    <Button Content="{Binding AttachmentActionText}"
+                                            Tag="{Binding Attachment}"
+                                            IsEnabled="{Binding AttachmentActionEnabled}"
+                                            Margin="0,9,0,0"
+                                            HorizontalAlignment="Left"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Click="ChatAttachmentActionButton_Click" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsLocal}" Value="True">
+                    <Setter TargetName="MessagePanel" Property="HorizontalAlignment" Value="Right" />
+                    <Setter TargetName="MessagePanel" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                    <Setter TargetName="MessagePanel" Property="BorderThickness" Value="0,0,2,0" />
+                    <Setter TargetName="MessageAvatar" Property="Grid.Column" Value="2" />
+                    <Setter TargetName="MessageBody" Property="Grid.Column" Value="0" />
+                    <Setter TargetName="MessageMetadata" Property="HorizontalAlignment" Value="Right" />
+                    <Setter TargetName="MessageText" Property="HorizontalAlignment" Value="Right" />
+                    <Setter TargetName="MessageText" Property="TextAlignment" Value="Right" />
+                    <Setter TargetName="MessageAttachmentCard" Property="HorizontalAlignment" Value="Right" />
+                    <Setter TargetName="MessageTime" Property="Grid.Column" Value="0" />
+                    <Setter TargetName="MessageTime" Property="Margin" Value="0" />
+                    <Setter TargetName="MessageRoleBadge" Property="Grid.Column" Value="1" />
+                    <Setter TargetName="MessageGameId" Property="Grid.Column" Value="2" />
+                    <Setter TargetName="MessageSender" Property="Grid.Column" Value="3" />
+                    <Setter TargetName="MessageSender" Property="Margin" Value="8,0,0,0" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <Style x:Key="UnifiedChatMessageListStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="18,14" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="ScrollViewer.IsDeferredScrollingEnabled" Value="False" />
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+            <Setter Property="ItemTemplate" Value="{StaticResource UnifiedChatMessageTemplate}" />
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0,0,0,6" />
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="UnifiedChatComposerTextBoxStyle"
+               TargetType="TextBox"
+               BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Height" Value="40" />
+            <Setter Property="MinHeight" Value="40" />
+            <Setter Property="Padding" Value="12,4" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="UnifiedChatSendButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Width" Value="94" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Margin" Value="10,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+        <DataTemplate x:Key="UnifiedChatAttachmentGlyphTemplate">
+            <Grid Width="18" Height="18">
+                <Path Data="M 2,9 L 16,9 M 9,2 L 9,16"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                      StrokeThickness="1.8"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round" />
+            </Grid>
+        </DataTemplate>
+        <Style x:Key="UnifiedChatAttachmentButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Content" Value="添加" />
+            <Setter Property="ContentTemplate" Value="{StaticResource UnifiedChatAttachmentGlyphTemplate}" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="ToolTip" Value="发送更多内容" />
+        </Style>
+        <Style x:Key="RoomFilterComboBox"
+               TargetType="ComboBox"
+               BasedOn="{StaticResource {x:Type ComboBox}}">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="9,0" />
+            <Setter Property="Margin" Value="7,0,0,0" />
+        </Style>
+        <Style x:Key="RoomListItemStyle" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,7" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        </Style>
+        <Style x:Key="CreateTagColumnList"
+               TargetType="ListBox"
+               BasedOn="{StaticResource {x:Type ListBox}}">
+            <Setter Property="Background" Value="#07121B" />
+            <Setter Property="BorderBrush" Value="#18384A" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+        <Style x:Key="CreateTagColumnItem" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="9,7" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+            <Setter Property="Foreground" Value="#CFE0EA" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#174461" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#102F43" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="RoomTagChip" TargetType="Border">
+            <Setter Property="Background" Value="#102536" />
+            <Setter Property="BorderBrush" Value="#1A5370" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Padding" Value="7,3" />
+            <Setter Property="Margin" Value="0,0,6,4" />
+        </Style>
+        <DataTemplate x:Key="RoomDisplayTagTemplate">
+            <Border Style="{StaticResource RoomTagChip}"
+                    Background="{Binding Background}"
+                    BorderBrush="{Binding BorderBrush}">
+                <TextBlock Text="{Binding Text}"
+                           Foreground="{Binding Foreground}"
+                           FontSize="10"
+                           FontWeight="SemiBold" />
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Border Background="{StaticResource PageBackgroundBrush}"
+            BorderBrush="{StaticResource AccentDimBrush}"
+            BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="52" />
+                <RowDefinition Height="62" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="#F0162634"
+                    BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
+                    BorderThickness="0,0,0,1"
+                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid Margin="16,0,0,0">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="组队大厅"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="14"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="RoomWindowSubtitleText"
+                                   Text="寻找现在可以一起游玩的队友，或创建一支临时队伍。"
+                                   Margin="0,2,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right">
+                        <Button x:Name="ShowCreateButton"
+                                Content="创建房间"
+                                Width="92"
+                                Height="30"
+                                Margin="0,11,8,0"
+                                Style="{StaticResource PrimaryButton}"
+                                Click="ShowCreateButton_Click" />
+                        <Button Tag="Minimize"
+                                Width="48"
+                                Style="{StaticResource WindowCaptionButton}"
+                                Click="MinimizeButton_Click" />
+                        <Button Tag="Close"
+                                Width="48"
+                                Style="{StaticResource CloseWindowCaptionButton}"
+                                Click="CloseButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border x:Name="LobbyToolbar"
+                    Grid.Row="1"
+                    Margin="14,10,14,0"
+                    Padding="10"
+                    Background="{StaticResource AvionicsGlassRaisedBrush}"
+                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                    BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="124" />
+                        <ColumnDefinition Width="100" />
+                        <ColumnDefinition Width="106" />
+                        <ColumnDefinition Width="72" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Height="34">
+                        <TextBox x:Name="RoomSearchBox"
+                                 Padding="10,4"
+                                 VerticalContentAlignment="Center"
+                                 TextChanged="RoomSearchBox_TextChanged" />
+                        <TextBlock Text="搜索房间名、目标、标签或房主"
+                                   Margin="11,0,0,0"
+                                   Foreground="#637A89"
+                                   FontSize="10"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=RoomSearchBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+
+                    <ComboBox x:Name="RoomActivityFilter"
+                              Grid.Column="1"
+                              Style="{StaticResource RoomFilterComboBox}"
+                              SelectedIndex="0"
+                              SelectionChanged="RoomFilter_SelectionChanged">
+                        <ComboBoxItem Content="全部玩法" Tag="" />
+                        <ComboBoxItem Content="PVE" Tag="pve" />
+                        <ComboBoxItem Content="PVP" Tag="pvp" />
+                        <ComboBoxItem Content="工业" Tag="industry" />
+                        <ComboBoxItem Content="运输" Tag="logistics" />
+                        <ComboBoxItem Content="探索支援" Tag="support" />
+                        <ComboBoxItem Content="混合行动" Tag="mixed" />
+                    </ComboBox>
+                    <ComboBox x:Name="RoomVoiceFilter"
+                              Grid.Column="2"
+                              Style="{StaticResource RoomFilterComboBox}"
+                              SelectedIndex="0"
+                              SelectionChanged="RoomFilter_SelectionChanged">
+                        <ComboBoxItem Content="全部语音" Tag="" />
+                        <ComboBoxItem Content="不要求语音" Tag="none" />
+                        <ComboBoxItem Content="建议语音" Tag="recommended" />
+                        <ComboBoxItem Content="语音必须" Tag="required" />
+                    </ComboBox>
+                    <ComboBox x:Name="RoomAdmissionFilter"
+                              Grid.Column="3"
+                              Style="{StaticResource RoomFilterComboBox}"
+                              SelectedIndex="0"
+                              SelectionChanged="RoomFilter_SelectionChanged">
+                        <ComboBoxItem Content="全部加入方式" Tag="" />
+                        <ComboBoxItem Content="直接加入" Tag="direct" />
+                        <ComboBoxItem Content="房主批准" Tag="approval" />
+                    </ComboBox>
+                    <Button Grid.Column="4"
+                            Height="34"
+                            Margin="7,0,0,0"
+                            Content="清除筛选"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ClearFiltersButton_Click" />
+                    <Button x:Name="ShowRoomCodeButton"
+                            Grid.Column="5"
+                            Height="34"
+                            Margin="7,0,0,0"
+                            Content="输入房间码"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ShowRoomCodeButton_Click" />
+                    <Button Grid.Column="6"
+                            Height="34"
+                            Margin="7,0,0,0"
+                            Content="刷新"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="RefreshButton_Click" />
+                </Grid>
+            </Border>
+
+            <Grid x:Name="LobbySurface"
+                  Grid.Row="2"
+                  Margin="14,10,14,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2.05*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="1*" MinWidth="300" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        Background="{StaticResource AvionicsGlassRaisedBrush}"
+                        BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                        BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="48" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="34" />
+                        </Grid.RowDefinitions>
+                        <Border Padding="14,0"
+                                BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                BorderThickness="0,0,0,1">
+                            <Grid>
+                                <TextBlock Text="全部房间"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock x:Name="RoomCountText"
+                                           Text="正在加载房间…"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10"
+                                           FontFamily="Bahnschrift, Microsoft YaHei UI"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1">
+                            <ListBox x:Name="RoomList"
+                                     Margin="9"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     ItemContainerStyle="{StaticResource RoomListItemStyle}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                     SelectionChanged="RoomList_SelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderThickness="1"
+                                                CornerRadius="2"
+                                                Cursor="Hand">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="#0A1823" />
+                                                    <Setter Property="BorderBrush" Value="#173447" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                                     Value="True">
+                                                            <Setter Property="Background" Value="#0D2231" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                                        </DataTrigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="#0D1D29" />
+                                                            <Setter Property="BorderBrush" Value="#1A5370" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <Grid MinHeight="112">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="150" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Background="{Binding BeaconBrush}" />
+                                                <StackPanel Grid.Column="1" Margin="14,12">
+                                                    <TextBlock Text="{Binding Title}"
+                                                               Foreground="{StaticResource PrimaryTextBrush}"
+                                                               FontSize="15"
+                                                               FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding GoalDisplay}"
+                                                               Margin="0,5,0,0"
+                                                               Foreground="{StaticResource MutedTextBrush}"
+                                                               FontSize="10.5"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <ItemsControl ItemsSource="{Binding DisplayTags}"
+                                                                  ItemTemplate="{StaticResource RoomDisplayTagTemplate}"
+                                                                  Margin="0,8,0,0">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <WrapPanel />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                                <Border Grid.Column="2"
+                                                        Padding="12"
+                                                        BorderBrush="{StaticResource BorderSubtleBrush}"
+                                                        BorderThickness="1,0,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding HostDisplay, StringFormat=房主：{0}}"
+                                                                   Foreground="#CFE0EA"
+                                                                   FontSize="10.5"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding MemberCountText}"
+                                                                   Margin="0,8,0,0"
+                                                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                                                   FontFamily="Bahnschrift"
+                                                                   FontSize="13" />
+                                                        <TextBlock Text="{Binding VoiceRequirementText}"
+                                                                   Margin="0,5,0,0"
+                                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                                   FontSize="10" />
+                                                        <TextBlock Text="{Binding AdmissionText}"
+                                                                   Margin="0,4,0,0"
+                                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                                   FontSize="10" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <StackPanel x:Name="RoomEmptyState"
+                                        Width="310"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="当前没有可加入的房间"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           FontSize="15"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock Text="可以调整搜索条件，或创建一个临时房间等待队友加入。"
+                                           Margin="0,7,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10.5"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap" />
+                                <Button Content="清除筛选"
+                                        Width="90"
+                                        Height="32"
+                                        Margin="0,14,0,0"
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="ClearFiltersButton_Click" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Grid.Row="2"
+                                Padding="14,0"
+                                BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="0,1,0,0">
+                            <TextBlock Text="临时房间不会改变你在舰队中的正式小队编制。"
+                                       Foreground="#637A89"
+                                       FontSize="9.5"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Column="2"
+                        Background="{StaticResource AvionicsGlassPanelBrush}"
+                        BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                        BorderThickness="1">
+                    <Grid Margin="18">
+                        <StackPanel x:Name="NoRoomSelectionState"
+                                    Width="260"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="房间预览"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="选择一个房间，查看目标、成员与加入要求。"
+                                       Margin="0,8,0,0"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="10.5"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                            <TextBlock x:Name="NoRoomSelectionStatusText"
+                                       MaxWidth="300"
+                                       Margin="0,14,0,0"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       FontSize="10"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <Grid x:Name="RoomDetailPanel"
+                              Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="RoomTitleText"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           FontSize="21"
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap" />
+                                <TextBlock x:Name="RoomGoalText"
+                                           Margin="0,7,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding DisplayTags}"
+                                              ItemTemplate="{StaticResource RoomDisplayTagTemplate}"
+                                              Margin="0,11,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </StackPanel>
+                            <Border Grid.Row="1"
+                                    Margin="0,14,0,0"
+                                    Padding="0,11"
+                                    BorderBrush="{StaticResource BorderSubtleBrush}"
+                                    BorderThickness="0,1,0,1">
+                                <Grid>
+                                    <StackPanel>
+                                        <TextBlock Text="房主" Style="{StaticResource HudCaptionText}" />
+                                        <TextBlock x:Name="RoomHostText"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                                   FontSize="11" />
+                                    </StackPanel>
+                                    <StackPanel HorizontalAlignment="Right">
+                                        <TextBlock Text="成员" Style="{StaticResource HudCaptionText}" HorizontalAlignment="Right" />
+                                        <TextBlock x:Name="RoomMembersText"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                                   FontFamily="Bahnschrift, Microsoft YaHei UI"
+                                                   FontSize="11"
+                                                   HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Row="2"
+                                    Margin="0,13,0,0"
+                                    Padding="11"
+                                    Background="#0D1D29"
+                                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                    BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Text="加入要求" Style="{StaticResource HudCaptionText}" />
+                                    <TextBlock x:Name="RoomAccessText"
+                                               Margin="0,5,0,0"
+                                               Foreground="#CFE0EA"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock x:Name="RoomLanguageText"
+                                               Margin="0,4,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10" />
+                                    <TextBlock x:Name="RoomPasswordRequirementText"
+                                               Margin="0,4,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10" />
+                                </StackPanel>
+                            </Border>
+                            <StackPanel Grid.Row="3" Margin="0,14,0,0">
+                                <TextBlock Text="成员预览" Style="{StaticResource HudCaptionText}" />
+                                <ItemsControl x:Name="RoomMemberPreviewList"
+                                              ItemsSource="{Binding Members}"
+                                              Margin="0,8,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="38"
+                                                    Height="38"
+                                                    Margin="0,0,6,6"
+                                                    Background="#102536"
+                                                    BorderBrush="{StaticResource AccentDimBrush}"
+                                                    BorderThickness="1"
+                                                    ToolTip="{Binding Callsign}">
+                                                <Grid>
+                                                    <Image Source="{Binding AvatarImageData, Converter={StaticResource ImagePathConverter}}"
+                                                           Stretch="UniformToFill" />
+                                                    <ContentControl Tag="{Binding AvatarImageData}"
+                                                                    Style="{StaticResource IdentityBeaconAvatarFallbackStyle}" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <PasswordBox x:Name="RoomPasswordBox"
+                                             Width="250"
+                                             Height="34"
+                                             Margin="0,8,0,0"
+                                             Padding="9,4"
+                                             HorizontalAlignment="Left"
+                                             VerticalContentAlignment="Center"
+                                             ToolTip="房间密码"
+                                             Visibility="Collapsed" />
+                            </StackPanel>
+                            <Grid Grid.Row="4" Margin="0,12,0,0">
+                                <TextBlock x:Name="RoomStatusText"
+                                           Margin="0,0,110,0"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                                <Button x:Name="JoinRoomButton"
+                                        Width="104"
+                                        Height="34"
+                                        HorizontalAlignment="Right"
+                                        Content="加入房间"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Click="JoinRoomButton_Click" />
+                            </Grid>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Grid x:Name="CurrentRoomSurface"
+                  Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Margin="14,10,14,14"
+                  Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Padding="16,13"
+                        Background="{StaticResource AvionicsGlassRaisedBrush}"
+                        BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                        BorderThickness="1">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7"
+                                         Height="7"
+                                         Fill="#42CF7C"
+                                         VerticalAlignment="Center" />
+                                <TextBlock Text="房间开放中"
+                                           Margin="7,0,0,0"
+                                           Style="{StaticResource HudCaptionText}" />
+                            </StackPanel>
+                            <TextBlock x:Name="CurrentRoomTitleText"
+                                       Margin="0,5,0,0"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       FontSize="22"
+                                       FontWeight="SemiBold" />
+                            <TextBlock x:Name="CurrentRoomGoalText"
+                                       Margin="0,4,0,0"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center">
+                            <Border x:Name="CurrentRoomCodePanel"
+                                    Height="34"
+                                    MinWidth="118"
+                                    Padding="10,0"
+                                    Background="#0D1D29"
+                                    BorderBrush="#2B5F79"
+                                    BorderThickness="1">
+                                <TextBlock x:Name="CurrentRoomCodeText"
+                                           Text="房间码未提供"
+                                           Foreground="#CFE0EA"
+                                           FontFamily="Bahnschrift, Microsoft YaHei UI"
+                                           FontSize="10.5"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <Button x:Name="CopyCurrentRoomCodeButton"
+                                    Width="36"
+                                    Height="34"
+                                    Margin="6,0,0,0"
+                                    Padding="0"
+                                    ToolTip="复制房间码"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="CopyCurrentRoomCodeButton_Click">
+                                <TextBlock Text="&#xE8C8;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="12" />
+                            </Button>
+                            <Button x:Name="InviteFriendsButton"
+                                    Height="34"
+                                    Margin="8,0,0,0"
+                                    Padding="14,0"
+                                    Content="邀请好友"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Visibility="Collapsed"
+                                    Click="InviteFriendsButton_Click" />
+                            <Button x:Name="LeaveRoomButton"
+                                    Height="34"
+                                    Margin="8,0,0,0"
+                                    Content="退出房间"
+                                    Style="{StaticResource DangerButton}"
+                                    Click="LeaveRoomButton_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="0.8*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0"
+                            Padding="16"
+                            Background="{StaticResource AvionicsGlassRaisedBrush}"
+                            BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                            BorderThickness="1">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="房间简报" Style="{StaticResource HudCaptionText}" />
+                                <ItemsControl ItemsSource="{Binding DisplayTags}"
+                                              ItemTemplate="{StaticResource RoomDisplayTagTemplate}"
+                                              Margin="0,9,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </StackPanel>
+                            <Border Grid.Row="1"
+                                    Margin="0,12"
+                                    Padding="0,10"
+                                    BorderBrush="{StaticResource BorderSubtleBrush}"
+                                    BorderThickness="0,1,0,1">
+                                <StackPanel>
+                                    <TextBlock x:Name="CurrentRoomAccessText"
+                                               Foreground="#CFE0EA"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock x:Name="CurrentRoomScheduleText"
+                                               Margin="0,5,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10" />
+                                    <TextBlock x:Name="CurrentRoomFeedbackText"
+                                               Margin="0,7,0,0"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               FontSize="10"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Grid Grid.Row="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid>
+                                    <TextBlock Text="全部成员" Style="{StaticResource HudCaptionText}" />
+                                    <TextBlock x:Name="CurrentRoomMemberCountText"
+                                               HorizontalAlignment="Right"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               FontFamily="Bahnschrift" />
+                                </Grid>
+                                <ListBox x:Name="CurrentRoomMembersList"
+                                         Grid.Row="1"
+                                         Margin="0,9,0,0"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         ItemContainerStyle="{StaticResource RoomListItemStyle}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border MinHeight="82"
+                                                    Margin="0,0,0,7"
+                                                    Padding="12"
+                                                    Background="#0D1D29"
+                                                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                                    BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="42" />
+                                                        <ColumnDefinition Width="150" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="40"
+                                                            Height="40"
+                                                            Background="#102536"
+                                                            BorderBrush="{StaticResource AccentDimBrush}"
+                                                            BorderThickness="1"
+                                                            VerticalAlignment="Top">
+                                                        <Grid>
+                                                            <Image Source="{Binding AvatarImageData, Converter={StaticResource ImagePathConverter}}"
+                                                                   Stretch="UniformToFill" />
+                                                            <ContentControl Tag="{Binding AvatarImageData}"
+                                                                            Style="{StaticResource IdentityBeaconAvatarFallbackStyle}" />
+                                                        </Grid>
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1"
+                                                                Margin="10,0">
+                                                        <TextBlock Text="{Binding Callsign}"
+                                                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                                                   FontSize="13"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding GameId}"
+                                                                   Margin="0,3,0,0"
+                                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                                   FontSize="10.5"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                                            <Ellipse Width="6"
+                                                                     Height="6"
+                                                                     Fill="{Binding PresenceBrush}"
+                                                                     VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding PresenceText}"
+                                                                       Margin="6,0,0,0"
+                                                                       Foreground="{Binding PresenceBrush}"
+                                                                       FontSize="10.5" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                    <Grid Grid.Column="2" Margin="0,0,12,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="0.9*" />
+                                                            <ColumnDefinition Width="1.45*" />
+                                                            <ColumnDefinition Width="1.6*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                                                BorderThickness="1,0,0,0"
+                                                                Padding="11,1,7,0">
+                                                            <StackPanel>
+                                                                <TextBlock Text="服务器"
+                                                                           Style="{StaticResource HudCaptionText}"
+                                                                           FontSize="9.5" />
+                                                                <TextBlock Text="{Binding ShardText}"
+                                                                           Margin="0,7,0,0"
+                                                                           Foreground="#CFE0EA"
+                                                                           FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding ShardText}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Border Grid.Column="1"
+                                                                BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                                                BorderThickness="1,0,0,0"
+                                                                Padding="11,1,7,0">
+                                                            <StackPanel>
+                                                                <TextBlock Text="当前飞船"
+                                                                           Style="{StaticResource HudCaptionText}"
+                                                                           FontSize="9.5" />
+                                                                <TextBlock Text="{Binding ShipText}"
+                                                                           Margin="0,7,0,0"
+                                                                           Foreground="#CFE0EA"
+                                                                           FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding ShipText}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Border Grid.Column="2"
+                                                                BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                                                BorderThickness="1,0,0,0"
+                                                                Padding="11,1,7,0">
+                                                            <StackPanel>
+                                                                <TextBlock Text="当前位置"
+                                                                           Style="{StaticResource HudCaptionText}"
+                                                                           FontSize="9.5" />
+                                                                <TextBlock Text="{Binding LocationText}"
+                                                                           Margin="0,7,0,0"
+                                                                           Foreground="#CFE0EA"
+                                                                           FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding LocationText}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </Grid>
+                                                    <Border Grid.Column="3"
+                                                            Padding="7,3"
+                                                            Background="#12301F"
+                                                            BorderBrush="#24683D"
+                                                            BorderThickness="1"
+                                                            VerticalAlignment="Top">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsHost}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Text="房主"
+                                                                   Foreground="#72DB91"
+                                                                   FontSize="10" />
+                                                    </Border>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="2"
+                            Padding="18"
+                            Background="{StaticResource AvionicsGlassPanelBrush}"
+                            BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                            BorderThickness="1">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock Text="房间聊天"
+                                           Style="{StaticResource HudCaptionText}" />
+                                <TextBlock x:Name="CurrentRoomChatStatusText"
+                                           Text="房间内可见"
+                                           HorizontalAlignment="Right"
+                                           Foreground="#637A89"
+                                           FontSize="10.5" />
+                            </Grid>
+                            <Grid Grid.Row="1"
+                                  Margin="0,12"
+                                  Background="#07141E">
+                                <Border BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                        BorderThickness="0,1,0,1" />
+                                <StackPanel x:Name="CurrentRoomChatEmptyPanel"
+                                            Width="280"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                    <Border Width="48"
+                                            Height="48"
+                                            HorizontalAlignment="Center"
+                                            Background="#102536"
+                                            BorderBrush="{StaticResource AccentDimBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="2">
+                                        <TextBlock Text="&#xE8BD;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="20"
+                                                   Foreground="{StaticResource AccentBrush}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="尚无房间消息"
+                                               Margin="0,13,0,0"
+                                               Foreground="{StaticResource PrimaryTextBrush}"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="发送第一条消息，或等待成员加入动态。"
+                                               Margin="0,7,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ListBox x:Name="CurrentRoomChatList"
+                                         Visibility="Collapsed"
+                                         Style="{StaticResource UnifiedChatMessageListStyle}" />
+                            </Grid>
+                            <Grid Grid.Row="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="CurrentRoomChatAttachmentButton"
+                                        Style="{StaticResource UnifiedChatAttachmentButtonStyle}"
+                                        Click="CurrentRoomChatAttachmentButton_Click" />
+                                <TextBox x:Name="CurrentRoomChatInputBox"
+                                         Grid.Column="1"
+                                         MaxLength="300"
+                                         Style="{StaticResource UnifiedChatComposerTextBoxStyle}"
+                                         ToolTip="Enter 发送；Shift+Enter 换行"
+                                         PreviewKeyDown="CurrentRoomChatInputBox_PreviewKeyDown" />
+                                <Button x:Name="CurrentRoomChatSendButton"
+                                        Grid.Column="2"
+                                        Content="发送"
+                                        Style="{StaticResource UnifiedChatSendButtonStyle}"
+                                        Click="CurrentRoomChatSendButton_Click" />
+                                <TextBlock Grid.Row="1"
+                                           Grid.ColumnSpan="3"
+                                           Text="Enter 发送 · Shift+Enter 换行 · 最多 300 字"
+                                           Margin="1,8,0,0"
+                                           HorizontalAlignment="Right"
+                                           Foreground="#506775"
+                                           FontSize="9" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="InviteFriendsPanel"
+                      Grid.RowSpan="2"
+                      Background="#E8061018"
+                      Visibility="Collapsed"
+                      Panel.ZIndex="70">
+                    <Border Width="680"
+                            MaxHeight="580"
+                            Padding="20"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="{StaticResource AvionicsGlassRaisedBrush}"
+                            BorderBrush="{StaticResource AccentDimBrush}"
+                            BorderThickness="1">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="INVITE FRIENDS"
+                                               Style="{StaticResource HudCaptionText}" />
+                                    <TextBlock Text="邀请好友"
+                                               Margin="0,6,0,0"
+                                               Foreground="{StaticResource PrimaryTextBrush}"
+                                               FontSize="21"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="邀请好友直接加入当前房间；已在房间中的好友不会重复显示。"
+                                               Margin="0,6,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Width="34"
+                                        Height="34"
+                                        Padding="0"
+                                        ToolTip="关闭"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="InviteFriendsCloseButton_Click">
+                                    <TextBlock Text="&#xE711;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               FontSize="11" />
+                                </Button>
+                            </Grid>
+
+                            <Grid Grid.Row="1"
+                                  MinHeight="230"
+                                  MaxHeight="390"
+                                  Margin="0,18,0,0">
+                                <ListBox x:Name="InviteFriendsList"
+                                         Background="#07141E"
+                                         BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                         BorderThickness="1"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border MinHeight="68"
+                                                    Margin="7,7,7,0"
+                                                    Padding="10"
+                                                    Background="#0D1D29"
+                                                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                                    BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="46" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="42"
+                                                            Height="42"
+                                                            Background="#102536"
+                                                            BorderBrush="{StaticResource AccentDimBrush}"
+                                                            BorderThickness="1">
+                                                        <Grid>
+                                                            <Image Source="{Binding AvatarImageData, Converter={StaticResource ImagePathConverter}}"
+                                                                   Stretch="UniformToFill" />
+                                                            <ContentControl Tag="{Binding AvatarImageData}"
+                                                                            Style="{StaticResource IdentityBeaconAvatarFallbackStyle}" />
+                                                        </Grid>
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1"
+                                                                Margin="10,1,12,0">
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                                                   FontSize="13"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding DetailText}"
+                                                                   Margin="0,5,0,0"
+                                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                                   FontSize="10.5"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2"
+                                                                Orientation="Horizontal"
+                                                                VerticalAlignment="Center">
+                                                        <Button MinWidth="74"
+                                                                Height="32"
+                                                                Padding="12,0"
+                                                                Content="{Binding SecondaryText}"
+                                                                Tag="{Binding}"
+                                                                Style="{StaticResource SecondaryButton}"
+                                                                Visibility="{Binding SecondaryVisibility}"
+                                                                Click="InviteFriendSecondaryButton_Click" />
+                                                        <Button MinWidth="82"
+                                                                Height="32"
+                                                                Margin="7,0,0,0"
+                                                                Padding="12,0"
+                                                                Content="{Binding PrimaryText}"
+                                                                IsEnabled="{Binding PrimaryEnabled}"
+                                                                Tag="{Binding}"
+                                                                Style="{StaticResource PrimaryButton}"
+                                                                Click="InviteFriendPrimaryButton_Click" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock x:Name="InviteFriendsEmptyText"
+                                           Text="当前没有可邀请的好友。"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="13"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Visibility="Collapsed" />
+                            </Grid>
+
+                            <TextBlock x:Name="InviteFriendsStatusText"
+                                       Grid.Row="2"
+                                       MinHeight="22"
+                                       Margin="0,13,0,0"
+                                       Text="邀请会在房间关闭、招募结束或 24 小时后失效。"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <Border x:Name="RoomCodeJoinPanel"
+                    Grid.Row="2"
+                    Margin="14,10,14,14"
+                    Padding="24"
+                    Background="{StaticResource PageBackgroundBrush}"
+                    BorderBrush="{StaticResource AccentDimBrush}"
+                    BorderThickness="1"
+                    Visibility="Collapsed"
+                    Panel.ZIndex="30">
+                <Grid MaxWidth="560"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="输入房间码"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="20"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="房间码用于查找指定房间；只有房主设置了密码时才需要填写密码。"
+                                   Margin="0,7,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Grid Grid.Row="1" Margin="0,22,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="房间码"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBox x:Name="RoomCodeBox"
+                                     Height="38"
+                                     Margin="0,7,0,0"
+                                     MaxLength="20"
+                                     Padding="10,5"
+                                     VerticalContentAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="房间密码 · 可选"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <PasswordBox x:Name="RoomCodePasswordBox"
+                                         Height="38"
+                                         Margin="0,7,0,0"
+                                         MaxLength="32"
+                                         Padding="10,5"
+                                         VerticalContentAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="RoomCodeStatusText"
+                               Grid.Row="2"
+                               MinHeight="30"
+                               Margin="0,14,0,0"
+                               Foreground="{StaticResource AccentBrush}"
+                               TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="3"
+                                Margin="0,10,0,0"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right">
+                        <Button Width="82"
+                                Height="34"
+                                Margin="0,0,8,0"
+                                Content="返回"
+                                Style="{StaticResource SecondaryButton}"
+                                Click="CancelRoomCodeButton_Click" />
+                        <Button Width="120"
+                                Height="34"
+                                Content="查找并加入"
+                                Style="{StaticResource PrimaryButton}"
+                                Click="JoinByCodeButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border x:Name="CreateRoomPanel"
+                    Grid.Row="2"
+                    Margin="14,10,14,14"
+                    Padding="20"
+                    Background="{StaticResource PageBackgroundBrush}"
+                    BorderBrush="{StaticResource AccentDimBrush}"
+                    BorderThickness="1"
+                    Visibility="Collapsed"
+                    Panel.ZIndex="20">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="创建临时房间"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="20"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="设置本次招募内容。创建后你会直接进入房间。"
+                                   Margin="0,6,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10.5" />
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1"
+                                  Margin="0,18,0,12"
+                                  VerticalScrollBarVisibility="Auto">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="房间名 · 必填" Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBox x:Name="CreateTitleBox"
+                                         Height="36"
+                                         Margin="0,6,0,14"
+                                         MaxLength="32"
+                                         Padding="10,5"
+                                         VerticalContentAlignment="Center" />
+                                <TextBlock Text="组队目标 · 可选" Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBox x:Name="CreateGoalBox"
+                                         Height="72"
+                                         Margin="0,6,0,14"
+                                         MaxLength="120"
+                                         Padding="10,7"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap" />
+                                <Grid Margin="0,0,0,6">
+                                    <TextBlock Text="房间标签 · 必填"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Right">
+                                        <TextBlock x:Name="CreateTagCountText"
+                                                   Text="0 / 5"
+                                                   Margin="0,0,9,0"
+                                                   Foreground="#637A89"
+                                                   VerticalAlignment="Center" />
+                                        <Button Content="选择标签"
+                                                Height="32"
+                                                Padding="13,0"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Click="ShowCreateTagPicker_Click" />
+                                    </StackPanel>
+                                </Grid>
+                                <Border MinHeight="76"
+                                        Margin="0,0,0,14"
+                                        Padding="10"
+                                        Background="{StaticResource AvionicsGlassPanelBrush}"
+                                        BorderBrush="#18384A"
+                                        BorderThickness="1">
+                                    <Grid>
+                                        <TextBlock x:Name="CreateTagEmptyText"
+                                                   Text="至少选择 1 条玩法路径"
+                                                   Foreground="#637A89"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                        <ItemsControl x:Name="CreateSelectedTags">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Style="{StaticResource RoomTagChip}"
+                                                            Padding="9,5">
+                                                        <TextBlock Text="{Binding DisplayText}"
+                                                                   Foreground="#CFE0EA"
+                                                                   FontSize="10.5" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="人数上限" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateCapacityBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="主要语言" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateLanguageBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="0">
+                                            <ComboBoxItem Content="中文" Tag="zh" />
+                                            <ComboBoxItem Content="English" Tag="en" />
+                                            <ComboBoxItem Content="中英双语" Tag="bilingual" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="谁能找到" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateVisibilityBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="0">
+                                            <ComboBoxItem Content="公开大厅" Tag="public" />
+                                            <ComboBoxItem Content="仅房间码" Tag="code" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="谁能加入" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateEligibilityBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="0">
+                                            <ComboBoxItem Content="所有玩家" Tag="everyone" />
+                                            <ComboBoxItem Content="房主好友" Tag="friends" />
+                                            <ComboBoxItem Content="同舰队成员" Tag="fleet" />
+                                            <ComboBoxItem Content="仅受邀玩家" Tag="invite" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="加入方式" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateAdmissionBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="1">
+                                            <ComboBoxItem Content="直接加入" Tag="direct" />
+                                            <ComboBoxItem Content="房主批准" Tag="approval" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="语音要求" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateVoiceBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="1">
+                                            <ComboBoxItem Content="不要求语音" Tag="none" />
+                                            <ComboBoxItem Content="建议语音" Tag="recommended" />
+                                            <ComboBoxItem Content="必须使用语音" Tag="required" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Grid>
+                                <Border Padding="10"
+                                        Margin="0,0,0,14"
+                                        Background="#0D1D29"
+                                        BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel>
+                                        <CheckBox x:Name="CreatePasswordToggle"
+                                                  Content="设置房间密码"
+                                                  Foreground="#CFE0EA"
+                                                  Checked="CreatePasswordToggle_Changed"
+                                                  Unchecked="CreatePasswordToggle_Changed" />
+                                        <PasswordBox x:Name="CreatePasswordBox"
+                                                     Height="36"
+                                                     Margin="0,9,0,0"
+                                                     MaxLength="32"
+                                                     Padding="10,5"
+                                                     VerticalContentAlignment="Center"
+                                                     IsEnabled="False" />
+                                        <TextBlock Text="启用后密码需要 4–32 个字符。"
+                                                   Margin="0,5,0,0"
+                                                   Foreground="#637A89"
+                                                   FontSize="10.5" />
+                                    </StackPanel>
+                                </Border>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="招募时长" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateRecruitmentBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="0">
+                                            <ComboBoxItem Content="不限时" Tag="" />
+                                            <ComboBoxItem Content="30 分钟" Tag="30" />
+                                            <ComboBoxItem Content="1 小时" Tag="60" />
+                                            <ComboBoxItem Content="2 小时" Tag="120" />
+                                            <ComboBoxItem Content="4 小时" Tag="240" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="自动解散" Foreground="{StaticResource MutedTextBrush}" />
+                                        <ComboBox x:Name="CreateDisbandBox"
+                                                  Height="36"
+                                                  Margin="0,6,0,14"
+                                                  SelectedIndex="3">
+                                            <ComboBoxItem Content="1 小时后" Tag="1" />
+                                            <ComboBoxItem Content="2 小时后" Tag="2" />
+                                            <ComboBoxItem Content="4 小时后" Tag="4" />
+                                            <ComboBoxItem Content="6 小时后" Tag="6" />
+                                            <ComboBoxItem Content="12 小时后" Tag="12" />
+                                            <ComboBoxItem Content="24 小时后" Tag="24" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                    <Grid Grid.Row="2">
+                        <TextBlock x:Name="CreateStatusText"
+                                   Margin="0,0,220,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right">
+                            <Button Width="82"
+                                    Height="34"
+                                    Margin="0,0,8,0"
+                                    Content="取消"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="CancelCreateButton_Click" />
+                            <Button Width="132"
+                                    Height="34"
+                                    Content="创建并进入房间"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Click="CreateRoomButton_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border x:Name="CreateTagPickerPanel"
+                    Grid.Row="2"
+                    Margin="14,10,14,14"
+                    Padding="20"
+                    Background="{StaticResource PageBackgroundBrush}"
+                    BorderBrush="{StaticResource AccentDimBrush}"
+                    BorderThickness="1"
+                    Visibility="Collapsed"
+                    Panel.ZIndex="40">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="190" />
+                        <RowDefinition Height="*" MinHeight="96" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="选择房间标签"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       FontSize="20"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="先选择玩法层级，再补充队伍风格或状态标签。"
+                                       Margin="0,5,0,0"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                        </StackPanel>
+                        <TextBlock x:Name="CreateTagSelectionCountText"
+                                   Text="0 / 5"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource AccentBrush}"
+                                   FontFamily="Bahnschrift"
+                                   FontSize="14"
+                                   FontWeight="SemiBold" />
+                    </Grid>
+                    <Border Grid.Row="1"
+                            Margin="0,14,0,10"
+                            Padding="12,8"
+                            Background="#0D1D29"
+                            BorderBrush="#18384A"
+                            BorderThickness="1">
+                        <Grid>
+                            <TextBlock x:Name="CreateTagCurrentPathText"
+                                       Text="从一级玩法开始选择"
+                                       Margin="0,0,150,0"
+                                       Foreground="#CFE0EA"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Button x:Name="CreateTagAddGameplayButton"
+                                    Width="132"
+                                    Height="32"
+                                    HorizontalAlignment="Right"
+                                    Content="添加此玩法"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="AddCreateGameplayTag_Click" />
+                        </Grid>
+                    </Border>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ListBox x:Name="CreateTagLevel1List"
+                                 Grid.Column="0"
+                                 Style="{StaticResource CreateTagColumnList}"
+                                 ItemContainerStyle="{StaticResource CreateTagColumnItem}"
+                                 DisplayMemberPath="Name"
+                                 SelectionChanged="CreateTagLevel1List_SelectionChanged" />
+                        <ListBox x:Name="CreateTagLevel2List"
+                                 Grid.Column="2"
+                                 Style="{StaticResource CreateTagColumnList}"
+                                 ItemContainerStyle="{StaticResource CreateTagColumnItem}"
+                                 DisplayMemberPath="Name"
+                                 SelectionChanged="CreateTagLevel2List_SelectionChanged" />
+                        <ListBox x:Name="CreateTagLevel3List"
+                                 Grid.Column="4"
+                                 Style="{StaticResource CreateTagColumnList}"
+                                 ItemContainerStyle="{StaticResource CreateTagColumnItem}"
+                                 DisplayMemberPath="Name"
+                                 SelectionChanged="CreateTagLevel3List_SelectionChanged" />
+                    </Grid>
+                    <Border Grid.Row="3"
+                            Margin="0,12,0,0"
+                            Padding="12,9"
+                            Background="{StaticResource AvionicsGlassPanelBrush}"
+                            BorderBrush="#18384A"
+                            BorderThickness="1">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="CreateContextTagGroups">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,9">
+                                            <TextBlock Text="{Binding Name}"
+                                                       Foreground="{StaticResource AccentBrush}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold" />
+                                            <ItemsControl ItemsSource="{Binding Tags}"
+                                                          Margin="0,5,0,0">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox Content="{Binding Name}"
+                                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                  Margin="0,0,16,6"
+                                                                  Foreground="#CFE0EA"
+                                                                  Click="CreateContextTag_Click" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Border>
+                    <Border Grid.Row="4"
+                            MinHeight="56"
+                            Margin="0,12,0,0"
+                            Padding="9"
+                            Background="#07121B"
+                            BorderBrush="#18384A"
+                            BorderThickness="1">
+                        <ItemsControl x:Name="CreateTagSelectedItems">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource RoomTagChip}"
+                                            Padding="8,4">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding DisplayText}"
+                                                       Foreground="#CFE0EA"
+                                                       FontSize="10.5"
+                                                       VerticalAlignment="Center" />
+                                            <Button Content="×"
+                                                    Width="22"
+                                                    Height="20"
+                                                    Margin="6,0,-3,0"
+                                                    Padding="0"
+                                                    Style="{StaticResource SecondaryButton}"
+                                                    Click="RemoveCreateTag_Click" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                    <Grid Grid.Row="5" Margin="0,12,0,0">
+                        <TextBlock x:Name="CreateTagValidationText"
+                                   Margin="0,0,220,0"
+                                   Foreground="#FFFF6B6B"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right">
+                            <Button Width="82"
+                                    Height="34"
+                                    Margin="0,0,8,0"
+                                    Content="返回"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="CancelCreateTagPicker_Click" />
+                            <Button Width="126"
+                                    Height="34"
+                                    Content="保存选择"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Click="SaveCreateTagPicker_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border x:Name="UnavailablePanel"
+                    Grid.Row="1"
+                    Grid.RowSpan="2"
+                    Margin="14,10,14,14"
+                    Background="{StaticResource PageBackgroundBrush}"
+                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                    BorderThickness="1"
+                    Visibility="Collapsed"
+                    Panel.ZIndex="100">
+                <StackPanel HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="登录后使用组队大厅"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               FontSize="17"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="RoomUnavailableDetailText"
+                               Text="登录后可查看和加入房间，也可以创建自己的临时房间。"
+                               Margin="0,8,0,0"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="10.5" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

@@ -74,6 +74,15 @@ public static class SmoothWheelScrollBehavior
         }
     }
 
+    public static void CancelPendingMotion(ScrollViewer viewer)
+    {
+        ArgumentNullException.ThrowIfNull(viewer);
+        if (States.TryGetValue(viewer, out var state))
+        {
+            state.CancelPendingMotion();
+        }
+    }
+
     private static void OnIsEnabledChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
     {
         if (dependencyObject is not ScrollViewer viewer)
@@ -173,6 +182,9 @@ public static class SmoothWheelScrollBehavior
             StopRendering(resetTarget: false);
             _targetOffset = viewer.VerticalOffset;
         }
+
+        public void CancelPendingMotion() =>
+            CancelInteraction();
 
         private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {

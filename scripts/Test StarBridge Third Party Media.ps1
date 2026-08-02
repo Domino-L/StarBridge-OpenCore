@@ -24,10 +24,9 @@ if ($RequireRedistributionPermission -and
     -not [string]::IsNullOrWhiteSpace($UnverifiedDistributionExceptionVersion)) {
     throw "RequireRedistributionPermission cannot be combined with an unverified media exception."
 }
-$approvedTemporaryTestReleaseVersions = @("0.4.8.2", "0.4.8.3")
 if (-not [string]::IsNullOrWhiteSpace($UnverifiedDistributionExceptionVersion) -and
-    $UnverifiedDistributionExceptionVersion -notin $approvedTemporaryTestReleaseVersions) {
-    throw "The unverified third-party media exception is restricted to StarBridge 0.4.8.2 or 0.4.8.3."
+    $UnverifiedDistributionExceptionVersion -ne "0.4.8.2") {
+    throw "The unverified third-party media exception is restricted to StarBridge 0.4.8.2."
 }
 $usesUnverifiedDistributionException =
     -not [string]::IsNullOrWhiteSpace($UnverifiedDistributionExceptionVersion)
@@ -1148,7 +1147,7 @@ try {
         Add-MediaCheck `
             -Name "redistribution-permission" `
             -Status "exception" `
-            -Details "Redistribution permission is not verified. Packaging is permitted only by the explicitly documented StarBridge $UnverifiedDistributionExceptionVersion test-release exception; this audit does not assert authorization."
+            -Details "Redistribution permission is not verified. Packaging is permitted only by the explicitly documented StarBridge 0.4.8.2 test-release exception; this audit does not assert authorization."
     }
     else {
         Add-MediaCheck `

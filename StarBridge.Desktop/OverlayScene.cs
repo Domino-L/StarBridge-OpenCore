@@ -149,7 +149,9 @@ public static class OverlaySceneResolver
             Name: name,
             Status: online ? "Online" : "Offline",
             Ship: ship,
-            ShipInfo: $"飞船：{ship}",
+            ShipInfo: PlayerSessionStatePresentation.IsSessionStateText(ship)
+                ? ship
+                : $"飞船：{ship}",
             Location: location,
             Callsign: callsign,
             AvatarPath: member.AvatarImageData,
@@ -162,13 +164,14 @@ public static class OverlaySceneResolver
             RawLocation: rawLocation,
             IsSelf: isSelf,
             ShowMemberActions: false,
-            ServerShard: ResolveRoomShard(member.ShardText),
+            ServerRegion: ResolveRoomRegion(member.ShardText),
             LiveStatus: member.PresenceText);
     }
 
     private static string FormatRoomLocation(string location)
     {
-        if (location.StartsWith("地点：", StringComparison.OrdinalIgnoreCase) ||
+        if (PlayerSessionStatePresentation.IsSessionStateText(location) ||
+            location.StartsWith("地点：", StringComparison.OrdinalIgnoreCase) ||
             location.StartsWith("可能在：", StringComparison.OrdinalIgnoreCase) ||
             location.StartsWith("可能离开：", StringComparison.OrdinalIgnoreCase) ||
             location.StartsWith("等待", StringComparison.OrdinalIgnoreCase))
@@ -201,7 +204,7 @@ public static class OverlaySceneResolver
             .Replace("地点：", "", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? ResolveRoomShard(string? value)
+    private static string? ResolveRoomRegion(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Contains("等待", StringComparison.OrdinalIgnoreCase))
         {
@@ -209,7 +212,7 @@ public static class OverlaySceneResolver
         }
 
         var parts = value.Split('·', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return parts.Length == 0 ? value.Trim() : parts[^1];
+        return parts.Length == 0 ? value.Trim() : parts[0];
     }
 
     private static string FirstNonEmpty(params string?[] values) =>

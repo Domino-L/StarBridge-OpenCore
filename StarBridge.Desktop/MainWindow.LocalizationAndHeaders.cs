@@ -38,21 +38,21 @@ public partial class MainWindow
 
     private void RefreshOverlayCommunicationEventControls()
     {
-        if (OverlayCommunicationFriendEventsCheck is null ||
-            OverlayCommunicationMessagePreviewCheck is null ||
-            OverlayCommunicationDurationSlider is null)
+        if (OverlayInspectorCommunicationFriendEventsCheck is null ||
+            OverlayInspectorCommunicationMessagePreviewCheck is null ||
+            OverlayInspectorCommunicationDurationSlider is null)
         {
             return;
         }
 
         var enabled = ShowNoticePanelCheck?.IsChecked == true;
-        OverlayCommunicationFriendEventsCheck.IsEnabled = enabled;
-        OverlayCommunicationFriendEventsCheck.Opacity = enabled ? 1.0 : 0.58;
-        var friendEventsEnabled = enabled && OverlayCommunicationFriendEventsCheck.IsChecked == true;
-        OverlayCommunicationMessagePreviewCheck.IsEnabled = friendEventsEnabled;
-        OverlayCommunicationMessagePreviewCheck.Opacity = friendEventsEnabled ? 1.0 : 0.58;
-        OverlayCommunicationDurationSlider.IsEnabled = enabled;
-        OverlayCommunicationDurationSlider.Opacity = enabled ? 1.0 : 0.58;
+        OverlayInspectorCommunicationFriendEventsCheck.IsEnabled = enabled;
+        OverlayInspectorCommunicationFriendEventsCheck.Opacity = enabled ? 1.0 : 0.58;
+        var friendEventsEnabled = enabled && OverlayInspectorCommunicationFriendEventsCheck.IsChecked == true;
+        OverlayInspectorCommunicationMessagePreviewCheck.IsEnabled = friendEventsEnabled;
+        OverlayInspectorCommunicationMessagePreviewCheck.Opacity = friendEventsEnabled ? 1.0 : 0.58;
+        OverlayInspectorCommunicationDurationSlider.IsEnabled = enabled;
+        OverlayInspectorCommunicationDurationSlider.Opacity = enabled ? 1.0 : 0.58;
     }
 
     private static void ApplyOverlayEventCountComboLanguage(System.Windows.Controls.ComboBox? comboBox, bool zh)
@@ -110,20 +110,8 @@ public partial class MainWindow
         }
     }
 
-    private void ApplyOverlayLayerAndModuleStyleLanguage(bool zh)
+    private void ApplyOverlayModuleStyleLanguage(bool zh)
     {
-        if (OverlayLayerPanelTitleText is not null)
-        {
-            OverlayLayerPanelTitleText.Text = zh ? "图层" : "LAYERS";
-        }
-
-        if (OverlayLayerPanelHintText is not null)
-        {
-            OverlayLayerPanelHintText.Text = zh
-                ? "越靠上越晚绘制；事件通知栏固定置顶。"
-                : "Higher rows draw later. The event rail stays on top.";
-        }
-
         if (OverlayInspectorModuleAppearanceTitleText is not null)
         {
             OverlayInspectorModuleAppearanceTitleText.Text = zh ? "模块独立设置" : "MODULE STYLE";
@@ -159,7 +147,6 @@ public partial class MainWindow
             OverlayFullScreenBackgroundOpacityLabel.Text = zh ? "背景不透明度" : "BACKGROUND OPACITY";
         }
 
-        RefreshOverlayLayerPanel();
     }
 
     private void ApplyLanguageToControls()
@@ -217,12 +204,28 @@ public partial class MainWindow
         MySquadOnlineColumn.Header = zh ? "在线状态" : "Online";
         MySquadShipColumn.Header = zh ? "飞船状态" : "Ship Status";
         MySquadLocationColumn.Header = zh ? "地点信息" : "Location";
-        OverlayEditHintText.Text = zh
-            ? "拖动模块调整位置，拖拽右下角缩放；保存后的布局会应用到游戏浮层。"
-            : "Drag panels to move. Drag the lower-right handle to resize. Saved layout is applied to fullscreen Overlay.";
-        OverlayPresetLabel.Text = zh ? "预设与布局" : "PRESETS AND LAYOUT";
-        OverlayHotkeyLabel.Text = zh ? "启动与热键" : "STARTUP AND HOTKEYS";
-        OverlayHotkeyGroupLabel.Text = zh ? "全局热键" : "GLOBAL HOTKEY";
+        OverlayPresetLabel.Text = zh ? "预设与恢复" : "PRESETS AND RECOVERY";
+        OverlayHotkeyLabel.Text = zh ? "打开方式" : "OPENING";
+        OverlayHotkeyGroupLabel.Text = zh ? "信息浮层热键" : "INFORMATION OVERLAY HOTKEY";
+        OverlayQuickSettingsGroupText.Text = zh ? "快速设置" : "QUICK SETTINGS";
+        OverlayContentLayoutGroupText.Text = zh ? "内容与布局" : "CONTENT AND LAYOUT";
+        OverlayVisualExperienceGroupText.Text = zh ? "视觉体验" : "VISUAL EXPERIENCE";
+        OverlayManagementGroupText.Text = zh ? "管理" : "MANAGEMENT";
+        OverlayOverviewCategoryButton.Content = zh ? "总览" : "Overview";
+        OverlayStartupCategoryButton.Content = zh ? "打开方式" : "Opening";
+        OverlayDisplayBehaviorCategoryButton.Content = zh ? "跟随游戏" : "Follow game";
+        OverlayModulesCategoryButton.Content = zh ? "模块与内容" : "Modules and content";
+        OverlayPlacementCategoryButton.Content = zh ? "屏幕布局" : "Screen layout";
+        OverlayCrosshairCategoryButton.Content = zh ? "虚拟准星" : "Virtual crosshair";
+        OverlayAppearanceCategoryButton.Content = zh ? "外观" : "Appearance";
+        OverlayMotionCategoryButton.Content = zh ? "动画与性能" : "Motion and performance";
+        OverlayPresetCategoryButton.Content = zh ? "预设与恢复" : "Presets and recovery";
+        OverlaySettingsScopeLabelText.Text = zh ? "设置范围" : "SETTING SCOPE";
+        OverlaySettingsGlobalScopeText.Text = zh ? "通用" : "GLOBAL";
+        OverlaySettingsPresetScopeText.Text = zh ? "当前预设" : "ACTIVE PRESET";
+        OverlaySettingsScopeHintText.Text = zh
+            ? "打开方式作用于所有预设；布局、内容和外观保存到当前预设。"
+            : "Opening applies to every preset. Layout, content, and appearance are saved to the active preset.";
         RefreshOverlayPresetBoxItems();
         OverlayRenamePresetButton.Content = zh ? "重命名" : "Rename";
         OverlayDuplicatePresetButton.Content = zh ? "复制" : "Copy";
@@ -240,32 +243,31 @@ public partial class MainWindow
         OverlayOverviewCanvasHintText.Text = zh ? "自动匹配当前显示器" : "Matches the active display";
         OverlayOverviewSavedLabel.Text = zh ? "本次保存" : "SESSION SAVE";
         OverlayOverviewDirtyLabel.Text = zh ? "未保存更改" : "UNSAVED CHANGES";
-        OverlayOverviewSaveButton.Content = zh ? "保存更改" : "Save changes";
-        OverlayOverviewResetButton.Content = zh ? "重置布局" : "Reset layout";
+        OverlayOverviewActionsHintText.Text = zh
+            ? "打开、保存和放弃更改统一位于页面顶部；恢复操作集中在“预设与恢复”。"
+            : "Open, save, and discard are kept at the top. Recovery actions are grouped under Presets and recovery.";
+        OverlayHeaderDiscardButton.Content = zh ? "放弃更改" : "Discard changes";
         SaveLayoutButton.Content = zh ? "保存更改" : "Save changes";
-        ResetLayoutButton.Content = zh ? "重置" : "Reset";
-        OverlayOptionsLabel.Text = zh ? "模块" : "MODULES";
-        OverlayModuleTogglesGroupLabel.Text = zh ? "模块开关" : "MODULE TOGGLES";
+        OverlayOptionsLabel.Text = zh ? "模块与内容" : "MODULES AND CONTENT";
+        OverlayModuleWorkbenchEntryTitleText.Text = zh ? "模块工作台" : "MODULE WORKBENCH";
+        OverlayModuleWorkbenchEntryDescriptionText.Text = zh
+            ? "选择模块，调整内容、显示规则、停留时间、位置与外观。"
+            : "Choose a module, then adjust its content, display rules, duration, position, and appearance.";
+        OverlayOpenModuleWorkbenchButton.Content = zh ? "打开工作台" : "Open workbench";
+        OverlayModuleTogglesGroupLabel.Text = zh ? "全部模块" : "ALL MODULES";
         OverlayModuleSettingsOwnershipHintText.Text = zh
-            ? "模块内容与显示方式请在右侧画布中选中模块后调整。"
-            : "Select a module on the canvas to adjust its content and display behavior.";
+            ? "可点击右侧画布中的模块快速调整，也可从上方模块工作台统一选择。"
+            : "Select a module on the canvas for a quick edit, or use the workbench above to browse every module.";
         OverlayEventRailGroupLabel.Text = zh ? "显示规则" : "DISPLAY RULES";
-        ShowNoticePanelCheck.Content = zh ? "显示通讯事件" : "Show communication events";
-        ShowSquadsPanelCheck.Content = zh ? "显示态势概况" : "Show situation overview";
+        ShowNoticePanelCheck.Content = zh ? "显示通讯提醒" : "Show communication alerts";
+        ShowSquadsPanelCheck.Content = zh ? "显示队伍概况" : "Show team overview";
         ShowMembersPanelCheck.Content = zh ? "显示成员信息" : "Show member information";
         ShowChatPanelCheck.Content = zh ? "显示场景通讯" : "Show scene communication";
-        OverlayCommunicationSettingsLabel.Text = zh ? "通讯事件" : "COMMUNICATION EVENTS";
-        OverlayCommunicationSettingsHintText.Text = zh
-            ? "接入状态与好友通讯按顺序显示；无事件时模块完全隐藏。"
-            : "Connection and friend communication events are shown in order; the module is hidden while idle.";
-        OverlayCommunicationFriendEventsCheck.Content = zh
-            ? "好友私信、申请与消息请求"
-            : "Friend messages, requests, and message requests";
-        OverlayCommunicationMessagePreviewCheck.Content = zh
-            ? "显示私信正文预览"
-            : "Show private-message preview";
-        OverlayCommunicationDurationLabel.Text = zh ? "停留时间" : "DISPLAY TIME";
-        ShowEventNotificationsCheck.Content = zh ? "显示事件通知栏" : "Show event notification rail";
+        ShowEventNotificationsCheck.Content = zh ? "显示事件通知" : "Show event notifications";
+        OverlayEventSettingsTitleText.Text = zh ? "事件内容" : "EVENT CONTENT";
+        OverlayEventSettingsDescriptionText.Text = zh
+            ? "管理事件类型、显示数量和停留规则。"
+            : "Manage event types, display count, and duration rules.";
         OverlayEventMaxCountLabel.Text = zh ? "最大显示" : "MAX VISIBLE";
         OverlayEventPinImportantCheck.Content = zh ? "重要事件常驻" : "Keep important events";
         OverlayEventAnimationSpeedLabel.Text = zh ? "弹出速度" : "ANIMATION";
@@ -296,8 +298,6 @@ public partial class MainWindow
         OverlaySettingsLockLayoutCheck.Content = zh ? "锁定布局" : "Lock layout";
         OverlayEditorUndoButton.Content = zh ? "撤销" : "Undo";
         OverlayEditorRedoButton.Content = zh ? "重做" : "Redo";
-        OverlayPreviewDiscardButton.Content = zh ? "放弃更改" : "Discard changes";
-        OverlayPreviewSaveButton.Content = zh ? "保存更改" : "Save changes";
         RefreshOverlaySceneChrome();
         ApplyOverlaySceneComboLanguage(OverlaySceneModeBox, zh);
         ApplyOverlaySceneComboLanguage(OverlayBehaviorSceneModeBox, zh);
@@ -343,12 +343,18 @@ public partial class MainWindow
         OverlayFullScreenHideSelfMemberCheck.Content = zh ? "隐藏自己" : "Hide self";
         OverlayFullScreenMemberPriorityLabel.Text = zh ? "优先显示" : "PRIORITY";
         OverlayFullScreenMemberNameModeLabel.Text = zh ? "名称显示" : "NAME MODE";
-        OverlayInspectorHeaderText.Text = zh ? "模块控制台" : "Module Console";
+        OverlayInspectorHeaderText.Text = zh ? "模块工作台" : "Module workbench";
+        OverlayInspectorCloseButton.Content = zh ? "返回设置" : "Back to settings";
+        OverlayInspectorCloseButton.ToolTip = zh ? "返回之前查看的设置" : "Return to the settings you were viewing";
         OverlayInspectorHintText.Text = zh
-            ? "选择一个预览模块后，可校准位置、尺寸和显示行为。"
-            : "Select a preview module to calibrate placement, size, and display behavior.";
+            ? "调整当前模块，右侧画面会立即显示结果。"
+            : "Adjust the current module while the preview updates immediately.";
+        OverlayInspectorSwitchModuleText.Text = zh ? "切换模块" : "Switch module";
+        OverlayInspectorModulePickerHintText.Text = zh
+            ? "选择模块后，设置区会立即切换并保持右侧预览。"
+            : "Choose a module to switch its settings while keeping the preview visible.";
         OverlayEventInspectorSectionTitleText.Text = zh ? "弹出行为" : "POP BEHAVIOR";
-        OverlayNoticeInspectorSectionTitleText.Text = zh ? "通讯事件" : "COMMUNICATION EVENTS";
+        OverlayNoticeInspectorSectionTitleText.Text = zh ? "通讯提醒" : "COMMUNICATION ALERTS";
         OverlayNoticeInspectorEmptyText.Text = zh
             ? "无事件时自动隐藏；位置仅可贴合画布顶部或底部。"
             : "Hidden while idle. This module can only dock to the top or bottom edge.";
@@ -364,8 +370,8 @@ public partial class MainWindow
             ? "被隐藏的模块可在这里恢复到上次布局位置。"
             : "Hidden modules can be restored here to their previous layout position.";
         RefreshOverlayHiddenModuleLibrary();
-        OverlayInspectorResetButton.Content = zh ? "重置模块" : "Reset module";
-        OverlayInspectorHideButton.Content = zh ? "隐藏模块" : "Hide module";
+        OverlayInspectorResetButton.Content = zh ? "恢复模块默认" : "Restore module defaults";
+        OverlayInspectorHideButton.Content = zh ? "从画面隐藏" : "Hide from canvas";
         OverlayInspectorHideSquadIconsCheck.Content = zh ? "隐藏小队图标" : "Hide squad icons";
         OverlayInspectorHideOfflineMembersCheck.Content = zh ? "隐藏离线小队成员" : "Hide offline squad members";
         OverlayInspectorHideMemberOnlineStatusCheck.Content = zh ? "隐藏成员在线状态" : "Hide member online status";
@@ -453,7 +459,7 @@ public partial class MainWindow
             ((ComboBoxItem)OverlayFullScreenVerticalAnchorBox.Items[2]).Content = zh ? "下" : "Bottom";
         }
         RefreshOverlayOverviewSummary();
-        OverlayThemeLabel.Text = zh ? "外观风格" : "APPEARANCE";
+        OverlayThemeLabel.Text = zh ? "外观" : "APPEARANCE";
         OverlayAppearanceDescriptionText.Text = zh
             ? "选择一种外观，再调整该外观支持的配色与显示强度。"
             : "Choose an appearance, then tune the colors and display strength it supports.";
@@ -502,10 +508,17 @@ public partial class MainWindow
             ((ComboBoxItem)OverlayThemeBox.Items[12]).Content = zh ? "盖塔克" : "Gatac";
         }
         CrosshairLabel.Text = zh ? "虚拟准星" : "VIRTUAL CROSSHAIR";
-        OverlayTransitionLabel.Text = zh ? "转场与动效" : "TRANSITIONS AND MOTION";
+        OverlayTransitionLabel.Text = zh ? "动画与性能" : "MOTION AND PERFORMANCE";
         OverlayMotionDescriptionText.Text = zh
-            ? "每套外观只使用其专属转场；你可以关闭转场或调整播放流畅度。"
-            : "Each appearance uses its own transition; you can disable it or adjust playback smoothness.";
+            ? "选择常用体验方案，或继续分别调整转场与常驻动画。"
+            : "Choose a common experience profile or tune transitions and ambient motion separately.";
+        OverlayExperiencePresetLabelText.Text = zh ? "快速体验设置" : "QUICK EXPERIENCE";
+        OverlayExperienceSmoothButton.Content = zh ? "流畅优先" : "Smooth";
+        OverlayExperienceBalancedButton.Content = zh ? "均衡" : "Balanced";
+        OverlayExperienceReducedMotionButton.Content = zh ? "减少动画" : "Reduced motion";
+        OverlayExperiencePresetHintText.Text = zh
+            ? "此操作会同时调整启动转场与常驻动画帧率，可撤销，也可继续单独修改。"
+            : "This changes both the opening transition and ambient frame rate. It can be undone or tuned further.";
         OverlayStartupTransitionGroupLabel.Text = zh ? "风格对应转场" : "APPEARANCE TRANSITION";
         OverlayTransitionFrameRateLabel.Text = zh ? "转场帧率" : "TRANSITION FRAME RATE";
         OverlayTransitionEnabledCheck.Content = zh ? "启动浮层时播放转场" : "Play transition when overlay opens";
@@ -513,7 +526,9 @@ public partial class MainWindow
         OverlaySkipTransitionInGameCheck.ToolTip = zh
             ? "Star Citizen 位于前台时，开启浮层将直接显示内容。"
             : "Show the overlay immediately when Star Citizen is in the foreground.";
-        OverlayGlobalHotkeyEnabledCheck.Content = zh ? "启用全局热键" : "Enable global hotkey";
+        OverlayGlobalHotkeyEnabledCheck.Content = zh
+            ? "启用信息浮层热键"
+            : "Enable information overlay hotkey";
         OverlayAutoFocusGameWindowCheck.Content = zh ? "启动浮层时自动切换至游戏窗口" : "Switch to game window when overlay opens";
         OverlayAutoOpenOnGameStartCheck.Content = zh ? "启动游戏时自动开启浮层" : "Open overlay when the game starts";
         OverlayAutoOpenOnGameForegroundCheck.Content = zh ? "回到游戏窗口时开启浮层" : "Open overlay when returning to the game";
@@ -541,8 +556,7 @@ public partial class MainWindow
         CrosshairOutlineOpacityLabel.Text = zh ? "边缘增强" : "EDGE BOOST";
         CrosshairColorPickerButton.Content = zh ? "选择颜色" : "Pick color";
         CrosshairColorPreview.ToolTip = zh ? "选择颜色" : "Pick color";
-        OverlayDisplayBehaviorCategoryButton.Content = zh ? "显示行为" : "DISPLAY BEHAVIOR";
-        OverlayDisplayBehaviorTitleText.Text = zh ? "显示行为" : "DISPLAY BEHAVIOR";
+        OverlayDisplayBehaviorTitleText.Text = zh ? "跟随游戏" : "FOLLOW GAME";
         OverlayDisplayBehaviorDescriptionText.Text = zh
             ? "决定浮层显示什么内容，以及它如何跟随游戏窗口。"
             : "Choose the content Overlay shows and how it follows the game window.";
@@ -584,6 +598,7 @@ public partial class MainWindow
         OwnedShipSyncedAtColumn.Header = zh ? "同步时间" : "Synced";
         UpdateShipDatabaseSummary();
         RenderOverlayEditor();
+        ApplyOverlaySettingsWorkspacePresentation();
     }
 
     private static string NormalizeLanguage(string? language)

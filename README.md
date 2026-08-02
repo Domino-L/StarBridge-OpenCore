@@ -25,9 +25,12 @@
 | [下载完整安装包](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-win-x64-setup.exe) | 适合离线安装，或需要保留完整安装文件时使用。 |
 | [查看全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases) | 查看更新说明、历史版本和 SHA-256 校验文件。 |
 
-0.4.8.2 与 0.4.8.3 是取得代码签名证书前明确发布的未签名测试版，临时例外到 0.4.8.3 为止，因此 SmartScreen 可能显示“未知发布者”。请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对 Release 中的 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。无法接受未签名程序风险时，请等待后续签名版本。
+0.5.0 的主程序、完整安装器和在线安装器均要求可信 Windows 数字签名与时间戳。
+请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对
+`SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。如果 Windows 仍显示“未知发布者”，请停止安装并提交反馈。
 
-0.4.8.2 与 0.4.8.3 官方客户端还保留了来源待核实的第三方图片，用于舰船与星系资料展示；该临时例外到 0.4.8.3 为止。图片不包含在本开源源码中，也不因随官方客户端分发而获得 Apache-2.0 授权；StarBridge 不主张这些图片的版权或再分发许可。详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
+0.5.0 官方客户端不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+缺少可用图片时会显示应用自带占位图；详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
 
 安装与首次使用说明见 [开始使用](docs/GETTING_STARTED.md)。如果下载或更新失败，请先查看 [下载帮助](docs/DOWNLOADS.md)。需要核验精确 Release tag、SHA-256、Windows 签名、SBOM 与构建来源时，请按 [Release 核验指南](docs/RELEASE-VERIFICATION.md) 操作。
 

@@ -37,7 +37,10 @@ public partial class MainWindow
         string Body,
         string SectionKey,
         bool RequiresTargetAction = true,
-        bool IsNavigationTarget = true);
+        bool IsNavigationTarget = true,
+        FrameworkElement? ExplanationTarget = null,
+        string? InspectorModuleKey = null,
+        bool ExpandGeometry = false);
 
     private GuideMode _guideMode;
     private GuideStep _guideStep;

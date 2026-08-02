@@ -26,12 +26,13 @@ $requiredFiles = @(
     "third-party-packages.json",
     "StarBridge.Desktop/Assets/Brand/LICENSE.txt",
     "scripts/Test Third Party Licenses.ps1",
+    "scripts/Test StarBridge Version Migration.ps1",
     "SUPPORT.md",
     "docs/GETTING_STARTED.md",
     "docs/DOWNLOADS.md",
     "docs/RELEASE-VERIFICATION.md",
     "docs/OFFICIAL-BINARY-LICENSE.txt",
-    "licenses/OFFICIAL-BINARY-LICENSE.txt",
+    "LICENSES/OFFICIAL-BINARY-LICENSE.txt",
     ".github/ISSUE_TEMPLATE/bug-report.yml",
     ".github/ISSUE_TEMPLATE/feature-request.yml",
     ".github/ISSUE_TEMPLATE/config.yml",
@@ -40,6 +41,8 @@ $requiredFiles = @(
     ".github/workflows/binary-release-audit.yml",
     "scripts/Test DCO Signoffs.ps1",
     "scripts/Test StarBridge Third Party Media.ps1",
+    "scripts/Test StarBridge Media-Free Payload.ps1",
+    "scripts/Stage StarBridge Media-Free Payload.ps1",
     "scripts/Update StarBridge Third Party Media Manifest.ps1",
     "scripts/Test StarBridge Binary Distribution.ps1",
     "scripts/Test StarBridge Installer Payload.ps1"
@@ -226,35 +229,12 @@ if (Test-Path -LiteralPath $binaryAuditWorkflowPath) {
         "gh release verify",
         "gh release verify-asset",
         "Test StarBridge Binary Distribution.ps1",
-        '$approvedTemporaryTestReleaseVersions = @("0.4.8.2", "0.4.8.3")',
-        '$auditArguments.AllowUnverifiedThirdPartyMediaTestRelease = $true',
-        '$auditArguments.RequireAuthenticode = $true',
+        "RequireAuthenticode = `$true",
         "BINARY-AUDIT-REPORT.json",
         "actions/upload-artifact@"
     )) {
         if (-not $binaryAuditWorkflow.Contains($requiredBinaryAuditValue)) {
             $errors.Add("Binary release audit workflow is missing required behavior: $requiredBinaryAuditValue")
-        }
-    }
-
-    $temporaryVersionMatch = [regex]::Match(
-        $binaryAuditWorkflow,
-        '(?m)^\s*\$approvedTemporaryTestReleaseVersions\s*=\s*@\((?<versions>[^\r\n]*)\)\s*$'
-    )
-    if (-not $temporaryVersionMatch.Success) {
-        $errors.Add("Binary release audit workflow does not define the temporary test-release allowlist.")
-    }
-    else {
-        $temporaryVersions = @(
-            [regex]::Matches(
-                $temporaryVersionMatch.Groups["versions"].Value,
-                '"(?<version>\d+\.\d+\.\d+(?:\.\d+)?)"'
-            ) | ForEach-Object { $_.Groups["version"].Value }
-        )
-        if ($temporaryVersions.Count -ne 2 -or
-            $temporaryVersions -notcontains "0.4.8.2" -or
-            $temporaryVersions -notcontains "0.4.8.3") {
-            $errors.Add("Binary release audit workflow temporary exception must be limited to 0.4.8.2 and 0.4.8.3.")
         }
     }
 }

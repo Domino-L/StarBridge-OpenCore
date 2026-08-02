@@ -13,6 +13,10 @@ internal static class GameCompatibleHotkeyModifiers
 
 internal readonly record struct GameCompatibleHotkeyBinding(uint VirtualKey, uint Modifiers);
 
+internal readonly record struct GameCompatibleHotkeyRoute(
+    int CommandId,
+    GameCompatibleHotkeyBinding Binding);
+
 internal readonly record struct GameCompatibleHotkeyInput(
     uint VirtualKey,
     uint PressedModifiers,
@@ -50,6 +54,35 @@ internal sealed class GameCompatibleHotkeyTriggerFilter
         _primaryKeyDown = true;
         return (input.PressedModifiers & GameCompatibleHotkeyModifiers.SupportedMask) ==
                (_binding.Modifiers & GameCompatibleHotkeyModifiers.SupportedMask);
+    }
+}
+
+internal sealed class GameCompatibleHotkeyTriggerRouter
+{
+    private readonly (int CommandId, GameCompatibleHotkeyTriggerFilter Filter)[] _routes;
+
+    internal GameCompatibleHotkeyTriggerRouter(IEnumerable<GameCompatibleHotkeyRoute> routes)
+    {
+        _routes = routes
+            .Select(route => (
+                route.CommandId,
+                new GameCompatibleHotkeyTriggerFilter(route.Binding)))
+            .ToArray();
+    }
+
+    internal bool TryResolve(GameCompatibleHotkeyInput input, out int commandId)
+    {
+        int? acceptedCommand = null;
+        foreach (var route in _routes)
+        {
+            if (route.Filter.TryAccept(input) && acceptedCommand is null)
+            {
+                acceptedCommand = route.CommandId;
+            }
+        }
+
+        commandId = acceptedCommand ?? 0;
+        return acceptedCommand.HasValue;
     }
 }
 
@@ -115,7 +148,7 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
     private readonly NativeWindowProcedure _windowProcedure;
     private ManualResetEventSlim? _startupSignal;
     private Thread? _listenerThread;
-    private GameCompatibleHotkeyTriggerFilter? _triggerFilter;
+    private GameCompatibleHotkeyTriggerRouter? _triggerRouter;
     private IntPtr _targetWindow;
     private uint _targetMessage;
     private IntPtr _rawInputWindow;
@@ -157,13 +190,27 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
         uint targetMessage,
         GameCompatibleHotkeyBinding binding)
     {
+        return Start(
+            targetWindow,
+            targetMessage,
+            [new GameCompatibleHotkeyRoute(0, binding)]);
+    }
+
+    internal bool Start(
+        IntPtr targetWindow,
+        uint targetMessage,
+        IReadOnlyCollection<GameCompatibleHotkeyRoute> routes)
+    {
         if (_disposed)
         {
             throw new ObjectDisposedException(nameof(GameCompatibleHotkeyListener));
         }
 
         Stop();
-        if (targetWindow == IntPtr.Zero || targetMessage == 0 || binding.VirtualKey == 0)
+        if (targetWindow == IntPtr.Zero ||
+            targetMessage == 0 ||
+            routes.Count == 0 ||
+            routes.Any(route => route.Binding.VirtualKey == 0))
         {
             lock (_sync)
             {
@@ -178,7 +225,7 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
         {
             _targetWindow = targetWindow;
             _targetMessage = targetMessage;
-            _triggerFilter = new GameCompatibleHotkeyTriggerFilter(binding);
+            _triggerRouter = new GameCompatibleHotkeyTriggerRouter(routes);
             _lastError = 0;
             _startupSignal = startupSignal;
             _windowClassName = $"StarBridge.RawInputHotkey.{Guid.NewGuid():N}";
@@ -231,7 +278,7 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
             _listenerThreadId = 0;
             _targetWindow = IntPtr.Zero;
             _targetMessage = 0;
-            _triggerFilter = null;
+            _triggerRouter = null;
             _rawInputWindow = IntPtr.Zero;
             _rawInputRegistered = false;
             _windowClassName = null;
@@ -426,25 +473,31 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
                 return;
             }
 
-            GameCompatibleHotkeyTriggerFilter? triggerFilter;
+            GameCompatibleHotkeyTriggerRouter? triggerRouter;
             IntPtr targetWindow;
             uint targetMessage;
             lock (_sync)
             {
-                triggerFilter = _triggerFilter;
+                triggerRouter = _triggerRouter;
                 targetWindow = _targetWindow;
                 targetMessage = _targetMessage;
             }
 
-            if (triggerFilter?.TryAccept(new GameCompatibleHotkeyInput(
-                    rawInput.Keyboard.VirtualKey,
-                    ResolvePressedModifiers(),
-                    isKeyDown,
-                    IsInjected: false)) == true &&
+            if (triggerRouter?.TryResolve(
+                    new GameCompatibleHotkeyInput(
+                        rawInput.Keyboard.VirtualKey,
+                        ResolvePressedModifiers(),
+                        isKeyDown,
+                        IsInjected: false),
+                    out var commandId) == true &&
                 targetWindow != IntPtr.Zero &&
                 targetMessage != 0)
             {
-                _ = PostMessage(targetWindow, targetMessage, UIntPtr.Zero, IntPtr.Zero);
+                _ = PostMessage(
+                    targetWindow,
+                    targetMessage,
+                    new UIntPtr(unchecked((uint)commandId)),
+                    IntPtr.Zero);
             }
         }
         finally

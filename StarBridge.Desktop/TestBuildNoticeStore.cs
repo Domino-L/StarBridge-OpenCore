@@ -8,7 +8,7 @@ namespace StarBridge.Desktop;
 
 internal sealed class TestBuildNoticeStore
 {
-    internal const string CurrentTermsVersion = "2026-07-27-v2";
+    internal const string CurrentTermsVersion = "2026-08-01-v3";
     private const int CurrentSchemaVersion = 1;
     private const string LicenseFileName = "OFFICIAL-BINARY-LICENSE.txt";
 
@@ -44,11 +44,7 @@ internal sealed class TestBuildNoticeStore
                    string.Equals(
                        acknowledgement.TermsVersion,
                        CurrentTermsVersion,
-                       StringComparison.Ordinal) &&
-                   string.Equals(
-                       acknowledgement.TermsSha256,
-                       currentHash,
-                       StringComparison.OrdinalIgnoreCase);
+                       StringComparison.Ordinal);
         }
         catch
         {

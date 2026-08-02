@@ -14,7 +14,7 @@ var tests = new (string Name, Action Test)[]
     ("Confirmed immediate-exit vehicles clear ship on control release", ConfirmedImmediateExitVehiclesClearShip),
     ("Unconfirmed vehicles keep ship on control release", UnconfirmedVehiclesKeepShipOnControlRelease),
     ("Medical response notification parses player downed", MedicalResponseNotificationParsesPlayerDowned),
-    ("Incapacitated notification parses player downed", IncapacitatedNotificationParsesPlayerDowned),
+    ("Incapacitated evidence stays internal until death is confirmed", IncapacitatedEvidenceStaysInternalUntilDeathIsConfirmed),
     ("Safe-zone and incapacitated notices emit one downed event", DuplicateDownedNotificationsEmitOnce),
     ("Downed slice does not emit death or respawn", DownedSliceDoesNotEmitDeathOrRespawn),
     ("RemoveIgnore confirms immediate death", RemoveIgnoreConfirmsImmediateDeath),
@@ -520,14 +520,16 @@ static void MedicalResponseNotificationParsesPlayerDowned()
     AssertEqual("LocalPlayer", fleetEvent?.Player, "event player");
 }
 
-static void IncapacitatedNotificationParsesPlayerDowned()
+static void IncapacitatedEvidenceStaysInternalUntilDeathIsConfirmed()
 {
     var parser = NewParserWithLocalPlayer();
-    var fleetEvent = parser.TryParse(
+    var downedEvent = parser.TryParse(
         "<2026-07-23T23:23:15.380Z> [Notice] <SHUDEvent_OnNotification> Added notification \"\u4E27\u5931\u884C\u52A8\u80FD\u529B: \u5F53\u4F60\u5931\u53BB\u884C\u52A8\u80FD\u529B\u65F6\uFF0C\u5728\u201C\u6B7B\u4EA1\u65F6\u95F4\u201D\u8BA1\u65F6\u5668\u7ED3\u675F\u524D\uFF0C\u901A\u8FC7\u4F60\u7684\u961F\u53CB\u8BA9\u4F60\u82CF\u9192\u3002\" [31] to queue.");
+    var deathEvent = parser.TryParse(
+        "<2026-07-23T23:23:38.720Z> [Notice] <Recv Unbind Batch Add Player> Unbind Batch Add sent for player playerGEID=204721330404 entityId=204721330404, className=\"Player\", parentEntityId=729382953449");
 
-    AssertEqual(FleetEventType.PlayerDowned, fleetEvent?.Type, "event type");
-    AssertEqual(LifeEventContext.Incapacitated, fleetEvent?.LifeContext, "life context");
+    AssertEqual<FleetEvent?>(null, downedEvent, "non-safe-zone downed event");
+    AssertEqual(FleetEventType.PlayerDied, deathEvent?.Type, "confirmed death event");
 }
 
 static void DuplicateDownedNotificationsEmitOnce()
@@ -535,8 +537,8 @@ static void DuplicateDownedNotificationsEmitOnce()
     var parser = NewParserWithLocalPlayer();
     var events = ParseLines(parser,
     [
-        "<2026-07-23T23:23:15.365Z> [Notice] <SHUDEvent_OnNotification> Added notification \"\u8BF7\u7B49\u5F85\uFF0C\u672C\u5730\u6025\u6551\u4EBA\u5458\u6B63\u5728\u8D76\u6765\u7684\u8DEF\u4E0A\u3002: \" [30] to queue.",
-        "<2026-07-23T23:23:15.380Z> [Notice] <SHUDEvent_OnNotification> Added notification \"\u4E27\u5931\u884C\u52A8\u80FD\u529B: \u5F53\u4F60\u5931\u53BB\u884C\u52A8\u80FD\u529B\u65F6\uFF0C\u5728\u201C\u6B7B\u4EA1\u65F6\u95F4\u201D\u8BA1\u65F6\u5668\u7ED3\u675F\u524D\uFF0C\u901A\u8FC7\u4F60\u7684\u961F\u53CB\u8BA9\u4F60\u82CF\u9192\u3002\" [31] to queue."
+        "<2026-07-23T23:23:15.365Z> [Notice] <SHUDEvent_OnNotification> Added notification \"\u4E27\u5931\u884C\u52A8\u80FD\u529B: \u5F53\u4F60\u5931\u53BB\u884C\u52A8\u80FD\u529B\u65F6\uFF0C\u5728\u201C\u6B7B\u4EA1\u65F6\u95F4\u201D\u8BA1\u65F6\u5668\u7ED3\u675F\u524D\uFF0C\u901A\u8FC7\u4F60\u7684\u961F\u53CB\u8BA9\u4F60\u82CF\u9192\u3002\" [31] to queue.",
+        "<2026-07-23T23:23:15.380Z> [Notice] <SHUDEvent_OnNotification> Added notification \"\u8BF7\u7B49\u5F85\uFF0C\u672C\u5730\u6025\u6551\u4EBA\u5458\u6B63\u5728\u8D76\u6765\u7684\u8DEF\u4E0A\u3002: \" [30] to queue."
     ]);
 
     AssertEqual(1, events.Count, "downed event count");

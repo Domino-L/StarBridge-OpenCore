@@ -21,6 +21,10 @@ public partial class MainWindow
         DirectMessage
     }
 
+    private sealed record ChatAttachmentDestination(
+        Button Anchor,
+        ChatAttachmentTarget Target);
+
     private void FleetChatAttachmentButton_Click(object sender, RoutedEventArgs e) =>
         OpenChatAttachmentMenu((Button)sender, ChatAttachmentTarget.FleetChannel);
 
@@ -30,11 +34,14 @@ public partial class MainWindow
     private void FriendChatAttachmentButton_Click(object sender, RoutedEventArgs e) =>
         OpenChatAttachmentMenu((Button)sender, ChatAttachmentTarget.DirectMessage);
 
-    private void OpenChatAttachmentMenu(Button anchor, ChatAttachmentTarget target)
+    private void OpenChatAttachmentMenu(Button anchor, ChatAttachmentTarget target) =>
+        OpenChatAttachmentMenu(new ChatAttachmentDestination(anchor, target));
+
+    private void OpenChatAttachmentMenu(ChatAttachmentDestination destination)
     {
         var menu = new ContextMenu
         {
-            PlacementTarget = anchor,
+            PlacementTarget = destination.Anchor,
             Placement = PlacementMode.Top,
             HorizontalOffset = 0,
             VerticalOffset = -4
@@ -44,9 +51,9 @@ public partial class MainWindow
             menu.Style = menuStyle;
         }
 
-        menu.Items.Add(CreateOverlayPresetAttachmentMenu(anchor));
+        menu.Items.Add(CreateOverlayPresetAttachmentMenu(destination));
 
-        if (target is ChatAttachmentTarget.PartyRoom or ChatAttachmentTarget.DirectMessage)
+        if (destination.Target is ChatAttachmentTarget.PartyRoom or ChatAttachmentTarget.DirectMessage)
         {
             var separator = new Separator();
             if (TryFindResource("StarBridgeContextMenuSeparator") is Style separatorStyle)
@@ -55,7 +62,7 @@ public partial class MainWindow
             }
             menu.Items.Add(separator);
 
-            var isDirectMessage = target == ChatAttachmentTarget.DirectMessage;
+            var isDirectMessage = destination.Target == ChatAttachmentTarget.DirectMessage;
             var friendAlreadyInFleet = isDirectMessage && IsActiveFriendInCurrentFleet();
             var eligibleRoomMembers = isDirectMessage ? 0 : CountPartyRoomFleetInvitationRecipients();
             var canSendFleetCard = CanCurrentUserSendFleetInvitationCard();
@@ -64,7 +71,7 @@ public partial class MainWindow
                 canSendFleetCard && (isDirectMessage
                     ? _activeFriendChatUser is not null && !friendAlreadyInFleet
                     : eligibleRoomMembers > 0),
-                async () => await SendFleetInvitationToChatAsync(anchor)));
+                async () => await SendFleetInvitationToChatAsync(destination)));
 
             if (isDirectMessage)
             {
@@ -87,7 +94,7 @@ public partial class MainWindow
         menu.IsOpen = true;
     }
 
-    private MenuItem CreateOverlayPresetAttachmentMenu(Button anchor)
+    private MenuItem CreateOverlayPresetAttachmentMenu(ChatAttachmentDestination destination)
     {
         if (_overlayPresetEntries.Count == 0)
         {
@@ -110,7 +117,7 @@ public partial class MainWindow
             presetMenu.Items.Add(CreateChatAttachmentMenuItem(
                 isCurrent ? $"{preset.Name} · 当前" : preset.Name,
                 true,
-                async () => await SendOverlayPresetAsync(anchor, preset)));
+                async () => await SendOverlayPresetAsync(destination, preset)));
         }
 
         return presetMenu;
@@ -231,26 +238,38 @@ public partial class MainWindow
             OverlayPresetPackage: JsonSerializer.Serialize(package, OverlayPresetJsonOptions));
     }
 
-    private async Task SendOverlayPresetAsync(Button source, OverlayPresetEntry preset)
+    private async Task SendOverlayPresetAsync(
+        ChatAttachmentDestination destination,
+        OverlayPresetEntry preset)
     {
         var attachment = BuildOverlayPresetAttachment(preset);
-        if (ReferenceEquals(source, FleetChatAttachmentButton))
-        {
-            await SendFleetChatMessageAsync("", attachment);
-        }
-        else if (ReferenceEquals(source, PartyRoomChatAttachmentButton))
-        {
-            await SendPartyRoomChatMessageAsync("", attachment);
-        }
-        else
-        {
-            await SendFriendChatMessageAsync("", attachment);
-        }
+        await SendChatAttachmentAsync(destination, attachment);
     }
 
-    private async Task SendFleetInvitationToChatAsync(Button source)
+    private async Task SendChatAttachmentAsync(
+        ChatAttachmentDestination destination,
+        ChatAttachmentContract attachment)
     {
-        var isPartyRoom = ReferenceEquals(source, PartyRoomChatAttachmentButton);
+        switch (destination.Target)
+        {
+            case ChatAttachmentTarget.FleetChannel:
+                await SendFleetChatMessageAsync("", attachment);
+                break;
+            case ChatAttachmentTarget.PartyRoom:
+                await SendPartyRoomChatMessageAsync("", attachment);
+                break;
+            case ChatAttachmentTarget.DirectMessage:
+                await SendFriendChatMessageAsync("", attachment);
+                break;
+        }
+
+        RefreshInGameSocialSnapshot();
+        RefreshInGameRoomSnapshot();
+    }
+
+    private async Task SendFleetInvitationToChatAsync(ChatAttachmentDestination destination)
+    {
+        var isPartyRoom = destination.Target == ChatAttachmentTarget.PartyRoom;
         var eligibleRoomMembers = isPartyRoom ? CountPartyRoomFleetInvitationRecipients() : 0;
         if (!CanCurrentUserSendFleetInvitationCard() ||
             isPartyRoom && eligibleRoomMembers <= 0 ||
@@ -303,11 +322,11 @@ public partial class MainWindow
                 ExpiresAt: invite.ExpiresAt);
             if (isPartyRoom)
             {
-                await SendPartyRoomChatMessageAsync("", attachment);
+                await SendChatAttachmentAsync(destination, attachment);
             }
             else
             {
-                await SendFriendChatMessageAsync("", attachment);
+                await SendChatAttachmentAsync(destination, attachment);
             }
         }
         catch (Exception ex)
@@ -367,6 +386,11 @@ public partial class MainWindow
             return;
         }
 
+        await HandleChatAttachmentActionAsync(attachment);
+    }
+
+    private async Task HandleChatAttachmentActionAsync(ChatAttachmentContract attachment)
+    {
         if (attachment.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow)
         {
             StarBridgeMessageBox.Show(this, "这条邀请已过期。", "邀请已失效", MessageBoxButton.OK, MessageBoxImage.Information);

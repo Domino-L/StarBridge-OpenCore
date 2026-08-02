@@ -92,3 +92,107 @@ internal static class PlayerPresencePresentation
             ? Brush(automaticPresence)
             : StatusPalette.DisabledBrush;
 }
+
+internal static class PlayerSessionStatePresentation
+{
+    public const string NotInGame = "未进入游戏";
+    public const string NotInServer = "未进入服务器";
+    public const string WaitingForRecognition = "等待识别";
+    public const string WaitingForServerSync = "等待服务器同步";
+
+    public static string ResolveShip(
+        PlayerPresenceKind presence,
+        bool? hasServerSession,
+        string? ship) =>
+        ResolveRuntimeValue(presence, hasServerSession, ship);
+
+    public static string ResolveLocation(
+        PlayerPresenceKind presence,
+        bool? hasServerSession,
+        string? location) =>
+        ResolveRuntimeValue(presence, hasServerSession, location);
+
+    public static string ResolveServer(
+        PlayerPresenceKind presence,
+        bool? hasServerSession,
+        string? server)
+    {
+        if (presence != PlayerPresenceKind.InGame)
+        {
+            return NotInGame;
+        }
+
+        if (hasServerSession == false)
+        {
+            return NotInServer;
+        }
+
+        if (HasRecognizedValue(server))
+        {
+            return server!.Trim();
+        }
+
+        return hasServerSession == true
+            ? WaitingForRecognition
+            : WaitingForServerSync;
+    }
+
+    public static bool HasRecognizedValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim();
+        return !text.Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("None", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("N/A", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("未知", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("无", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("未连接", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("地点：未知星域", StringComparison.OrdinalIgnoreCase) &&
+               !text.Equals("飞船：未知", StringComparison.OrdinalIgnoreCase) &&
+               !text.StartsWith("等待", StringComparison.OrdinalIgnoreCase) &&
+               !IsSessionStateText(text);
+    }
+
+    public static bool IsSessionStateText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim();
+        return text.Equals(NotInGame, StringComparison.OrdinalIgnoreCase) ||
+               text.Equals(NotInServer, StringComparison.OrdinalIgnoreCase) ||
+               text.Equals(WaitingForRecognition, StringComparison.OrdinalIgnoreCase) ||
+               text.Equals(WaitingForServerSync, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveRuntimeValue(
+        PlayerPresenceKind presence,
+        bool? hasServerSession,
+        string? value)
+    {
+        if (presence != PlayerPresenceKind.InGame)
+        {
+            return NotInGame;
+        }
+
+        if (hasServerSession == false)
+        {
+            return NotInServer;
+        }
+
+        if (HasRecognizedValue(value))
+        {
+            return value!.Trim();
+        }
+
+        return hasServerSession == true
+            ? WaitingForRecognition
+            : WaitingForServerSync;
+    }
+}

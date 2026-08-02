@@ -1,0 +1,434 @@
+<Window x:Class="StarBridge.Desktop.InGameImageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="游戏时参考图"
+        Icon="/Assets/Brand/StarBridge_AppIcon.ico"
+        Width="780"
+        Height="560"
+        MinWidth="780"
+        MinHeight="260"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        AllowsTransparency="True"
+        Background="Transparent"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Deactivated="Window_Deactivated">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome x:Name="ImageWindowShellChrome"
+                            CaptionHeight="0"
+                            ResizeBorderThickness="7"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="ImageHeaderIconButton" TargetType="Button">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="52" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="IconChrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="0,0,0,1">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="IconChrome" Property="Background" Value="#263C5061" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="IconChrome" Property="Background" Value="#1E304250" />
+                                <Setter TargetName="IconChrome" Property="Opacity" Value="0.75" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="IconChrome" Property="BorderBrush" Value="#2E8FBA" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="ImageWindowFrame"
+            Background="{StaticResource PageBackgroundBrush}"
+            BorderBrush="{StaticResource AccentDimBrush}"
+            BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="ImageTopDockRow" Height="52" />
+                <RowDefinition x:Name="ImageToolbarTopRow" Height="88" />
+                <RowDefinition x:Name="ImageStatusTopRow" Height="56" />
+                <RowDefinition Height="*" />
+                <RowDefinition x:Name="ImageStatusBottomRow" Height="0" />
+                <RowDefinition x:Name="ImageToolbarBottomRow" Height="0" />
+                <RowDefinition x:Name="ImageBottomDockRow" Height="0" />
+            </Grid.RowDefinitions>
+
+            <Border x:Name="ImageAccentLine"
+                    Grid.RowSpan="7"
+                    Height="2"
+                    VerticalAlignment="Top"
+                    Background="{StaticResource AccentBrush}"
+                    Opacity="0.72"
+                    Panel.ZIndex="10"
+                    IsHitTestVisible="False" />
+
+            <Border x:Name="ImageEditorChrome"
+                    Grid.Row="0"
+                    Grid.RowSpan="3"
+                    Background="Transparent"
+                    IsHitTestVisible="False" />
+
+            <Border x:Name="ImageWindowChrome"
+                    Grid.Row="0"
+                    Background="#F0162634"
+                    BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
+                    BorderThickness="0,0,0,1"
+                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="48" />
+                        <ColumnDefinition Width="48" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Margin="16,0,92,0"
+                                 VerticalAlignment="Center">
+                        <TextBlock Text="游戏时参考图"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   LineHeight="18"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="ImageNameText"
+                                   Text="选择一张本地图片"
+                                   Margin="0,1,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10"
+                                   LineHeight="14"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <TextBlock x:Name="ImageWindowCountText"
+                               Grid.Column="0"
+                               Margin="0,0,14,0"
+                               Text="参考图 1 / 5"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="10"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center" />
+
+                    <Button x:Name="ImageSettingsToggleButton"
+                            Grid.Column="1"
+                            ToolTip="将编辑栏移到底部"
+                            Style="{StaticResource ImageHeaderIconButton}"
+                            Click="ImageSettingsToggleButton_Click">
+                        <Viewbox Width="16" Height="16">
+                            <Path x:Name="ImageSettingsChevronPath"
+                                  Data="M 3,6 L 8,11 L 13,6"
+                                  Stroke="{StaticResource MutedTextBrush}"
+                                  StrokeThickness="1.5"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" />
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="PinToOverlayButton"
+                            Grid.Column="2"
+                            ToolTip="固定到浮层"
+                            Style="{StaticResource ImageHeaderIconButton}"
+                            Click="PinToOverlayButton_Click">
+                        <Viewbox Width="18" Height="18">
+                            <Path x:Name="PinGlyphPath"
+                                  Data="M16.2425 2.93189L21.0682 7.75765C22.3955 9.08491 22.0324 11.3224 20.3535 12.1619L15.4826 14.5973C15.3073 14.685 15.1732 14.8379 15.1092 15.0232L13.6699 19.1895C13.3684 20.0622 12.2574 20.3181 11.6045 19.6653L8.50002 16.5607L4.06074 21.0001H3L3.00008 19.9394L7.43936 15.5001L4.33487 12.3956C3.682 11.7427 3.93791 10.6317 4.81061 10.3302L8.97688 8.89096C9.16223 8.82694 9.31512 8.69287 9.40281 8.51748L11.8382 3.6466C12.6777 1.96772 14.9152 1.60462 16.2425 2.93189ZM20.0076 8.81831L15.1818 3.99255C14.5785 3.38924 13.5614 3.55429 13.1799 4.31742L10.7445 9.18829C10.4814 9.71446 10.0227 10.1167 9.46666 10.3087L5.67812 11.6175L12.3826 18.322L13.6914 14.5335C13.8835 13.9774 14.2857 13.5188 14.8118 13.2557L19.6827 10.8202C20.4458 10.4387 20.6109 9.42161 20.0076 8.81831Z"
+                                  Fill="White"
+                                  Stretch="Uniform" />
+                        </Viewbox>
+                    </Button>
+                    <Button Grid.Column="3"
+                            Tag="Minimize"
+                            ToolTip="最小化"
+                            Style="{StaticResource WindowCaptionButton}"
+                            Click="MinimizeButton_Click" />
+                    <Button Grid.Column="4"
+                            Tag="Close"
+                            ToolTip="关闭参考图"
+                            Style="{StaticResource CloseWindowCaptionButton}"
+                            Click="CloseButton_Click" />
+                </Grid>
+            </Border>
+
+            <Border x:Name="ImageToolbar"
+                    Grid.Row="1"
+                    Padding="14,8"
+                    Background="{StaticResource AvionicsGlassPanelBrush}"
+                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                    BorderThickness="0,0,0,1"
+                    Visibility="Visible">
+                <Grid x:Name="ImageSettingsPanel">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="34" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="108" />
+                        <ColumnDefinition Width="94" />
+                        <ColumnDefinition Width="66" />
+                        <ColumnDefinition Width="72" />
+                        <ColumnDefinition Width="76" />
+                        <ColumnDefinition Width="96" />
+                        <ColumnDefinition Width="88" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0"
+                            Height="34"
+                            Content="选择图片"
+                            Style="{StaticResource PrimaryButton}"
+                            Click="ChooseImageButton_Click" />
+                    <Button Grid.Column="1"
+                            Height="34"
+                            Margin="8,0,0,0"
+                            Content="新增参考图"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="NewImageButton_Click" />
+                    <Button Grid.Column="2"
+                            Height="34"
+                            Margin="8,0,0,0"
+                            Content="适应"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="FitButton_Click" />
+                    <Button Grid.Column="3"
+                            Height="34"
+                            Margin="8,0,0,0"
+                            Content="100%"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ActualSizeButton_Click" />
+                    <Button x:Name="CropImageButton"
+                            Grid.Column="4"
+                            Height="34"
+                            Margin="8,0,0,0"
+                            Content="裁剪"
+                            ToolTip="拖动框选要保留的图片区域"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="CropImageButton_Click" />
+                    <Button x:Name="ZoomRegionButton"
+                            Grid.Column="5"
+                            Height="34"
+                            Margin="8,0,0,0"
+                            Content="局部放大"
+                            ToolTip="拖动框选要放大查看的图片区域"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ZoomRegionButton_Click" />
+                    <Button x:Name="ResetImageEditsButton"
+                            Grid.Column="6"
+                            Height="34"
+                            Margin="8,0,0,0"
+                            Content="重置裁剪"
+                            ToolTip="恢复完整原图"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ResetImageEditsButton_Click" />
+
+                    <Grid Grid.Row="1"
+                          Grid.ColumnSpan="8"
+                          Margin="0,7,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="42" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="48" />
+                            <ColumnDefinition Width="56" />
+                            <ColumnDefinition Width="148" />
+                            <ColumnDefinition Width="42" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="缩放"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10"
+                                   VerticalAlignment="Center" />
+                        <Slider x:Name="ZoomSlider"
+                                Grid.Column="1"
+                                Minimum="5"
+                                Maximum="800"
+                                Value="100"
+                                Margin="0,0,10,0"
+                                VerticalAlignment="Center"
+                                ValueChanged="ZoomSlider_ValueChanged" />
+                        <TextBlock x:Name="ZoomValueText"
+                                   Grid.Column="2"
+                                   Text="100%"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3"
+                                   Margin="8,0,4,0"
+                                   Text="透明度"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10"
+                                   VerticalAlignment="Center" />
+                        <Slider x:Name="ImageOpacitySlider"
+                                Grid.Column="4"
+                                Minimum="20"
+                                Maximum="100"
+                                Value="100"
+                                VerticalAlignment="Center"
+                                ValueChanged="ImageOpacitySlider_ValueChanged" />
+                        <TextBlock x:Name="ImageOpacityValueText"
+                                   Grid.Column="5"
+                                   Text="100%"
+                                   Margin="7,0,0,0"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontFamily="Bahnschrift"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Grid x:Name="ImageSurface"
+                  Grid.Row="3"
+                  Background="#01060A"
+                  PreviewMouseLeftButtonDown="ImageSurface_MouseLeftButtonDown"
+                  PreviewMouseLeftButtonUp="ImageSurface_MouseLeftButtonUp"
+                  PreviewMouseMove="ImageSurface_MouseMove">
+                <ScrollViewer x:Name="ImageScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              CanContentScroll="False"
+                              PanningMode="Both"
+                              SizeChanged="ImageScrollViewer_SizeChanged">
+                    <Grid x:Name="ImageScrollContent"
+                          MinWidth="{Binding ActualWidth, ElementName=ImageScrollViewer}"
+                          MinHeight="{Binding ActualHeight, ElementName=ImageScrollViewer}">
+                        <Grid x:Name="DisplayedImageLayer"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center">
+                            <Image x:Name="DisplayedImage"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Stretch="Uniform"
+                                   ToolTip="双击进入纯图片模式；再次双击返回编辑"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Canvas x:Name="ImageSelectionCanvas"
+                                    IsHitTestVisible="False">
+                                <Rectangle x:Name="ImageSelectionRectangle"
+                                           Fill="#2931B7F2"
+                                           Stroke="#DDF4FF"
+                                           StrokeThickness="1.5"
+                                           StrokeDashArray="5,3"
+                                           Visibility="Collapsed" />
+                            </Canvas>
+                        </Grid>
+                    </Grid>
+                </ScrollViewer>
+
+                <Border x:Name="ImageModeToast"
+                        Margin="18"
+                        Padding="14,9"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Background="#F00A1B27"
+                        BorderBrush="{StaticResource AccentBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Visibility="Collapsed"
+                        IsHitTestVisible="False"
+                        Panel.ZIndex="30">
+                    <TextBlock x:Name="ImageModeToastText"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               FontSize="12"
+                               FontWeight="SemiBold" />
+                </Border>
+
+                <Border x:Name="EmptyState"
+                        Background="#F007121A">
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                        <Border Width="52"
+                                Height="52"
+                                Background="{StaticResource AvionicsGlassPanelBrush}"
+                                BorderBrush="{StaticResource AvionicsGlassEdgeBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4">
+                            <TextBlock Text="&#xEB9F;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       FontSize="24"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="在游戏旁查看参考图片"
+                                   Margin="0,14,0,0"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="支持 PNG、JPG、BMP、GIF 与 TIFF"
+                                   Margin="0,7,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border x:Name="ImageStatusBar"
+                    Grid.Row="2"
+                    MinHeight="56"
+                    Padding="12,7"
+                    Background="{StaticResource AvionicsDataWellBrush}"
+                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                    BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="ImageModeHintText"
+                               Text="双击图片进入纯图片模式 · 再次双击返回编辑"
+                               Foreground="{StaticResource AccentBrush}"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <TextBlock x:Name="ImageStatusText"
+                               Grid.Row="1"
+                               Text="纯图片模式下可拖动图片，并继续固定在游戏浮层中"
+                               Margin="0,2,90,0"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="9"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.RowSpan="2"
+                               Text="ESC 返回游戏"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="9"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

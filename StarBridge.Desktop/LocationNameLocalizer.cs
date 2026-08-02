@@ -10,6 +10,17 @@ public static partial class LocationNameLocalizer
     private const string VerifiedLocationFileName = "location-names-zh.txt";
     private static readonly Lazy<IReadOnlyDictionary<string, string>> ChineseNames =
         new(() => LoadChineseNames(VerifiedLocationFileName));
+    private static readonly Lazy<IReadOnlyList<string>> ChineseDisplayNames =
+        new(() => ChineseNames.Value.Values
+            .Select(value => value.Trim())
+            .Where(value =>
+                !string.IsNullOrWhiteSpace(value) &&
+                !value.Equals(Unknown, StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains('_') &&
+                ContainsCjk(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray());
 
     public static string DisplayName(string? location, string language)
     {
@@ -33,6 +44,7 @@ public static partial class LocationNameLocalizer
     }
 
     public static IReadOnlyDictionary<string, string> KnownChineseNames => ChineseNames.Value;
+    public static IReadOnlyList<string> ConfirmedChineseDisplayNames => ChineseDisplayNames.Value;
 
     public static string NormalizeLocation(string? location)
     {

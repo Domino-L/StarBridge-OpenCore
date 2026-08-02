@@ -17,17 +17,12 @@ internal enum FriendCenterSection
     Search
 }
 
-internal static class FriendCenterAvatarResolver
+internal static class FriendCenterUserResolver
 {
     public static FriendUserContract Resolve(
         FriendUserContract user,
         IEnumerable<NetworkPlayerSnapshot> playerSnapshots)
     {
-        if (!string.IsNullOrWhiteSpace(user.AvatarImageData))
-        {
-            return user;
-        }
-
         var candidates = !string.IsNullOrWhiteSpace(user.AccountId)
             ? playerSnapshots.Where(snapshot =>
                 !string.IsNullOrWhiteSpace(snapshot.AccountId) &&
@@ -35,13 +30,27 @@ internal static class FriendCenterAvatarResolver
             : playerSnapshots.Where(snapshot =>
                 !string.IsNullOrWhiteSpace(user.GameId) &&
                 snapshot.Name.Equals(user.GameId, StringComparison.OrdinalIgnoreCase));
-        var avatarImageData = candidates
+        var snapshot = candidates
             .OrderByDescending(snapshot => snapshot.LastUpdated)
-            .Select(snapshot => snapshot.AvatarImageData)
-            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-        return string.IsNullOrWhiteSpace(avatarImageData)
-            ? user
-            : user with { AvatarImageData = avatarImageData };
+            .FirstOrDefault();
+        if (snapshot is null)
+        {
+            return user;
+        }
+
+        var avatarImageData = string.IsNullOrWhiteSpace(user.AvatarImageData)
+            ? snapshot.AvatarImageData
+            : user.AvatarImageData;
+        var presence = PlayerPresence.ToWireValue(
+            PlayerPresence.Normalize(snapshot.LiveStatus, snapshot.Online));
+        return user with
+        {
+            AvatarImageData = avatarImageData,
+            Presence = presence,
+            LastUpdated = snapshot.LastUpdated > user.LastUpdated
+                ? snapshot.LastUpdated
+                : user.LastUpdated
+        };
     }
 }
 

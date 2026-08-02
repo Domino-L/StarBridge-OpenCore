@@ -132,18 +132,33 @@ public partial class MainWindow
             : "启动游戏后自动更新当前航程";
 
         var rawShip = local?.Ship;
-        var hasShip = gameRunning && !IsHomeUnknown(rawShip);
-        HomeJourneyShipText.Text = hasShip ? FormatShipForUser(rawShip) : "等待识别";
+        var hasServerSession = gameRunning && IsGameServerRegionCurrent();
+        var hasShip = hasServerSession && !IsHomeUnknown(rawShip);
+        HomeJourneyShipText.Text = PlayerSessionStatePresentation.ResolveShip(
+            _localPresence,
+            hasServerSession,
+            hasShip ? FormatShipForUser(rawShip) : null);
         HomeJourneyShipEvidenceText.Text = hasShip
             ? $"识别可信度：{FormatHomeConfidence(local?.ShipConfidence)}"
-            : gameRunning ? "正在等待舰船信号" : "游戏启动后开始识别";
+            : !gameRunning
+                ? "启动游戏后开始识别"
+                : hasServerSession
+                    ? "正在等待舰船信号"
+                    : "进入服务器后开始识别";
 
         var rawLocation = local?.Location;
-        var hasLocation = gameRunning && !IsHomeUnknown(rawLocation);
-        HomeJourneyLocationText.Text = hasLocation ? FormatLocationForUser(rawLocation) : "等待识别";
+        var hasLocation = hasServerSession && !IsHomeUnknown(rawLocation);
+        HomeJourneyLocationText.Text = PlayerSessionStatePresentation.ResolveLocation(
+            _localPresence,
+            hasServerSession,
+            hasLocation ? FormatLocationForUser(rawLocation) : null);
         HomeJourneyLocationEvidenceText.Text = hasLocation
             ? $"识别可信度：{FormatHomeConfidence(local?.LocationConfidence)}"
-            : gameRunning ? "正在等待地点信号" : "游戏启动后开始识别";
+            : !gameRunning
+                ? "启动游戏后开始识别"
+                : hasServerSession
+                    ? "正在等待地点信号"
+                    : "进入服务器后开始识别";
 
         HomeJourneyServerText.Text = IsGameServerRegionCurrent()
             ? GetGameServerRegionDisplay()

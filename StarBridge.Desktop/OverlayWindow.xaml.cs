@@ -1936,17 +1936,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             return;
         }
 
-        if (sceneKind == OverlaySceneKind.PartyRoom)
-        {
-            ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
-            _gameEventSnapshotInitialized = true;
-            if (!settings.ShowEventNotifications)
-            {
-                ClearEventNotifications();
-            }
-            return;
-        }
-
         if (!settings.ShowEventNotifications)
         {
             ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
@@ -2575,7 +2564,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             text = text[locationPrefix.Length..].Trim();
         }
 
-        return IsUnknownGameEventValue(text) ? null : text;
+        return IsUnknownGameEventValue(text) ||
+               PlayerSessionStatePresentation.IsSessionStateText(text)
+            ? null
+            : text;
     }
 
     private static bool IsUnknownGameEventValue(string? value)

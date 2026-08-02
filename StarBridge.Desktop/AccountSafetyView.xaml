@@ -1,0 +1,85 @@
+<UserControl x:Class="StarBridge.Desktop.AccountSafetyView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True"
+             Background="{StaticResource PageBackgroundBrush}">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="账号状态与申诉"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           FontSize="22"
+                           FontWeight="SemiBold" />
+                <TextBlock Text="查看账号当前状态、恢复时间，以及已经提交的申诉。"
+                           Margin="0,6,0,0"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           FontSize="12" />
+            </StackPanel>
+            <Button Grid.Column="1"
+                    Content="刷新"
+                    Width="82"
+                    Height="34"
+                    VerticalAlignment="Bottom"
+                    Style="{StaticResource SecondaryButton}"
+                    Click="RefreshButton_Click" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="1"
+                      Margin="0,16,0,0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <Border Style="{StaticResource HudPanel}" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="当前账号状态"
+                                   Foreground="#61CAFF"
+                                   FontSize="13"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="AccountStateSummaryText"
+                                   Margin="0,7,0,0"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Text="正在读取…" />
+                        <TextBlock x:Name="AccountStateDetailText"
+                                   Margin="0,6,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="当前记录"
+                           Margin="0,18,0,8"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           FontSize="15"
+                           FontWeight="SemiBold" />
+                <StackPanel x:Name="SanctionListPanel" />
+
+                <TextBlock Text="我的申诉"
+                           Margin="0,18,0,8"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           FontSize="15"
+                           FontWeight="SemiBold" />
+                <StackPanel x:Name="AppealListPanel" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock x:Name="StatusText"
+                   Grid.Row="2"
+                   Margin="0,10,0,0"
+                   Foreground="{StaticResource MutedTextBrush}"
+                   FontSize="11"
+                   Text="申诉提交后会进入人工审核，请勿重复提交。" />
+    </Grid>
+</UserControl>

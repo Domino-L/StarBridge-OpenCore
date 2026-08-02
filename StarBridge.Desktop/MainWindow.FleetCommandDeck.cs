@@ -1258,7 +1258,7 @@ public partial class MainWindow
         }
 
         var zh = _language == "zh";
-        ApplyOverlayLayerAndModuleStyleLanguage(zh);
+        ApplyOverlayModuleStyleLanguage(zh);
         _isFleetRailCollapsed = false;
         FleetRailColumn.Width = new GridLength(118);
         if (_isFleetRailCollapsed)

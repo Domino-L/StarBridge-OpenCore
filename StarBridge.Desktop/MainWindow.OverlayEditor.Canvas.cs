@@ -167,6 +167,14 @@ public partial class MainWindow
             return;
         }
 
+        if (IsOverlayEditorLiveEditActive())
+        {
+            _overlayEditorRenderPendingAfterLiveEdit = true;
+            return;
+        }
+
+        _overlayEditorRenderPendingAfterLiveEdit = false;
+
         ApplyOverlayEditorCanvasScaleState();
         RefreshOverlaySceneChrome();
 
@@ -630,6 +638,7 @@ public partial class MainWindow
         _isOverlayCrosshairSelected = false;
         _selectedOverlayInspectorItem = null;
         ClearOverlayEditorAlignmentGuides();
+        SetOverlayInspectorOpen(true);
         RefreshOverlayInspector();
         if (!wasSelected)
         {
@@ -926,6 +935,7 @@ public partial class MainWindow
         _isOverlayEventNotificationSelected = false;
         _selectedOverlayInspectorItem = null;
         ClearOverlayEditorAlignmentGuides();
+        SetOverlayInspectorOpen(true);
         RenderOverlayEditor();
         e.Handled = true;
     }
@@ -1186,7 +1196,77 @@ public partial class MainWindow
         _isOverlayEventNotificationSelected = false;
         _isOverlayCrosshairSelected = false;
         _selectedOverlayInspectorItem = item;
+        SetOverlayInspectorOpen(true);
         RefreshOverlayEditorAlignmentGuides(item);
         RefreshOverlayInspector();
+    }
+
+    private void SetOverlayInspectorOpen(bool open)
+    {
+        if (OverlayInspectorPanel is null)
+        {
+            return;
+        }
+
+        if (open && !_isOverlayEditorFullScreen)
+        {
+            CaptureOverlayInspectorReturnState();
+            OverlayInspectorPanel.Visibility = Visibility.Visible;
+            OverlayInspectorScrollViewer?.ScrollToTop();
+            return;
+        }
+
+        OverlayInspectorPanel.Visibility = Visibility.Collapsed;
+        if (!open && !_isOverlayEditorFullScreen)
+        {
+            RestoreOverlaySettingsAfterInspector();
+        }
+    }
+
+    private void CaptureOverlayInspectorReturnState()
+    {
+        if (_overlayInspectorReturnStateCaptured ||
+            OverlaySettingsScrollViewer is null)
+        {
+            return;
+        }
+
+        CancelOverlaySettingsProgrammaticScroll();
+        SmoothWheelScrollBehavior.CancelPendingMotion(OverlaySettingsScrollViewer);
+        _overlayInspectorReturnScrollOffset = OverlaySettingsScrollViewer.VerticalOffset;
+        _overlayInspectorReturnSectionKey = _overlaySettingsActiveKey;
+        _overlayInspectorReturnStateCaptured = true;
+    }
+
+    private void RestoreOverlaySettingsAfterInspector()
+    {
+        if (!_overlayInspectorReturnStateCaptured)
+        {
+            return;
+        }
+
+        var returnOffset = _overlayInspectorReturnScrollOffset;
+        var returnSectionKey = _overlayInspectorReturnSectionKey;
+        _overlayInspectorReturnStateCaptured = false;
+        _overlayInspectorReturnSectionKey = null;
+
+        if (OverlaySettingsScrollViewer is null)
+        {
+            return;
+        }
+
+        CancelOverlaySettingsProgrammaticScroll();
+        SmoothWheelScrollBehavior.CancelPendingMotion(OverlaySettingsScrollViewer);
+        OverlaySettingsScrollViewer.ScrollToVerticalOffset(
+            Math.Clamp(returnOffset, 0, OverlaySettingsScrollViewer.ScrollableHeight));
+        if (!string.IsNullOrWhiteSpace(returnSectionKey))
+        {
+            SetActiveOverlaySettingsSection(returnSectionKey);
+        }
+    }
+
+    private void CloseOverlayInspector_Click(object sender, RoutedEventArgs e)
+    {
+        SetOverlayInspectorOpen(false);
     }
 }

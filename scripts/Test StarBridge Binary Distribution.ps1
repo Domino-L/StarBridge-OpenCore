@@ -17,20 +17,24 @@ param(
 
     [switch]$AllowUnverifiedThirdPartyMediaTestRelease,
 
+    [switch]$OmitThirdPartyMedia,
+
     [string]$OutputReportPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$approvedTemporaryTestReleaseVersions = @("0.4.8.2", "0.4.8.3")
-if ($AllowUnverifiedThirdPartyMediaTestRelease -and
-    $ExpectedVersion -notin $approvedTemporaryTestReleaseVersions) {
-    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2 or 0.4.8.3."
+if ($OmitThirdPartyMedia -and $AllowUnverifiedThirdPartyMediaTestRelease) {
+    throw "OmitThirdPartyMedia cannot be combined with the unverified third-party media test-release exception."
+}
+if ($AllowUnverifiedThirdPartyMediaTestRelease -and $ExpectedVersion -ne "0.4.8.2") {
+    throw "The unverified third-party media test-release exception is restricted to StarBridge 0.4.8.2."
 }
 
 $scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $thirdPartyMediaAuditScript = Join-Path $scriptsDir "Test StarBridge Third Party Media.ps1"
+$mediaFreeAuditScript = Join-Path $scriptsDir "Test StarBridge Media-Free Payload.ps1"
 $startedAtUtc = [DateTime]::UtcNow
 $checks = [Collections.Generic.List[object]]::new()
 $errors = [Collections.Generic.List[string]]::new()
@@ -511,20 +515,28 @@ if ($errors.Count -eq 0) {
     }
 
     try {
-        if (-not (Test-Path -LiteralPath $thirdPartyMediaAuditScript -PathType Leaf)) {
-            throw "Third-party media audit script was not found: $thirdPartyMediaAuditScript"
-        }
-
-        $liveMediaAuditArguments = @{
-            PayloadRoot = $PayloadRoot
-        }
-        if ($AllowUnverifiedThirdPartyMediaTestRelease) {
-            $liveMediaAuditArguments.UnverifiedDistributionExceptionVersion = $ExpectedVersion
+        if ($OmitThirdPartyMedia) {
+            if (-not (Test-Path -LiteralPath $mediaFreeAuditScript -PathType Leaf)) {
+                throw "Media-free payload audit script was not found: $mediaFreeAuditScript"
+            }
+            $mediaAuditOutput = @(& $mediaFreeAuditScript -PayloadRoot $PayloadRoot)
         }
         else {
-            $liveMediaAuditArguments.RequireRedistributionPermission = $true
+            if (-not (Test-Path -LiteralPath $thirdPartyMediaAuditScript -PathType Leaf)) {
+                throw "Third-party media audit script was not found: $thirdPartyMediaAuditScript"
+            }
+
+            $liveMediaAuditArguments = @{
+                PayloadRoot = $PayloadRoot
+            }
+            if ($AllowUnverifiedThirdPartyMediaTestRelease) {
+                $liveMediaAuditArguments.UnverifiedDistributionExceptionVersion = $ExpectedVersion
+            }
+            else {
+                $liveMediaAuditArguments.RequireRedistributionPermission = $true
+            }
+            $mediaAuditOutput = @(& $thirdPartyMediaAuditScript @liveMediaAuditArguments)
         }
-        $mediaAuditOutput = @(& $thirdPartyMediaAuditScript @liveMediaAuditArguments)
         if ($mediaAuditOutput.Count -ne 1) {
             throw "Third-party media audit returned $($mediaAuditOutput.Count) result objects; expected exactly one."
         }
@@ -535,9 +547,10 @@ if ($errors.Count -eq 0) {
             -not [bool]$officialMediaAudit.passed) {
             throw "Third-party media audit did not return passed=true."
         }
-        if ([int]$officialMediaAudit.sourceCount -le 0 -or
-            [int]$officialMediaAudit.fileCount -le 0 -or
-            [long]$officialMediaAudit.totalBytes -le 0) {
+        if (-not $OmitThirdPartyMedia -and
+            ([int]$officialMediaAudit.sourceCount -le 0 -or
+             [int]$officialMediaAudit.fileCount -le 0 -or
+             [long]$officialMediaAudit.totalBytes -le 0)) {
             throw "Third-party media audit returned an empty official media set."
         }
 
@@ -555,15 +568,26 @@ if ($errors.Count -eq 0) {
             [string]$bundledMediaAudit.rightsStatus -eq "verified-redistribution-permission"
         $bundledHasScopedUnverifiedMediaException =
             $AllowUnverifiedThirdPartyMediaTestRelease -and
-            $ExpectedVersion -in $approvedTemporaryTestReleaseVersions -and
+            $ExpectedVersion -eq "0.4.8.2" -and
             $bundledMediaAudit.requireRedistributionPermission -is [bool] -and
             -not [bool]$bundledMediaAudit.requireRedistributionPermission -and
             [string]$bundledMediaAudit.rightsStatus -eq "unverified-distribution-exception" -and
             [string]$bundledMediaAudit.unverifiedDistributionExceptionVersion -eq $ExpectedVersion
+        $bundledHasNoThirdPartyMedia =
+            $OmitThirdPartyMedia -and
+            $bundledMediaAudit.mediaIncluded -is [bool] -and
+            -not [bool]$bundledMediaAudit.mediaIncluded -and
+            $bundledMediaAudit.requireRedistributionPermission -is [bool] -and
+            [bool]$bundledMediaAudit.requireRedistributionPermission -and
+            [string]$bundledMediaAudit.rightsStatus -eq "not-included" -and
+            [int]$bundledMediaAudit.sourceCount -eq 0 -and
+            [int]$bundledMediaAudit.fileCount -eq 0 -and
+            [long]$bundledMediaAudit.totalBytes -eq 0
         if ([string]$bundledMediaAudit.auditType -ne "third-party-media" -or
             [string]$bundledMediaAudit.mode -ne "payload" -or
             (-not $bundledHasVerifiedMediaRights -and
-             -not $bundledHasScopedUnverifiedMediaException)) {
+             -not $bundledHasScopedUnverifiedMediaException -and
+             -not $bundledHasNoThirdPartyMedia)) {
             throw "Bundled THIRD-PARTY-MEDIA-AUDIT.json is not an official payload redistribution audit."
         }
         if ($bundledMediaAudit.PSObject.Properties.Name -notcontains "passed" -or
@@ -699,7 +723,18 @@ if ($errors.Count -eq 0) {
                 [string]$bundledMediaAudit.unverifiedDistributionExceptionVersion) {
             throw "BUILD-PROVENANCE.json officialMedia rights status does not match the bundled media audit."
         }
-        if ([int]$officialMedia.sourceCount -le 0 -or
+        $provenanceOmitsMedia =
+            $OmitThirdPartyMedia -and
+            $officialMedia.included -is [bool] -and
+            -not [bool]$officialMedia.included -and
+            [string]$officialMedia.mode -eq "not-included"
+        $provenanceIncludesMedia =
+            -not $OmitThirdPartyMedia -and
+            $officialMedia.included -is [bool] -and
+            [bool]$officialMedia.included -and
+            [string]$officialMedia.mode -eq "included" -and
+            [int]$officialMedia.sourceCount -gt 0
+        if ((-not $provenanceOmitsMedia -and -not $provenanceIncludesMedia) -or
             [int]$officialMedia.fileCount -ne $mediaFiles.Count -or
             [long]$officialMedia.totalBytes -ne $mediaTotalBytes) {
             throw "BUILD-PROVENANCE.json officialMedia counts do not match the bundled manifest."
@@ -721,6 +756,8 @@ if ($errors.Count -eq 0) {
             publicSourceCommit = [string]$provenance.publicSourceCommit
             sourceDirty = [bool]$provenance.sourceDirty
             officialMedia = [ordered]@{
+                included = [bool]$officialMedia.included
+                mode = [string]$officialMedia.mode
                 registrySha256 = [string]$officialMedia.registrySha256
                 manifestSha256 = [string]$officialMedia.manifestSha256
                 auditSha256 = [string]$officialMedia.auditSha256

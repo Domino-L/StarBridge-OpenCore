@@ -180,14 +180,12 @@ are included with or referenced by the Official Binary. This agreement neither
 grants rights that Licensor does not have nor reduces rights granted directly
 by a third-party license. You are responsible for complying with those terms.
 
-The StarBridge 0.4.8.2 and 0.4.8.3 test builds retain third-party ship images
-and system maps whose provenance and redistribution authorization have not
-been verified. This temporary exception ends with 0.4.8.3. Their inclusion
-does not assert ownership or permission, and the associated audit records an
-unverified distribution exception rather than verified redistribution rights.
-All rights in those media remain with their respective owners. The media may
-be removed or replaced in a later update or after a valid rights claim or
-removal request.
+An Official Binary must omit third-party ship images and system maps unless
+their provenance, redistribution scope, and exact file hashes pass the bundled
+release audit. A media-free build may show placeholders instead. The historical
+StarBridge 0.4.8.2 test build used a limited unverified distribution exception;
+that exception does not apply to later releases and did not assert ownership or
+permission. All rights in third-party media remain with their respective owners.
 
 13. Termination
 

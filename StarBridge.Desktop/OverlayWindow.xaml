@@ -534,10 +534,13 @@
                             <Grid.RenderTransform>
                                 <TranslateTransform X="{Binding SlideOffsetX}" />
                             </Grid.RenderTransform>
-                            <Border Background="{Binding DataContext.PanelBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    BorderBrush="{Binding DataContext.PanelBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    BorderThickness="1"
+                            <Border x:Name="EventNotificationBackgroundPlate"
+                                    Background="{Binding DataContext.PanelBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}"
                                     Opacity="{Binding DataContext.EventNotificationBackgroundOpacity, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            <Border x:Name="EventNotificationChrome"
+                                    Background="Transparent"
+                                    BorderBrush="{Binding DataContext.PanelBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    BorderThickness="1" />
                             <Grid Margin="12"
                                   Opacity="{Binding DataContext.EventNotificationTextOpacity, RelativeSource={RelativeSource AncestorType=Window}}">
                                 <Grid.ColumnDefinitions>
