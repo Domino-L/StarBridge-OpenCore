@@ -711,7 +711,12 @@ if ($errors.Count -eq 0) {
         }
         $mediaManifest = Get-Content -LiteralPath $mediaManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $mediaFiles = @($mediaManifest.files)
-        $mediaTotalBytes = [long](($mediaFiles | Measure-Object -Property bytes -Sum).Sum)
+        if ($mediaFiles.Count -eq 0) {
+            $mediaTotalBytes = 0L
+        }
+        else {
+            $mediaTotalBytes = [long](($mediaFiles | Measure-Object -Property bytes -Sum).Sum)
+        }
         if ([string]$officialMedia.scope -ne [string]$mediaManifest.distributionScope -or
             [string]$officialMedia.scope -ne "official-binary") {
             throw "BUILD-PROVENANCE.json officialMedia scope is not official-binary."
