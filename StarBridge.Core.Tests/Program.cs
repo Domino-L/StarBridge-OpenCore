@@ -20,6 +20,7 @@ var tests = new (string Name, Action Test)[]
     ("RemoveIgnore confirms immediate death", RemoveIgnoreConfirmsImmediateDeath),
     ("Local inventory termination confirms death before entity unbind", InventoryTerminationConfirmsDeathBeforeUnbind),
     ("Natural downed notification removal waits for entity unbind", DownedNotificationRemovalWaitsForEntityUnbind),
+    ("Remote player corpse evidence does not report the local player dead", RemotePlayerCorpseEvidenceDoesNotReportLocalDeath),
     ("Non-safe-zone corpse sequence parses death and respawn", NonSafeZoneCorpseSequenceParsesDeathAndRespawn),
     ("Second non-safe-zone corpse sequence parses death and respawn", SecondNonSafeZoneCorpseSequenceParsesDeathAndRespawn),
     ("Recovered hand activity parses player revived", RecoveredHandActivityParsesPlayerRevived),
@@ -607,6 +608,20 @@ static void DownedNotificationRemovalWaitsForEntityUnbind()
     AssertEqual(FleetEventType.PlayerDowned, events[0].Type, "downed event");
     AssertEqual(FleetEventType.PlayerDied, events[1].Type, "death event");
     AssertEqual(DateTimeOffset.Parse("2026-07-15T05:49:57.450Z"), events[1].Timestamp, "death timestamp");
+}
+
+static void RemotePlayerCorpseEvidenceDoesNotReportLocalDeath()
+{
+    var parser = NewParserWithLocalPlayer();
+    var events = ParseLines(parser,
+    [
+        "<2026-08-02T04:44:35.072Z> [Notice] <Adding non kept item [CSCActorCorpseUtils::PopulateItemPortForItemRecoveryEntitlement]> Item 'body_01_noMagicPocket_718269573420 - Class(body_01_noMagicPocket) - Context(Streamable Runtime-spawned) - Socpak()', Recorded data is: Port Name 'Body_ItemPort', Class GUID: 'dbaa8a7d-755f-4104-8b24-7b58fd1e76f6', KeptId: '718269573420' [Team_CoreGameplayFeatures][Unknown]"
+    ]);
+
+    AssertEqual(
+        0,
+        events.Count(item => item.Type == FleetEventType.PlayerDied),
+        "another player's corpse is not local death evidence");
 }
 
 static void NonSafeZoneCorpseSequenceParsesDeathAndRespawn()

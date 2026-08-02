@@ -82,6 +82,64 @@ internal static class InGameToolWindowBehavior
         }
     }
 
+    internal static bool TakeForegroundInput(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (GetForegroundWindow() == handle)
+        {
+            _ = SetFocus(handle);
+            return true;
+        }
+
+        _ = SetForegroundWindow(handle);
+        if (GetForegroundWindow() == handle)
+        {
+            _ = SetActiveWindow(handle);
+            _ = SetFocus(handle);
+            return true;
+        }
+
+        var foregroundHandle = GetForegroundWindow();
+        var foregroundThreadId = foregroundHandle == IntPtr.Zero
+            ? 0
+            : GetWindowThreadProcessId(foregroundHandle, out _);
+        var currentThreadId = GetCurrentThreadId();
+        var inputAttached = false;
+        try
+        {
+            if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+            {
+                inputAttached = AttachThreadInput(
+                    currentThreadId,
+                    foregroundThreadId,
+                    attach: true);
+            }
+
+            _ = BringWindowToTop(handle);
+            _ = SetForegroundWindow(handle);
+            _ = SetActiveWindow(handle);
+            _ = SetFocus(handle);
+        }
+        finally
+        {
+            if (inputAttached)
+            {
+                _ = AttachThreadInput(
+                    currentThreadId,
+                    foregroundThreadId,
+                    attach: false);
+            }
+        }
+
+        return GetForegroundWindow() == handle;
+    }
+
     private static void EnableAfterSourceInitialized(object? sender, EventArgs e)
     {
         if (sender is Window window)
@@ -112,6 +170,35 @@ internal static class InGameToolWindowBehavior
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
     private static extern IntPtr SetWindowLongPtr64(IntPtr windowHandle, int index, IntPtr value);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetActiveWindow(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr windowHandle);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr windowHandle,
+        out uint processId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AttachThreadInput(
+        uint attachThreadId,
+        uint attachToThreadId,
+        [MarshalAs(UnmanagedType.Bool)] bool attach);
 
     private sealed class SnapMaximizeGuard
     {

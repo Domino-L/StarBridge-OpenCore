@@ -1194,6 +1194,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         ContentRendered -= MainWindow_ContentRendered;
         QueueStartupUpdateCheck();
+        QueueInGameMenuPreparation();
     }
 
     private void QueueStartupUpdateCheck()

@@ -59,6 +59,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     private bool _informationOverlayWasVisible;
     private bool _captureInProgress;
     private bool _closingSession;
+    private bool _menuSessionOpen;
     private bool _focusCheckPending;
     private bool _browserRequestedVisible;
     private bool _fleetRequestedVisible;
@@ -105,7 +106,9 @@ internal sealed class InGameMenuCoordinator : IDisposable
     internal event EventHandler<InGameRoomAttachmentRequestedEventArgs>? RoomAttachmentRequested;
     internal event EventHandler<InGameRoomInvitationActionRequestedEventArgs>? RoomInvitationActionRequested;
 
-    internal bool IsOpen => _window is not null;
+    internal bool IsOpen =>
+        _menuSessionOpen &&
+        _window?.IsMenuOpen == true;
     internal bool IsFleetVisible => _fleetWindow?.IsVisible == true;
 
     internal bool BeginAccountSession(
@@ -210,6 +213,22 @@ internal sealed class InGameMenuCoordinator : IDisposable
             _informationOverlayHotkey);
     }
 
+    internal void Prepare(
+        InGameMenuSnapshot snapshot,
+        Rect surfaceBounds,
+        bool informationOverlayWasVisible)
+    {
+        if (_disposed || _window is not null)
+        {
+            return;
+        }
+
+        _informationOverlayWasVisible = informationOverlayWasVisible;
+        var window = CreateMenuWindow();
+        ApplyMenuState(window, snapshot, surfaceBounds);
+        window.PrepareForFirstOpen();
+    }
+
     internal void Open(
         InGameMenuSnapshot snapshot,
         Rect surfaceBounds,
@@ -217,42 +236,53 @@ internal sealed class InGameMenuCoordinator : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _informationOverlayWasVisible = informationOverlayWasVisible;
-        if (_window is not null)
-        {
-            _window.ApplySurfaceBounds(surfaceBounds);
-            _window.ApplySnapshot(snapshot);
-            _window.ApplySettings(_settings);
-            _window.ApplyInformationOverlayHotkey(
-                _informationOverlayHotkey);
-            _window.ApplyInformationOverlayState(_informationOverlayWasVisible);
-            if (!_window.IsVisible)
-            {
-                _window.Show();
-            }
-
-            MarkToolSessionOpen();
-            RestoreToolsOrActivateMenu();
-            return;
-        }
-
         _pendingExitMode = InGameMenuExitMode.RestorePreviousOverlay;
         _closingSession = false;
+        var window = _window ?? CreateMenuWindow();
+        ApplyMenuState(window, snapshot, surfaceBounds);
+        _menuSessionOpen = true;
+        window.ShowForMenu();
+        MarkToolSessionOpen();
+        ScheduleToolsRestoreOrMenuActivation(window);
+    }
+
+    private void ScheduleToolsRestoreOrMenuActivation(InGameMenuWindow window)
+    {
+        window.Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() =>
+            {
+                if (_menuSessionOpen &&
+                    !_closingSession &&
+                    ReferenceEquals(_window, window))
+                {
+                    RestoreToolsOrActivateMenu();
+                }
+            }));
+    }
+
+    private InGameMenuWindow CreateMenuWindow()
+    {
         var window = new InGameMenuWindow();
         _window = window;
-        window.ApplySurfaceBounds(surfaceBounds);
-        window.ApplySnapshot(snapshot);
-        window.ApplySettings(_settings);
-        window.ApplyInformationOverlayHotkey(
-            _informationOverlayHotkey);
-        window.ApplyInformationOverlayState(_informationOverlayWasVisible);
         window.ActionRequested += Window_ActionRequested;
         window.MenuCloseRequested += Window_MenuCloseRequested;
         window.MenuDeactivated += Window_MenuDeactivated;
         window.Closing += Window_Closing;
         window.Closed += Window_Closed;
-        window.Show();
-        MarkToolSessionOpen();
-        RestoreToolsOrActivateMenu();
+        return window;
+    }
+
+    private void ApplyMenuState(
+        InGameMenuWindow window,
+        InGameMenuSnapshot snapshot,
+        Rect surfaceBounds)
+    {
+        window.ApplySurfaceBounds(surfaceBounds);
+        window.ApplySnapshot(snapshot);
+        window.ApplySettings(_settings);
+        window.ApplyInformationOverlayHotkey(_informationOverlayHotkey);
+        window.ApplyInformationOverlayState(_informationOverlayWasVisible);
     }
 
     internal void Refresh(InGameMenuSnapshot snapshot, Rect surfaceBounds)
@@ -708,7 +738,10 @@ internal sealed class InGameMenuCoordinator : IDisposable
     internal void Close(InGameMenuExitMode mode)
     {
         var window = _window;
-        if (window is null || _closingSession)
+        if (window is null ||
+            _closingSession ||
+            mode != InGameMenuExitMode.ApplicationClosing &&
+            !_menuSessionOpen)
         {
             return;
         }
@@ -915,6 +948,10 @@ internal sealed class InGameMenuCoordinator : IDisposable
         }
 
         window.Activate();
+        if (window is InGameMenuWindow menu)
+        {
+            menu.TakeInputOwnership();
+        }
     }
 
     private void ScheduleFocusCheck()
@@ -1411,6 +1448,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
     private void Window_Closed(object? sender, EventArgs e)
     {
+        var closedOpenSession = _menuSessionOpen;
+        _menuSessionOpen = false;
         _closingSession = true;
         if (sender is InGameMenuWindow window)
         {
@@ -1421,15 +1460,22 @@ internal sealed class InGameMenuCoordinator : IDisposable
             window.Closed -= Window_Closed;
         }
 
-        HidePersistentTools();
+        if (closedOpenSession)
+        {
+            HidePersistentTools();
+        }
+
         _window = null;
         try
         {
-            Closed?.Invoke(
-                this,
-                new InGameMenuClosedEventArgs(
-                    _pendingExitMode,
-                    _informationOverlayWasVisible));
+            if (closedOpenSession)
+            {
+                Closed?.Invoke(
+                    this,
+                    new InGameMenuClosedEventArgs(
+                        _pendingExitMode,
+                        _informationOverlayWasVisible));
+            }
         }
         finally
         {

@@ -109,6 +109,31 @@ public partial class MainWindow
         UpdateInGameMenuSettingsPresentation();
     }
 
+    private void QueueInGameMenuPreparation()
+    {
+        Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(() =>
+            {
+                if (!IsVisible || _inGameMenuCoordinator.IsOpen)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _inGameMenuCoordinator.Prepare(
+                        BuildInGameMenuSnapshot(),
+                        ResolveOverlayTargetSurfaceBounds(),
+                        IsInformationOverlayRunning);
+                }
+                catch (Exception exception)
+                {
+                    App.WriteCrashLog(exception);
+                }
+            }));
+    }
+
     private void MenuOverlayHotkeyBox_GotKeyboardFocus(
         object sender,
         System.Windows.Input.KeyboardFocusChangedEventArgs e) =>

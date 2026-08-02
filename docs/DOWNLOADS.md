@@ -22,12 +22,12 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\StarBridge-win-x64-setup.exe"
 
 ### Windows 显示“未知发布者”
 
-0.5.0 要求主程序、完整安装器和在线安装器均具有可信 Windows 数字签名和时间戳。
+0.5.1 要求主程序、完整安装器和在线安装器均具有可信 Windows 数字签名和时间戳。
 如果安装时显示“未知发布者”或签名不是有效状态，请不要继续；重新从官方渠道下载并提交反馈。
 
 ### 安装包中的第三方图片
 
-0.5.0 不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+0.5.1 不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
 Release 中的 `THIRD-PARTY-MEDIA-AUDIT.json` 应显示 `rightsStatus: not-included`、零文件和零字节；相应页面可能显示占位图。
 
 ### 在线安装器无法下载

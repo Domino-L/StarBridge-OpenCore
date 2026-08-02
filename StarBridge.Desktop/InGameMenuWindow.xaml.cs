@@ -67,6 +67,10 @@ public partial class InGameMenuWindow : Window
     private bool _informationOverlayEnabled;
     private string _informationOverlayHotkey = "";
     private bool _toolMoveActive;
+    private bool _contentRendered;
+    private bool _preparingFirstOpen;
+    private bool _revealOnContentRendered;
+    private bool _menuOpen;
     private InGameMenuLayoutPreset _layoutPreset =
         InGameMenuLayoutPreset.BottomDock;
     private InGameMenuSettings _settings = InGameMenuSettings.Default;
@@ -78,6 +82,8 @@ public partial class InGameMenuWindow : Window
     internal InGameMenuWindow()
     {
         InitializeComponent();
+        Activated += Window_Activated;
+        IsVisibleChanged += Window_IsVisibleChanged;
         _clockTimer.Tick += (_, _) => RefreshLocalClock();
         _noticeResetTimer.Tick += (_, _) =>
         {
@@ -95,6 +101,74 @@ public partial class InGameMenuWindow : Window
         RefreshLocalClock();
         _clockTimer.Start();
         ApplyLayoutPreset(_layoutPreset);
+    }
+
+    internal bool IsMenuOpen => _menuOpen;
+
+    internal bool IsPreparedForFirstOpen =>
+        _contentRendered &&
+        !_preparingFirstOpen &&
+        !_menuOpen &&
+        IsVisible &&
+        Opacity <= 0;
+
+    internal void PrepareForFirstOpen()
+    {
+        if (_contentRendered || IsVisible)
+        {
+            return;
+        }
+
+        _preparingFirstOpen = true;
+        _revealOnContentRendered = false;
+        _menuOpen = false;
+        ShowActivated = false;
+        Focusable = false;
+        IsHitTestVisible = false;
+        InGameToolWindowBehavior.SetClickThrough(this, enabled: true);
+        BeginAnimation(OpacityProperty, null);
+        Opacity = 0;
+        Show();
+    }
+
+    internal void ShowForMenu()
+    {
+        _menuOpen = true;
+        _preparingFirstOpen = false;
+        ShowActivated = true;
+        Focusable = true;
+        IsHitTestVisible = true;
+        InGameToolWindowBehavior.SetClickThrough(this, enabled: false);
+        _revealOnContentRendered = !_contentRendered;
+
+        if (_contentRendered)
+        {
+            PlayOpenTransition();
+        }
+        else
+        {
+            BeginAnimation(OpacityProperty, null);
+            Opacity = 0;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        TakeInputOwnership();
+    }
+
+    internal void TakeInputOwnership()
+    {
+        if (!_menuOpen || !IsVisible)
+        {
+            return;
+        }
+
+        ShowActivated = true;
+        _ = InGameToolWindowBehavior.TakeForegroundInput(this);
+        CaptureMouseInput();
     }
 
     internal void ApplySnapshot(InGameMenuSnapshot snapshot)
@@ -421,10 +495,20 @@ public partial class InGameMenuWindow : Window
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
+        _contentRendered = true;
+        if (_preparingFirstOpen && !_menuOpen)
+        {
+            _preparingFirstOpen = false;
+            return;
+        }
+
+        if (!_revealOnContentRendered && !_menuOpen)
+        {
+            return;
+        }
+
+        _revealOnContentRendered = false;
         PlayOpenTransition();
-        Activate();
-        Focus();
-        Keyboard.Focus(this);
     }
 
     private void PlayOpenTransition()
@@ -469,6 +553,10 @@ public partial class InGameMenuWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        ReleaseInputOwnership();
+        _menuOpen = false;
+        _preparingFirstOpen = false;
+        _revealOnContentRendered = false;
         _clockTimer.Stop();
         _noticeResetTimer.Stop();
         base.OnClosed(e);
@@ -486,13 +574,53 @@ public partial class InGameMenuWindow : Window
 
     private void Window_Deactivated(object? sender, EventArgs e)
     {
+        ReleaseInputOwnership();
+        if (!_menuOpen)
+        {
+            return;
+        }
+
         Dispatcher.BeginInvoke(() =>
         {
-            if (IsVisible && !IsActive)
+            if (_menuOpen && IsVisible && !IsActive)
             {
                 MenuDeactivated?.Invoke(this, EventArgs.Empty);
             }
         }, DispatcherPriority.ContextIdle);
+    }
+
+    private void Window_Activated(object? sender, EventArgs e)
+    {
+        if (_menuOpen)
+        {
+            CaptureMouseInput();
+        }
+    }
+
+    private void Window_IsVisibleChanged(
+        object sender,
+        DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is false)
+        {
+            ReleaseInputOwnership();
+        }
+    }
+
+    private void CaptureMouseInput()
+    {
+        if (!ReferenceEquals(Mouse.Captured, this))
+        {
+            Mouse.Capture(this, CaptureMode.SubTree);
+        }
+    }
+
+    private void ReleaseInputOwnership()
+    {
+        if (ReferenceEquals(Mouse.Captured, this))
+        {
+            Mouse.Capture(null);
+        }
     }
 
     private void CloseMenu_Click(object sender, RoutedEventArgs e) =>

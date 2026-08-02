@@ -8,6 +8,7 @@
         Background="Transparent"
         ShowInTaskbar="False"
         Topmost="True"
+        Opacity="0"
         Focusable="True"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"

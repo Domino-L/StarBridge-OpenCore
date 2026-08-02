@@ -223,15 +223,20 @@ public sealed class RegexLogEventParser : ILogEventParser
             _respawn.Clear();
         }
 
+        if (_respawn.DeathAt is null &&
+            _respawn.CorpseEvidenceAt is not null &&
+            timestamp - _respawn.CorpseEvidenceAt.Value > RespawnRebindWindow)
+        {
+            _respawn.ClearCorpseEvidence();
+        }
+
         if (_respawn.DeathAt is null && IsCorpseRecoveryRootEvidence(line))
         {
-            _respawn.ConfirmDeath(timestamp);
-            return new FleetEvent(
-                FleetEventType.PlayerDied,
-                "LocalPlayer",
-                Timestamp: timestamp,
-                SourceLine: line,
-                PlayerId: _localPlayerId);
+            // Corpse inventory is also emitted when the local player kills
+            // somebody else. It has no player identity, so keep it only as a
+            // candidate until the local entity unbinds and rebinds elsewhere.
+            _respawn.RecordCorpseEvidence(timestamp, line);
+            return null;
         }
 
         if (IsDownedNotificationRemoval(line) && _respawn.DownedAt is not null)
@@ -289,6 +294,20 @@ public sealed class RegexLogEventParser : ILogEventParser
                 {
                     _respawn.BindAt = timestamp;
                     _respawn.NewParentId = newParent;
+                    if (_respawn.DeathAt is null &&
+                        _respawn.CorpseEvidenceAt is not null &&
+                        timestamp - _respawn.CorpseEvidenceAt.Value <= RespawnRebindWindow)
+                    {
+                        var deathAt = _respawn.CorpseEvidenceAt.Value;
+                        var deathSourceLine = _respawn.CorpseEvidenceLine ?? line;
+                        _respawn.ConfirmDeath(deathAt);
+                        return new FleetEvent(
+                            FleetEventType.PlayerDied,
+                            "LocalPlayer",
+                            Timestamp: deathAt,
+                            SourceLine: deathSourceLine,
+                            PlayerId: _localPlayerId);
+                    }
                 }
 
                 return null;
@@ -554,6 +573,8 @@ public sealed class RegexLogEventParser : ILogEventParser
     {
         public DateTimeOffset? DownedAt { get; private set; }
         public DateTimeOffset? DeathAt { get; private set; }
+        public DateTimeOffset? CorpseEvidenceAt { get; private set; }
+        public string? CorpseEvidenceLine { get; private set; }
         public bool DownedEventPublished { get; set; }
         public DateTimeOffset? DownedNotificationRemovedAt { get; set; }
         public DateTimeOffset? InventoryTerminatedAt { get; set; }
@@ -577,6 +598,19 @@ public sealed class RegexLogEventParser : ILogEventParser
         public void ConfirmDeath(DateTimeOffset timestamp)
         {
             DeathAt = timestamp;
+            ClearCorpseEvidence();
+        }
+
+        public void RecordCorpseEvidence(DateTimeOffset timestamp, string sourceLine)
+        {
+            CorpseEvidenceAt = timestamp;
+            CorpseEvidenceLine = sourceLine;
+        }
+
+        public void ClearCorpseEvidence()
+        {
+            CorpseEvidenceAt = null;
+            CorpseEvidenceLine = null;
         }
 
         public bool IsSameDownedEpisode(DateTimeOffset timestamp)
@@ -590,6 +624,7 @@ public sealed class RegexLogEventParser : ILogEventParser
         {
             DownedAt = null;
             DeathAt = null;
+            ClearCorpseEvidence();
             DownedEventPublished = false;
             DownedNotificationRemovedAt = null;
             InventoryTerminatedAt = null;

@@ -2,7 +2,7 @@
 param(
     [string]$Root = "",
     [string]$ExpectedVersion = "",
-    [string[]]$LegacyPublicTestVersions = @("0.4.8.2", "0.4.8.3")
+    [string[]]$LegacyPublicTestVersions = @("0.4.8.2", "0.4.8.3", "0.5.0")
 )
 
 $ErrorActionPreference = "Stop"
