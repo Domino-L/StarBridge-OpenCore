@@ -2,7 +2,7 @@
 param(
     [string]$Root = "",
     [string]$ExpectedVersion = "",
-    [string[]]$LegacyPublicTestVersions = @("0.4.8.2", "0.4.8.3", "0.5.0")
+    [string[]]$LegacyPublicTestVersions = @("0.4.8.2", "0.4.8.3", "0.5.0", "0.5.1")
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +35,13 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion) -and
     $authoredVersion -ne $ExpectedVersion.Trim()) {
     throw "The authored version '$authoredVersion' does not match expected version '$ExpectedVersion'."
 }
+
+$releaseNotesScript = Join-Path $Root "scripts\StarBridge.ReleaseNotes.ps1"
+if (-not (Test-Path -LiteralPath $releaseNotesScript -PathType Leaf)) {
+    throw "Release-notes helper was not found: $releaseNotesScript"
+}
+. $releaseNotesScript
+$currentRelease = Get-StarBridgeCurrentReleaseNotes -Root $Root -ExpectedVersion $authoredVersion
 
 function Assert-CurrentReleaseSurface {
     param(
@@ -109,6 +116,20 @@ foreach ($relativePath in $currentReleaseSurfaces) {
         -RelativePath $relativePath `
         -CurrentVersion $authoredVersion `
         -LegacyVersions $LegacyPublicTestVersions
+}
+
+$websitePath = Join-Path $Root "StarBridge.Web\index.html"
+if (Test-Path -LiteralPath $websitePath -PathType Leaf) {
+    $website = [IO.File]::ReadAllText($websitePath)
+    foreach ($requiredReleaseText in @(
+        $currentRelease.PublishedOn,
+        $currentRelease.Title,
+        $currentRelease.Summary
+    )) {
+        if ($website.IndexOf($requiredReleaseText, [StringComparison]::Ordinal) -lt 0) {
+            throw "Website release notes do not match release-notes/catalog.json: $requiredReleaseText"
+        }
+    }
 }
 
 Write-Host "Version migration checks passed for StarBridge $authoredVersion across $($currentReleaseSurfaces.Count) current release surfaces."

@@ -63,17 +63,6 @@ public partial class MainWindow
         return new string('\u200B', (_fleetCurrentTaskNoticeRevision % 2) + 1);
     }
 
-    private IEnumerable<PlayerRow> GetOverlayPlayers()
-    {
-        if (_joinedSquad is null)
-        {
-            return _players;
-        }
-
-        return _players.Where(player =>
-            player.SquadName.Equals(_joinedSquad.Name, StringComparison.OrdinalIgnoreCase));
-    }
-
     private void SaveOverlayLayout_Click(object sender, RoutedEventArgs e)
     {
         MarkOverlayEditorLayoutSaved();
@@ -221,6 +210,10 @@ public partial class MainWindow
         SetActiveOverlaySettingsSection(sectionKey);
         NotifyOverlaySettingsGuideTarget(element);
         ScrollOverlaySettingsToSection(target);
+        if (_isOverlayEditorCompact)
+        {
+            SetOverlayEditorCompactDrawer(OverlayEditorCompactDrawer.Settings);
+        }
     }
 
     private void OverlaySettingsScrollViewer_Loaded(object sender, RoutedEventArgs e)
@@ -595,7 +588,7 @@ public partial class MainWindow
             OverlaySettingsActiveRailTransform.BeginAnimation(TranslateTransform.YProperty, null);
             OverlaySettingsActiveRailTransform.Y = targetY;
 
-            if (!animate || !SystemParameters.ClientAreaAnimation || Math.Abs(targetY - currentY) < 0.5)
+            if (!animate || !UiMotion.IsEnabled || Math.Abs(targetY - currentY) < 0.5)
             {
                 _overlaySettingsActiveRailInitialized = true;
                 return;
@@ -645,8 +638,6 @@ public partial class MainWindow
             EventNotifySameServerCheck is null ||
             EventNotifyShipChangeCheck is null ||
             EventNotifyLocationChangeCheck is null ||
-            EventNotifySquadChangeCheck is null ||
-            EventNotifyCommanderCheck is null ||
             EventNotifyOnlineSummaryCheck is null ||
             EventNotifyPrimaryServerCheck is null ||
             OverlayEventMaxCountBox is null ||
@@ -992,16 +983,6 @@ public partial class MainWindow
             types |= OverlayEventNotificationTypes.LocationChange;
         }
 
-        if (EventNotifySquadChangeCheck?.IsChecked == true)
-        {
-            types |= OverlayEventNotificationTypes.SquadChange;
-        }
-
-        if (EventNotifyCommanderCheck?.IsChecked == true)
-        {
-            types |= OverlayEventNotificationTypes.CommanderChange;
-        }
-
         if (EventNotifyOnlineSummaryCheck?.IsChecked == true)
         {
             types |= OverlayEventNotificationTypes.OnlineSummary;
@@ -1162,8 +1143,6 @@ public partial class MainWindow
             OverlayEventNotificationTypes.SameServer => zh ? "同服提醒与概况" : "Same-server alerts",
             OverlayEventNotificationTypes.ShipChange => zh ? "飞船变化" : "Ship changes",
             OverlayEventNotificationTypes.LocationChange => zh ? "地点变化" : "Location changes",
-            OverlayEventNotificationTypes.SquadChange => zh ? "小队变动" : "Squad changes",
-            OverlayEventNotificationTypes.CommanderChange => zh ? "指挥官变化" : "Commander changes",
             OverlayEventNotificationTypes.OnlineSummary => zh ? "在线人数变化" : "Online count changes",
             OverlayEventNotificationTypes.PrimaryServer => zh ? "主服务器变化" : "Primary server changes",
             OverlayEventNotificationTypes.DeathAndRespawn => zh ? "倒地 / 死亡 / 获救 / 重生" : "Downed / death / revived / respawn",
@@ -1254,16 +1233,6 @@ public partial class MainWindow
             EventNotifyLocationChangeCheck.IsChecked = types.HasFlag(OverlayEventNotificationTypes.LocationChange);
         }
 
-        if (EventNotifySquadChangeCheck is not null)
-        {
-            EventNotifySquadChangeCheck.IsChecked = types.HasFlag(OverlayEventNotificationTypes.SquadChange);
-        }
-
-        if (EventNotifyCommanderCheck is not null)
-        {
-            EventNotifyCommanderCheck.IsChecked = types.HasFlag(OverlayEventNotificationTypes.CommanderChange);
-        }
-
         if (EventNotifyOnlineSummaryCheck is not null)
         {
             EventNotifyOnlineSummaryCheck.IsChecked = types.HasFlag(OverlayEventNotificationTypes.OnlineSummary);
@@ -1310,16 +1279,6 @@ public partial class MainWindow
         if (EventNotifyLocationChangeCheck is not null)
         {
             yield return EventNotifyLocationChangeCheck;
-        }
-
-        if (EventNotifySquadChangeCheck is not null)
-        {
-            yield return EventNotifySquadChangeCheck;
-        }
-
-        if (EventNotifyCommanderCheck is not null)
-        {
-            yield return EventNotifyCommanderCheck;
         }
 
         if (EventNotifyOnlineSummaryCheck is not null)

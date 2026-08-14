@@ -368,16 +368,20 @@ public partial class MainWindow
     {
         if (!IsLoggedIn && string.IsNullOrWhiteSpace(NetworkServerKeyBox.Password))
         {
+            ResetStartupDataGate();
             LoginStatusText.Text = "未登录";
             RefreshAccountPanel();
             RefreshHeaderStatusBar();
             return;
         }
 
-        var session = _accountSessionCoordinator.Capture();
+        var attempt = BeginStartupDataGate(_accountSessionCoordinator.Capture());
         if (IsLoggedIn && !await EnsureSyncConsentAsync())
         {
-            NetworkAutoSyncCheck.IsChecked = false;
+            CompleteStartupDataGate(
+                attempt,
+                StartupSyncOutcome.Failed,
+                Stopwatch.StartNew());
             NetworkStatusText.Text = "已登录 · 游戏状态同步未启用";
             RefreshHeaderStatusBar();
             return;
@@ -385,66 +389,119 @@ public partial class MainWindow
 
         ShowSyncStatusOverlay(
             "正在同步服务器数据",
-            "正在同步账号、舰队、小队、任务和玩家状态...",
+            "正在同步账号、舰队、任务和玩家状态...",
             showRetry: false);
         var slowNotice = BeginSyncStatusSlowNotice();
+        var elapsed = Stopwatch.StartNew();
+        var completionAttempt = attempt;
+        StartupSyncOutcome outcome;
+        try
+        {
+            var cancellationToken = _startupDataSyncCts?.Token ?? CancellationToken.None;
+            outcome = await StartupSyncTimeoutPolicy.WaitAsync(
+                async timeoutToken =>
+                {
+                    var connected = await TestNetworkAsync(
+                        silent: true,
+                        pullFleetDirectory: false);
+                    timeoutToken.ThrowIfCancellationRequested();
+                    if (!connected || !IsStartupAttemptCurrent(completionAttempt))
+                    {
+                        return false;
+                    }
 
-        var connected = await TestNetworkAsync(silent: true);
-        if (!_accountSessionCoordinator.IsCurrent(session))
+                    if (IsLoggedIn && !await ValidateSavedSessionAsync())
+                    {
+                        return false;
+                    }
+
+                    timeoutToken.ThrowIfCancellationRequested();
+                    var validatedSession = _accountSessionCoordinator.Capture();
+                    if (!_accountSessionCoordinator.IsCurrent(completionAttempt.AccountSession))
+                    {
+                        // A legacy saved session can be upgraded from a name
+                        // identity to a stable account id during validation.
+                        // Start the data mutation lease from the validated
+                        // identity instead of treating that legitimate upgrade
+                        // as a stale response.
+                        completionAttempt = RestartStartupDataGate(validatedSession);
+                    }
+
+                    if (!IsStartupAttemptCurrent(completionAttempt))
+                    {
+                        return false;
+                    }
+
+                    if (IsLoggedIn && !CanSynchronizeUserData)
+                    {
+                        StopNetworkDataSyncTimers();
+                        ReevaluateIdentityBinding(showPrompt: true);
+                        return false;
+                    }
+
+                    var sharing = GetPresenceSharingDecision();
+                    var pulledFleets = await PullNetworkFleetsAsync(
+                        silent: true,
+                        startupAttempt: completionAttempt);
+                    timeoutToken.ThrowIfCancellationRequested();
+                    var pulledPlayers = !sharing.CanReceiveRealtime ||
+                                        await PullNetworkSnapshotsAsync(
+                                            silent: true,
+                                            startupAttempt: completionAttempt);
+                    timeoutToken.ThrowIfCancellationRequested();
+
+                    if (sharing.CanPublishRealtime && IsStartupAttemptCurrent(completionAttempt))
+                    {
+                        _ = await PushLocalSnapshotAsync(
+                            silent: true,
+                            pushFleetDirectory: false);
+                    }
+
+                    return pulledFleets && pulledPlayers &&
+                           IsStartupAttemptCurrent(completionAttempt);
+                },
+                _startupSyncTimingHistory.ResolveTimeout(_networkClient.Timeout),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            slowNotice.Cancel();
+            slowNotice.Dispose();
+            if (ReferenceEquals(_syncStatusOverlayCts, slowNotice))
+            {
+                _syncStatusOverlayCts = null;
+            }
+            return;
+        }
+
+        if (outcome != StartupSyncOutcome.Succeeded)
+        {
+            // The directory cache is verified lazily only after the live pull
+            // fails. Complete the gate from what was actually recovered, not
+            // merely from the fact that a cache file existed at startup.
+            completionAttempt = completionAttempt with
+            {
+                HasCachedState = _hasFleet || _allNetworkFleets.Count > 0,
+                CacheWrittenAtUtc = ResolveStartupCacheWrittenAtUtc()
+            };
+        }
+
+        slowNotice.Cancel();
+        slowNotice.Dispose();
+        if (ReferenceEquals(_syncStatusOverlayCts, slowNotice))
+        {
+            _syncStatusOverlayCts = null;
+        }
+
+        if (!CompleteStartupDataGate(completionAttempt, outcome, elapsed))
         {
             HideSyncStatusOverlay();
             return;
         }
-        var sharing = GetPresenceSharingDecision();
-        var pulledFleets = false;
-        var pulledPlayers = false;
-        var pushedLocal = false;
-        if (connected)
+
+        if (StartupRetryPolicy.ShouldArmPeriodicSynchronization(outcome))
         {
-            if (IsLoggedIn && !await ValidateSavedSessionAsync())
-            {
-                HideSyncStatusOverlay();
-                return;
-            }
-
-            if (!_accountSessionCoordinator.IsCurrent(session))
-            {
-                HideSyncStatusOverlay();
-                return;
-            }
-
-            if (IsLoggedIn && !CanSynchronizeUserData)
-            {
-                StopNetworkSyncTimers();
-                NetworkStatusText.Text = _identityBindingAssessment.State ==
-                                         StarBridge.Core.Identity.IdentityVerificationState.Mismatch
-                    ? "无法验证身份 · 所有同步已暂停"
-                    : "等待绑定游戏身份 · 同步尚未启用";
-                HideSyncStatusOverlay();
-                ReevaluateIdentityBinding(showPrompt: true);
-                RefreshAccountPanel();
-                RefreshHeaderStatusBar();
-                return;
-            }
-
-            pulledFleets = await PullNetworkFleetsAsync(silent: true);
-            if (sharing.CanReceiveRealtime)
-            {
-                pulledPlayers = await PullNetworkSnapshotsAsync(silent: true);
-            }
-
-            if (sharing.CanPublishRealtime)
-            {
-                pushedLocal = await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
-            }
-        }
-
-        var syncCompleted = pulledFleets || pulledPlayers || pushedLocal ||
-                            (connected && !sharing.CanReceiveRealtime);
-        if (connected && syncCompleted)
-        {
-            NetworkAutoSyncCheck.IsChecked = true;
-            StartNetworkSyncTimers();
+            ArmNetworkAutoSyncRecovery();
             LoginStatusText.Text = string.IsNullOrWhiteSpace(_accountName)
                 ? "已连接服务器"
                 : $"已登录：{_accountName}";
@@ -458,30 +515,33 @@ public partial class MainWindow
             RefreshHeaderStatusBar();
             HideSyncStatusOverlay();
             HideNetworkSyncIssueDialog();
+            AppendOutput($"STARTUP SYNC | {_startupSyncTimingHistory.Describe()}");
             return;
         }
 
-        slowNotice.Cancel();
-        slowNotice.Dispose();
-        if (ReferenceEquals(_syncStatusOverlayCts, slowNotice))
-        {
-            _syncStatusOverlayCts = null;
-        }
-
-        NetworkStatusText.Text = _accountSessionRequiresFreshSync
-            ? "新账号数据尚未完成同步"
-            : "启动同步失败，当前显示本地缓存";
+        StopNetworkDataSyncTimers();
+        var terminalState = _startupDataGate.Current.State;
+        NetworkStatusText.Text = terminalState == StartupDataGateState.OfflineCache
+            ? "启动同步未完成 · 当前显示本地缓存"
+            : "启动同步未完成 · 当前没有可用缓存";
         RefreshHeaderStatusBar();
-        var issue = _accountSessionRequiresFreshSync
-            ? "新账号的数据暂时无法加载。为避免混用旧账号资料，舰队、房间、好友和通讯将保持空白，请稍后重试。"
-            : connected
-                ? "服务器暂时无法同步，当前会保留本账号的本地舰队资料，请稍后重试。"
-                : "当前网络不可用，已保留本账号的本地缓存数据。";
+        var issue = outcome == StartupSyncOutcome.TimedOut
+            ? terminalState == StartupDataGateState.OfflineCache
+                ? "同步等待已超时，当前显示本地缓存。请在网络稳定后手动重试。"
+                : "同步等待已超时，且没有可用缓存。请检查网络后重试。"
+            : terminalState == StartupDataGateState.OfflineCache
+                ? "服务器数据同步失败，当前显示本地缓存。请在网络恢复后手动重试。"
+                : "服务器数据同步失败，且没有可用缓存。请检查网络后重试。";
         ShowSyncStatusOverlay(
-            "同步失败",
+            "同步暂未完成",
             issue,
             showRetry: true);
-        ShowNetworkSyncIssueDialog(issue);
+        HideNetworkSyncIssueDialog();
+    }
+
+    private void ArmNetworkAutoSyncRecovery()
+    {
+        ApplyNetworkSyncMasterState();
     }
 
     private async Task<bool> ValidateSavedSessionAsync()
@@ -725,7 +785,6 @@ public partial class MainWindow
             NetworkStatusText.Text = "已登录并连接服务器";
             SaveCurrentConfig();
             RefreshAccountPanel();
-            NetworkAutoSyncCheck.IsChecked = false;
             NetworkStatusText.Text = "已登录 · 等待同步设置";
             RefreshHeaderStatusBar();
             return null;
@@ -924,7 +983,9 @@ public partial class MainWindow
         }
     }
 
-    private async Task<bool> TestNetworkAsync(bool silent = false)
+    private async Task<bool> TestNetworkAsync(
+        bool silent = false,
+        bool pullFleetDirectory = true)
     {
         try
         {
@@ -942,7 +1003,10 @@ public partial class MainWindow
             {
                 AppendOutput($"NETWORK | connected={NetworkServerUrlBox.Text.Trim()}");
             }
-            await PullNetworkFleetsAsync(silent: true);
+            if (pullFleetDirectory)
+            {
+                await PullNetworkFleetsAsync(silent: true);
+            }
             return true;
         }
         catch (TaskCanceledException)

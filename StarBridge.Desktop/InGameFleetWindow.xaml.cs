@@ -24,10 +24,13 @@ public partial class InGameFleetWindow : Window
     internal event EventHandler? RefreshRequested;
     internal event EventHandler? CommunicationRequested;
     internal event EventHandler<InGameFleetMemberActionRequestedEventArgs>? MemberActionRequested;
+    internal event EventHandler<InGameFleetShipImageReportRequestedEventArgs>? ShipImageReportRequested;
+    internal event EventHandler<InGameFleetShipImagePreviewRequestedEventArgs>? ShipImagePreviewRequested;
 
     internal InGameFleetWindow()
     {
         InitializeComponent();
+        Theming.BridgeSceneContext.ApplyFixed(this, Theming.BridgeSceneKind.Fleet);
         InGameToolWindowBehavior.PreventSnapMaximize(this);
     }
 
@@ -59,6 +62,7 @@ public partial class InGameFleetWindow : Window
             : Visibility.Collapsed;
         UnavailableDetailText.Text = snapshot.StatusText;
         StatusText.Text = snapshot.StatusText;
+        Controls.InGameLoadingPresentation.Apply(UnavailableLoadingIndicator, false);
         if (!snapshot.IsAvailable)
         {
             ClearCollections();
@@ -97,14 +101,14 @@ public partial class InGameFleetWindow : Window
         ApplySignalWidths(snapshot);
 
         ApplyCollaborationMembers();
-        ApplySquads();
         ApplyFleetShips();
     }
 
-    internal void ResetAccountState(string statusText)
+    internal void ResetAccountState(string statusText, bool isLoading = false)
     {
         _lastFingerprint = "";
         ApplySnapshot(InGameFleetSnapshot.Unavailable(statusText));
+        Controls.InGameLoadingPresentation.Apply(UnavailableLoadingIndicator, isLoading);
     }
 
     internal void HideForMenu()
@@ -144,48 +148,10 @@ public partial class InGameFleetWindow : Window
     private void ClearCollections()
     {
         CollaborationMemberList.ItemsSource = null;
-        SquadList.ItemsSource = null;
         ShipList.ItemsSource = null;
         CollaborationEmptyText.Visibility = Visibility.Collapsed;
-        SquadEmptyText.Visibility = Visibility.Collapsed;
         ShipEmptyText.Visibility = Visibility.Collapsed;
-        SquadFilterSummaryText.Text = "0 个小队";
         ShipFilterSummaryText.Text = "0 艘";
-    }
-
-    private void ApplySquads()
-    {
-        if (_currentSnapshot is not { IsAvailable: true } snapshot)
-        {
-            SquadList.ItemsSource = null;
-            SquadEmptyText.Visibility = Visibility.Collapsed;
-            SquadFilterSummaryText.Text = "0 个小队";
-            return;
-        }
-
-        var search = SquadSearchBox.Text;
-        var rows = snapshot.Squads
-            .Where(squad => FleetRosterSearchPolicy.Matches(
-                search,
-                squad.Name,
-                squad.Commander,
-                squad.Type,
-                squad.Description,
-                squad.MemberNames,
-                string.Join(" ", squad.Members.Select(member => member.Callsign)),
-                string.Join(" ", squad.Members.Select(member => member.GameId)),
-                string.Join(" ", squad.Members.Select(member => member.RoleText)),
-                string.Join(" ", squad.Members.Select(member => member.ShipText))))
-            .ToArray();
-
-        SquadList.ItemsSource = rows;
-        SquadFilterSummaryText.Text = $"{rows.Length} / {snapshot.Squads.Length} 个小队";
-        SquadEmptyText.Text = string.IsNullOrWhiteSpace(search)
-            ? "舰队暂未建立小队"
-            : "没有找到匹配的小队";
-        SquadEmptyText.Visibility = rows.Length == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
     }
 
     private void ApplyFleetShips()
@@ -201,7 +167,7 @@ public partial class InGameFleetWindow : Window
         var rows = InGameFleetShipFilter.Apply(snapshot.Ships, _shipOwnerFilter);
         ShipList.ItemsSource = rows;
         ShipFilterSummaryText.Text = $"{rows.Length} / {snapshot.Ships.Length} 艘";
-        ShipEmptyText.Text = _shipOwnerFilter switch
+        ShipEmptyText.TitleOverride = _shipOwnerFilter switch
         {
             InGameFleetShipOwnerFilter.Online => "当前没有舰长在线的共享舰船",
             InGameFleetShipOwnerFilter.Offline => "当前没有舰长离线的共享舰船",
@@ -225,7 +191,6 @@ public partial class InGameFleetWindow : Window
         members = _collaborationFilter switch
         {
             "same-server" => members.Where(member => member.IsSameServer),
-            "squad" => members.Where(member => member.IsCurrentUserSquad),
             "in-game" => members.Where(member =>
                 member.Presence == StarBridge.Core.Presence.PlayerPresenceKind.InGame),
             _ => members
@@ -239,7 +204,6 @@ public partial class InGameFleetWindow : Window
                 member.Callsign,
                 member.GameId,
                 member.RoleText,
-                member.SquadText,
                 member.ShipText,
                 member.LocationText,
                 member.ServerText));
@@ -247,12 +211,11 @@ public partial class InGameFleetWindow : Window
 
         var rows = members.ToArray();
         CollaborationMemberList.ItemsSource = rows;
-        CollaborationEmptyText.Text = !string.IsNullOrWhiteSpace(search)
+        CollaborationEmptyText.TitleOverride = !string.IsNullOrWhiteSpace(search)
             ? "没有找到匹配的舰队成员"
             : _collaborationFilter switch
             {
-                "same-server" => "当前没有识别到同一服务器分线的舰队成员",
-                "squad" => "当前没有可显示的小队成员",
+                "same-server" => "当前没有识别到同一服务器的舰队成员",
                 "in-game" => "当前没有舰队成员在游戏中",
                 _ => "暂无可显示的舰队成员"
             };
@@ -289,16 +252,12 @@ public partial class InGameFleetWindow : Window
         _collaborationFilter = filter;
         CollaborationAllFilter.IsChecked = ReferenceEquals(selected, CollaborationAllFilter);
         CollaborationSameServerFilter.IsChecked = ReferenceEquals(selected, CollaborationSameServerFilter);
-        CollaborationSquadFilter.IsChecked = ReferenceEquals(selected, CollaborationSquadFilter);
         CollaborationInGameFilter.IsChecked = ReferenceEquals(selected, CollaborationInGameFilter);
         ApplyCollaborationMembers();
     }
 
     private void CollaborationSearchBox_TextChanged(object sender, TextChangedEventArgs e) =>
         ApplyCollaborationMembers();
-
-    private void SquadSearchBox_TextChanged(object sender, TextChangedEventArgs e) =>
-        ApplySquads();
 
     private void ShipOwnerFilter_Click(object sender, RoutedEventArgs e)
     {
@@ -363,6 +322,27 @@ public partial class InGameFleetWindow : Window
         MemberActionRequested?.Invoke(
             this,
             new InGameFleetMemberActionRequestedEventArgs(member, requestedAction));
+    }
+
+    private void ShipImageReportButton_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is WpfFrameworkElement { DataContext: InGameFleetShipRow ship } && ship.CanReportCustomImage)
+        {
+            ShipImageReportRequested?.Invoke(this, new InGameFleetShipImageReportRequestedEventArgs(ship));
+        }
+    }
+
+    private void ShipImagePreview_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is WpfFrameworkElement { DataContext: InGameFleetShipRow ship } &&
+            !string.IsNullOrWhiteSpace(ship.ImageSource))
+        {
+            e.Handled = true;
+            ShipImagePreviewRequested?.Invoke(
+                this,
+                new InGameFleetShipImagePreviewRequestedEventArgs(ship));
+        }
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e) =>

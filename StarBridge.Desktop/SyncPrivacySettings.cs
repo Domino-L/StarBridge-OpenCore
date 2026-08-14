@@ -8,7 +8,7 @@ internal enum SyncPrivacyVisibilityScope
 {
     Private,
     AdminOnly,
-    Squad,
+    SpecifiedMembers,
     Fleet
 }
 
@@ -19,9 +19,6 @@ internal sealed record SyncPrivacySettings(
     bool SyncServerInfo = true,
     bool SyncOnlyInGame = true,
     SyncPrivacyVisibilityScope VisibilityScope = SyncPrivacyVisibilityScope.Fleet,
-    bool FleetMembersVisible = true,
-    bool SquadMembersVisible = true,
-    bool AdminOnlyVisible = false,
     bool PersonalHangarVisible = false,
     bool TaskOnlineStatusVisible = true,
     bool TaskShipStatusVisible = true,
@@ -35,7 +32,8 @@ internal sealed record SyncPrivacySettings(
     int SyncConsentVersion = 0,
     bool SyncEnabled = true,
     PlayerPresenceVisibilityMode PresenceVisibilityMode = PlayerPresenceVisibilityMode.Online,
-    bool FriendsCanViewPresence = true)
+    bool FriendsCanViewPresence = true,
+    string[]? SpecifiedMemberAccountIds = null)
 {
     public static readonly SyncPrivacySettings Default = new();
 
@@ -43,10 +41,12 @@ internal sealed record SyncPrivacySettings(
         DesktopAppConfig.ConfigDirectory,
         "sync-privacy.settings.json");
 
+    internal static bool HasStoredSettings => File.Exists(SettingsPath);
+
     public SyncPrivacyVisibilityScope EffectiveVisibilityScope =>
         VisibilityScope is SyncPrivacyVisibilityScope.Private
             or SyncPrivacyVisibilityScope.AdminOnly
-            or SyncPrivacyVisibilityScope.Squad
+            or SyncPrivacyVisibilityScope.SpecifiedMembers
             or SyncPrivacyVisibilityScope.Fleet
                 ? VisibilityScope
                 : SyncPrivacyVisibilityScope.Fleet;
@@ -57,9 +57,8 @@ internal sealed record SyncPrivacySettings(
         return this with
         {
             VisibilityScope = scope,
-            FleetMembersVisible = scope == SyncPrivacyVisibilityScope.Fleet,
-            SquadMembersVisible = scope is SyncPrivacyVisibilityScope.Squad or SyncPrivacyVisibilityScope.Fleet,
-            AdminOnlyVisible = scope == SyncPrivacyVisibilityScope.AdminOnly,
+            SpecifiedMemberAccountIds = PlayerSharedStateVisibility.NormalizeSpecifiedMemberAccountIds(
+                SpecifiedMemberAccountIds),
             HideStatusBeforeGameStart = true,
             HideServerInfoBeforePu = true,
             StopSyncAfterGameExit = true,
@@ -84,7 +83,7 @@ internal sealed record SyncPrivacySettings(
             using var document = JsonDocument.Parse(json);
             if (!document.RootElement.TryGetProperty(nameof(VisibilityScope), out _))
             {
-                settings = settings with { VisibilityScope = GetLegacyVisibilityScope(settings) };
+                settings = settings with { VisibilityScope = GetLegacyVisibilityScope(document.RootElement) };
             }
 
             return settings.NormalizeVisibilityScope();
@@ -104,23 +103,27 @@ internal sealed record SyncPrivacySettings(
         }));
     }
 
-    private static SyncPrivacyVisibilityScope GetLegacyVisibilityScope(SyncPrivacySettings settings)
+    private static SyncPrivacyVisibilityScope GetLegacyVisibilityScope(JsonElement root)
     {
-        if (settings.AdminOnlyVisible)
+        if (ReadLegacyFlag(root, "AdminOnlyVisible"))
         {
             return SyncPrivacyVisibilityScope.AdminOnly;
         }
 
-        if (settings.FleetMembersVisible)
+        if (ReadLegacyFlag(root, "FleetMembersVisible"))
         {
             return SyncPrivacyVisibilityScope.Fleet;
         }
 
-        if (settings.SquadMembersVisible)
+        if (ReadLegacyFlag(root, "SquadMembersVisible"))
         {
-            return SyncPrivacyVisibilityScope.Squad;
+            return SyncPrivacyVisibilityScope.SpecifiedMembers;
         }
 
         return SyncPrivacyVisibilityScope.Private;
     }
+
+    private static bool ReadLegacyFlag(JsonElement root, string propertyName) =>
+        root.TryGetProperty(propertyName, out var value) &&
+        value.ValueKind is JsonValueKind.True;
 }

@@ -34,6 +34,7 @@ public partial class InGameFriendsWindow : Window
     internal InGameFriendsWindow()
     {
         InitializeComponent();
+        Theming.BridgeSceneContext.ApplyFixed(this, Theming.BridgeSceneKind.Social);
         InGameToolWindowBehavior.PreventSnapMaximize(this);
         LocalPresenceBox.ItemsSource = PlayerPresenceVisibilityCatalog.Options;
     }
@@ -71,6 +72,10 @@ public partial class InGameFriendsWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             UnavailableDetailText.Text = snapshot.FriendStatusText;
+            Controls.InGameLoadingPresentation.Apply(
+                UnavailableLoadingIndicator,
+                !snapshot.IsAvailable &&
+                snapshot.FriendDirectoryState == InGameFriendDirectoryState.Loading);
 
             LocalCallsignText.Text = string.IsNullOrWhiteSpace(snapshot.LocalCallsign)
                 ? "我的账号"
@@ -88,16 +93,28 @@ public partial class InGameFriendsWindow : Window
 
             ApplyFriendGroups(snapshot.Friends);
 
-            IncomingRequestList.ItemsSource = snapshot.IncomingRequests;
+            IncomingRequestList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+                IncomingRequestList.ItemsSource as IEnumerable<FriendCenterRow>,
+                snapshot.IncomingRequests);
             IncomingRequestsPanel.Visibility = snapshot.IncomingRequests.Length > 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            FriendSearchResultList.ItemsSource = snapshot.SearchResults;
+            FriendSearchResultList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+                FriendSearchResultList.ItemsSource as IEnumerable<FriendCenterRow>,
+                snapshot.SearchResults);
             SearchResultsPanel.Visibility = snapshot.IsSearchActive
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            FriendSearchStatusText.Text = snapshot.SearchStatusText;
-            FriendDirectoryStatusText.Text = snapshot.FriendStatusText;
+            Controls.InGameLoadingPresentation.Apply(
+                FriendSearchStatusText,
+                FriendSearchLoadingIndicator,
+                snapshot.SearchStatusText,
+                snapshot.IsSearchLoading);
+            Controls.InGameLoadingPresentation.Apply(
+                FriendDirectoryStatusText,
+                FriendDirectoryLoadingIndicator,
+                snapshot.FriendStatusText,
+                snapshot.FriendDirectoryState == InGameFriendDirectoryState.Loading);
         }
         finally
         {
@@ -105,7 +122,7 @@ public partial class InGameFriendsWindow : Window
         }
     }
 
-    internal void ResetAccountState(string statusText)
+    internal void ResetAccountState(string statusText, bool isLoading = false)
     {
         FriendSearchBox.Clear();
         ApplySnapshot(new InGameSocialSnapshot(
@@ -115,9 +132,12 @@ public partial class InGameFriendsWindow : Window
             [],
             new InGameConversationPaneSnapshot([], [], null, null, false, statusText),
             new InGameConversationPaneSnapshot([], [], null, null, false, statusText),
-            InGameFriendDirectoryState.Unavailable,
+            isLoading
+                ? InGameFriendDirectoryState.Loading
+                : InGameFriendDirectoryState.Unavailable,
             statusText,
             "输入呼号或游戏 ID 查找用户",
+            false,
             false,
             "",
             "",
@@ -169,8 +189,12 @@ public partial class InGameFriendsWindow : Window
             .Where(row => !PlayerPresence.IsOnline(row.Presence))
             .OrderBy(row => row.Callsign, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
-        OnlineFriendsList.ItemsSource = online;
-        OfflineFriendsList.ItemsSource = offline;
+        OnlineFriendsList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+            OnlineFriendsList.ItemsSource as IEnumerable<FriendCenterRow>,
+            online);
+        OfflineFriendsList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+            OfflineFriendsList.ItemsSource as IEnumerable<FriendCenterRow>,
+            offline);
         OnlineFriendCountText.Text = online.Length.ToString();
         OfflineFriendCountText.Text = offline.Length.ToString();
     }

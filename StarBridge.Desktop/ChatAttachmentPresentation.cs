@@ -1,4 +1,5 @@
 using StarBridge.Core.Chat;
+using StarBridge.Desktop.Theming;
 using System.Windows;
 
 namespace StarBridge.Desktop;
@@ -72,13 +73,22 @@ internal static class ChatAttachmentPresentation
         };
     }
 
-    public static string StatusBrush(ChatAttachmentContract? attachment) => StatusText(attachment) switch
+    public static BridgeBrushToken StatusToken(ChatAttachmentContract? attachment)
     {
-        "开放中" => "#49D98A",
-        "已满员" => "#F0B84B",
-        "邀请有效" => "#69CCFF",
-        _ => "#8094A3"
-    };
+        if (attachment?.Kind != ChatAttachmentKinds.PartyRoomInvitation ||
+            attachment.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow)
+        {
+            return BridgeBrushToken.StatusOff;
+        }
+
+        return attachment.RoomStatus?.Trim().ToLowerInvariant() switch
+        {
+            "recruiting" => BridgeBrushToken.StatusOk,
+            "full" => BridgeBrushToken.StatusWarn,
+            "closed" => BridgeBrushToken.StatusOff,
+            _ => BridgeBrushToken.StatusInfo
+        };
+    }
 
     public static string RoomActivityText(ChatAttachmentContract? attachment)
     {

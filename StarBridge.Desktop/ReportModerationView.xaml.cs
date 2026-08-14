@@ -1,11 +1,11 @@
 using StarBridge.Core.TrustSafety;
+using StarBridge.Desktop.Controls;
+using StarBridge.Desktop.Theming;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Brush = System.Windows.Media.Brush;
-using Brushes = System.Windows.Media.Brushes;
 using Button = System.Windows.Controls.Button;
-using Color = System.Windows.Media.Color;
 
 namespace StarBridge.Desktop;
 
@@ -14,62 +14,132 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
     private readonly Func<string?, Task<AdminReportQueueContract?>> _loadQueue;
     private readonly Func<string, Task<AdminReportDetailContract?>> _loadDetail;
     private readonly Func<string, ReviewReportRequestContract, Task<AdminReportDetailContract?>> _review;
+    private readonly Func<string, Task<string?>> _loadShipImage;
     private readonly string _reviewer;
     private string? _selectedReportId;
-    private bool _loading;
+    private string? _selectedTargetType;
+    private long _detailRequestGeneration;
+    private long _queueRequestGeneration;
 
     public ReportModerationView(
         Func<string?, Task<AdminReportQueueContract?>> loadQueue,
         Func<string, Task<AdminReportDetailContract?>> loadDetail,
         Func<string, ReviewReportRequestContract, Task<AdminReportDetailContract?>> review,
+        Func<string, Task<string?>> loadShipImage,
         string reviewer)
     {
         InitializeComponent();
+        BridgeSceneContext.ApplyFixed(this, BridgeSceneKind.Review);
         _loadQueue = loadQueue;
         _loadDetail = loadDetail;
         _review = review;
+        _loadShipImage = loadShipImage;
         _reviewer = reviewer;
     }
 
     public async Task RefreshAsync()
     {
-        if (_loading)
-        {
-            return;
-        }
-
-        _loading = true;
-        QueueLoadingPanel.Visibility = Visibility.Visible;
+        var filter = (QueueFilterComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+        var generation = ++_queueRequestGeneration;
+        ShowQueueState(
+            BridgeStateKind.Loading,
+            "正在读取举报记录",
+            "正在获取最新审核队列。");
         StatusText.Text = "正在读取举报记录…";
         try
         {
-            var filter = (QueueFilterComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             var queue = await _loadQueue(string.IsNullOrWhiteSpace(filter) ? null : filter);
-            RenderQueue(queue?.Reports ?? []);
+            if (generation != _queueRequestGeneration)
+            {
+                return;
+            }
+
+            var reports = queue?.Reports ?? [];
+            ReconcileSelectedReport(reports);
+            RenderQueue(reports);
+            if (reports.Length == 0)
+            {
+                ShowQueueState(
+                    BridgeStateKind.Empty,
+                    "当前没有举报记录",
+                    "当前筛选条件下没有待显示的举报。");
+            }
+            else
+            {
+                ShowQueueContent();
+            }
             StatusText.Text = "处理结果会记录时间与审核人，保存前请再次确认。";
         }
         catch (Exception ex)
         {
-            QueueListPanel.Children.Clear();
-            QueueListPanel.Children.Add(CreateMessage("暂时无法读取举报记录，请稍后重试。"));
+            if (generation != _queueRequestGeneration)
+            {
+                return;
+            }
+
+            QueueCountText.Text = "—";
+            ShowQueueState(
+                BridgeStateKind.Error,
+                "暂时无法读取举报记录",
+                "请稍后重试。");
             StatusText.Text = $"读取失败：{ex.Message}";
         }
-        finally
+    }
+
+    private void ShowQueueState(BridgeStateKind state, string title, string description)
+    {
+        QueueListPanel.Children.Clear();
+        QueueScrollViewer.Visibility = Visibility.Collapsed;
+        QueueStatePanel.State = state;
+        QueueStatePanel.TitleOverride = title;
+        QueueStatePanel.DescriptionOverride = description;
+        QueueStatePanel.ActionTextOverride = "";
+        QueueStatePanel.Visibility = Visibility.Visible;
+    }
+
+    private void ShowQueueContent()
+    {
+        QueueStatePanel.Visibility = Visibility.Collapsed;
+        QueueScrollViewer.Visibility = Visibility.Visible;
+    }
+
+    private void ShowDetailState(BridgeStateKind state, string title, string description)
+    {
+        DetailScrollViewer.Visibility = Visibility.Collapsed;
+        DetailStatePanel.State = state;
+        DetailStatePanel.TitleOverride = title;
+        DetailStatePanel.DescriptionOverride = description;
+        DetailStatePanel.ActionTextOverride = "";
+        DetailStatePanel.Visibility = Visibility.Visible;
+    }
+
+    private void ShowDetailContent()
+    {
+        DetailStatePanel.Visibility = Visibility.Collapsed;
+        DetailScrollViewer.Visibility = Visibility.Visible;
+    }
+
+    private void ReconcileSelectedReport(AdminReportSummaryContract[] reports)
+    {
+        if (string.IsNullOrWhiteSpace(_selectedReportId) ||
+            reports.Any(item => item.Report.ReportId.Equals(_selectedReportId, StringComparison.OrdinalIgnoreCase)))
         {
-            QueueLoadingPanel.Visibility = Visibility.Collapsed;
-            _loading = false;
+            return;
         }
+
+        _selectedReportId = null;
+        _selectedTargetType = null;
+        _detailRequestGeneration++;
+        ShowDetailState(
+            BridgeStateKind.Empty,
+            "选择一条举报查看详情",
+            "审核内容会显示在这里。");
     }
 
     private void RenderQueue(AdminReportSummaryContract[] reports)
     {
         QueueListPanel.Children.Clear();
         QueueCountText.Text = $"{reports.Length} 条";
-        if (reports.Length == 0)
-        {
-            QueueListPanel.Children.Add(CreateMessage("当前筛选条件下没有举报。"));
-            return;
-        }
 
         foreach (var item in reports)
         {
@@ -77,10 +147,10 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             {
                 Style = FindResource("ReportModerationQueueItemButton") as Style,
                 Margin = new Thickness(0, 0, 0, 8),
-                Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
+                Background = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.PanelRaised),
                 BorderBrush = item.Report.ReportId.Equals(_selectedReportId, StringComparison.OrdinalIgnoreCase)
-                    ? new SolidColorBrush(Color.FromRgb(97, 202, 255))
-                    : new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+                    ? Theming.BridgeSceneContext.GetRequiredAccentBrush(this)
+                    : Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 Tag = item.Report.ReportId,
                 Content = BuildQueueCard(item)
@@ -96,7 +166,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         panel.Children.Add(new TextBlock
         {
             Text = item.Report.TargetDisplayName,
-            Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+            Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink),
             FontSize = 13,
             FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -112,7 +182,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         {
             Text = $"提交于 {item.Report.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm} · 记录 {item.AuditEntryCount} 条",
             Margin = new Thickness(0, 5, 0, 0),
-            Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+            Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
             FontSize = 9
         });
         return panel;
@@ -126,40 +196,71 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         }
 
         _selectedReportId = reportId;
-        await LoadSelectedDetailAsync();
-        await RefreshAsync();
+        var generation = ++_detailRequestGeneration;
+        await LoadSelectedDetailAsync(reportId, generation);
+        if (IsCurrentDetailRequest(reportId, generation))
+        {
+            await RefreshAsync();
+        }
     }
 
-    private async Task LoadSelectedDetailAsync()
+    private async Task LoadSelectedDetailAsync(string reportId, long generation)
     {
-        if (string.IsNullOrWhiteSpace(_selectedReportId))
+        if (!IsCurrentDetailRequest(reportId, generation))
         {
             return;
         }
 
+        ShowDetailState(
+            BridgeStateKind.Loading,
+            "正在读取举报详情",
+            "正在核对最新记录。");
         StatusText.Text = "正在读取举报详情…";
         try
         {
-            var detail = await _loadDetail(_selectedReportId);
+            var detail = await _loadDetail(reportId);
             if (detail is null)
             {
                 throw new InvalidOperationException("这条举报记录已不存在。");
             }
 
+            if (!IsCurrentDetailRequest(reportId, generation))
+            {
+                return;
+            }
+
             RenderDetail(detail);
-            StatusText.Text = "举报详情已更新。";
+            await RenderShipImageEvidenceAsync(detail, reportId, generation);
+            if (IsCurrentDetailRequest(reportId, generation))
+            {
+                StatusText.Text = "举报详情已更新。";
+            }
         }
         catch (Exception ex)
         {
+            if (!IsCurrentDetailRequest(reportId, generation))
+            {
+                return;
+            }
+
+            _selectedTargetType = null;
+            ShowDetailState(
+                BridgeStateKind.Error,
+                "暂时无法读取这条举报",
+                "请稍后重试，旧详情已隐藏。");
             StatusText.Text = $"读取失败：{ex.Message}";
         }
     }
 
+    private bool IsCurrentDetailRequest(string reportId, long generation) =>
+        generation == _detailRequestGeneration &&
+        string.Equals(reportId, _selectedReportId, StringComparison.OrdinalIgnoreCase);
+
     private void RenderDetail(AdminReportDetailContract detail)
     {
-        EmptyDetailText.Visibility = Visibility.Collapsed;
-        DetailScrollViewer.Visibility = Visibility.Visible;
+        ShowDetailContent();
         DetailTargetText.Text = detail.Report.TargetDisplayName;
+        _selectedTargetType = detail.Report.TargetType;
         DetailMetaText.Text = $"举报人账号：{detail.ReporterAccountId} · 来源：{ContextLabel(detail.Report.ContextType)} · 提交于 {detail.Report.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}";
         DetailStatusText.Text = StatusLabel(detail.Report.Status);
         DetailStatusText.Foreground = StatusBrush(detail.Report.Status);
@@ -167,21 +268,36 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         DetailReasonText.Text = $"原因：{ReasonLabel(detail.Report.Reason)}";
         DetailBodyText.Text = string.IsNullOrWhiteSpace(detail.Report.Details) ? "举报人没有填写补充说明。" : detail.Report.Details;
         DetailSnapshotText.Text = $"显示名称：{detail.TargetSnapshot.DisplayName}\n游戏账号：{DisplayOrFallback(detail.TargetSnapshot.GameName)}\n呼号：{DisplayOrFallback(detail.TargetSnapshot.Callsign)}\n记录时间：{detail.TargetSnapshot.CapturedAt.ToLocalTime():yyyy-MM-dd HH:mm}";
+        ShipImageEvidencePanel.Visibility = Visibility.Collapsed;
+        ShipImageEvidenceImage.Source = null;
+        ShipImageEvidenceStatusText.Text = "正在读取图片…";
         RenderEvidence(detail.Evidence);
         OutcomeSummaryTextBox.Text = detail.Report.OutcomeSummary ?? "";
         InternalNoteTextBox.Clear();
         SanctionTypeComboBox.SelectedIndex = 0;
+        ContentActionPanel.Visibility = detail.Report.TargetType.Equals(
+            ReportTargetTypes.ShipImage,
+            StringComparison.OrdinalIgnoreCase)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ContentActionComboBox.SelectedIndex = detail.Report.TargetType.Equals(
+            ReportTargetTypes.ShipImage,
+            StringComparison.OrdinalIgnoreCase)
+            ? 1
+            : 0;
         SanctionDurationTextBox.Text = "24";
         SelectReviewStatus(detail.Report.Status);
 
         AuditListPanel.Children.Clear();
         foreach (var entry in detail.AuditTrail.OrderByDescending(item => item.CreatedAt))
         {
+            var contentActionText = ContentActionLabel(entry.ContentAction);
             var text = new TextBlock
             {
                 Text = $"{entry.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm} · {ActorLabel(entry.Actor)}\n{StatusLabel(entry.FromStatus)} → {StatusLabel(entry.ToStatus)}" +
+                       (string.IsNullOrWhiteSpace(contentActionText) ? "" : $"\n内容处理：{contentActionText}") +
                        (string.IsNullOrWhiteSpace(entry.InternalNote) ? "" : $"\n{entry.InternalNote}"),
-                Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+                Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
                 FontSize = 10,
                 TextWrapping = TextWrapping.Wrap
             };
@@ -189,8 +305,8 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             {
                 Margin = new Thickness(0, 0, 0, 7),
                 Padding = new Thickness(10),
-                Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+                Background = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.PanelRaised),
+                BorderBrush = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 Child = text
             });
@@ -210,17 +326,54 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
                 {
                     Margin = new Thickness(0, 0, 0, 7),
                     Padding = new Thickness(10),
-                    Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+                    Background = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.PanelRaised),
+                    BorderBrush = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Hairline),
                     BorderThickness = new Thickness(1),
                     Child = new TextBlock
                     {
                         Text = $"{AccountSafetyView.SanctionLabel(sanction.Type)} · {sanction.IssuedAt.ToLocalTime():yyyy-MM-dd HH:mm}\n{sanction.Summary}\n{SanctionExpiryLabel(sanction)}",
-                        Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+                        Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
                         FontSize = 10,
                         TextWrapping = TextWrapping.Wrap
                     }
                 });
+            }
+        }
+    }
+
+    private async Task RenderShipImageEvidenceAsync(
+        AdminReportDetailContract detail,
+        string reportId,
+        long generation)
+    {
+        if (!detail.Report.TargetType.Equals(ReportTargetTypes.ShipImage, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        ShipImageEvidencePanel.Visibility = Visibility.Visible;
+        ShipImageEvidenceLoadingIndicator.IsActive = true;
+        ShipImageEvidenceLoadingIndicator.Visibility = Visibility.Visible;
+        try
+        {
+            var path = await _loadShipImage(detail.Report.TargetId);
+            if (!IsCurrentDetailRequest(reportId, generation))
+            {
+                return;
+            }
+
+            var image = string.IsNullOrWhiteSpace(path) ? null : ImageDecodeCache.Load(path, 720);
+            ShipImageEvidenceImage.Source = image;
+            ShipImageEvidenceStatusText.Text = image is null
+                ? "图片暂时无法加载，请刷新后重试。"
+                : "";
+        }
+        finally
+        {
+            if (IsCurrentDetailRequest(reportId, generation))
+            {
+                ShipImageEvidenceLoadingIndicator.IsActive = false;
+                ShipImageEvidenceLoadingIndicator.Visibility = Visibility.Collapsed;
             }
         }
     }
@@ -250,7 +403,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             header.Children.Add(new TextBlock
             {
                 Text = $"{EvidenceCategoryLabel(item.Category)} · {item.Label}",
-                Foreground = new SolidColorBrush(Color.FromRgb(97, 202, 255)),
+                Foreground = Theming.BridgeSceneContext.GetRequiredAccentBrush(this),
                 FontSize = 10,
                 FontWeight = FontWeights.SemiBold,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -259,7 +412,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             {
                 Text = item.CapturedAt.ToLocalTime().ToString("MM-dd HH:mm"),
                 Margin = new Thickness(10, 0, 0, 0),
-                Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+                Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
                 FontSize = 9
             };
             Grid.SetColumn(time, 1);
@@ -269,7 +422,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             {
                 Text = string.IsNullOrWhiteSpace(item.Content) ? "仅包含附件或非文字内容。" : item.Content,
                 Margin = new Thickness(0, 7, 0, 0),
-                Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+                Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink),
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap
             };
@@ -280,8 +433,8 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             {
                 Margin = new Thickness(0, 0, 0, 7),
                 Padding = new Thickness(10),
-                Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+                Background = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.PanelRaised),
+                BorderBrush = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 Child = panel
             });
@@ -296,8 +449,21 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             return;
         }
 
+        var reportId = _selectedReportId;
+        var detailGeneration = _detailRequestGeneration;
         var status = selected.Tag?.ToString() ?? ReportStatuses.Reviewing;
         var sanctionType = (SanctionTypeComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+        var contentAction = ReportStatuses.Normalize(status) == ReportStatuses.Actioned &&
+                            string.Equals(_selectedTargetType, ReportTargetTypes.ShipImage, StringComparison.OrdinalIgnoreCase)
+            ? (ContentActionComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString()
+            : ReportContentActions.None;
+        if (string.Equals(_selectedTargetType, ReportTargetTypes.ShipImage, StringComparison.OrdinalIgnoreCase) &&
+            ReportStatuses.Normalize(status) == ReportStatuses.Actioned &&
+            ReportContentActions.Normalize(contentAction) != ReportContentActions.QuarantineShipImage)
+        {
+            StatusText.Text = "确认图片违规时，请同时选择“下架并隔离图片”。";
+            return;
+        }
         int? sanctionDurationHours = null;
         if (!string.IsNullOrWhiteSpace(sanctionType) &&
             sanctionType != AccountSanctionTypes.Warning &&
@@ -314,11 +480,13 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         }
 
         SaveReviewButton.IsEnabled = false;
+        OperationLoadingIndicator.IsActive = true;
+        OperationLoadingIndicator.Visibility = Visibility.Visible;
         StatusText.Text = "正在保存处理结果…";
         try
         {
             var updated = await _review(
-                _selectedReportId,
+                reportId,
                 new ReviewReportRequestContract(
                     status,
                     _reviewer,
@@ -326,23 +494,42 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
                     OutcomeSummaryTextBox.Text,
                     string.IsNullOrWhiteSpace(sanctionType) ? null : sanctionType,
                     sanctionDurationHours,
-                    Guid.NewGuid().ToString("N")));
+                    Guid.NewGuid().ToString("N"),
+                    ReportContentActions.Normalize(contentAction)));
             if (updated is null)
             {
                 throw new InvalidOperationException("服务没有返回更新后的举报记录。");
             }
 
+            if (!IsCurrentDetailRequest(reportId, detailGeneration))
+            {
+                return;
+            }
+
             RenderDetail(updated);
             await RefreshAsync();
+            if (!IsCurrentDetailRequest(reportId, detailGeneration))
+            {
+                return;
+            }
+
             StatusText.Text = "处理结果已保存，相关用户会在“我的举报”中看到最新状态。";
         }
         catch (Exception ex)
         {
+            if (!IsCurrentDetailRequest(reportId, detailGeneration))
+            {
+                return;
+            }
+
             StatusText.Text = $"保存失败：{ex.Message}";
         }
         finally
         {
-            SaveReviewButton.IsEnabled = true;
+            OperationLoadingIndicator.IsActive = false;
+            OperationLoadingIndicator.Visibility = Visibility.Collapsed;
+            SaveReviewButton.IsEnabled = !string.IsNullOrWhiteSpace(_selectedReportId) &&
+                                         DetailScrollViewer.Visibility == Visibility.Visible;
         }
     }
 
@@ -390,7 +577,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
     {
         Text = text,
         Margin = new Thickness(12),
-        Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+        Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
         TextAlignment = TextAlignment.Center,
         TextWrapping = TextWrapping.Wrap
     };
@@ -405,12 +592,12 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
             _ => "待审核"
         };
 
-    private static Brush StatusBrush(string status) => ReportStatuses.Normalize(status) switch
+    private Brush StatusBrush(string status) => ReportStatuses.Normalize(status) switch
     {
-        ReportStatuses.Reviewing => new SolidColorBrush(Color.FromRgb(255, 181, 79)),
-        ReportStatuses.Actioned => new SolidColorBrush(Color.FromRgb(64, 218, 146)),
-        ReportStatuses.NoViolation => new SolidColorBrush(Color.FromRgb(145, 167, 181)),
-        _ => new SolidColorBrush(Color.FromRgb(97, 202, 255))
+        ReportStatuses.Reviewing => Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.StatusWarn),
+        ReportStatuses.Actioned => Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.StatusOk),
+        ReportStatuses.NoViolation => Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.StatusOff),
+        _ => Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.StatusInfo)
     };
 
     private static string ReasonLabel(string reason) => reason switch
@@ -431,6 +618,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         "friend_chat" => "好友私信",
         "fleet_chat" => "舰队通讯",
         "party_room" => "组队房间",
+        ReportEvidenceCategories.ShipImage => "舰船图片",
         _ => "应用内入口"
     };
 
@@ -441,7 +629,14 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
         ReportEvidenceCategories.FleetChat => "舰队通讯",
         ReportEvidenceCategories.RoomChat => "房间聊天",
         ReportEvidenceCategories.RoomContent => "房间资料",
+        ReportEvidenceCategories.ShipImage => "舰船图片",
         _ => "相关内容"
+    };
+
+    private static string ContentActionLabel(string? action) => ReportContentActions.Normalize(action) switch
+    {
+        ReportContentActions.QuarantineShipImage => "已下架并隔离图片",
+        _ => ""
     };
 
     private static string DisplayOrFallback(string? value) => string.IsNullOrWhiteSpace(value) ? "未提供" : value;

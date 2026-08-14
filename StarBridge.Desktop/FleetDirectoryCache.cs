@@ -9,6 +9,14 @@ public sealed class FleetDirectoryCache
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _cachePath;
 
+    private sealed record CacheEnvelope(
+        DateTimeOffset WrittenAtUtc,
+        NetworkFleetSnapshot[] Snapshots);
+
+    public DateTimeOffset? LastLoadedWrittenAtUtc { get; private set; }
+
+    public bool HasCachedFile => File.Exists(_cachePath);
+
     public FleetDirectoryCache(string? cachePath = null)
     {
         _cachePath = string.IsNullOrWhiteSpace(cachePath)
@@ -29,8 +37,21 @@ public sealed class FleetDirectoryCache
                 return Array.Empty<NetworkFleetSnapshot>();
             }
 
-            await using var stream = File.OpenRead(_cachePath);
-            var snapshots = await JsonSerializer.DeserializeAsync<NetworkFleetSnapshot[]>(stream, JsonOptions);
+            var payload = await File.ReadAllTextAsync(_cachePath);
+            NetworkFleetSnapshot[]? snapshots;
+            try
+            {
+                var envelope = JsonSerializer.Deserialize<CacheEnvelope>(payload, JsonOptions);
+                snapshots = envelope?.Snapshots;
+                LastLoadedWrittenAtUtc = envelope?.WrittenAtUtc.ToUniversalTime();
+            }
+            catch (JsonException)
+            {
+                // Legacy caches were a bare array and had no trustworthy write
+                // timestamp. Preserve the data without inventing a date.
+                snapshots = JsonSerializer.Deserialize<NetworkFleetSnapshot[]>(payload, JsonOptions);
+                LastLoadedWrittenAtUtc = null;
+            }
             return snapshots?
                 .Where(snapshot => !string.IsNullOrWhiteSpace(snapshot.Name) && !string.IsNullOrWhiteSpace(snapshot.Code))
                 .Select(snapshot => snapshot with { PublicProfileEnabled = true })
@@ -39,6 +60,7 @@ public sealed class FleetDirectoryCache
         }
         catch
         {
+            LastLoadedWrittenAtUtc = null;
             return Array.Empty<NetworkFleetSnapshot>();
         }
     }
@@ -63,7 +85,10 @@ public sealed class FleetDirectoryCache
             Directory.CreateDirectory(directory);
             await using (var stream = File.Create(temporaryPath))
             {
-                await JsonSerializer.SerializeAsync(stream, safeSnapshots, JsonOptions);
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    new CacheEnvelope(DateTimeOffset.UtcNow, safeSnapshots),
+                    JsonOptions);
             }
 
             File.Move(temporaryPath, _cachePath, overwrite: true);
@@ -106,7 +131,6 @@ public sealed class FleetDirectoryCache
             TaskHistory = [],
             Applications = [],
             Invites = [],
-            Squads = [],
             CurrentTaskNoticeRevision = 0,
             EmailNotificationsEnabled = false,
             PublicProfileEnabled = true,

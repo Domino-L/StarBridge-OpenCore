@@ -5,9 +5,8 @@ using System.Text.Json;
 
 internal enum PlayerActivityNotificationScope
 {
-    Squad,
-    PartyRoom,
-    Fleet
+    PartyRoom = 1,
+    Fleet = 2
 }
 
 internal enum DesktopNotificationPosition
@@ -40,7 +39,7 @@ internal sealed record NotificationSettings(
     int EmailHourlyLimit = 3,
     bool EmailOnlyCritical = true,
     bool EnablePlayerActivityNotifications = false,
-    PlayerActivityNotificationScope PlayerActivityScope = PlayerActivityNotificationScope.Squad,
+    PlayerActivityNotificationScope PlayerActivityScope = PlayerActivityNotificationScope.Fleet,
     bool NotifyPlayerOnline = true,
     bool NotifyPlayerOffline = false,
     bool NotifyPlayerStartedGame = true,
@@ -55,7 +54,7 @@ internal sealed record NotificationSettings(
     {
         PlayerActivityScope = Enum.IsDefined(PlayerActivityScope)
             ? PlayerActivityScope
-            : PlayerActivityNotificationScope.Squad,
+            : PlayerActivityNotificationScope.Fleet,
         PlayerActivityPosition = Enum.IsDefined(PlayerActivityPosition)
             ? PlayerActivityPosition
             : DesktopNotificationPosition.BottomRight

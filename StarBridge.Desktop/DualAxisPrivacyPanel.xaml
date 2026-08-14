@@ -1,0 +1,442 @@
+<UserControl x:Class="StarBridge.Desktop.DualAxisPrivacyPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+             Background="Transparent">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Bridge/Shell.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/Directory.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="PrivacySwitchStyle" TargetType="{x:Type CheckBox}">
+                <Setter Property="Width" Value="44" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type CheckBox}">
+                            <Border x:Name="Track"
+                                    Background="{DynamicResource BridgePanel}"
+                                    BorderBrush="{DynamicResource BridgeStatusOff}"
+                                    BorderThickness="1"
+                                    CornerRadius="2">
+                                <TextBlock x:Name="State"
+                                           Text="OFF"
+                                           Foreground="{DynamicResource BridgeInk2}"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Track" Property="Background" Value="{DynamicResource BridgeSignalSurface}" />
+                                    <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource BridgeStatusOk}" />
+                                    <Setter TargetName="State" Property="Text" Value="ON" />
+                                    <Setter TargetName="State" Property="Foreground" Value="{DynamicResource BridgeStatusOk}" />
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource BridgeStatusInfo}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Track" Property="Background" Value="{DynamicResource BridgeGround}" />
+                                    <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource BridgeHairline}" />
+                                    <Setter TargetName="State" Property="Foreground" Value="{DynamicResource BridgeStatusOff}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="PrivacyAudienceCheckStyle"
+                   TargetType="{x:Type CheckBox}"
+                   BasedOn="{StaticResource {x:Type CheckBox}}">
+                <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                <Setter Property="Margin" Value="0,5,12,0" />
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <controls:ChamferBorder Padding="12"
+                                Style="{StaticResource BridgeDirectorySurfaceStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Width="4"
+                        Margin="0,1,12,1"
+                        Background="{DynamicResource BridgeStatusInfo}" />
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="现在谁能看到我的状态"
+                               Foreground="{DynamicResource BridgeInk}"
+                               FontSize="13"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="PolicySummaryText"
+                               Margin="0,3,0,0"
+                               Text="正在根据实际隐私策略生成说明…"
+                               Foreground="{DynamicResource BridgeInk2}"
+                               FontSize="11"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+                <Button x:Name="AudienceDetailsButton"
+                        Grid.Column="2"
+                        Margin="14,0,0,0"
+                        Content="调整"
+                        MinWidth="70"
+                        Height="28"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                        Click="AudienceDetailsButton_Click" />
+            </Grid>
+        </controls:ChamferBorder>
+
+        <Grid x:Name="AudienceCardsLayout"
+              Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <controls:ChamferBorder x:Name="FleetAudienceCard"
+                                    Margin="0,0,5,0"
+                                    Padding="12"
+                                    Style="{StaticResource BridgeDirectorySurfaceStyle}">
+                <StackPanel>
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="舰队成员"
+                                       Foreground="{DynamicResource BridgeStatusInfo}"
+                                       FontSize="13"
+                                       FontWeight="SemiBold" />
+                            <TextBlock x:Name="FleetAudienceSummaryText"
+                                       Margin="0,3,12,0"
+                                       Text="不向舰队成员共享状态"
+                                       Foreground="{DynamicResource BridgeInk2}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel x:Name="FleetDetailsPanel"
+                                Margin="0,10,0,0"
+                                Visibility="Collapsed">
+                        <Border BorderBrush="{DynamicResource BridgeRowHairline}"
+                                BorderThickness="0,1,0,0"
+                                Padding="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="给谁看"
+                                           Foreground="{DynamicResource BridgeInk}"
+                                           FontWeight="SemiBold" />
+                                <WrapPanel>
+                                    <CheckBox x:Name="FleetAdministratorsCheck"
+                                              Content="舰队管理员"
+                                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                                              Checked="FleetAudienceChoice_Changed"
+                                              Unchecked="FleetAudienceChoice_Changed" />
+                                    <CheckBox x:Name="FleetAllMembersCheck"
+                                              Content="所有舰队成员"
+                                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                                              Checked="FleetAudienceChoice_Changed"
+                                              Unchecked="FleetAudienceChoice_Changed" />
+                                    <CheckBox x:Name="FleetSpecifiedPeopleCheck"
+                                              Content="指定人员"
+                                              Visibility="Collapsed"
+                                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                                              Checked="FleetAudienceChoice_Changed"
+                                              Unchecked="FleetAudienceChoice_Changed" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel x:Name="FleetSpecifiedPeopleSection"
+                                    Margin="0,8,0,0"
+                                    Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="选择一个或多个私有分组"
+                                           Foreground="{DynamicResource BridgeInk2}"
+                                           VerticalAlignment="Center" />
+                                <Button Grid.Column="1"
+                                        Content="新建分组"
+                                        MinWidth="86"
+                                        Height="28"
+                                        Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                                        Click="CreateGroupButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="FleetGroupsEmptyText"
+                                       Margin="0,7,0,0"
+                                       Text="还没有分组。新建后可以选择其中的人员。"
+                                       Foreground="{DynamicResource BridgeInk3}" />
+                            <ItemsControl x:Name="FleetVisibilityGroupList" Margin="0,4,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,3,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <CheckBox IsChecked="{Binding FleetSelected, Mode=TwoWay}"
+                                                      VerticalAlignment="Center"
+                                                      Checked="GroupSelection_Changed"
+                                                      Unchecked="GroupSelection_Changed" />
+                                            <StackPanel Grid.Column="1" Margin="7,0">
+                                                <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource BridgeInk}" />
+                                                <TextBlock Text="{Binding MemberCountText}" Foreground="{DynamicResource BridgeInk3}" FontSize="10" />
+                                            </StackPanel>
+                                            <Button Grid.Column="2"
+                                                    Content="管理"
+                                                    Height="26"
+                                                    Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                                                    Click="EditGroupButton_Click" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+
+                        <Border Margin="0,9,0,0"
+                                BorderBrush="{DynamicResource BridgeRowHairline}"
+                                BorderThickness="0,1,0,0"
+                                Padding="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="看什么"
+                                           Foreground="{DynamicResource BridgeInk}"
+                                           FontWeight="SemiBold" />
+                                <ItemsControl x:Name="FleetStatusFieldList"
+                                              ItemsSource="{Binding StatusFields, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,5,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="48" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Label}" Foreground="{DynamicResource BridgeInk}" />
+                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource BridgeInk3}" FontSize="10" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="1"
+                                                          Style="{StaticResource PrivacySwitchStyle}"
+                                                          IsChecked="{Binding FleetEnabled, Mode=TwoWay}"
+                                                          Checked="Control_Changed"
+                                                          Unchecked="Control_Changed" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </controls:ChamferBorder>
+
+            <controls:ChamferBorder x:Name="RoomAudienceCard"
+                                    Grid.Column="1"
+                                    Margin="5,0,0,0"
+                                    Padding="12"
+                                    Style="{StaticResource BridgeDirectorySurfaceStyle}">
+                <StackPanel>
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="同房间的人"
+                                       Foreground="{DynamicResource BridgeStatusInfo}"
+                                       FontSize="13"
+                                       FontWeight="SemiBold" />
+                            <TextBlock x:Name="RoomAudienceSummaryText"
+                                       Margin="0,3,12,0"
+                                       Text="不向同房间的人共享状态"
+                                       Foreground="{DynamicResource BridgeInk2}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel x:Name="RoomDetailsPanel"
+                                Margin="0,10,0,0"
+                                Visibility="Collapsed">
+                        <Border BorderBrush="{DynamicResource BridgeRowHairline}"
+                                BorderThickness="0,1,0,0"
+                                Padding="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="给谁看"
+                                           Foreground="{DynamicResource BridgeInk}"
+                                           FontWeight="SemiBold" />
+                                <WrapPanel>
+                                    <CheckBox x:Name="RoomAllMembersCheck"
+                                              Content="所有同房间的人"
+                                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                                              Checked="Control_Changed"
+                                              Unchecked="Control_Changed" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Margin="0,9,0,0"
+                                BorderBrush="{DynamicResource BridgeRowHairline}"
+                                BorderThickness="0,1,0,0"
+                                Padding="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="看什么"
+                                           Foreground="{DynamicResource BridgeInk}"
+                                           FontWeight="SemiBold" />
+                                <ItemsControl x:Name="RoomStatusFieldList"
+                                              ItemsSource="{Binding StatusFields, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,5,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="48" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Label}" Foreground="{DynamicResource BridgeInk}" />
+                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource BridgeInk3}" FontSize="10" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="1"
+                                                          Style="{StaticResource PrivacySwitchStyle}"
+                                                          IsChecked="{Binding RoomEnabled, Mode=TwoWay}"
+                                                          Checked="Control_Changed"
+                                                          Unchecked="Control_Changed" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </controls:ChamferBorder>
+        </Grid>
+
+        <controls:ChamferBorder x:Name="GameIdVisibilitySection"
+                                Margin="0,10,0,0"
+                                Padding="12"
+                                Style="{StaticResource BridgeDirectorySurfaceStyle}">
+            <Grid x:Name="GameIdVisibilityLayout">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel x:Name="GameIdVisibilityDescription"
+                            Grid.Row="0"
+                            Grid.Column="0"
+                            Margin="0,0,18,0">
+                    <TextBlock Text="游戏 ID 展示"
+                               Foreground="{DynamicResource BridgeStatusInfo}"
+                               FontSize="13"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="GameIdVisibilityHintText"
+                               Margin="0,3,0,0"
+                               Text="选择可以显示游戏 ID 的位置；其他位置会优先显示呼号。"
+                               Foreground="{DynamicResource BridgeInk2}"
+                               FontSize="10"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+                <WrapPanel x:Name="GameIdVisibilityOptions"
+                           Grid.Row="0"
+                           Grid.Column="1"
+                           VerticalAlignment="Center">
+                    <CheckBox x:Name="GameIdFleetCheck"
+                              Content="舰队"
+                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                              Checked="GameIdVisibility_Changed"
+                              Unchecked="GameIdVisibility_Changed" />
+                    <CheckBox x:Name="GameIdRoomCheck"
+                              Content="房间"
+                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                              Checked="GameIdVisibility_Changed"
+                              Unchecked="GameIdVisibility_Changed" />
+                    <CheckBox x:Name="GameIdFriendsCheck"
+                              Content="好友"
+                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                              Checked="GameIdVisibility_Changed"
+                              Unchecked="GameIdVisibility_Changed" />
+                    <CheckBox x:Name="GameIdPersonalProfileCheck"
+                              Content="个人主页"
+                              Style="{StaticResource PrivacyAudienceCheckStyle}"
+                              Checked="GameIdVisibility_Changed"
+                              Unchecked="GameIdVisibility_Changed" />
+                </WrapPanel>
+            </Grid>
+        </controls:ChamferBorder>
+
+        <controls:ChamferBorder x:Name="SharedEventSharingSection"
+                                Margin="0,10,0,0"
+                                Padding="12"
+                                Style="{StaticResource BridgeDirectorySurfaceStyle}">
+            <Grid x:Name="SharedEventLayout">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel x:Name="SharedEventDescription"
+                            Margin="0,0,18,0">
+                    <TextBlock Text="浮层事件提醒"
+                               Foreground="{DynamicResource BridgeStatusInfo}"
+                               FontSize="13"
+                               FontWeight="SemiBold" />
+                    <TextBlock Margin="0,3,0,0"
+                               Text="只控制是否在他人的浮层事件栏弹出，不改变你的当前状态是否可见。"
+                               Foreground="{DynamicResource BridgeInk2}"
+                               FontSize="10"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel x:Name="FleetEventAudienceOption"
+                            Grid.Column="1"
+                            Margin="0,0,18,0"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <TextBlock Margin="0,0,8,0"
+                               Text="提醒舰队成员"
+                               Foreground="{DynamicResource BridgeInk}" />
+                    <CheckBox x:Name="FleetEventsCheck"
+                              Style="{StaticResource PrivacySwitchStyle}"
+                              Checked="Control_Changed"
+                              Unchecked="Control_Changed" />
+                </StackPanel>
+                <StackPanel x:Name="RoomEventAudienceOption"
+                            Grid.Column="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <TextBlock Margin="0,0,8,0"
+                               Text="提醒同房间的人"
+                               Foreground="{DynamicResource BridgeInk}" />
+                    <CheckBox x:Name="RoomEventsCheck"
+                              Style="{StaticResource PrivacySwitchStyle}"
+                              Checked="Control_Changed"
+                              Unchecked="Control_Changed" />
+                </StackPanel>
+            </Grid>
+        </controls:ChamferBorder>
+
+        <TextBlock x:Name="GroupStatusText"
+                   Margin="4,7,4,0"
+                   HorizontalAlignment="Right"
+                   Foreground="{DynamicResource BridgeInk3}"
+                   FontSize="10" />
+    </StackPanel>
+</UserControl>

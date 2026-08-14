@@ -152,6 +152,7 @@ public partial class MainWindow
     private void ApplyLanguageToControls()
     {
         var zh = _language == "zh";
+        _inGameMenuCoordinator.SetImageLanguage(_language);
         Title = GetAppDisplayTitle();
         WindowTitleText.Text = Title;
 
@@ -161,6 +162,29 @@ public partial class MainWindow
 
         FindFleetNavText.Text = zh ? "寻找舰队" : "Find Fleet";
         MyFleetNavText.Text = zh ? "我的舰队" : "My Fleet";
+        BridgeFindFleetSectionButton.Content = zh ? "寻找舰队" : "Find Fleet";
+        System.Windows.Automation.AutomationProperties.SetName(
+            BridgeFindFleetSectionButton,
+            zh ? "寻找舰队" : "Find Fleet");
+        BridgeMyFleetSectionButton.Content = zh ? "我的舰队" : "My Fleet";
+        System.Windows.Automation.AutomationProperties.SetName(
+            BridgeMyFleetSectionButton,
+            zh ? "我的舰队" : "My Fleet");
+        BridgePartyNavText.Text = zh ? "房间" : "Rooms";
+        BridgePartyNavButton.ToolTip = zh ? "房间" : "Rooms";
+        System.Windows.Automation.AutomationProperties.SetName(
+            BridgePartyNavButton,
+            zh ? "房间" : "Rooms");
+        BridgeOverlayNavText.Text = zh ? "浮层" : "Overlay";
+        BridgeOverlayNavButton.ToolTip = zh ? "游戏浮层" : "In-game Overlay";
+        System.Windows.Automation.AutomationProperties.SetName(
+            BridgeOverlayNavButton,
+            zh ? "浮层" : "Overlay");
+        BridgeInfoNavText.Text = zh ? "信息" : "Info";
+        BridgeInfoNavButton.ToolTip = zh ? "说明、版本与反馈" : "Guides, versions, and feedback";
+        System.Windows.Automation.AutomationProperties.SetName(
+            BridgeInfoNavButton,
+            zh ? "信息" : "Info");
         MySquadNavText.Text = zh ? "组队大厅" : "Party Lobby";
         OverlayNavText.Text = zh ? "游戏浮层" : "Overlay";
         FindFleetTab.Header = zh ? "寻找舰队" : "Find Fleet";
@@ -184,11 +208,11 @@ public partial class MainWindow
         SettingsTab.Header = zh ? "设置" : "Settings";
         MonitorTab.Header = zh ? "监控" : "Monitor";
         FleetCommanderLabel.Text = zh ? "指挥官" : "COMMANDER";
-        FleetActivityLabel.Text = zh ? "活动时间" : "ACTIVE TIME";
+        FleetActivityLabel.Text = zh ? "活动时间" : "ACTIVITY";
         TotalMembersLabel.Text = zh ? "总人数" : "TOTAL MEMBERS";
-        OnlineLabel.Text = zh ? "在线人数" : "ONLINE";
+        OnlineLabel.Text = zh ? "在线" : "ONLINE";
         FleetShipsLabel.Text = zh ? "舰船统计" : "SHIPS";
-        FleetHeaderAnnouncementLabelText.Text = zh ? "舰队公告" : "FLEET BULLETIN";
+        FleetHeaderAnnouncementLabelText.Text = zh ? "公告" : "BULLETIN";
         FleetNoticeInfoTabButton.Content = zh ? "公告" : "Notice";
         FleetCurrentTaskInfoTabButton.Content = zh ? "任务" : "Task";
         FleetActionPlanInfoTabButton.Content = zh ? "计划" : "Plan";
@@ -196,14 +220,6 @@ public partial class MainWindow
         PlayerStatusColumn.Header = zh ? "状态" : "Status";
         PlayerShipColumn.Header = zh ? "飞船" : "Ship";
         PlayerLocationColumn.Header = zh ? "位置" : "Location";
-        MySquadEmblemHintText.Text = zh ? "点击更换" : "Click to change";
-        MySquadAvatarColumn.Header = zh ? "头像" : "Avatar";
-        MySquadRoleColumn.Header = zh ? "职位" : "Role";
-        MySquadCallsignColumn.Header = zh ? "呼号" : "Callsign";
-        MySquadGameIdColumn.Header = zh ? "游戏 ID" : "Game ID";
-        MySquadOnlineColumn.Header = zh ? "在线状态" : "Online";
-        MySquadShipColumn.Header = zh ? "飞船状态" : "Ship Status";
-        MySquadLocationColumn.Header = zh ? "地点信息" : "Location";
         OverlayPresetLabel.Text = zh ? "预设与恢复" : "PRESETS AND RECOVERY";
         OverlayHotkeyLabel.Text = zh ? "打开方式" : "OPENING";
         OverlayHotkeyGroupLabel.Text = zh ? "信息浮层热键" : "INFORMATION OVERLAY HOTKEY";
@@ -260,7 +276,7 @@ public partial class MainWindow
             : "Select a module on the canvas for a quick edit, or use the workbench above to browse every module.";
         OverlayEventRailGroupLabel.Text = zh ? "显示规则" : "DISPLAY RULES";
         ShowNoticePanelCheck.Content = zh ? "显示通讯提醒" : "Show communication alerts";
-        ShowSquadsPanelCheck.Content = zh ? "显示队伍概况" : "Show team overview";
+        ShowSquadsPanelCheck.Content = zh ? "显示舰队总览" : "Show fleet overview";
         ShowMembersPanelCheck.Content = zh ? "显示成员信息" : "Show member information";
         ShowChatPanelCheck.Content = zh ? "显示场景通讯" : "Show scene communication";
         ShowEventNotificationsCheck.Content = zh ? "显示事件通知" : "Show event notifications";
@@ -277,8 +293,6 @@ public partial class MainWindow
         EventNotifySameServerCheck.Content = zh ? "同服提醒与概况" : "Same-server alerts";
         EventNotifyShipChangeCheck.Content = zh ? "飞船变化" : "Ship changes";
         EventNotifyLocationChangeCheck.Content = zh ? "地点变化" : "Location changes";
-        EventNotifySquadChangeCheck.Content = zh ? "小队变动" : "Squad changes";
-        EventNotifyCommanderCheck.Content = zh ? "指挥官变化" : "Commander changes";
         EventNotifyOnlineSummaryCheck.Content = zh ? "在线人数变化" : "Online count changes";
         EventNotifyPrimaryServerCheck.Content = zh ? "主服务器变化" : "Primary server changes";
         EventNotifyDeathAndRespawnCheck.Content = zh ? "倒地 / 死亡 / 获救 / 重生" : "Downed / death / revived / respawn";
@@ -689,6 +703,29 @@ public partial class MainWindow
         FleetHeaderLogoText.Visibility = Visibility.Collapsed;
     }
 
+    private void RefreshBridgeFleetIdentityMark()
+    {
+        if (BridgeFleetIdentityMark is null || BridgeFleetIdentityLogoImage is null)
+        {
+            return;
+        }
+
+        BridgeFleetIdentityLogoImage.Source = null;
+        BridgeFleetIdentityMark.ToolTip = null;
+        BridgeFleetIdentityMark.Visibility = Visibility.Collapsed;
+
+        if (!_hasFleet || !TryLoadBitmapImage(_fleetLogoPath, out var image))
+        {
+            return;
+        }
+
+        BridgeFleetIdentityLogoImage.Source = image;
+        BridgeFleetIdentityMark.ToolTip = string.IsNullOrWhiteSpace(_fleetName)
+            ? "当前舰队"
+            : _fleetName;
+        BridgeFleetIdentityMark.Visibility = Visibility.Visible;
+    }
+
     private void LoadFleetHeaderBannerPreview()
     {
         if (!TryLoadBitmapImage(_fleetBannerPath, out var image))
@@ -779,17 +816,19 @@ public partial class MainWindow
 
     private void RefreshFleetHeader()
     {
-        if (FleetHeaderNameText is null)
+        RefreshBridgeFleetIdentityMark();
+
+        if (FleetHeaderCodeText is null)
         {
             return;
         }
 
-        FleetHeaderNameText.Text = _hasFleet ? _fleetName : "暂无舰队";
         FleetHeaderCodeText.Text = _hasFleet ? _fleetCode : "暂无";
         FleetCommanderText.Text = FormatCommanderName(_callsign, _localPlayer, _fleetChiefCommander);
         FleetDeputyCommanderText.Text = $"副指挥官 / {_fleetDeputyCommander}";
         RefreshFleetActivityHeaderPresentation();
         RefreshFleetHeaderAnnouncement();
+        RefreshFleetHeaderExternalContacts();
 
         RefreshFleetClockDisplays();
 
@@ -800,6 +839,40 @@ public partial class MainWindow
         LoadFleetHeaderBannerPreview();
         RefreshPersonalHeaderFleetCard();
         RefreshFleetManagementPermissions();
+    }
+
+    private void RefreshFleetHeaderExternalContacts()
+    {
+        if (FleetHeaderExternalContactsHost is null ||
+            FleetHeaderExternalContactsLabelText is null ||
+            FleetHeaderExternalContactsText is null)
+        {
+            return;
+        }
+
+        var useChinese = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        var presentation = FleetHeaderExternalContactProjection.Project(
+            _hasFleet,
+            _fleetExternalContacts,
+            useChinese);
+
+        FleetHeaderExternalContactsHost.Visibility = presentation.IsVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        FleetHeaderExternalContactsLabelText.Text = useChinese ? "联系方式" : "Contacts";
+        FleetHeaderExternalContactsText.Text = presentation.InlineText;
+        FleetHeaderExternalContactsHost.IsEnabled = presentation.Entries.Count > 0;
+        FleetHeaderExternalContactsHost.ToolTip = presentation.Entries.Count > 0
+            ? useChinese
+                ? $"{presentation.AccessibleText}{Environment.NewLine}点击查看并复制"
+                : $"{presentation.AccessibleText}{Environment.NewLine}Open and copy"
+            : presentation.AccessibleText;
+        _fleetHeaderExternalContactsAccessibleText = presentation.AccessibleText;
+        System.Windows.Automation.AutomationProperties.SetName(
+            FleetHeaderExternalContactsHost,
+            useChinese
+                ? $"外部联系方式：{presentation.AccessibleText}"
+                : $"External contacts: {presentation.AccessibleText}");
     }
 
     private void RefreshFleetClockDisplays()

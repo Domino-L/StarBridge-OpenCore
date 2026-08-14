@@ -41,7 +41,7 @@ public partial class MainWindow
             return;
         }
 
-        FleetAnnouncementCenterPanel.Visibility = Visibility.Collapsed;
+        FleetAnnouncementCenterPanel.Hide();
         FleetActivityScheduleList.ItemsSource = BuildFleetActivityHeaderWindows()
             .Select((window, index) => new FleetActivityScheduleRow(
                 $"时段 {index + 1}",
@@ -56,17 +56,17 @@ public partial class MainWindow
         EditFleetActivityScheduleButton.Visibility = CanCurrentUserManageFleetInfo()
             ? Visibility.Visible
             : Visibility.Collapsed;
-        FleetActivitySchedulePanel.Visibility = Visibility.Visible;
+        FleetActivitySchedulePanel.Show();
     }
 
     private void CloseFleetActivityScheduleButton_Click(object sender, RoutedEventArgs e)
     {
-        FleetActivitySchedulePanel.Visibility = Visibility.Collapsed;
+        FleetActivitySchedulePanel.Hide();
     }
 
     private void EditFleetActivityScheduleButton_Click(object sender, RoutedEventArgs e)
     {
-        FleetActivitySchedulePanel.Visibility = Visibility.Collapsed;
+        FleetActivitySchedulePanel.Hide();
         OpenManageFleetSection(ManageFleetProfileTab);
     }
 }

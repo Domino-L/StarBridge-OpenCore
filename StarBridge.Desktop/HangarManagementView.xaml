@@ -1,0 +1,463 @@
+<UserControl x:Class="StarBridge.Desktop.HangarManagementView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:StarBridge.Desktop"
+             xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+             xmlns:theming="clr-namespace:StarBridge.Desktop.Theming"
+             Background="{DynamicResource BridgeGround}">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Bridge/Shell.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/Directory.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <local:ImagePathConverter x:Key="ImagePathConverter" />
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid Background="{DynamicResource BridgeGround}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <controls:ChamferBorder Style="{StaticResource BridgeDirectoryHeaderStyle}"
+                                Padding="16,13">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="我的机库"
+                           Style="{StaticResource BridgePageTitleTextStyle}" />
+                <TextBlock Text="查看舰船资产、定位构成与同步状态，并管理每艘舰船的专属图片。"
+                           Margin="0,6,0,0"
+                           Style="{StaticResource BridgeBodyTextStyle}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Bottom">
+                <Button x:Name="ScanButton"
+                        Content="扫描官网机库"
+                        MinWidth="112"
+                        Margin="0,0,8,0"
+                        Style="{StaticResource BridgeDirectoryPrimaryButtonStyle}"
+                        Click="ScanButton_Click" />
+                <Button x:Name="RefreshButton"
+                        Content="刷新"
+                        MinWidth="76"
+                        Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                        Click="RefreshButton_Click" />
+            </StackPanel>
+        </Grid>
+        </controls:ChamferBorder>
+
+        <UniformGrid x:Name="SummaryPanel"
+                     Grid.Row="1"
+                     Columns="5"
+                     Margin="0,16,0,12"
+                     Visibility="Collapsed">
+            <Border Style="{StaticResource BridgeDirectoryCardStyle}" Padding="12" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="舰船资产" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                    <TextBlock x:Name="TotalCountText" Text="" Margin="0,4,0,0" Style="{StaticResource BridgeDataTextStyle}" FontSize="20" />
+                    <TextBlock x:Name="ManageableCountText" Text="" Margin="0,3,0,0" Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource BridgeDirectoryCardStyle}" Padding="12" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="机库估值" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                    <TextBlock x:Name="TotalValueText" Text="" Margin="0,4,0,0" Style="{StaticResource BridgeDataTextStyle}" FontSize="20" Foreground="{DynamicResource BridgeMetricValue}" />
+                    <TextBlock Text="按当前公开舰船价格估算" Margin="0,3,0,0" Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource BridgeDirectoryCardStyle}" Padding="12" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="交付状态" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                    <TextBlock x:Name="DeliverySummaryText" Text="" Margin="0,4,0,0" Style="{StaticResource BridgeDataTextStyle}" FontSize="18" />
+                    <TextBlock Text="帮助快速区分当前可用舰船" Margin="0,3,0,0" Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource BridgeDirectoryCardStyle}" Padding="12" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="专属图片" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                    <TextBlock x:Name="CustomCountText" Text="" Margin="0,4,0,0" Style="{StaticResource BridgeDataTextStyle}" FontSize="20" />
+                    <TextBlock x:Name="MissingCountText" Text="" Margin="0,3,0,0" Style="{StaticResource BridgeDirectoryAuxTextStyle}" Foreground="{DynamicResource BridgeInk2}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource BridgeDirectoryCardStyle}" Padding="12">
+                <StackPanel>
+                    <TextBlock Text="同步覆盖" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                    <TextBlock x:Name="SyncCoverageText" Text="" Margin="0,4,0,0" Style="{StaticResource BridgeDataTextStyle}" FontSize="20" Foreground="{DynamicResource BridgeMetricInfo}" />
+                    <TextBlock x:Name="SyncCoverageStatusText" Text="" Margin="0,3,0,0" Style="{StaticResource BridgeDirectoryAuxTextStyle}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <controls:ChamferBorder x:Name="FilterPanel"
+                                Grid.Row="2"
+                                Style="{StaticResource BridgeDirectorySurfaceStyle}"
+                                Margin="0,0,0,10"
+                                Padding="10,8"
+                                Visibility="Collapsed">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="158" />
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="174" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="SearchBox"
+                     Style="{StaticResource BridgeDirectoryTextBoxStyle}"
+                     ToolTip="按舰船名称、型号或定位搜索"
+                     TextChanged="Filter_Changed" />
+            <ComboBox x:Name="FilterComboBox"
+                      Grid.Column="1"
+                      Style="{StaticResource BridgeDirectoryComboBoxStyle}"
+                      Margin="8,0,0,0"
+                      SelectedIndex="0"
+                      SelectionChanged="Filter_Changed">
+                <ComboBoxItem Content="全部状态" Tag="all" />
+                <ComboBoxItem Content="当前可飞" Tag="flyable" />
+                <ComboBoxItem Content="概念舰船" Tag="concept" />
+                <ComboBoxItem Content="已有专属图片" Tag="custom" />
+                <ComboBoxItem Content="待设置图片" Tag="missing" />
+                <ComboBoxItem Content="需要重新扫描" Tag="unbound" />
+            </ComboBox>
+            <ComboBox x:Name="RoleFilterComboBox"
+                      Grid.Column="2"
+                      Style="{StaticResource BridgeDirectoryComboBoxStyle}"
+                      Margin="8,0,0,0"
+                      SelectedIndex="0"
+                      SelectionChanged="Filter_Changed">
+                <ComboBoxItem Content="全部定位" Tag="all" />
+                <ComboBoxItem Content="战斗" Tag="Combat" />
+                <ComboBoxItem Content="运输" Tag="Transport" />
+                <ComboBoxItem Content="工业" Tag="Industrial" />
+                <ComboBoxItem Content="探索" Tag="Exploration" />
+                <ComboBoxItem Content="支援" Tag="Support" />
+                <ComboBoxItem Content="其他" Tag="Utility" />
+            </ComboBox>
+            <ComboBox x:Name="SortComboBox"
+                      Grid.Column="3"
+                      Style="{StaticResource BridgeDirectoryComboBoxStyle}"
+                      Margin="8,0,0,0"
+                      SelectedIndex="0"
+                      SelectionChanged="Filter_Changed">
+                <ComboBoxItem Content="按名称排序" Tag="name" />
+                <ComboBoxItem Content="最近入库优先" Tag="recent" />
+                <ComboBoxItem Content="价值从高到低" Tag="value" />
+                <ComboBoxItem Content="按定位归类" Tag="role" />
+            </ComboBox>
+            <TextBlock x:Name="VisibleCountText"
+                       Grid.Column="4"
+                       MinWidth="74"
+                       Margin="12,0,0,0"
+                       VerticalAlignment="Center"
+                       Style="{StaticResource BridgeDirectoryAuxTextStyle}"
+                       TextAlignment="Right"
+                       Text="0 艘" />
+        </Grid>
+        </controls:ChamferBorder>
+
+        <Grid x:Name="ContentPanel"
+              Grid.Row="3"
+              Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="314" />
+            </Grid.ColumnDefinitions>
+
+            <controls:ChamferBorder Style="{StaticResource BridgeDirectorySurfaceStyle}"
+                                    Padding="10"
+                                    Margin="0,0,10,0">
+                <Grid>
+                    <ListBox x:Name="ShipsListBox"
+                             BorderThickness="0"
+                             Background="{DynamicResource BridgeGround}"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.CanContentScroll="True"
+                             ScrollViewer.IsDeferredScrollingEnabled="False"
+                             ScrollViewer.PanningMode="VerticalOnly"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,0,0,8" />
+                                <Setter Property="Focusable" Value="False" />
+                                <Setter Property="IsTabStop" Value="False" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                                  SnapsToDevicePixels="True" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border MinHeight="112"
+                                        Padding="10"
+                                        Background="{DynamicResource BridgePanel}"
+                                        BorderBrush="{Binding CategoryBrush}"
+                                        BorderThickness="3,1,1,1"
+                                        CornerRadius="0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="154" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="230" />
+                                            <ColumnDefinition Width="104" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="144"
+                                                Height="81"
+                                                Background="{DynamicResource BridgeGround}"
+                                                BorderBrush="{DynamicResource BridgeHairline}"
+                                                BorderThickness="1"
+                                                ClipToBounds="True"
+                                                Cursor="Hand"
+                                                Tag="{Binding}"
+                                                ToolTip="查看完整图片"
+                                                MouseLeftButtonUp="ShipImage_MouseLeftButtonUp">
+                                            <Grid>
+                                                <TextBlock Text="暂无图片" Style="{StaticResource BridgeDirectoryAuxTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <Image Source="{Binding ImagePath, Converter={StaticResource ImagePathConverter}, ConverterParameter=320}"
+                                                       Stretch="Uniform"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                                <Border HorizontalAlignment="Left"
+                                                        VerticalAlignment="Bottom"
+                                                        Padding="5,2"
+                                                        Background="{DynamicResource BridgeSignalSurface}"
+                                                        Visibility="{Binding CustomBadgeVisibility}">
+                                                    <TextBlock Text="专属图片" Foreground="{DynamicResource BridgeStatusOk}" FontSize="9" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                           Style="{StaticResource BridgeDirectorySectionTitleStyle}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <Border Margin="8,0,0,0"
+                                                        Padding="6,2"
+                                                        Background="{DynamicResource BridgeSignalSurface}"
+                                                        BorderBrush="{DynamicResource BridgeChipHairline}"
+                                                        BorderThickness="1"
+                                                        Visibility="{Binding FavoriteBadgeVisibility}">
+                                                    <TextBlock Text="主页展示" Foreground="{DynamicResource BridgeStatusInfo}" FontSize="9" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding EnglishName}"
+                                                       Margin="0,3,0,0"
+                                                       Style="{StaticResource BridgeDirectoryAuxTextStyle}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                                                <Border Padding="6,2" Background="{DynamicResource BridgePanelRaised}" BorderBrush="{DynamicResource BridgeChipHairline}" BorderThickness="1">
+                                                    <TextBlock Text="{Binding Spec}" Foreground="{DynamicResource BridgeInk2}" FontSize="9.5" />
+                                                </Border>
+                                                <Border Margin="5,0,0,0" Padding="6,2" Background="{DynamicResource BridgePanelRaised}" BorderBrush="{Binding CategoryBrush}" BorderThickness="1">
+                                                    <TextBlock Text="{Binding Role}" Foreground="{Binding CategoryBrush}" FontSize="9.5" />
+                                                </Border>
+                                                <Border Margin="5,0,0,0" Padding="6,2" Background="{DynamicResource BridgePanelRaised}" BorderThickness="1">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource BridgeStatusOff}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsConcept}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="{DynamicResource BridgeStatusWarn}" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsFlyable}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="{DynamicResource BridgeStatusOk}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding Status}" FontSize="9.5">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{DynamicResource BridgeStatusOff}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsConcept}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusWarn}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding IsFlyable}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusOk}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <Grid Grid.Column="2" Margin="8,2,14,2" VerticalAlignment="Center">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="86" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="估算价值" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding PriceDisplay}" Style="{StaticResource BridgeDataTextStyle}" Foreground="{DynamicResource BridgeMetricValue}" />
+                                            <TextBlock Grid.Row="1" Margin="0,5,0,0" Text="入库时间" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,5,0,0" Text="{Binding ImportedAtText}" Style="{StaticResource BridgeDirectoryAuxTextStyle}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Row="2" Margin="0,5,0,0" Text="同步状态" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,5,0,0" Text="{Binding SyncStateText}" FontSize="10" TextTrimming="CharacterEllipsis">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource BridgeDirectoryAuxTextStyle}">
+                                                        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusWarn}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSynced}" Value="True">
+                                                                <Setter Property="Foreground" Value="{DynamicResource BridgeStatusOk}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+
+                                        <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                                            <Button Content="{Binding UploadActionText}"
+                                                    MinWidth="94"
+                                                    Style="{StaticResource BridgeDirectoryPrimaryButtonStyle}"
+                                                    IsEnabled="{Binding CanUpload}"
+                                                    Tag="{Binding}"
+                                                    Click="UploadButton_Click" />
+                                            <Button Content="移除图片"
+                                                    MinWidth="94"
+                                                    Margin="0,7,0,0"
+                                                    Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                                                    Visibility="{Binding RemoveVisibility}"
+                                                    Tag="{Binding}"
+                                                    Click="RemoveButton_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <controls:BridgeStatePresenter x:Name="EmptyPanel"
+                                                   State="Empty"
+                                                   TitleOverride="没有符合当前条件的舰船"
+                                                   DescriptionOverride="清除筛选条件，或重新扫描官网机库获取最新舰船。"
+                                                   ActionTextOverride=""
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   Visibility="Collapsed" />
+                </Grid>
+            </controls:ChamferBorder>
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <controls:ChamferBorder Style="{StaticResource BridgeDirectorySurfaceStyle}" Padding="13">
+                    <StackPanel>
+                        <TextBlock Text="机库状态" Style="{StaticResource BridgeDirectorySectionTitleStyle}" />
+                        <Grid Margin="0,11,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="82" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="最近入库" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                            <TextBlock x:Name="LastReadText" Grid.Column="1" Text="" Style="{StaticResource BridgeDirectoryFieldValueTextStyle}" />
+                            <TextBlock Grid.Row="1" Margin="0,7,0,0" Text="最近同步" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                            <TextBlock x:Name="LastSyncText" Grid.Row="1" Grid.Column="1" Margin="0,7,0,0" Text="" Style="{StaticResource BridgeDirectoryFieldValueTextStyle}" />
+                            <TextBlock Grid.Row="2" Margin="0,7,0,0" Text="舰队可见性" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                            <TextBlock x:Name="ShareStatusText" Grid.Row="2" Grid.Column="1" Margin="0,7,0,0" Text="" Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
+                        </Grid>
+                        <Button Content="管理共享设置"
+                                Margin="0,12,0,0"
+                                Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                                Click="PrivacyButton_Click" />
+                    </StackPanel>
+                </controls:ChamferBorder>
+
+                <controls:ChamferBorder Grid.Row="1" Style="{StaticResource BridgeDirectorySurfaceStyle}" Padding="13" Margin="0,10,0,0">
+                    <StackPanel>
+                        <TextBlock Text="机库构成" Style="{StaticResource BridgeDirectorySectionTitleStyle}" />
+                        <TextBlock Text="按舰船主要定位汇总。"
+                                   Margin="0,4,0,0"
+                                   Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
+                        <Grid x:Name="DistributionBar" Height="7" Margin="0,12,0,0" Background="{DynamicResource BridgeHairline}" />
+                        <ItemsControl x:Name="DistributionLegend" Margin="0,10,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,7">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Width="7" Height="7" Fill="{Binding Brush}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Name}" Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
+                                        <TextBlock Grid.Column="2" Text="{Binding CountText}" Style="{StaticResource BridgeDirectoryValueTextStyle}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </controls:ChamferBorder>
+
+            </Grid>
+        </Grid>
+
+        <Border x:Name="OperationalStateHost"
+                Grid.Row="1"
+                Grid.RowSpan="3"
+                Panel.ZIndex="2"
+                Background="{DynamicResource BridgeGround}">
+            <controls:BridgeStatePresenter x:Name="OperationalStatePanel"
+                                           State="Loading"
+                                           TitleOverride="正在读取机库"
+                                           DescriptionOverride="正在同步舰船资料与机库状态。"
+                                           ActionTextOverride=""
+                                           ActionInvoked="OperationalStatePanel_ActionInvoked" />
+        </Border>
+
+        <StackPanel Grid.Row="4"
+                    Margin="0,9,0,0"
+                    Orientation="Horizontal">
+            <controls:BridgeLoadingIndicator x:Name="HangarLoadingIndicator"
+                                             Margin="0,0,7,0"
+                                             Visibility="Collapsed" />
+            <TextBlock x:Name="StatusText"
+                       Style="{StaticResource BridgeDirectoryAuxTextStyle}"
+                       Text="机库数据仅在你主动扫描或同步时更新。专属图片会用于个人主页、舰队舰船和游戏内菜单。" />
+        </StackPanel>
+    </Grid>
+</UserControl>

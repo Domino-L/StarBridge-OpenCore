@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
   </ItemGroup>
@@ -42,6 +43,7 @@
     <Nullable>enable</Nullable>
     <Configurations>Debug;Release;Preview</Configurations>
     <ApplicationIcon>Assets\Brand\StarBridge_AppIcon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -54,6 +56,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\release-notes\catalog.json"
+                      Link="ReleaseNotes\catalog.json"
+                      LogicalName="StarBridge.ReleaseNotes.catalog.json" />
     <Content Include="..\LICENSES\OFFICIAL-BINARY-LICENSE.txt"
              Link="OFFICIAL-BINARY-LICENSE.txt"
              CopyToOutputDirectory="PreserveNewest"

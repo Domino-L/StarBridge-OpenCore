@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using StarBridge.Core.Events;
 using StarBridge.Core.State;
+using StarBridge.Desktop.Theming;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -753,20 +754,18 @@ public partial class MainWindow
         var actionText = zh
             ? informationVisible ? "关闭信息浮层" : "信息浮层"
             : informationVisible ? "Close information" : "Information overlay";
-        var informationStatusBrush = FindBrush(
-            informationVisible ? "StatusSuccessBrush" : "StatusDisabledBrush",
-            informationVisible ? Brushes.SpringGreen : Brushes.LightSlateGray);
+        var informationStatusBrush = BridgeTokenBrushes.GetRequired(
+            this,
+            informationVisible ? BridgeBrushToken.StatusOk : BridgeBrushToken.StatusOff);
         var menuStatusBrush = menuVisible
-            ? FindBrush("StatusSuccessBrush", Brushes.SpringGreen)
+            ? BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.StatusOk)
             : menuHotkeyReady
-                ? new SolidColorBrush(Color.FromRgb(139, 124, 255))
-                : FindBrush(
+                ? BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.MetricDuration)
+                : BridgeTokenBrushes.GetRequired(
+                    this,
                     _inGameMenuSettings.EnableHotkey
-                        ? "StatusWarningBrush"
-                        : "StatusDisabledBrush",
-                    _inGameMenuSettings.EnableHotkey
-                        ? Brushes.Goldenrod
-                        : Brushes.LightSlateGray);
+                        ? BridgeBrushToken.StatusWarn
+                        : BridgeBrushToken.StatusOff);
 
         if (OverlayHeaderStatusText is not null)
         {

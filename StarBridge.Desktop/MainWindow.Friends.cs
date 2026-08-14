@@ -15,6 +15,14 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private enum FriendCenterViewState
+    {
+        Content,
+        Loading,
+        Error,
+        NoPermission
+    }
+
     private readonly record struct FriendChatOperationLane(
         AccountSessionLease Session,
         string TargetAccountId);
@@ -37,6 +45,8 @@ public partial class MainWindow
     private FriendCenterSection _friendCenterSection = FriendCenterSection.Friends;
     private readonly HashSet<AccountSessionLease> _mutatingFriendRelationshipSessions = [];
     private bool _isSelectingFriendChatConversation;
+    private string? _pendingFriendChatConversationAccountId;
+    private System.Windows.Point _friendChatConversationPressPoint;
     private bool _isApplyingDirectMessagePrivacy;
     private bool _isUpdatingDirectMessagePrivacy;
     private bool _friendChatHasOlder;
@@ -81,6 +91,7 @@ public partial class MainWindow
         FriendCenterResultsList.ItemsSource = _friendCenterRows;
         FriendChatConversationList.ItemsSource = _friendChatConversations;
         FriendChatMessageList.ItemsSource = _friendChatMessages;
+        InitializeFriendCenterAcceptanceScenarios();
         ChatHistoryViewport.EnableSmoothScrolling(FriendChatMessageList);
         FriendChatMessageList.AddHandler(
             ScrollViewer.ScrollChangedEvent,
@@ -135,6 +146,9 @@ public partial class MainWindow
         FriendCenterBlockedCountText.Text = "0";
         FriendCenterConversationUnreadText.Text = "0";
         FriendCenterConversationUnreadBadge.Visibility = Visibility.Collapsed;
+        ApplyFriendCenterCountVisuals(0, 0, 0, 0);
+        SetFriendCenterViewState(FriendCenterViewState.NoPermission);
+        SetFriendCenterDegradedState(false);
         RefreshNavigationActivityBadges();
         RenderFriendCenterSection();
         RenderActiveFriendChat();
@@ -273,6 +287,11 @@ public partial class MainWindow
 
     private async Task RefreshDirectMessagePrivacyAsync(bool showErrors)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            return;
+        }
+
         if (!CanConfigureDirectMessagePrivacy)
         {
             ApplyDirectMessagePrivacyToControls();
@@ -335,6 +354,14 @@ public partial class MainWindow
             return;
         }
 
+        if (IsFriendCenterAcceptanceMode)
+        {
+            ApplyDirectMessagePrivacyToControls();
+            DirectMessagePrivacyStatusText.Text = "模拟场景不会修改私信设置。";
+            DirectMessagePrivacyStatusText.Foreground = StatusPalette.InfoBrush;
+            return;
+        }
+
         if (!CanConfigureDirectMessagePrivacy)
         {
             ApplyDirectMessagePrivacyToControls();
@@ -378,8 +405,16 @@ public partial class MainWindow
 
     private async Task RefreshFriendCenterAsync(bool showErrors)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            SetFriendCenterStatus("模拟场景 · 选择“返回实际数据”后恢复同步", StatusPalette.InfoBrush);
+            return;
+        }
+
         if (!CanSynchronizeUserData)
         {
+            SetFriendCenterViewState(FriendCenterViewState.NoPermission);
+            SetFriendCenterDegradedState(false);
             SetFriendCenterStatus("登录后即可同步好友与申请。", StatusPalette.DisabledBrush);
             _inGameFriendDirectoryState = InGameFriendDirectoryState.Unavailable;
             _inGameFriendCollectionStatus = "登录后即可同步好友与申请。";
@@ -391,6 +426,13 @@ public partial class MainWindow
         if (!_refreshingFriendCenterSessions.Add(session))
         {
             return;
+        }
+
+        var hasCachedSnapshot = _friendCenterSnapshot is not null;
+        SetFriendCenterDegradedState(false);
+        if (!hasCachedSnapshot)
+        {
+            SetFriendCenterViewState(FriendCenterViewState.Loading);
         }
 
         _inGameFriendDirectoryState = InGameFriendDirectoryState.Loading;
@@ -416,6 +458,8 @@ public partial class MainWindow
                 ? "好友列表为空，可以通过上方搜索添加好友。"
                 : $"已加载 {snapshot.Friends.Length} 位好友";
             ApplyFriendCenterSnapshot(snapshot);
+            SetFriendCenterViewState(FriendCenterViewState.Content);
+            SetFriendCenterDegradedState(false);
             SetFriendCenterStatus($"已同步 · {snapshot.RefreshedAt.ToLocalTime():HH:mm:ss}", StatusPalette.SuccessBrush);
         }
         catch (Exception ex)
@@ -427,6 +471,15 @@ public partial class MainWindow
                     "好友数据暂时无法同步，请稍后重试。");
                 _inGameFriendDirectoryState = InGameFriendDirectoryState.Failed;
                 _inGameFriendCollectionStatus = failure;
+                if (hasCachedSnapshot)
+                {
+                    SetFriendCenterViewState(FriendCenterViewState.Content);
+                    SetFriendCenterDegradedState(true, "连接暂时不可用，当前显示上次同步的好友数据。");
+                }
+                else
+                {
+                    SetFriendCenterViewState(FriendCenterViewState.Error, failure);
+                }
                 RefreshInGameSocialSnapshot();
                 if (showErrors)
                 {
@@ -451,6 +504,11 @@ public partial class MainWindow
         FriendCenterIncomingCountText.Text = snapshot.IncomingRequests.Length.ToString();
         FriendCenterOutgoingCountText.Text = snapshot.OutgoingRequests.Length.ToString();
         FriendCenterBlockedCountText.Text = snapshot.BlockedUsers.Length.ToString();
+        ApplyFriendCenterCountVisuals(
+            snapshot.Friends.Length,
+            snapshot.IncomingRequests.Length,
+            snapshot.OutgoingRequests.Length,
+            snapshot.BlockedUsers.Length);
         RefreshNavigationActivityBadges();
         RenderFriendCenterSection();
         RefreshPersonalProfileFriendAction();
@@ -491,27 +549,19 @@ public partial class MainWindow
                 FriendCenterBlockedButton
             ],
             activeButton);
-        FriendCenterRelationshipPanel.Visibility = section == FriendCenterSection.Conversations
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        FriendChatWorkspace.Visibility = section == FriendCenterSection.Conversations
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        ApplyFriendCenterSectionVisibility();
         if (section == FriendCenterSection.Conversations)
         {
-            _ = RefreshFriendChatAsync(showErrors: true);
+            if (!IsFriendCenterAcceptanceMode)
+            {
+                _ = RefreshFriendChatAsync(showErrors: true);
+            }
         }
         else
         {
             RenderFriendCenterSection();
         }
 
-        var activePanel = section == FriendCenterSection.Conversations
-            ? FriendChatWorkspace
-            : FriendCenterRelationshipPanel;
-        activePanel.Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            new Action(() => UiMotion.RevealContent(activePanel, UiMotionRevealDirection.FromRight)));
     }
 
     private void RenderFriendCenterSection()
@@ -572,6 +622,12 @@ public partial class MainWindow
 
     private async Task SearchFriendsAsync()
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            SetFriendCenterStatus("模拟场景不会发起搜索；可在“验收场景”中切换到“搜索结果”。", StatusPalette.InfoBrush);
+            return;
+        }
+
         var query = FriendSearchBox.Text.Trim();
         if (query.Length < 2)
         {
@@ -581,6 +637,7 @@ public partial class MainWindow
 
         if (!CanSynchronizeUserData)
         {
+            SetFriendCenterViewState(FriendCenterViewState.NoPermission);
             SetFriendCenterStatus("请先登录，再查找用户。", StatusPalette.WarningBrush);
             return;
         }
@@ -590,6 +647,8 @@ public partial class MainWindow
             var response = await _relayClient.GetFromJsonAsync<FriendSearchResponseContract>(
                 $"api/friends/search?q={Uri.EscapeDataString(query)}&includePresence={GetPresenceSharingDecision().CanReceiveRealtime.ToString().ToLowerInvariant()}");
             _friendSearchResults = response?.Results ?? [];
+            SetFriendCenterViewState(FriendCenterViewState.Content);
+            SetFriendCenterDegradedState(false);
             SetFriendCenterSection(FriendCenterSection.Search);
             SetFriendCenterStatus(
                 _friendSearchResults.Length == 0 ? "没有找到匹配用户。" : $"找到 {_friendSearchResults.Length} 位用户。",
@@ -597,7 +656,12 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            SetFriendCenterStatus(UserFacingError.Describe(ex, "暂时无法查找用户，请稍后重试。"), StatusPalette.DangerBrush);
+            var failure = UserFacingError.Describe(ex, "暂时无法查找用户，请稍后重试。");
+            if (_friendCenterSnapshot is null)
+            {
+                SetFriendCenterViewState(FriendCenterViewState.Error, failure);
+            }
+            SetFriendCenterStatus(failure, StatusPalette.DangerBrush);
         }
     }
 
@@ -607,6 +671,12 @@ public partial class MainWindow
             button.Tag is not string action ||
             string.IsNullOrWhiteSpace(action))
         {
+            return;
+        }
+
+        if (IsFriendCenterAcceptanceMode)
+        {
+            SetFriendCenterStatus("模拟场景不会修改好友关系，也不会打开真实资料或会话。", StatusPalette.InfoBrush);
             return;
         }
 
@@ -651,6 +721,12 @@ public partial class MainWindow
 
     private async Task<bool> MutateFriendRelationshipAsync(string targetAccountId, string action)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            SetFriendCenterStatus("模拟场景不会修改好友关系。", StatusPalette.InfoBrush);
+            return false;
+        }
+
         var session = _accountSessionCoordinator.Capture();
         if (!_mutatingFriendRelationshipSessions.Add(session))
         {
@@ -802,6 +878,11 @@ public partial class MainWindow
 
     private async Task RefreshFriendChatAsync(bool showErrors)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            return;
+        }
+
         if (!CanSynchronizeUserData)
         {
             return;
@@ -983,6 +1064,101 @@ public partial class MainWindow
         _isSelectingFriendChatConversation = false;
     }
 
+    private void FriendChatConversationList_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _pendingFriendChatConversationAccountId = null;
+        if (e.ChangedButton != MouseButton.Left ||
+            FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject) is not
+            { DataContext: FriendChatConversationRow row })
+        {
+            return;
+        }
+
+        _pendingFriendChatConversationAccountId = row.AccountId;
+        _friendChatConversationPressPoint = e.GetPosition(FriendChatConversationList);
+        e.Handled = true;
+        if (!Mouse.Capture(FriendChatConversationList, CaptureMode.SubTree))
+        {
+            _pendingFriendChatConversationAccountId = null;
+        }
+    }
+
+    private async void FriendChatConversationList_PreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        var pendingAccountId = _pendingFriendChatConversationAccountId;
+        _pendingFriendChatConversationAccountId = null;
+        try
+        {
+            if (e.ChangedButton != MouseButton.Left || string.IsNullOrWhiteSpace(pendingAccountId))
+            {
+                return;
+            }
+
+            e.Handled = true;
+            var releasePoint = e.GetPosition(FriendChatConversationList);
+            if (FindVisualParent<ListBoxItem>(FriendChatConversationList.InputHitTest(releasePoint) as DependencyObject) is not
+                { DataContext: FriendChatConversationRow row } ||
+                !row.AccountId.Equals(pendingAccountId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (Math.Abs(releasePoint.X - _friendChatConversationPressPoint.X) >
+                    SystemParameters.MinimumHorizontalDragDistance ||
+                Math.Abs(releasePoint.Y - _friendChatConversationPressPoint.Y) >
+                    SystemParameters.MinimumVerticalDragDistance)
+            {
+                return;
+            }
+
+            await CommitFriendChatConversationSelectionAsync(row);
+        }
+        finally
+        {
+            if (ReferenceEquals(Mouse.Captured, FriendChatConversationList))
+            {
+                FriendChatConversationList.ReleaseMouseCapture();
+            }
+        }
+    }
+
+    private void FriendChatConversationList_LostMouseCapture(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        _pendingFriendChatConversationAccountId = null;
+    }
+
+    private async Task CommitFriendChatConversationSelectionAsync(FriendChatConversationRow row)
+    {
+        var selectionMatches = FriendChatConversationList.SelectedItem is FriendChatConversationRow selected &&
+                               selected.AccountId.Equals(row.AccountId, StringComparison.OrdinalIgnoreCase);
+        var activeConversationMatches = _activeFriendChatUser?.AccountId.Equals(
+            row.AccountId,
+            StringComparison.OrdinalIgnoreCase) == true;
+        if (selectionMatches && activeConversationMatches)
+        {
+            return;
+        }
+
+        _isSelectingFriendChatConversation = true;
+        try
+        {
+            FriendChatConversationList.SelectedItem = row;
+        }
+        finally
+        {
+            _isSelectingFriendChatConversation = false;
+        }
+
+        FriendChatConversationList.ScrollIntoView(row);
+        await ActivateFriendChatConversationAsync(row);
+    }
+
     private async void FriendChatConversationList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_isSelectingFriendChatConversation || FriendChatConversationList.SelectedItem is not FriendChatConversationRow row)
@@ -990,6 +1166,11 @@ public partial class MainWindow
             return;
         }
 
+        await ActivateFriendChatConversationAsync(row);
+    }
+
+    private async Task ActivateFriendChatConversationAsync(FriendChatConversationRow row)
+    {
         _activeFriendChatUser = row.User;
         _activeFriendChatConversation = row.Conversation;
         _activeFriendChatOrigin = DirectMessageOrigins.Normalize(row.Conversation.Context?.Origin);
@@ -997,11 +1178,22 @@ public partial class MainWindow
         _friendChatMessages.Clear();
         ResetFriendChatPagingState();
         RenderActiveFriendChat();
+        if (IsFriendCenterAcceptanceMode)
+        {
+            SelectFriendAcceptanceConversation(row);
+            return;
+        }
+
         await RefreshFriendChatMessagesAsync(showErrors: true);
     }
 
     private async Task RefreshFriendChatMessagesAsync(bool showErrors)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            return;
+        }
+
         if (_activeFriendChatUser is null || !CanSynchronizeUserData)
         {
             return;
@@ -1136,6 +1328,11 @@ public partial class MainWindow
 
     private async Task LoadOlderFriendChatMessagesAsync()
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            return;
+        }
+
         if (_isLoadingOlderFriendChat || !_friendChatHasOlder || _activeFriendChatUser is null ||
             _friendChatMessages.Count == 0 || !CanSynchronizeUserData)
         {
@@ -1228,6 +1425,13 @@ public partial class MainWindow
 
     private async Task SendFriendChatMessageAsync(string text, ChatAttachmentContract? attachment)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            FriendChatStatusText.Text = "模拟场景不会发送消息。";
+            FriendChatStatusText.Foreground = StatusPalette.InfoBrush;
+            return;
+        }
+
         var activeUser = _activeFriendChatUser;
         if (activeUser is null || !CanSynchronizeUserData)
         {
@@ -1362,11 +1566,20 @@ public partial class MainWindow
             isLocal,
             senderCallsign,
             senderGameId,
-            senderAvatar);
+            senderAvatar,
+            ChatPresentationBrushes.ResolveSenderRole(this, isLocal, publishedColor: null),
+            ChatPresentationBrushes.ResolveAttachmentStatus(this, message.Attachment));
     }
 
     private async void FriendChatSelectedProfileButton_Click(object sender, RoutedEventArgs e)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            FriendChatStatusText.Text = "模拟场景不会打开真实个人资料。";
+            FriendChatStatusText.Foreground = StatusPalette.InfoBrush;
+            return;
+        }
+
         if (_activeFriendChatUser is not null)
         {
             await OpenFriendProfileAsync(new FriendCenterRow(_activeFriendChatUser, default));
@@ -1375,6 +1588,13 @@ public partial class MainWindow
 
     private async void FriendChatRequestActionButton_Click(object sender, RoutedEventArgs e)
     {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            FriendChatStatusText.Text = "模拟场景不会处理真实消息请求。";
+            FriendChatStatusText.Foreground = StatusPalette.InfoBrush;
+            return;
+        }
+
         if (_activeFriendChatUser is null ||
             sender is not System.Windows.Controls.Button { Tag: string action } ||
             action is not (DirectMessageRequestActions.Accept or DirectMessageRequestActions.Reject or DirectMessageRequestActions.Block))
@@ -1628,6 +1848,77 @@ public partial class MainWindow
         FriendActions.Unblock => "已解除屏蔽。",
         _ => "好友关系已更新。"
     };
+
+    private void ApplyFriendCenterSectionVisibility()
+    {
+        var systemStateVisible = FriendCenterSystemStatePanel.Visibility == Visibility.Visible;
+        var showConversations = _friendCenterSection == FriendCenterSection.Conversations && !systemStateVisible;
+        FriendCenterRelationshipPanel.Visibility = showConversations ? Visibility.Collapsed : Visibility.Visible;
+        FriendChatWorkspace.Visibility = showConversations ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SetFriendCenterViewState(FriendCenterViewState state, string? description = null)
+    {
+        if (state == FriendCenterViewState.Content)
+        {
+            FriendCenterSystemStatePanel.Visibility = Visibility.Collapsed;
+            ApplyFriendCenterSectionVisibility();
+            return;
+        }
+
+        var presentation = state switch
+        {
+            FriendCenterViewState.Loading => (
+                Controls.BridgeStateKind.Loading,
+                "正在同步好友",
+                "正在读取好友、申请与在线状态。",
+                string.Empty),
+            FriendCenterViewState.NoPermission => (
+                Controls.BridgeStateKind.AccessDenied,
+                "登录后查看好友",
+                "登录并完成账号识别后，即可同步好友、申请与私信。",
+                string.Empty),
+            _ => (
+                Controls.BridgeStateKind.Error,
+                "暂时无法同步好友",
+                description ?? "请检查网络连接后重试。",
+                "重试")
+        };
+
+        FriendCenterSystemStatePanel.State = presentation.Item1;
+        FriendCenterSystemStatePanel.TitleOverride = presentation.Item2;
+        FriendCenterSystemStatePanel.DescriptionOverride = presentation.Item3;
+        FriendCenterSystemStatePanel.ActionTextOverride = presentation.Item4;
+        FriendCenterSystemStatePanel.Visibility = Visibility.Visible;
+        ApplyFriendCenterSectionVisibility();
+    }
+
+    private void SetFriendCenterDegradedState(bool visible, string? message = null)
+    {
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            FriendCenterDegradedText.Text = message;
+        }
+
+        FriendCenterDegradedBanner.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApplyFriendCenterCountVisuals(int friends, int incoming, int outgoing, int blocked)
+    {
+        ApplyFriendCenterCountVisual(FriendCenterFriendsCountText, friends, "BridgeInk2");
+        ApplyFriendCenterCountVisual(FriendCenterIncomingCountText, incoming, "BridgeStatusWarn");
+        ApplyFriendCenterCountVisual(FriendCenterOutgoingCountText, outgoing, "BridgeInk2");
+        ApplyFriendCenterCountVisual(FriendCenterBlockedCountText, blocked, "BridgeInk2");
+    }
+
+    private void ApplyFriendCenterCountVisual(TextBlock target, int count, string activeBrushKey)
+    {
+        var brushKey = count == 0 ? "BridgeInk3" : activeBrushKey;
+        if (TryFindResource(brushKey) is System.Windows.Media.Brush brush)
+        {
+            target.Foreground = brush;
+        }
+    }
 
     private void SetFriendCenterStatus(string text, System.Windows.Media.Brush brush)
     {

@@ -49,6 +49,7 @@ public partial class InGameProfileWindow : Window
             overlays,
             released);
         ProfileLoadingPanel.Visibility = Visibility.Collapsed;
+        Controls.InGameLoadingPresentation.Apply(ProfileLoadingIndicator, false);
     }
 
     internal void DetachProfileSurface()
@@ -56,6 +57,7 @@ public partial class InGameProfileWindow : Window
         _surfaceLease?.Dispose();
         _surfaceLease = null;
         ProfileLoadingPanel.Visibility = Visibility.Visible;
+        Controls.InGameLoadingPresentation.Apply(ProfileLoadingIndicator, true);
     }
 
     internal void CloseForApplication()

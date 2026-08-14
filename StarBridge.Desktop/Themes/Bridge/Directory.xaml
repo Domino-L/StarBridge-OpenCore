@@ -1,0 +1,334 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+                    xmlns:theming="clr-namespace:StarBridge.Desktop.Theming">
+
+    <!-- Shared list-sidebar skeleton for Find Fleet, Party Lobby and Fleet
+         Members (Phase 4 / D39 + D44 + D46). Sidebar content remains owned by
+         each page; this style owns only the common spatial contract. -->
+    <Style x:Key="BridgeDirectorySplitPanelStyle" TargetType="controls:DirectorySplitPanel">
+        <Setter Property="ListWidth" Value="2.05*" />
+        <Setter Property="SidebarWidth" Value="1*" />
+        <Setter Property="SidebarMinWidth" Value="320" />
+        <Setter Property="Gap" Value="14" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryHeaderStyle" TargetType="controls:ChamferBorder">
+        <Setter Property="Background" Value="{DynamicResource BridgePanel}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Chamfer" Value="16" />
+        <Setter Property="Corners" Value="Signature" />
+        <Setter Property="Padding" Value="20,16" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+    </Style>
+
+    <Style x:Key="BridgeDirectorySurfaceStyle" TargetType="controls:ChamferBorder">
+        <Setter Property="Background" Value="{DynamicResource BridgePanel}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Chamfer" Value="16" />
+        <Setter Property="Corners" Value="Signature" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+    </Style>
+
+    <Style x:Key="BridgeDirectorySeamSurfaceStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource BridgePanel}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryRaisedStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeRowHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryCardStyle" TargetType="Border"
+           BasedOn="{StaticResource BridgeDirectoryRaisedStyle}">
+        <Setter Property="Background" Value="{DynamicResource BridgePanel}" />
+        <Setter Property="Padding" Value="14,12" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource BridgeRowHover}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BridgeChipHairline}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="BridgeDirectorySectionDividerStyle" TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeRowHairline}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryStatusBannerStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="12,9" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryValueTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeDataFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontBody}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryStatusOkTextStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeDirectoryAuxTextStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusOk}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryStatusInfoTextStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeDirectoryAuxTextStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusInfo}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="BridgeDirectorySectionTitleStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontBodyStrong}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryAuxTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryLabelStyle" TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeDirectoryAuxTextStyle}">
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- D43: one compact field grammar shared by directory pages and the
+         fleet command surfaces. A field stays on one line; hierarchy comes
+         from typography and spacing, never from nested cards or separators. -->
+    <Style x:Key="BridgeDirectoryFieldRowStyle" TargetType="StackPanel">
+        <Setter Property="Orientation" Value="Horizontal" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,2,14,2" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryFieldLabelTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontLabel}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk3}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryFieldValueTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontBody}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="Margin" Value="7,0,0,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryFieldPrimaryValueTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeDirectoryFieldValueTextStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontBodyStrong}" />
+    </Style>
+
+    <!-- Resource dictionaries merged beside Shell.xaml cannot resolve its
+         private styles during BAML loading. Keep the directory skeleton
+         independently loadable and bind only to application-level tokens. -->
+    <Style x:Key="BridgeDirectoryKeyboardFocusStyle" TargetType="{x:Type Control}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Control}">
+                    <Grid Margin="1" IsHitTestVisible="False">
+                        <Border Background="Transparent"
+                                BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource TemplatedParent}}"
+                                BorderThickness="1" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeDirectorySecondaryButtonStyle" TargetType="Button">
+        <Setter Property="MinWidth" Value="72" />
+        <Setter Property="Height" Value="36" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeChipHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource BridgeDirectoryKeyboardFocusStyle}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource BridgeRowHover}" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BridgeInk3}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource BridgeRowSelected}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.42" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeDirectoryPrimaryButtonStyle" TargetType="Button"
+           BasedOn="{StaticResource BridgeDirectorySecondaryButtonStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeGround}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="ScopedChrome"
+                                Background="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource TemplatedParent}}"
+                                BorderThickness="1" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True" />
+                        <Border x:Name="HoverLayer"
+                                Background="{DynamicResource BridgeInk}"
+                                Opacity="0" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="0.10" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ScopedChrome" Property="Opacity" Value="0.82" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.42" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeDirectoryComboBoxStyle" TargetType="ComboBox"
+           BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="Height" Value="36" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeChipHairline}" />
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryTextBoxStyle" TargetType="TextBox"
+           BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="Height" Value="36" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeChipHairline}" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryRowStyle" TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeRowHairline}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource BridgeRowHover}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="BridgeDirectoryTagChipStyle" TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeChipHairline}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="7,3" />
+        <Setter Property="Margin" Value="0,0,6,6" />
+    </Style>
+
+    <Style x:Key="BridgeDirectoryCategoryIconStyle" TargetType="Path">
+        <Setter Property="Width" Value="14" />
+        <Setter Property="Height" Value="14" />
+        <Setter Property="Stretch" Value="Uniform" />
+        <Setter Property="Stroke" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="StrokeThickness" Value="1.25" />
+        <Setter Property="StrokeStartLineCap" Value="Square" />
+        <Setter Property="StrokeEndLineCap" Value="Square" />
+        <Setter Property="Data" Value="{DynamicResource BridgeIconCategoryOther}" />
+        <Style.Triggers>
+            <Trigger Property="Tag" Value="combat"><Setter Property="Data" Value="{DynamicResource BridgeIconCategoryCombat}" /></Trigger>
+            <Trigger Property="Tag" Value="industry"><Setter Property="Data" Value="{DynamicResource BridgeIconCategoryIndustry}" /></Trigger>
+            <Trigger Property="Tag" Value="logistics"><Setter Property="Data" Value="{DynamicResource BridgeIconCategoryLogistics}" /></Trigger>
+            <Trigger Property="Tag" Value="support"><Setter Property="Data" Value="{DynamicResource BridgeIconCategorySupport}" /></Trigger>
+            <Trigger Property="Tag" Value="exploration"><Setter Property="Data" Value="{DynamicResource BridgeIconCategoryExploration}" /></Trigger>
+            <Trigger Property="Tag" Value="arena"><Setter Property="Data" Value="{DynamicResource BridgeIconCategoryArena}" /></Trigger>
+            <Trigger Property="Tag" Value="social"><Setter Property="Data" Value="{DynamicResource BridgeIconCategorySocial}" /></Trigger>
+            <Trigger Property="Tag" Value="special"><Setter Property="Data" Value="{DynamicResource BridgeIconCategorySpecial}" /></Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <DataTemplate x:Key="BridgeDirectoryCategoryTagTemplate">
+        <Border Style="{StaticResource BridgeDirectoryTagChipStyle}"
+                Background="{Binding Background}"
+                BorderBrush="{Binding BorderBrush}">
+            <TextBlock Text="{Binding Text}"
+                       Foreground="{Binding Foreground}"
+                       FontFamily="{DynamicResource BridgeFont}"
+                       FontSize="11"
+                       VerticalAlignment="Center" />
+        </Border>
+    </DataTemplate>
+
+    <Style x:Key="BridgeDirectoryEmptyIconStyle" TargetType="Path">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Stretch" Value="Uniform" />
+        <Setter Property="Stroke" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="StrokeThickness" Value="1.1" />
+        <Setter Property="Data" Value="{DynamicResource BridgeIconSearch}" />
+    </Style>
+
+</ResourceDictionary>

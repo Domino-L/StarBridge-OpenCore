@@ -9,7 +9,7 @@ using System.Windows.Threading;
 
 namespace StarBridge.Desktop;
 
-public partial class InGameImageWindow : Window
+public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuard
 {
     private enum ImageRegionAction
     {
@@ -22,12 +22,16 @@ public partial class InGameImageWindow : Window
     private BitmapSource? _originalImage;
     private bool _fitToWindow;
     private bool _updatingZoom;
+    private bool _updatingViewportMode;
+    private bool _compactSettingsExpanded;
+    private string _language = "zh";
     private bool _allowPermanentClose;
     private bool _isPinnedToOverlay;
     private bool _isPureImageMode;
     private bool _isToolbarDockedToBottom;
     private bool _surfaceDragPending;
     private System.Windows.Point _surfaceDragStart;
+    private readonly InGameImageViewportPanSession _viewportPan = new();
     private ImageRegionAction _imageRegionAction;
     private bool _isSelectingImageRegion;
     private System.Windows.Point _imageRegionStart;
@@ -35,6 +39,7 @@ public partial class InGameImageWindow : Window
     private double _editingMinWidth;
     private double _editingMinHeight;
     private bool _menuSessionActive;
+    private bool _screenshotVisibilitySuppressed;
     private InGameMenuSettings _settings = InGameMenuSettings.Default;
     private readonly Dictionary<string, ImageAdjustmentState> _adjustmentsByPath =
         new(StringComparer.OrdinalIgnoreCase);
@@ -51,7 +56,6 @@ public partial class InGameImageWindow : Window
     };
 
     internal event EventHandler? MenuCloseRequested;
-    internal event EventHandler? NewImageRequested;
     internal event EventHandler? ToolDeactivated;
     internal event EventHandler? ToolHidden;
 
@@ -63,6 +67,7 @@ public partial class InGameImageWindow : Window
         InitializeComponent();
         _editingFrameBackground = ImageWindowFrame.Background;
         _editingSurfaceBackground = ImageSurface.Background;
+        ApplyLanguage(_language);
         ApplyImageToolbarDock();
         RefreshPinButtonPresentation();
         InGameToolWindowBehavior.PreventSnapMaximize(this);
@@ -99,10 +104,23 @@ public partial class InGameImageWindow : Window
 
         if (_image is null)
         {
+            SetFitToWindowState(
+                _settings.ImageScaleMode != InGameMenuImageScaleMode.ActualSize);
             ImageOpacitySlider.Value = _settings.ImageDefaultOpacity;
             _isPinnedToOverlay = _settings.ImageDefaultPinned;
             RefreshPinButtonPresentation();
         }
+    }
+
+    internal void ApplyLanguage(string? language)
+    {
+        _language = language?.Trim().StartsWith(
+            "zh",
+            StringComparison.OrdinalIgnoreCase) == true
+            ? "zh"
+            : "en";
+        RefreshViewportModeOptions();
+        RefreshCompactSettingsToggleText();
     }
 
     internal void HideForMenu()
@@ -124,31 +142,14 @@ public partial class InGameImageWindow : Window
 
     internal void CloseForApplication()
     {
-        _foregroundVisibilityTimer.Stop();
-        _modeNotificationTimer.Stop();
-        _allowPermanentClose = true;
-        Close();
+        ClosePermanently();
     }
 
-    internal void UpdateCollectionPosition(int index, int limit)
-    {
-        ImageWindowCountText.Text = $"参考图 {index} / {limit}";
-    }
+    void IInGameScreenshotVisibilityGuard.BeginScreenshotVisibilitySuppression() =>
+        _screenshotVisibilitySuppressed = true;
 
-    internal void ShowCapacityNotice(int limit = 5)
-    {
-        ImageStatusText.Text =
-            $"最多可同时打开 {Math.Max(1, limit)} 个参考图窗口；可在现有窗口中更换图片";
-        if (!IsVisible)
-        {
-            ShowForMenu();
-        }
-
-        Activate();
-    }
-
-    private void NewImageButton_Click(object sender, RoutedEventArgs e) =>
-        NewImageRequested?.Invoke(this, EventArgs.Empty);
+    void IInGameScreenshotVisibilityGuard.EndScreenshotVisibilitySuppression() =>
+        _screenshotVisibilitySuppressed = false;
 
     private void ChooseImageButton_Click(object sender, RoutedEventArgs e)
     {
@@ -177,7 +178,7 @@ public partial class InGameImageWindow : Window
         }
     }
 
-    private void LoadImage(string path)
+    internal void LoadImage(string path)
     {
         if (!InGameImageFilePolicy.IsSupported(path))
         {
@@ -212,7 +213,7 @@ public partial class InGameImageWindow : Window
             ImageOpacitySlider.Value = saved.OpacityPercent;
             _isPinnedToOverlay = saved.IsPinned;
             _isToolbarDockedToBottom = saved.ToolbarDockedToBottom;
-            _fitToWindow = saved.FitToWindow;
+            SetFitToWindowState(saved.FitToWindow);
             ApplyImageToolbarDock();
             RefreshPinButtonPresentation();
             if (saved.FitToWindow)
@@ -249,7 +250,7 @@ public partial class InGameImageWindow : Window
         RefreshPinButtonPresentation();
         if (_settings.ImageScaleMode == InGameMenuImageScaleMode.ActualSize)
         {
-            _fitToWindow = false;
+            SetFitToWindowState(false);
             SetZoom(100);
         }
         else
@@ -293,7 +294,29 @@ public partial class InGameImageWindow : Window
     private void ActualSizeButton_Click(object sender, RoutedEventArgs e)
     {
         CancelImageRegionSelection();
-        _fitToWindow = false;
+        SetFitToWindowState(false);
+        SetZoom(100);
+    }
+
+    private void ImageViewportModeComboBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_updatingViewportMode ||
+            ImageViewportModeComboBox.SelectedItem is not
+                InGameImageViewportModeOption option)
+        {
+            return;
+        }
+
+        CancelImageRegionSelection();
+        if (option.Value == InGameImageViewportMode.FullImage)
+        {
+            FitImageToViewport();
+            return;
+        }
+
+        SetFitToWindowState(false);
         SetZoom(100);
     }
 
@@ -483,7 +506,7 @@ public partial class InGameImageWindow : Window
             availableWidth / Math.Max(1, sourceWidth),
             availableHeight / Math.Max(1, sourceHeight)) * 100;
 
-        _fitToWindow = false;
+        SetFitToWindowState(false);
         SetZoom(Math.Clamp(zoom, ZoomSlider.Minimum, ZoomSlider.Maximum));
         Dispatcher.BeginInvoke(
             () =>
@@ -513,8 +536,53 @@ public partial class InGameImageWindow : Window
         var ratio = Math.Min(
             availableWidth / _image.Width,
             availableHeight / _image.Height);
-        _fitToWindow = true;
+        SetFitToWindowState(true);
         SetZoom(Math.Clamp(ratio * 100, ZoomSlider.Minimum, ZoomSlider.Maximum));
+    }
+
+    private void SetFitToWindowState(bool fitToWindow)
+    {
+        _fitToWindow = fitToWindow;
+        RefreshViewportModeSelection();
+    }
+
+    private void RefreshViewportModeOptions()
+    {
+        if (ImageViewportModeComboBox is null)
+        {
+            return;
+        }
+
+        _updatingViewportMode = true;
+        var options = InGameImageViewportModePresentation.Options(_language);
+        ImageViewportModeComboBox.ItemsSource = options;
+        ImageViewportModeComboBox.ToolTip = _language == "zh"
+            ? "选择只查看窗口框内区域，或自动显示完整图片"
+            : "Choose the framed area or fit the full image";
+        System.Windows.Automation.AutomationProperties.SetName(
+            ImageViewportModeComboBox,
+            _language == "zh" ? "图片显示范围" : "Image display area");
+        ImageViewportModeComboBox.SelectedItem = options.First(option =>
+            option.Value == (_fitToWindow
+                ? InGameImageViewportMode.FullImage
+                : InGameImageViewportMode.FramedArea));
+        _updatingViewportMode = false;
+    }
+
+    private void RefreshViewportModeSelection()
+    {
+        if (ImageViewportModeComboBox?.ItemsSource is not
+            IEnumerable<InGameImageViewportModeOption> options)
+        {
+            return;
+        }
+
+        _updatingViewportMode = true;
+        ImageViewportModeComboBox.SelectedItem = options.First(option =>
+            option.Value == (_fitToWindow
+                ? InGameImageViewportMode.FullImage
+                : InGameImageViewportMode.FramedArea));
+        _updatingViewportMode = false;
     }
 
     private void SetZoom(double value)
@@ -541,7 +609,7 @@ public partial class InGameImageWindow : Window
 
         if (!_updatingZoom)
         {
-            _fitToWindow = false;
+            SetFitToWindowState(false);
         }
 
         ApplyZoom(e.NewValue);
@@ -586,6 +654,28 @@ public partial class InGameImageWindow : Window
         }
     }
 
+    private void ImageToolbar_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (ImageStatusBar is null)
+        {
+            return;
+        }
+
+        ApplyImageToolbarDock();
+    }
+
+    private void CompactSettingsToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        _compactSettingsExpanded = !_compactSettingsExpanded;
+        ApplyImageToolbarDock();
+    }
+
+    private void CompactSettingsPopup_Closed(object? sender, EventArgs e)
+    {
+        _compactSettingsExpanded = false;
+        RefreshCompactSettingsToggleText();
+    }
+
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
@@ -626,6 +716,7 @@ public partial class InGameImageWindow : Window
     {
         SaveCurrentImageAdjustments();
         _foregroundVisibilityTimer.Stop();
+        _modeNotificationTimer.Stop();
         base.OnClosed(e);
     }
 
@@ -664,8 +755,21 @@ public partial class InGameImageWindow : Window
         if (e.ClickCount == 2)
         {
             _surfaceDragPending = false;
+            EndImageViewportPan();
             e.Handled = true;
             TogglePureImageMode();
+            return;
+        }
+
+        if (TryGetImageRegionPoint(e, out _) &&
+            _viewportPan.TryBegin(
+                ImageScrollViewer,
+                e.GetPosition(ImageScrollViewer)))
+        {
+            _surfaceDragPending = false;
+            ImageSurface.CaptureMouse();
+            ImageSurface.Cursor = System.Windows.Input.Cursors.SizeAll;
+            e.Handled = true;
             return;
         }
 
@@ -689,6 +793,13 @@ public partial class InGameImageWindow : Window
             return;
         }
 
+        if (_viewportPan.IsActive)
+        {
+            EndImageViewportPan();
+            e.Handled = true;
+            return;
+        }
+
         _surfaceDragPending = false;
     }
 
@@ -697,6 +808,23 @@ public partial class InGameImageWindow : Window
         if (_isSelectingImageRegion && e.LeftButton == MouseButtonState.Pressed)
         {
             UpdateImageRegionSelection(ClampImageRegionPoint(e));
+            e.Handled = true;
+            return;
+        }
+
+        if (_viewportPan.IsActive)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                _viewportPan.Update(
+                    ImageScrollViewer,
+                    e.GetPosition(ImageScrollViewer));
+            }
+            else
+            {
+                EndImageViewportPan();
+            }
+
             e.Handled = true;
             return;
         }
@@ -727,8 +855,73 @@ public partial class InGameImageWindow : Window
         }
     }
 
-    private void MinimizeButton_Click(object sender, RoutedEventArgs e) =>
-        WindowState = WindowState.Minimized;
+    private void ImageSurface_PreviewMouseWheel(
+        object sender,
+        MouseWheelEventArgs e)
+    {
+        if (_image is null || e.Delta == 0)
+        {
+            return;
+        }
+
+        // The image surface owns the wheel gesture. Never let ScrollViewer turn
+        // it into movement; movement is deliberately reserved for mouse drag.
+        e.Handled = true;
+        if (_isSelectingImageRegion)
+        {
+            return;
+        }
+
+        var pointerInImage = e.GetPosition(DisplayedImageLayer);
+        var pointerInViewport = e.GetPosition(ImageScrollViewer);
+        var plan = InGameImageWheelZoom.Project(
+            ZoomSlider.Value,
+            e.Delta,
+            ZoomSlider.Minimum,
+            ZoomSlider.Maximum,
+            pointerInImage,
+            new System.Windows.Size(
+                DisplayedImageLayer.ActualWidth,
+                DisplayedImageLayer.ActualHeight));
+        SetFitToWindowState(false);
+        SetZoom(plan.TargetZoom);
+        Dispatcher.BeginInvoke(
+            () => InGameImageWheelZoom.RestorePointerAnchor(
+                ImageScrollViewer,
+                ImageScrollContent,
+                DisplayedImage,
+                pointerInViewport,
+                plan),
+            DispatcherPriority.Loaded);
+    }
+
+    private void EndImageViewportPan()
+    {
+        _viewportPan.End();
+        if (Mouse.Captured == ImageSurface)
+        {
+            ImageSurface.ReleaseMouseCapture();
+        }
+
+        ImageSurface.Cursor = _imageRegionAction == ImageRegionAction.None
+            ? System.Windows.Input.Cursors.Arrow
+            : System.Windows.Input.Cursors.Cross;
+    }
+
+    private void ImageSurface_LostMouseCapture(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_viewportPan.IsActive)
+        {
+            return;
+        }
+
+        _viewportPan.End();
+        ImageSurface.Cursor = _imageRegionAction == ImageRegionAction.None
+            ? System.Windows.Input.Cursors.Arrow
+            : System.Windows.Input.Cursors.Cross;
+    }
 
     private void ImageSettingsToggleButton_Click(object sender, RoutedEventArgs e)
     {
@@ -876,6 +1069,16 @@ public partial class InGameImageWindow : Window
 
     private void RefreshPinnedVisibility()
     {
+        if (_screenshotVisibilitySuppressed)
+        {
+            if (IsVisible)
+            {
+                Hide();
+            }
+
+            return;
+        }
+
         if (!_isPinnedToOverlay && !_menuSessionActive)
         {
             if (IsVisible)
@@ -941,10 +1144,27 @@ public partial class InGameImageWindow : Window
 
     private void ApplyImageToolbarDock()
     {
+        var availableToolbarWidth = ImageToolbar.ActualWidth > 0
+            ? ImageToolbar.ActualWidth
+            : Math.Max(0, Width - 2);
+        var layout = InGameImageToolbarLayoutPolicy.Resolve(
+            availableToolbarWidth,
+            _compactSettingsExpanded);
+
         ImageEditorChrome.Visibility = Visibility.Visible;
         ImageWindowChrome.Visibility = Visibility.Visible;
         ImageToolbar.Visibility = Visibility.Visible;
-        ImageStatusBar.Visibility = Visibility.Visible;
+        ImageStatusBar.Visibility = layout.StatusHeight > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ImageSettingsPanel.Visibility = layout.UseCompactSettings
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        CompactImageSettingsPanel.Visibility = layout.UseCompactSettings
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        CompactSettingsPopup.IsOpen = layout.ShowExpandedSettings;
+        RefreshCompactSettingsToggleText();
         Grid.SetRow(ImageEditorChrome, _isToolbarDockedToBottom ? 4 : 0);
         Grid.SetRowSpan(ImageEditorChrome, 3);
         Grid.SetRow(ImageWindowChrome, _isToolbarDockedToBottom ? 6 : 0);
@@ -955,15 +1175,15 @@ public partial class InGameImageWindow : Window
             : new GridLength(52);
         ImageToolbarTopRow.Height = _isToolbarDockedToBottom
             ? new GridLength(0)
-            : new GridLength(88);
+            : new GridLength(layout.ToolbarHeight);
         ImageStatusTopRow.Height = _isToolbarDockedToBottom
             ? new GridLength(0)
-            : new GridLength(56);
+            : new GridLength(layout.StatusHeight);
         ImageStatusBottomRow.Height = _isToolbarDockedToBottom
-            ? new GridLength(56)
+            ? new GridLength(layout.StatusHeight)
             : new GridLength(0);
         ImageToolbarBottomRow.Height = _isToolbarDockedToBottom
-            ? new GridLength(88)
+            ? new GridLength(layout.ToolbarHeight)
             : new GridLength(0);
         ImageBottomDockRow.Height = _isToolbarDockedToBottom
             ? new GridLength(52)
@@ -986,6 +1206,18 @@ public partial class InGameImageWindow : Window
             : "将编辑栏移到底部";
     }
 
+    private void RefreshCompactSettingsToggleText()
+    {
+        if (CompactSettingsToggleButton is null)
+        {
+            return;
+        }
+
+        CompactSettingsToggleButton.Content = _language == "zh"
+            ? (_compactSettingsExpanded ? "收起设置" : "展开设置")
+            : (_compactSettingsExpanded ? "Hide settings" : "Show settings");
+    }
+
     private void RefreshPinButtonPresentation()
     {
         PinToOverlayButton.ToolTip = _isPinnedToOverlay
@@ -1000,6 +1232,12 @@ public partial class InGameImageWindow : Window
     {
         _isPinnedToOverlay = false;
         RefreshPinButtonPresentation();
+        ClosePermanently();
+    }
+
+    private void ClosePermanently()
+    {
+        _allowPermanentClose = true;
         Close();
     }
 

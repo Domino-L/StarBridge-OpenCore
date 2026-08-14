@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using StarBridge.Core.Events;
 using StarBridge.Core.State;
+using StarBridge.Desktop.Theming;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -28,6 +29,218 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private void OverlayEditorWorkspaceGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ApplyOverlayEditorResponsiveState();
+    }
+
+    private void OverlayPreviewToolbar_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ApplyOverlayEditorToolbarOverflowState();
+    }
+
+    private void OverlayEditorCompactNavigationButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetOverlayEditorCompactDrawer(
+            _overlayEditorCompactDrawer == OverlayEditorCompactDrawer.Categories
+                ? OverlayEditorCompactDrawer.None
+                : OverlayEditorCompactDrawer.Categories);
+    }
+
+    private void OverlayEditorCompactSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetOverlayEditorCompactDrawer(
+            _overlayEditorCompactDrawer == OverlayEditorCompactDrawer.Settings
+                ? OverlayEditorCompactDrawer.None
+                : OverlayEditorCompactDrawer.Settings);
+    }
+
+    private void OverlayToolbarOverflowButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { ContextMenu: { } menu } button)
+        {
+            menu.PlacementTarget = button;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.IsOpen = true;
+        }
+    }
+
+    private void OverlayToolbarSceneMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string mode } || OverlaySceneModeBox is null)
+        {
+            return;
+        }
+
+        OverlaySceneModeBox.SelectedIndex = mode switch
+        {
+            "Fleet" => 1,
+            "PartyRoom" => 2,
+            _ => 0
+        };
+    }
+
+    private void OverlayToolbarSnapMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value } ||
+            !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var snapSize))
+        {
+            return;
+        }
+
+        _overlayEditorSnapSize = snapSize;
+        ApplyOverlayEditorChromeState();
+    }
+
+    private void SetOverlayEditorCompactDrawer(OverlayEditorCompactDrawer drawer)
+    {
+        _overlayEditorCompactDrawer = _isOverlayEditorCompact
+            ? drawer
+            : OverlayEditorCompactDrawer.None;
+        ApplyOverlayEditorResponsiveState();
+    }
+
+    private void ApplyOverlayEditorToolbarOverflowState()
+    {
+        if (OverlayPreviewToolbar is null ||
+            OverlayToolbarInlineAdvancedPanel is null ||
+            OverlayToolbarOverflowButton is null ||
+            OverlayEditorFullScreenButton is null ||
+            OverlayToolbarFullScreenMenuItem is null)
+        {
+            return;
+        }
+
+        var layout = OverlayEditorResponsiveLayout.Resolve(
+            OverlayEditorWorkspaceGrid?.ActualWidth ?? double.NaN,
+            OverlayPreviewToolbar.ActualWidth,
+            _isOverlayEditorFullScreen);
+        OverlayToolbarInlineAdvancedPanel.Visibility = layout.UsesToolbarOverflow
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        OverlayToolbarOverflowButton.Visibility = layout.UsesToolbarOverflow
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        OverlayEditorFullScreenButton.Visibility = layout.ShowsFullScreenInline
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        OverlayToolbarFullScreenMenuItem.Visibility = layout.ShowsFullScreenInline
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void ApplyOverlayEditorResponsiveState()
+    {
+        if (OverlayEditorWorkspaceGrid is null ||
+            OverlayEditorCategoryPanel is null ||
+            OverlayEditorSettingsPanel is null ||
+            OverlayInspectorPanel is null ||
+            OverlayPreviewPanel is null ||
+            OverlayEditorCategoryColumn is null ||
+            OverlayEditorSettingsColumn is null ||
+            OverlayEditorInspectorColumn is null ||
+            OverlayEditorPreviewColumn is null)
+        {
+            return;
+        }
+
+        var layout = OverlayEditorResponsiveLayout.Resolve(
+            OverlayEditorWorkspaceGrid.ActualWidth,
+            OverlayPreviewToolbar?.ActualWidth ?? double.NaN,
+            _isOverlayEditorFullScreen);
+        _isOverlayEditorCompact = layout.UsesCompactSidebars && !_isOverlayEditorFullScreen;
+
+        if (_isOverlayEditorFullScreen)
+        {
+            OverlayEditorCategoryPanel.Visibility = Visibility.Collapsed;
+            OverlayEditorSettingsPanel.Visibility = Visibility.Collapsed;
+            OverlayInspectorPanel.Visibility = Visibility.Collapsed;
+            OverlayEditorCategoryColumn.Width = new GridLength(0);
+            OverlayEditorSettingsColumn.Width = new GridLength(0);
+            OverlayEditorInspectorColumn.Width = new GridLength(0);
+            OverlayEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(OverlayPreviewPanel, 0);
+            Grid.SetColumnSpan(OverlayPreviewPanel, 4);
+        }
+        else if (_isOverlayEditorCompact)
+        {
+            OverlayEditorCategoryColumn.Width = new GridLength(0);
+            OverlayEditorSettingsColumn.Width = new GridLength(0);
+            OverlayEditorInspectorColumn.Width = new GridLength(0);
+            OverlayEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(OverlayPreviewPanel, 0);
+            Grid.SetColumnSpan(OverlayPreviewPanel, 4);
+
+            ConfigureOverlayEditorDrawer(OverlayEditorCategoryPanel, 300);
+            ConfigureOverlayEditorDrawer(OverlayEditorSettingsPanel, OverlayEditorResponsiveLayout.SettingsWidth);
+            ConfigureOverlayEditorDrawer(OverlayInspectorPanel, OverlayEditorResponsiveLayout.SettingsWidth);
+            OverlayEditorCategoryPanel.Visibility = _overlayEditorCompactDrawer == OverlayEditorCompactDrawer.Categories
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            OverlayEditorSettingsPanel.Visibility = _overlayEditorCompactDrawer == OverlayEditorCompactDrawer.Settings
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            OverlayInspectorPanel.Visibility = _isOverlayEditorInspectorOpen &&
+                                               _overlayEditorCompactDrawer == OverlayEditorCompactDrawer.Inspector
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        else
+        {
+            _overlayEditorCompactDrawer = OverlayEditorCompactDrawer.None;
+            OverlayEditorCategoryColumn.Width = new GridLength(layout.CategoryColumnWidth);
+            OverlayEditorSettingsColumn.Width = new GridLength(layout.SettingsColumnWidth);
+            OverlayEditorInspectorColumn.Width = new GridLength(0);
+            OverlayEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
+            RestoreOverlayEditorRail(OverlayEditorCategoryPanel, 0);
+            RestoreOverlayEditorRail(OverlayEditorSettingsPanel, 1);
+            RestoreOverlayEditorRail(OverlayInspectorPanel, 1);
+            OverlayEditorCategoryPanel.Visibility = Visibility.Visible;
+            OverlayEditorSettingsPanel.Visibility = Visibility.Visible;
+            OverlayInspectorPanel.Visibility = _isOverlayEditorInspectorOpen
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            Grid.SetColumn(OverlayPreviewPanel, 3);
+            Grid.SetColumnSpan(OverlayPreviewPanel, 1);
+        }
+
+        if (OverlayEditorCompactNavigationButton is not null)
+        {
+            OverlayEditorCompactNavigationButton.Visibility = _isOverlayEditorCompact
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (OverlayEditorCompactSettingsButton is not null)
+        {
+            OverlayEditorCompactSettingsButton.Visibility = _isOverlayEditorCompact
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        ApplyOverlayEditorToolbarOverflowState();
+    }
+
+    private static void ConfigureOverlayEditorDrawer(FrameworkElement panel, double width)
+    {
+        Grid.SetColumn(panel, 0);
+        Grid.SetColumnSpan(panel, 4);
+        panel.Width = width;
+        panel.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Margin = new Thickness(0, 0, 10, 0);
+        System.Windows.Controls.Panel.SetZIndex(panel, 40);
+    }
+
+    private static void RestoreOverlayEditorRail(FrameworkElement panel, int column)
+    {
+        Grid.SetColumn(panel, column);
+        Grid.SetColumnSpan(panel, 1);
+        panel.Width = double.NaN;
+        panel.HorizontalAlignment = HorizontalAlignment.Stretch;
+        panel.Margin = new Thickness(0, 0, 10, 0);
+        System.Windows.Controls.Panel.SetZIndex(panel, panel.Name == "OverlayInspectorPanel" ? 20 : 0);
+    }
+
     private void ToggleOverlayEditorGrid_Click(object sender, RoutedEventArgs e)
     {
         _isOverlayEditorGridVisible = !_isOverlayEditorGridVisible;
@@ -422,8 +635,13 @@ public partial class MainWindow
 
         if (OverlayEditorFullScreenButton is not null)
         {
-            OverlayEditorFullScreenButton.Content = _isOverlayEditorFullScreen ? "退出全屏" : "全屏预览";
+            OverlayEditorFullScreenButton.Content = _isOverlayEditorFullScreen ? "退出全屏" : "全屏编辑";
             OverlayEditorFullScreenButton.Opacity = _isOverlayEditorFullScreen ? 1.0 : 0.86;
+        }
+
+        if (OverlayToolbarFullScreenMenuItem is not null)
+        {
+            OverlayToolbarFullScreenMenuItem.Header = _isOverlayEditorFullScreen ? "退出全屏" : "全屏编辑";
         }
 
         if (OverlayEditorGridSummaryText is not null)
@@ -578,8 +796,8 @@ public partial class MainWindow
                 ? zh ? "未保存" : "Unsaved"
                 : zh ? "无" : "None";
             OverlayOverviewDirtyText.Foreground = _isOverlayEditorLayoutDirty
-                ? FindBrush("StatusWarningBrush", Brushes.Orange)
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+                ? BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.StatusWarn)
+                : BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink3);
         }
 
         if (OverlayHeaderDiscardButton is not null)
@@ -600,18 +818,21 @@ public partial class MainWindow
             if (_isOverlayEditorLayoutDirty)
             {
                 OverlayFullScreenSaveStateText.Text = zh ? "有未保存更改" : "Unsaved changes";
-                OverlayFullScreenSaveStateText.Foreground = FindBrush("StatusWarningBrush", Brushes.Orange);
+                OverlayFullScreenSaveStateText.Foreground =
+                    BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.StatusWarn);
             }
             else if (_overlayEditorLastSavedAt is { } savedAt)
             {
                 var savedTime = savedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.CurrentCulture);
                 OverlayFullScreenSaveStateText.Text = zh ? $"已保存 {savedTime}" : $"Saved {savedTime}";
-                OverlayFullScreenSaveStateText.Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+                OverlayFullScreenSaveStateText.Foreground =
+                    BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink3);
             }
             else
             {
                 OverlayFullScreenSaveStateText.Text = zh ? "布局已保存" : "Layout saved";
-                OverlayFullScreenSaveStateText.Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+                OverlayFullScreenSaveStateText.Foreground =
+                    BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink3);
             }
         }
     }
@@ -637,12 +858,6 @@ public partial class MainWindow
         }
 
         var focus = _isOverlayEditorFullScreen;
-        OverlayEditorCategoryPanel.Visibility = focus ? Visibility.Collapsed : Visibility.Visible;
-        OverlayEditorSettingsPanel.Visibility = focus ? Visibility.Collapsed : Visibility.Visible;
-        if (focus)
-        {
-            OverlayInspectorPanel.Visibility = Visibility.Collapsed;
-        }
         if (OverlayEditRootGrid is not null)
         {
             OverlayEditRootGrid.Margin = focus ? new Thickness(0) : new Thickness(0, 14, 0, 0);
@@ -658,13 +873,7 @@ public partial class MainWindow
             OverlayEditorHeaderRow.Height = focus ? new GridLength(0) : GridLength.Auto;
         }
 
-        OverlayEditorCategoryColumn.Width = focus ? new GridLength(0) : new GridLength(196);
-        OverlayEditorSettingsColumn.Width = focus ? new GridLength(0) : new GridLength(400);
-        OverlayEditorInspectorColumn.Width = new GridLength(0);
-        OverlayEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
-
-        Grid.SetColumn(OverlayPreviewPanel, focus ? 0 : 3);
-        Grid.SetColumnSpan(OverlayPreviewPanel, focus ? 4 : 1);
+        ApplyOverlayEditorResponsiveState();
 
         OverlayPreviewPanel.Padding = focus ? new Thickness(0) : new Thickness(10);
         OverlayPreviewPanel.BorderThickness = focus ? new Thickness(0) : new Thickness(1);
@@ -700,59 +909,7 @@ public partial class MainWindow
 
     private void SetOverlayEditorLivePreviewEnabled(bool enabled)
     {
-        var nextEnabled = _isOverlayEditorFullScreen && enabled;
-        if (nextEnabled)
-        {
-            if (!_isOverlayEditorLivePreviewEnabled || _overlayEditorSimulationSample is null)
-            {
-                RollOverlayEditorSimulationSample();
-            }
-
-            _isOverlayEditorLivePreviewEnabled = true;
-        }
-        else
-        {
-            _isOverlayEditorLivePreviewEnabled = false;
-            _overlayEditorSimulationSample = null;
-        }
-    }
-
-    private OverlayEditorSimulationSample EnsureOverlayEditorSimulationSample()
-    {
-        return _overlayEditorSimulationSample ?? RollOverlayEditorSimulationSample();
-    }
-
-    private OverlayEditorSimulationSample RollOverlayEditorSimulationSample()
-    {
-        var currentSquadName = ResolveOverlayEditorSampleCurrentSquadName();
-        var members = CreateOverlayEditorSampleMembers(currentSquadName);
-        var missingShipCount = members.Count(member => string.IsNullOrWhiteSpace(member.ShipText));
-        var missingLocationCount = members.Count(member => string.IsNullOrWhiteSpace(member.LocationText));
-        var sampleShips = ResolveOverlayEditorSampleShips(missingShipCount);
-        var sampleLocations = ResolveOverlayEditorSampleLocations(missingLocationCount);
-        var sampleShipIndex = 0;
-        var sampleLocationIndex = 0;
-        var fixedMembers = members
-            .Select(member =>
-            {
-                var ship = string.IsNullOrWhiteSpace(member.ShipText)
-                    ? sampleShips[Math.Min(sampleShipIndex++, sampleShips.Length - 1)]
-                    : member.ShipText;
-                var location = string.IsNullOrWhiteSpace(member.LocationText)
-                    ? sampleLocations[Math.Min(sampleLocationIndex++, sampleLocations.Length - 1)]
-                    : member.LocationText;
-                return member with
-                {
-                    ShipText = ship,
-                    LocationText = location
-                };
-            })
-            .ToArray();
-
-        _overlayEditorSimulationSample = new OverlayEditorSimulationSample(
-            currentSquadName,
-            fixedMembers);
-        return _overlayEditorSimulationSample;
+        _isOverlayEditorLivePreviewEnabled = _isOverlayEditorFullScreen && enabled;
     }
 
     private void EnterOverlayEditorFullScreen()
@@ -964,6 +1121,7 @@ public partial class MainWindow
             TopFleetBannerLayer.Visibility = Visibility.Collapsed;
         }
 
+        SetBridgeShellFullScreenEditorState(isFullScreen: true);
     }
 
     private void RestoreOverlayEditorWindowState()
@@ -1035,6 +1193,8 @@ public partial class MainWindow
         {
             TopFleetBannerLayer.Visibility = snapshot.TopFleetBannerVisibility;
         }
+
+        SetBridgeShellFullScreenEditorState(isFullScreen: false);
 
         WindowState = snapshot.WindowState;
         UpdateMaximizeButtonText();
@@ -1283,8 +1443,9 @@ public partial class MainWindow
         var rect = ResolveOverlayEditorItemDisplayRect(item);
         var anchorX = GetOverlayEditorHorizontalAnchorPoint(item, rect);
         var anchorY = GetOverlayEditorVerticalAnchorPoint(item, rect);
-        AddOverlayEditorGuideLine(OverlayEditorCanvas.Width / 2, true, Brushes.DeepSkyBlue, 0.28, 1);
-        AddOverlayEditorGuideLine(OverlayEditorCanvas.Height / 2, false, Brushes.DeepSkyBlue, 0.22, 1);
+        var sceneAccent = BridgeSceneContext.GetRequiredAccentBrush(this);
+        AddOverlayEditorGuideLine(OverlayEditorCanvas.Width / 2, true, sceneAccent, 0.28, 1);
+        AddOverlayEditorGuideLine(OverlayEditorCanvas.Height / 2, false, sceneAccent, 0.22, 1);
         AddOverlayEditorGuideLine(anchorX, true, item.Brush, 0.56, 2);
         AddOverlayEditorGuideLine(anchorY, false, item.Brush, 0.46, 2);
         AddOverlayEditorAnchorPoint(anchorX, anchorY, item.Brush);
@@ -1335,7 +1496,7 @@ public partial class MainWindow
             Tag = OverlayEditorAlignmentGuideTag,
             Width = size,
             Height = size,
-            Background = new SolidColorBrush(Color.FromArgb(230, 4, 18, 28)),
+            Background = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Panel),
             BorderBrush = brush,
             BorderThickness = new Thickness(2),
             IsHitTestVisible = false
@@ -1404,7 +1565,7 @@ public partial class MainWindow
     {
         var isSelected = !_isOverlayEventNotificationSelected &&
             _selectedOverlayInspectorItem?.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase) == true;
-        var selectedBrush = Brushes.WhiteSmoke;
+        var selectedBrush = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
         var effectiveSettings = GetEffectiveOverlaySettings();
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
@@ -1482,7 +1643,7 @@ public partial class MainWindow
                 : _language == "zh"
                     ? $"拖动调整 / 右下缩放 / {GetOverlayAnchorDisplayName(item, true)}"
                     : $"Drag to move / resize corner / {GetOverlayAnchorDisplayName(item, true)}",
-            Foreground = Brushes.LightSlateGray,
+            Foreground = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink3),
             FontSize = 11,
             Margin = new Thickness(0, 4, 0, 6),
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -1534,7 +1695,7 @@ public partial class MainWindow
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 7, 7, 0),
             Padding = new Thickness(7, 3, 7, 3),
-            Background = new SolidColorBrush(Color.FromArgb(178, 7, 27, 42)),
+            Background = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.PanelRaised),
             BorderBrush = selectedBrush,
             BorderThickness = new Thickness(1),
             IsHitTestVisible = false,
@@ -1810,7 +1971,7 @@ public partial class MainWindow
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(7, 7, 0, 0),
             Padding = new Thickness(7, 3, 7, 3),
-            Background = new SolidColorBrush(Color.FromArgb(212, 2, 16, 26)),
+            Background = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Panel),
             BorderBrush = brush,
             BorderThickness = new Thickness(1),
             IsHitTestVisible = false,
@@ -1832,14 +1993,14 @@ public partial class MainWindow
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(12, 0, 0, 7),
             Padding = new Thickness(8, 3, 8, 3),
-            Background = new SolidColorBrush(Color.FromArgb(214, 2, 16, 26)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(41, 175, 255)),
+            Background = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Panel),
+            BorderBrush = BridgeSceneContext.GetRequiredAccentBrush(this),
             BorderThickness = new Thickness(1),
             IsHitTestVisible = false,
             Child = new TextBlock
             {
                 Text = _language == "zh" ? "拖动分隔线：名字 / 地点" : "Drag divider: name / location",
-                Foreground = new SolidColorBrush(Color.FromRgb(176, 226, 255)),
+                Foreground = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink2),
                 FontSize = 10,
                 FontWeight = FontWeights.SemiBold
             }
@@ -1860,15 +2021,6 @@ public partial class MainWindow
         double Size,
         FontWeight Weight);
 
-    private sealed record OverlayEditorSquadPreviewRow(
-        string Name,
-        string Icon,
-        string Detail,
-        string Summary,
-        System.Windows.Media.Brush StatusBrush,
-        string? EmblemPath = null,
-        bool IsPartyRoomIcon = false);
-
     private sealed record OverlayEditorMemberPreviewRow(
         string DisplayName,
         string Status,
@@ -1876,38 +2028,14 @@ public partial class MainWindow
         string Ship,
         System.Windows.Media.Brush StatusBrush);
 
-    private sealed record OverlayEditorSampleMember(
-        string Callsign,
-        string GameName,
-        string SquadName,
-        bool Online,
-        bool IsSelf,
-        bool IsSquadCommander,
-        string? ShipText = null,
-        string? LocationText = null,
-        string? ServerShard = null);
-
-    private sealed record OverlayEditorSampleIdentity(string Callsign, string GameName);
-
-    private static readonly OverlayEditorSampleIdentity[] OverlayEditorSampleMemberIdentities =
-    [
-        new("示例", "Demo2"),
-        new("示例三", "Demo03"),
-        new("示例成员", "DemoUser04"),
-        new("示例远航员", "DemoVoyager05"),
-        new("示例深空观察员", "DemoObserver006"),
-        new("示例远程信标协调员", "DemoBeaconCoordinator07"),
-        new("示例超远距航路观察员", "DemoLongRangeRouteObserver08"),
-        new("示例最长呼号压力测试成员", "DemoExtraLongCallsignStressMember09")
-    ];
-
     private IEnumerable<UIElement> CreateOverlayEditorLivePreviewLines(OverlayLayoutItem item)
     {
         var palette = ResolveOverlayEditorPreviewPalette(GetEffectiveOverlaySettings().Theme);
         var elements = item.Key switch
         {
             "Notice" => BuildOverlayEditorNoticePreview(palette),
-            "Squads" => BuildOverlayEditorSquadPreview(item, palette),
+            // The persisted key remains "Squads" so existing layouts keep their slot.
+            "Squads" => BuildOverlayEditorOverviewPreview(item, palette),
             "Members" => BuildOverlayEditorMemberPreview(item, palette),
             "Chat" => BuildOverlayEditorChatPreview(item, palette),
             _ => Enumerable.Empty<UIElement>()
@@ -1925,7 +2053,7 @@ public partial class MainWindow
         return item.Key switch
         {
             "Notice" => ResolveOverlayEditorNoticeTitle(),
-            "Squads" => roomScene ? "房间概况" : "小队态势",
+            "Squads" => roomScene ? "房间概况" : "舰队总览",
             "Members" => roomScene ? "房间成员" : "成员状态",
             "Chat" => roomScene ? "房间通讯" : ResolveFleetOverlayChatTitle(),
             _ => item.Title
@@ -2002,95 +2130,163 @@ public partial class MainWindow
         yield return grid;
     }
 
-    private IEnumerable<UIElement> BuildOverlayEditorSquadPreview(
+    private IEnumerable<UIElement> BuildOverlayEditorOverviewPreview(
         OverlayLayoutItem item,
         OverlayEditorPreviewPalette palette)
     {
         var scene = ResolveCurrentOverlayScene();
-        if (scene.Context.Kind == OverlaySceneKind.PartyRoom)
-        {
-            foreach (var element in BuildOverlayEditorPartyRoomPreview(item, palette, scene.Context))
-            {
-                yield return element;
-            }
-            yield break;
-        }
+        var authorizedRoster = ResolveOverlayAuthorizedRoster(scene);
+        var projection = OverlayOverviewProjection.Project(
+            authorizedRoster.Members,
+            scene.Context,
+            scene.HasContent,
+            _localPresence,
+            ResolveOverlayEditorLocalShard(),
+            _language);
+        var displayRect = ResolveOverlayEditorItemDisplayRect(item);
+        var statusLayout = OverlaySquadStatusRowLayout.Resolve(
+            (float)Math.Max(1, displayRect.Width));
 
-        var sampleMembers = ResolveOverlayEditorSampleMembers();
-        var currentSquadName = ResolveOverlayEditorPreviewCurrentSquadName();
-        var currentSquadMembers = sampleMembers
-            .Where(member => member.SquadName.Equals(currentSquadName, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-        var fleetOnline = sampleMembers.Count(member => member.Online);
-        var currentOnline = currentSquadMembers.Count(member => member.Online);
-        var localShard = ResolveOverlayEditorLocalSampleShard();
-        var sameShard = currentSquadMembers.Count(member =>
-            member.Online &&
-            !member.IsSelf &&
-            !string.IsNullOrWhiteSpace(localShard) &&
-            string.Equals(member.ServerShard, localShard, StringComparison.OrdinalIgnoreCase));
-        var primaryName = "舰队总览";
-        var summary = $"在线 {fleetOnline.ToString(CultureInfo.InvariantCulture)} / {sampleMembers.Length.ToString(CultureInfo.InvariantCulture)}";
-        var serverSummary = "美服 · 5人";
-        var focusLine = $"与你同服务器分线 {sameShard.ToString(CultureInfo.InvariantCulture)} 人";
-        var statusBrush = ResolveOverlayEditorSampleFleetStatusBrush(sampleMembers, palette);
-        var showSimulation = ShouldShowOverlayEditorLivePreview();
-        var currentEmblemPath = showSimulation
-            ? null
-            : _squads.FirstOrDefault(squad =>
-                squad.Name.Equals(currentSquadName, StringComparison.OrdinalIgnoreCase))?.EmblemPath;
-        var currentSquadRow = new OverlayEditorSquadPreviewRow(
-            currentSquadName,
-            "A",
-            "当前小队",
-            $"在线 {currentOnline.ToString(CultureInfo.InvariantCulture)} / {currentSquadMembers.Length.ToString(CultureInfo.InvariantCulture)}",
-            currentOnline > 0 ? palette.Title : palette.Muted,
-            currentEmblemPath);
-        var squadRows = ResolveOverlayEditorSampleSquadRows(palette, currentSquadName, currentOnline, currentSquadMembers.Length);
-        if (!showSimulation)
-        {
-            squadRows = squadRows
-                .Select(row => row with
-                {
-                    EmblemPath = _squads.FirstOrDefault(squad =>
-                        squad.Name.Equals(row.Name, StringComparison.OrdinalIgnoreCase))?.EmblemPath
-                })
-                .ToArray();
-        }
-
-        var detailed = UsesDetailedSquadStatusPreview(item);
         yield return CreateOverlayEditorThreeColumnRow(
-            primaryName,
-            summary,
-            serverSummary,
+            projection.Primary,
+            projection.Summary,
+            projection.ServerSummary,
+            projection.StatusBrush,
             palette.Text,
-            statusBrush,
             palette.Alert,
             13,
             12,
             11,
-            new Thickness(0, detailed ? 10 : 9, 0, 0));
-        yield return CreateOverlayEditorPreviewText(
-            CompactOverlayEditorText(focusLine, 56),
-            palette.Muted,
-            10,
-            TextAlignment.Left,
-            HorizontalAlignment.Stretch,
-            FontWeights.Normal,
-            new Thickness(0, 5, 0, 0));
+            new Thickness(0, 9, 0, 0),
+            statusLayout);
 
-        if (!detailed)
+        if (scene.Context.Kind == OverlaySceneKind.Fleet)
         {
-            yield return CreateOverlayEditorSquadPreviewRow(currentSquadRow, palette);
+            if (!string.IsNullOrWhiteSpace(projection.Focus))
+            {
+                yield return CreateOverlayEditorPreviewText(
+                    CompactOverlayEditorText(projection.Focus, 56),
+                    palette.Muted,
+                    10,
+                    TextAlignment.Left,
+                    HorizontalAlignment.Stretch,
+                    FontWeights.Normal,
+                    new Thickness(0, 5, 0, 0));
+            }
+
+            if (projection.TopLocations.Count > 0)
+            {
+                var locationLayout = OverlayOverviewLocationLayout.Resolve(
+                    displayRect.Width,
+                    displayRect.Height,
+                    projection.TopLocations);
+                if (locationLayout.Orientation == OverlayOverviewLocationOrientation.Horizontal)
+                {
+                    yield return CreateOverlayEditorOverviewLocationRow(
+                        locationLayout.VisibleItems,
+                        palette.Text,
+                        palette.Muted);
+                }
+                else
+                {
+                    foreach (var location in locationLayout.VisibleItems)
+                    {
+                        yield return CreateOverlayEditorOverviewLocationRow(
+                            [location],
+                            palette.Text,
+                            palette.Muted);
+                    }
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(projection.LocationPlaceholder))
+            {
+                yield return CreateOverlayEditorOverviewLocationRow(
+                    [new OverlayOverviewLocationCount(
+                        "placeholder",
+                        projection.LocationPlaceholder,
+                        0,
+                        0,
+                        projection.LocationPlaceholderMetric)],
+                    palette.Text,
+                    palette.Muted);
+            }
+
             yield break;
         }
 
-        var projectedHeight = ResolveOverlayEditorItemDisplayRect(item).Height;
-        var rowLimit = Math.Clamp((int)Math.Floor((projectedHeight - 86) / 28), 1, 7);
-        foreach (var squad in squadRows.Take(rowLimit))
+        // Party goals are not typed location aggregates. Keep their existing
+        // projection copy rather than treating them as fleet geography.
+        if (scene.Context.Kind == OverlaySceneKind.PartyRoom)
         {
-            yield return CreateOverlayEditorSquadPreviewRow(squad, palette);
+            foreach (var detail in new[] { projection.Focus, projection.Secondary }
+                         .Where(value => !string.IsNullOrWhiteSpace(value)))
+            {
+                yield return CreateOverlayEditorPreviewText(
+                    CompactOverlayEditorText(detail, 56),
+                    palette.Muted,
+                    10,
+                    TextAlignment.Left,
+                    HorizontalAlignment.Stretch,
+                    FontWeights.Normal,
+                    new Thickness(0, 5, 0, 0));
+            }
         }
+    }
+
+    private static Grid CreateOverlayEditorOverviewLocationRow(
+        IReadOnlyList<OverlayOverviewLocationCount> locations,
+        System.Windows.Media.Brush nameBrush,
+        System.Windows.Media.Brush metricBrush)
+    {
+        var grid = new Grid
+        {
+            Margin = new Thickness(0, 5, 0, 0),
+            ClipToBounds = true
+        };
+        for (var index = 0; index < locations.Count; index++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            var cell = new Grid
+            {
+                Margin = index == 0 ? new Thickness(0) : new Thickness(10, 0, 0, 0),
+                ClipToBounds = true
+            };
+            cell.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            cell.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto
+            });
+
+            var name = CreateOverlayEditorPreviewText(
+                locations[index].DisplayName,
+                nameBrush,
+                10,
+                TextAlignment.Left,
+                HorizontalAlignment.Stretch,
+                FontWeights.Normal,
+                new Thickness(0));
+            var metric = CreateOverlayEditorPreviewText(
+                locations[index].DisplayMetricText,
+                metricBrush,
+                10,
+                TextAlignment.Right,
+                HorizontalAlignment.Stretch,
+                FontWeights.Normal,
+                new Thickness(8, 0, 0, 0));
+            Grid.SetColumn(metric, 1);
+            cell.Children.Add(name);
+            cell.Children.Add(metric);
+            Grid.SetColumn(cell, index);
+            grid.Children.Add(cell);
+        }
+
+        return grid;
     }
 
     private IEnumerable<UIElement> BuildOverlayEditorChatPreview(
@@ -2125,7 +2321,7 @@ public partial class MainWindow
                 : new[]
             {
                 (SenderDisplay: "NightShadow", Text: "准备完成，正在前往集合点。", TimeText: "21:14", SenderColor: "#FF3045"),
-                (SenderDisplay: "Black Division", Text: "收到，进入服务器后同步分线。", TimeText: "21:15", SenderColor: "#69CCFF")
+                (SenderDisplay: "Black Division", Text: "收到，进入服务器后同步服务器信息。", TimeText: "21:15", SenderColor: "#69CCFF")
             };
 
         foreach (var sample in samples)
@@ -2173,54 +2369,57 @@ public partial class MainWindow
             : $"{message.SourceLabel} · {sender}";
     }
 
-    private IEnumerable<UIElement> BuildOverlayEditorPartyRoomPreview(
-        OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette,
-        OverlaySceneContext scene)
-    {
-        var capacity = Math.Max(scene.RoomCapacity, scene.RoomMemberCount);
-        var roomName = string.IsNullOrWhiteSpace(scene.RoomTitle) ? "当前房间" : scene.RoomTitle!;
-        var online = Math.Max(1, scene.RoomMemberCount - 1);
-        yield return CreateOverlayEditorThreeColumnRow(
-            CompactOverlayEditorText(roomName, 22),
-            $"在线 {online}/{capacity}",
-            "房主在线",
-            palette.Text,
-            palette.Title,
-            palette.Alert,
-            13,
-            12,
-            11,
-            new Thickness(0, 9, 0, 0));
-        yield return CreateOverlayEditorPreviewText(
-            "与你同服务器分线 2 人",
-            palette.Muted,
-            10,
-            TextAlignment.Left,
-            HorizontalAlignment.Stretch,
-            FontWeights.Normal,
-            new Thickness(0, 5, 0, 0));
-
-        yield return CreateOverlayEditorSquadPreviewRow(
-            new OverlayEditorSquadPreviewRow(
-                roomName,
-                "",
-                CompactOverlayEditorText(scene.RoomGoal ?? "房间目标：协同游戏", 52),
-                $"成员 {scene.RoomMemberCount}/{capacity}",
-                palette.Title,
-                IsPartyRoomIcon: true),
-            palette);
-    }
-
     private IEnumerable<UIElement> BuildOverlayEditorMemberPreview(
         OverlayLayoutItem item,
         OverlayEditorPreviewPalette palette)
     {
-        var projectedHeight = ResolveOverlayEditorItemDisplayRect(item).Height;
-        var rowLimit = Math.Clamp((int)Math.Floor((projectedHeight - 52) / 34), 1, 8);
-        foreach (var player in ResolveOverlayEditorMemberPreviewRows(palette).Take(rowLimit))
+        var scene = ResolveCurrentOverlayScene();
+        var authorizedRoster = ResolveOverlayAuthorizedRoster(scene);
+        if (_overlaySettings.HideSelfMember)
         {
-            yield return CreateOverlayEditorMemberPreviewRow(player, palette);
+            authorizedRoster = new OverlayAuthorizedRoster(
+                authorizedRoster.Members.Where(player => !player.IsSelf));
+        }
+
+        var projectedHeight = ResolveOverlayEditorItemDisplayRect(item).Height;
+        var projection = OverlayRosterPlanner.Project(
+            authorizedRoster,
+            GetOverlayRosterSelectionSettings(),
+            new OverlayRosterViewport(
+                projectedHeight,
+                ResolveOverlayEditorLocalShard()));
+
+        foreach (var player in authorizedRoster.Resolve(projection))
+        {
+            yield return CreateOverlayEditorMemberPreviewRow(
+                ProjectOverlayEditorMemberPreviewRow(player, palette),
+                palette);
+        }
+
+        if (projection.ShowOverflowSummary)
+        {
+            var hiddenTotal = projection.HiddenOnlineCount + projection.HiddenOfflineCount;
+            var summary = projection.HiddenOfflineCount > 0
+                ? _language == "zh"
+                    ? $"另有 {hiddenTotal} 人（{projection.HiddenOnlineCount} 在线 / {projection.HiddenOfflineCount} 离线）"
+                    : $"{hiddenTotal} more ({projection.HiddenOnlineCount} online / {projection.HiddenOfflineCount} offline)"
+                : _language == "zh"
+                    ? $"另有 {projection.HiddenOnlineCount} 人在线"
+                    : $"{projection.HiddenOnlineCount} more online";
+            yield return CreateOverlayEditorMemberPreviewRow(
+                new OverlayEditorMemberPreviewRow(summary, "", "", "", palette.Muted),
+                palette);
+        }
+        else if (projection.VisibleSourceIndices.Count == 0)
+        {
+            yield return CreateOverlayEditorMemberPreviewRow(
+                new OverlayEditorMemberPreviewRow(
+                    _language == "zh" ? "暂无可显示成员" : "No visible members",
+                    "",
+                    "",
+                    "",
+                    palette.Muted),
+                palette);
         }
     }
 
@@ -2280,16 +2479,26 @@ public partial class MainWindow
         double leftSize,
         double middleSize,
         double rightSize,
-        Thickness margin)
+        Thickness margin,
+        OverlaySquadStatusRowLayout layout)
     {
         var grid = new Grid
         {
             Margin = margin,
             ClipToBounds = true
         };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(layout.Primary.Width, GridUnitType.Star)
+        });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(layout.Summary.Width, GridUnitType.Star)
+        });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(layout.Server.Width, GridUnitType.Star)
+        });
 
         grid.Children.Add(CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(leftText, 24),
@@ -2321,137 +2530,6 @@ public partial class MainWindow
         Grid.SetColumn(right, 2);
         grid.Children.Add(right);
         return grid;
-    }
-
-    private UIElement CreateOverlayEditorSquadPreviewRow(
-        OverlayEditorSquadPreviewRow squad,
-        OverlayEditorPreviewPalette palette)
-    {
-        var grid = new Grid
-        {
-            Margin = new Thickness(0, 8, 0, 0),
-            ClipToBounds = true
-        };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        if (!_overlaySettings.HideSquadIcons)
-        {
-            UIElement icon;
-            if (squad.IsPartyRoomIcon)
-            {
-                icon = CreateOverlayEditorPartyRoomNodeIcon(squad.StatusBrush);
-            }
-            else if (!string.IsNullOrWhiteSpace(squad.EmblemPath) &&
-                     ImageDecodeCache.Load(squad.EmblemPath, 32) is { } emblem)
-            {
-                icon = new Border
-                {
-                    Width = 14,
-                    Height = 14,
-                    VerticalAlignment = VerticalAlignment.Top,
-                    Child = new ControlsImage
-                    {
-                        Source = emblem,
-                        Stretch = Stretch.UniformToFill
-                    }
-                };
-            }
-            else
-            {
-                icon = new Border
-                {
-                    Width = 14,
-                    Height = 14,
-                    Background = squad.StatusBrush,
-                    Opacity = 0.92,
-                    VerticalAlignment = VerticalAlignment.Top,
-                    Child = new TextBlock
-                    {
-                        Text = string.IsNullOrWhiteSpace(squad.Icon) ? "?" : squad.Icon,
-                        Foreground = new SolidColorBrush(Color.FromRgb(6, 16, 26)),
-                        FontSize = 8,
-                        FontWeight = FontWeights.SemiBold,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        TextAlignment = TextAlignment.Center
-                    }
-                };
-            }
-
-            grid.Children.Add(icon);
-        }
-
-        var stack = new StackPanel { ClipToBounds = true };
-        stack.Children.Add(CreateOverlayEditorPreviewText(
-            CompactOverlayEditorText(squad.Name, 30),
-            palette.Text,
-            11,
-            TextAlignment.Left,
-            HorizontalAlignment.Stretch,
-            FontWeights.SemiBold));
-        stack.Children.Add(CreateOverlayEditorPreviewText(
-            CompactOverlayEditorText(squad.Detail, 62),
-            palette.Muted,
-            9,
-            TextAlignment.Left,
-            HorizontalAlignment.Stretch,
-            FontWeights.Normal,
-            new Thickness(0, 2, 0, 0)));
-        Grid.SetColumn(stack, 1);
-        grid.Children.Add(stack);
-
-        var summary = CreateOverlayEditorPreviewText(
-            CompactOverlayEditorText(squad.Summary, 16),
-            squad.StatusBrush,
-            10,
-            TextAlignment.Right,
-            HorizontalAlignment.Right,
-            FontWeights.SemiBold,
-            new Thickness(8, 0, 0, 0));
-        Grid.SetColumn(summary, 2);
-        grid.Children.Add(summary);
-        return grid;
-    }
-
-    private static UIElement CreateOverlayEditorPartyRoomNodeIcon(System.Windows.Media.Brush brush)
-    {
-        var canvas = new Canvas
-        {
-            Width = 14,
-            Height = 14,
-            VerticalAlignment = VerticalAlignment.Top,
-            SnapsToDevicePixels = true
-        };
-        canvas.Children.Add(new System.Windows.Shapes.Path
-        {
-            Data = Geometry.Parse("M7,3 L3,11 M7,3 L11,11"),
-            Stroke = brush,
-            StrokeThickness = 1,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
-            Opacity = 0.58
-        });
-
-        AddNode(5, 1, 4, 1);
-        AddNode(1.5, 9.5, 3, 0.9);
-        AddNode(9.5, 9.5, 3, 0.9);
-        return canvas;
-
-        void AddNode(double left, double top, double size, double opacity)
-        {
-            var node = new System.Windows.Shapes.Ellipse
-            {
-                Width = size,
-                Height = size,
-                Fill = brush,
-                Opacity = opacity
-            };
-            Canvas.SetLeft(node, left);
-            Canvas.SetTop(node, top);
-            canvas.Children.Add(node);
-        }
     }
 
     private UIElement CreateOverlayEditorMemberPreviewRow(
@@ -2582,74 +2660,24 @@ public partial class MainWindow
         };
     }
 
-    private bool UsesDetailedSquadStatusPreview(OverlayLayoutItem item)
-    {
-        var rect = ResolveOverlayEditorItemDisplayRect(item);
-        return _overlaySettings.SquadStatusDisplayMode switch
-        {
-            OverlaySquadStatusDisplayMode.Compact => false,
-            OverlaySquadStatusDisplayMode.Detailed => true,
-            _ => rect.Width >= 220 && rect.Height >= 168
-        };
-    }
-
-    private static System.Windows.Media.Brush ResolveOverlayEditorFleetStatusBrush(
-        IReadOnlyCollection<PlayerRow> players,
+    private OverlayEditorMemberPreviewRow ProjectOverlayEditorMemberPreviewRow(
+        PlayerRow player,
         OverlayEditorPreviewPalette palette)
     {
-        var online = players.Count(IsOverlayGamePresence);
-        if (players.Count == 0 || online == 0)
-        {
-            return palette.Muted;
-        }
-
-        return online == players.Count ? palette.Online : palette.Title;
+        var online = StarBridge.Core.Presence.PlayerPresence.IsOnline(player.SharedPresence);
+        return new OverlayEditorMemberPreviewRow(
+            FormatOverlayEditorMemberName(player),
+            player.SharedPresenceText,
+            FormatOverlayEditorPreviewLocationText(player.SharedLocationDisplayText),
+            FormatOverlayEditorPreviewShipText(player.SharedShipDisplayText),
+            online ? palette.Online : palette.Offline);
     }
 
-    private static System.Windows.Media.Brush ResolveOverlayEditorSquadStatusBrush(
-        SquadRow squad,
-        OverlayEditorPreviewPalette palette)
-    {
-        if (squad.MemberCount == 0 || squad.OnlineCount == 0)
-        {
-            return palette.Muted;
-        }
-
-        return squad.OnlineCount == squad.MemberCount ? palette.Online : palette.Title;
-    }
-
-    private IEnumerable<OverlayEditorMemberPreviewRow> ResolveOverlayEditorMemberPreviewRows(OverlayEditorPreviewPalette palette)
-    {
-        var roomScene = ResolveCurrentOverlayScene().Context.Kind == OverlaySceneKind.PartyRoom;
-        var visibleMembers = ResolveOverlayEditorSampleMembers()
-            .Where(member => roomScene || MemberMatchesOverlayEditorSampleScope(member))
-            .Where(member => !_overlaySettings.HideOfflineMembers || member.Online)
-            .Where(member => !_overlaySettings.HideSelfMember || !member.IsSelf)
-            .ToArray();
-
-        var selfMember = visibleMembers.FirstOrDefault(member => member.IsSelf);
-        var otherMembers = visibleMembers
-            .Where(member => !member.IsSelf)
-            .OrderByDescending(member => member.Online)
-            .ThenByDescending(member => ResolveOverlayEditorSampleMemberPriorityScore(member))
-            .ThenBy(member => FormatOverlayEditorSampleMemberName(member).Length)
-            .ThenBy(member => FormatOverlayEditorSampleMemberName(member), StringComparer.OrdinalIgnoreCase);
-        var sampleMembers = selfMember is null
-            ? otherMembers.ToArray()
-            : new[] { selfMember }.Concat(otherMembers).ToArray();
-
-        foreach (var member in sampleMembers)
-        {
-            var ship = string.IsNullOrWhiteSpace(member.ShipText) ? "Unknown" : member.ShipText!;
-            var location = string.IsNullOrWhiteSpace(member.LocationText) ? "Unknown" : member.LocationText!;
-            yield return new OverlayEditorMemberPreviewRow(
-                FormatOverlayEditorSampleMemberName(member),
-                member.Online ? "在线" : "离线",
-                FormatOverlayEditorPreviewLocationText(location),
-                FormatOverlayEditorPreviewShipText(ship),
-                member.Online ? palette.Online : palette.Offline);
-        }
-    }
+    private string? ResolveOverlayEditorLocalShard() =>
+        IsGameServerRegionCurrent() &&
+        PlayerSessionStatePresentation.HasRecognizedValue(_gameServerShard)
+            ? _gameServerShard.Trim()
+            : null;
 
     private string FormatOverlayEditorMemberName(PlayerRow player)
     {
@@ -2662,125 +2690,6 @@ public partial class MainWindow
                 ? player.Name
                 : $"{callsign} ({player.Name})"
         };
-    }
-
-    private string FormatOverlayEditorSampleMemberName(OverlayEditorSampleMember member)
-    {
-        return _overlaySettings.MemberNameMode switch
-        {
-            OverlayMemberNameMode.CallsignOnly => member.Callsign,
-            OverlayMemberNameMode.GameNameOnly => member.GameName,
-            _ => member.Callsign.Equals(member.GameName, StringComparison.OrdinalIgnoreCase)
-                ? member.GameName
-                : $"{member.Callsign} ({member.GameName})"
-        };
-    }
-
-    private OverlayEditorSampleMember[] ResolveOverlayEditorSampleMembers()
-    {
-        var currentSquadName = ResolveOverlayEditorSampleCurrentSquadName();
-        if (ShouldShowOverlayEditorLivePreview())
-        {
-            return EnsureOverlayEditorSimulationSample().Members;
-        }
-
-        return CreateOverlayEditorSampleMembers(currentSquadName);
-    }
-
-    private OverlayEditorSampleMember[] CreateOverlayEditorSampleMembers(string currentSquadName)
-    {
-        var localShard = ResolveOverlayEditorLocalSampleShard();
-        var identities = OverlayEditorSampleMemberIdentities;
-        return
-        [
-            ResolveOverlayEditorCurrentUserSampleMember(currentSquadName, localShard),
-            new(identities[0].Callsign, identities[0].GameName, currentSquadName, true, false, true, ServerShard: localShard),
-            new(identities[1].Callsign, identities[1].GameName, currentSquadName, true, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_999999"),
-            new(identities[2].Callsign, identities[2].GameName, "Bravo", true, false, false, ServerShard: "pub_sc_alpha_4_1_0_eu_222222"),
-            new(identities[3].Callsign, identities[3].GameName, currentSquadName, true, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_555555"),
-            new(identities[4].Callsign, identities[4].GameName, "Bravo", true, false, false, ServerShard: "pub_sc_alpha_4_1_0_aus_777777"),
-            new(identities[5].Callsign, identities[5].GameName, "Logistics Long Range", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_ap_333333"),
-            new(identities[6].Callsign, identities[6].GameName, "Delta Recon", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_444444"),
-            new(identities[7].Callsign, identities[7].GameName, "Delta Recon", false, false, false, ServerShard: "pub_sc_alpha_4_1_0_usw_888888")
-        ];
-    }
-
-    private OverlayEditorSampleMember ResolveOverlayEditorCurrentUserSampleMember(string currentSquadName, string localShard)
-    {
-        var local = GetLocalPlayerRow();
-        var gameName = FirstNonEmpty(local?.Name, _localPlayer, GetPersonalDisplayName());
-        var callsign = FirstNonEmpty(local?.Callsign, _callsign, gameName);
-
-        return new OverlayEditorSampleMember(
-            callsign,
-            gameName,
-            currentSquadName,
-            true,
-            true,
-            false,
-            ServerShard: localShard);
-    }
-
-    private string ResolveOverlayEditorLocalSampleShard()
-    {
-        return IsGameServerRegionCurrent()
-            ? _gameServerShard
-            : "pub_sc_alpha_4_1_0_usw_123456";
-    }
-
-    private string ResolveOverlayEditorSampleCurrentSquadName()
-    {
-        var local = GetLocalPlayerRow();
-        if (!IsOverlayEditorUnassignedSquadName(local?.SquadName))
-        {
-            return local!.SquadName;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_joinedSquad?.Name))
-        {
-            return _joinedSquad.Name;
-        }
-
-        return "Alpha";
-    }
-
-    private string ResolveOverlayEditorPreviewCurrentSquadName()
-    {
-        return ShouldShowOverlayEditorLivePreview()
-            ? EnsureOverlayEditorSimulationSample().CurrentSquadName
-            : ResolveOverlayEditorSampleCurrentSquadName();
-    }
-
-    private bool MemberMatchesOverlayEditorSampleScope(OverlayEditorSampleMember member)
-    {
-        var currentSquadName = ResolveOverlayEditorPreviewCurrentSquadName();
-        return _overlaySettings.MemberScopeMode switch
-        {
-            OverlayMemberScopeMode.AllFleet => true,
-            OverlayMemberScopeMode.CurrentSquad when member.IsSelf => true,
-            OverlayMemberScopeMode.OtherSquads => !member.SquadName.Equals(currentSquadName, StringComparison.OrdinalIgnoreCase),
-            _ => member.SquadName.Equals(currentSquadName, StringComparison.OrdinalIgnoreCase)
-        };
-    }
-
-    private static bool IsOverlayEditorUnassignedSquadName(string? squadName)
-    {
-        return string.IsNullOrWhiteSpace(squadName) ||
-               squadName.Equals("Unassigned", StringComparison.OrdinalIgnoreCase) ||
-               squadName.Equals("未分配", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string FirstNonEmpty(params string?[] values)
-    {
-        foreach (var value in values)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-        }
-
-        return "Unknown";
     }
 
     private static string FormatOverlayEditorPreviewShipText(string value)
@@ -2807,139 +2716,6 @@ public partial class MainWindow
         }
 
         return text;
-    }
-
-
-    private int ResolveOverlayEditorSampleMemberPriorityScore(OverlayEditorSampleMember member)
-    {
-        return _overlaySettings.MemberPriorityMode switch
-        {
-            OverlayMemberPriorityMode.Self => member.IsSelf ? 1 : 0,
-            OverlayMemberPriorityMode.SquadCommander => member.IsSquadCommander ? 1 : 0,
-            _ => 0
-        };
-    }
-
-    private static string FormatOverlayEditorSampleFleetOnlineSummary(IReadOnlyCollection<OverlayEditorSampleMember> members)
-    {
-        var online = members.Count(member => member.Online);
-        return $"在线 {online.ToString(CultureInfo.InvariantCulture)}";
-    }
-
-    private static System.Windows.Media.Brush ResolveOverlayEditorSampleFleetStatusBrush(
-        IReadOnlyCollection<OverlayEditorSampleMember> members,
-        OverlayEditorPreviewPalette palette)
-    {
-        var online = members.Count(member => member.Online);
-        if (members.Count == 0 || online == 0)
-        {
-            return palette.Muted;
-        }
-
-        return online == members.Count ? palette.Online : palette.Title;
-    }
-
-    private static OverlayEditorSquadPreviewRow[] ResolveOverlayEditorSampleSquadRows(
-        OverlayEditorPreviewPalette palette,
-        string currentSquadName,
-        int currentOnline,
-        int currentTotal)
-    {
-        return
-        [
-            new(
-                currentSquadName,
-                "A",
-                "指挥官 NOVA-7 · 在线 · 与你在同服务器",
-                $"在线 {currentOnline.ToString(CultureInfo.InvariantCulture)} / {currentTotal.ToString(CultureInfo.InvariantCulture)}",
-                currentOnline > 0 ? palette.Title : palette.Muted),
-            new("Bravo", "B", "指挥官 MIRAI · 在线", "在线 2 / 2", palette.Online),
-            new("Delta Recon", "D", "指挥官 VEGA · 离线", "在线 1 / 3", palette.Title),
-            new("Logistics Long Range", "L", "指挥官 ARGO-12 · 离线", "在线 0 / 2", palette.Muted)
-        ];
-    }
-
-    private string[] ResolveOverlayEditorSampleShips(int count)
-    {
-        var catalogShips = ShipCatalog.Entries
-            .Where(entry => !entry.HasHiddenTag("hide"))
-            .Select(entry => entry.DisplayName(_language))
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var fallback =
-            new[]
-            {
-                "RSI Polaris",
-                "Anvil Carrack Expedition w/C8X",
-                "Crusader C2 Hercules",
-                "Drake Cutlass Black",
-                "Aegis Redeemer",
-                "RSI Aurora MR",
-                "MISC Freelancer MAX",
-                "Origin 315p"
-            };
-        return PickOverlayEditorSampleValues(catalogShips.Length > 0 ? catalogShips : fallback, count);
-    }
-
-    private static string[] ResolveOverlayEditorSampleLocations(int count)
-    {
-        IReadOnlyList<string> locations = LocationNameLocalizer.ConfirmedChineseDisplayNames.Count > 0
-            ? LocationNameLocalizer.ConfirmedChineseDisplayNames
-            :
-            [
-                "新巴贝奇",
-                "奥里森",
-                "罗威尔",
-                "18区",
-                "特雷斯勒空间站",
-                "埃弗勒斯空间站",
-                "拜基尼空间站",
-                "炽天使空间站"
-            ];
-        return PickOverlayEditorSampleValues(locations, count);
-    }
-
-    private static string[] PickOverlayEditorSampleValues(IReadOnlyList<string> source, int count)
-    {
-        if (count <= 0)
-        {
-            return [];
-        }
-
-        if (source.Count == 0)
-        {
-            return Enumerable.Repeat("未知", count).ToArray();
-        }
-
-        var pool = source
-            .OrderBy(_ => Random.Shared.Next())
-            .ToArray();
-        var values = new string[count];
-        for (var index = 0; index < count; index++)
-        {
-            values[index] = pool[index % pool.Length];
-        }
-
-        return values;
-    }
-
-    private SquadRow? ResolveOverlayEditorCurrentSquad(IReadOnlyCollection<PlayerRow> players)
-    {
-        var self = players.FirstOrDefault(player => player.IsSelf);
-        var squadName = self?.SquadName;
-        if (!string.IsNullOrWhiteSpace(squadName) &&
-            !IsUnassignedSquad(squadName))
-        {
-            var matchedSquad = _squads.FirstOrDefault(squad =>
-                squad.Name.Equals(squadName, StringComparison.OrdinalIgnoreCase));
-            if (matchedSquad is not null)
-            {
-                return matchedSquad;
-            }
-        }
-
-        return _joinedSquad ?? _squads.FirstOrDefault();
     }
 
     private static OverlayEditorPreviewPalette ResolveOverlayEditorPreviewPalette(OverlayVisualTheme theme)

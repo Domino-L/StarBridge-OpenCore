@@ -6,6 +6,8 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Themes/AppTheme.xaml" />
                 <ResourceDictionary Source="Themes/OverlaySettingsTheme.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/Tokens.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/States.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

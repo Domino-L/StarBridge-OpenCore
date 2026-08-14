@@ -1,5 +1,6 @@
 using StarBridge.Core.FleetChat;
 using StarBridge.Core.Chat;
+using StarBridge.Desktop.Theming;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -11,8 +12,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Brush = System.Windows.Media.Brush;
-using Color = System.Windows.Media.Color;
-using ColorConverter = System.Windows.Media.ColorConverter;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 
 namespace StarBridge.Desktop;
@@ -42,7 +41,6 @@ public partial class MainWindow
     private FleetChatChannelRow? _activeFleetChatChannel;
     private bool _isRefreshingFleetMemberSidebarChatPreview;
     private bool _fleetMemberSidebarChatPreviewLoaded;
-    private bool _isSelectingFleetChatChannel;
     private bool _fleetChatNeedsFullHistoryRefresh = true;
     private bool _fleetChatHasOlder;
     private bool _isLoadingOlderFleetChat;
@@ -89,9 +87,7 @@ public partial class MainWindow
     private void InitializeFleetChat()
     {
         InitializeFleetAnnouncements();
-        FleetChatChannelList.ItemsSource = _fleetChatChannels;
         FleetChatMessageList.ItemsSource = _fleetChatMessages;
-        FleetCommunicationExternalContactsList.ItemsSource = _fleetExternalContacts;
         ChatHistoryViewport.EnableSmoothScrolling(FleetChatMessageList);
         FleetChatMessageList.AddHandler(
             ScrollViewer.ScrollChangedEvent,
@@ -198,13 +194,14 @@ public partial class MainWindow
             }
 
             var reconciled = FleetChatMessageReconciler.Reconcile(
+                fleetChannel.ChannelId,
                 _fleetMemberSidebarChatPreview.Select(row => row.Message),
                 history.Messages);
             var next = reconciled
                 .OrderByDescending(message => message.Sequence)
                 .Take(4)
                 .OrderBy(message => message.Sequence)
-                .Select(message => new FleetChatMessageRow(message, _accountId))
+                .Select(message => new FleetChatMessageRow(message, _accountId, this))
                 .ToArray();
             _fleetMemberSidebarChatLatestSequence = Math.Max(
                 _fleetMemberSidebarChatLatestSequence,
@@ -256,7 +253,6 @@ public partial class MainWindow
             _fleetChatLatestSequence = 0;
             _fleetChatMessages.Clear();
             ResetFleetChatPagingState();
-            SelectActiveFleetChatChannel();
         }
 
         FleetSubTabs.SelectedItem = FleetChatTab;
@@ -298,7 +294,7 @@ public partial class MainWindow
                 $"api/fleets/chat/channels?fleetCode={escapedFleetCode}");
             if (snapshot is null)
             {
-                throw new InvalidDataException("通讯频道数据为空。");
+                throw new InvalidDataException("舰队聊天数据为空。");
             }
 
             if (!IsFleetChatDirectoryCurrent(lane))
@@ -308,12 +304,13 @@ public partial class MainWindow
 
             var activeId = _activeFleetChatChannel?.ChannelId;
             _fleetChatChannels.Clear();
-            foreach (var channel in snapshot.Channels)
+            foreach (var channel in snapshot.Channels.Where(channel =>
+                         channel.Type == FleetChatChannelTypes.Fleet))
             {
-                _fleetChatChannels.Add(new FleetChatChannelRow(channel));
+                _fleetChatChannels.Add(new FleetChatChannelRow(channel, this));
             }
 
-            _fleetChatTotalUnread = snapshot.TotalUnread;
+            _fleetChatTotalUnread = _fleetChatChannels.Sum(channel => channel.UnreadCount);
             UpdateFleetChatRailUnreadLabel();
             var next = _fleetChatChannels.FirstOrDefault(channel =>
                            !string.IsNullOrWhiteSpace(activeId) &&
@@ -321,7 +318,7 @@ public partial class MainWindow
                        _fleetChatChannels.FirstOrDefault();
             if (next is null)
             {
-                ResetFleetChat("当前没有可访问的通讯频道。", clearChannels: false);
+                ResetFleetChat("当前没有可访问的舰队聊天。", clearChannels: false);
                 return;
             }
 
@@ -338,7 +335,6 @@ public partial class MainWindow
                 _activeFleetChatChannel = next;
             }
 
-            SelectActiveFleetChatChannel();
             RenderFleetChat();
             FleetChatSyncStateText.Text = $"已同步 · {snapshot.ServerTime.ToLocalTime():HH:mm:ss}";
             FleetChatSyncStateText.Foreground = StatusPalette.SuccessBrush;
@@ -356,7 +352,7 @@ public partial class MainWindow
 
             if (showErrors)
             {
-                FleetChatStatusText.Text = UserFacingError.Describe(ex, "频道暂时无法同步，请稍后重试。");
+                FleetChatStatusText.Text = UserFacingError.Describe(ex, "舰队聊天暂时无法同步，请稍后重试。");
                 FleetChatStatusText.Foreground = StatusPalette.DangerBrush;
             }
 
@@ -367,34 +363,6 @@ public partial class MainWindow
         {
             _refreshingFleetChatDirectoryLanes.Remove(lane);
         }
-    }
-
-    private void SelectActiveFleetChatChannel()
-    {
-        _isSelectingFleetChatChannel = true;
-        foreach (var channel in _fleetChatChannels)
-        {
-            channel.IsSelected = ReferenceEquals(channel, _activeFleetChatChannel);
-        }
-
-        FleetChatChannelList.SelectedItem = _activeFleetChatChannel;
-        _isSelectingFleetChatChannel = false;
-    }
-
-    private async void FleetChatChannelList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isSelectingFleetChatChannel || FleetChatChannelList.SelectedItem is not FleetChatChannelRow selected)
-        {
-            return;
-        }
-
-        _activeFleetChatChannel = selected;
-        _fleetChatLatestSequence = 0;
-        _fleetChatMessages.Clear();
-        ResetFleetChatPagingState();
-        SelectActiveFleetChatChannel();
-        RenderFleetChat();
-        await RefreshFleetChatMessagesAsync(showErrors: true);
     }
 
     private async Task RefreshFleetChatMessagesAsync(bool showErrors, bool forceFullHistory = false)
@@ -434,7 +402,7 @@ public partial class MainWindow
                 return;
             }
 
-            ReconcileFleetChatMessages(history.Messages);
+            ReconcileFleetChatMessages(activeChannelId, history.Messages);
 
             if (wasEmpty)
             {
@@ -449,9 +417,7 @@ public partial class MainWindow
             FleetChatInputBox.IsEnabled = history.CanSend;
             FleetChatSendButton.IsEnabled = history.CanSend && !_isSendingFleetChatMessage;
             FleetChatStatusText.Text = history.CanSend
-                ? activeChannel.Type == FleetChatChannelTypes.Squad
-                    ? "仅当前小队成员可见 · Enter 发送，Shift+Enter 换行"
-                    : "仅当前舰队成员可见 · Enter 发送，Shift+Enter 换行"
+                ? "仅当前舰队成员可见 · Enter 发送，Shift+Enter 换行"
                 : history.Error ?? "当前无法发送消息。";
             FleetChatStatusText.Foreground = history.CanSend
                 ? StatusPalette.DisabledBrush
@@ -496,9 +462,12 @@ public partial class MainWindow
         }
     }
 
-    private void ReconcileFleetChatMessages(IEnumerable<FleetChatMessageContract> incoming)
+    private void ReconcileFleetChatMessages(
+        string channelId,
+        IEnumerable<FleetChatMessageContract> incoming)
     {
         var reconciled = FleetChatMessageReconciler.Reconcile(
+            channelId,
             _fleetChatMessages.Select(row => row.Message),
             incoming);
         for (var index = 0; index < reconciled.Length; index++)
@@ -506,7 +475,7 @@ public partial class MainWindow
             var message = reconciled[index];
             if (index >= _fleetChatMessages.Count)
             {
-                _fleetChatMessages.Add(new FleetChatMessageRow(message, _accountId));
+                _fleetChatMessages.Add(new FleetChatMessageRow(message, _accountId, this));
                 continue;
             }
 
@@ -515,13 +484,13 @@ public partial class MainWindow
             {
                 if (existing != message)
                 {
-                    _fleetChatMessages[index] = new FleetChatMessageRow(message, _accountId);
+                    _fleetChatMessages[index] = new FleetChatMessageRow(message, _accountId, this);
                 }
 
                 continue;
             }
 
-            _fleetChatMessages.Insert(index, new FleetChatMessageRow(message, _accountId));
+            _fleetChatMessages.Insert(index, new FleetChatMessageRow(message, _accountId, this));
         }
 
         while (_fleetChatMessages.Count > reconciled.Length)
@@ -592,7 +561,7 @@ public partial class MainWindow
                 return;
             }
 
-            ReconcileFleetChatMessages([mutation.Message]);
+            ReconcileFleetChatMessages(channelId, [mutation.Message]);
 
             _fleetChatLatestSequence = Math.Max(_fleetChatLatestSequence, mutation.Message.Sequence);
             FleetChatInputBox.Clear();
@@ -656,11 +625,7 @@ public partial class MainWindow
 
     private void RenderFleetChat()
     {
-        RefreshFleetCommunicationOverview();
-        FleetChatActiveChannelTitle.Text = _activeFleetChatChannel?.DisplayName ?? "选择频道";
-        FleetChatActiveChannelScope.Text = _activeFleetChatChannel?.Type == FleetChatChannelTypes.Squad
-            ? "当前小队成员通讯"
-            : "当前舰队成员通讯";
+        FleetChatActiveChannelTitle.Text = "舰队聊天";
         FleetChatMessageEmptyState.Visibility = _fleetChatMessages.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -668,70 +633,6 @@ public partial class MainWindow
             ? Visibility.Collapsed
             : Visibility.Visible;
         ApplyFleetChatAvailability();
-    }
-
-    private void RefreshFleetCommunicationOverview()
-    {
-        if (FleetCommunicationAnnouncementPanel is null)
-        {
-            return;
-        }
-
-        var current = _fleetCurrentAnnouncement;
-        var hasAnnouncement = current is not null ||
-                              !string.IsNullOrWhiteSpace(_fleetNoticeTitle) ||
-                              !string.IsNullOrWhiteSpace(_fleetNoticeContent);
-        var hasAnnouncementAccess = hasAnnouncement ||
-                                    _fleetAnnouncementHistory.Count > 0 ||
-                                    _fleetAnnouncementCanManage;
-        FleetCommunicationAnnouncementPanel.Visibility = hasAnnouncementAccess
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        if (hasAnnouncement)
-        {
-            FleetCommunicationAnnouncementTitleText.Text = string.IsNullOrWhiteSpace(current?.Title ?? _fleetNoticeTitle)
-                ? "舰队公告"
-                : current?.Title ?? _fleetNoticeTitle;
-            FleetCommunicationAnnouncementContentText.Text = string.IsNullOrWhiteSpace(current?.Content ?? _fleetNoticeContent)
-                ? "指挥官暂未填写公告正文。"
-                : current?.Content ?? _fleetNoticeContent;
-            var publishedAt = current?.PublishedAt ?? _fleetNoticePublishedAt;
-            FleetCommunicationAnnouncementTimeText.Text = publishedAt is { } announcementTime
-                ? CommunicationTimeFormatter.Format(announcementTime)
-                : "历史公告";
-            FleetCommunicationAnnouncementAuthorText.Text = current is null
-                ? ""
-                : FormatFleetAnnouncementAuthor(current.Author);
-        }
-        else if (hasAnnouncementAccess)
-        {
-            FleetCommunicationAnnouncementTitleText.Text = "暂无当前公告";
-            FleetCommunicationAnnouncementContentText.Text = _fleetAnnouncementCanManage
-                ? "发布一条公告，让舰队成员快速掌握当前安排。"
-                : "当前没有正在广播的舰队公告。";
-            FleetCommunicationAnnouncementTimeText.Text = _fleetAnnouncementHistory.Count > 0
-                ? $"历史 {_fleetAnnouncementHistory.Count} 条"
-                : "未发布";
-            FleetCommunicationAnnouncementAuthorText.Text = "";
-        }
-
-        FleetCommunicationAnnouncementHistoryButton.Visibility = hasAnnouncementAccess
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        FleetCommunicationAnnouncementHistoryButton.Content = _fleetAnnouncementHistory.Count > 0
-            ? $"历史公告 ({_fleetAnnouncementHistory.Count})"
-            : "历史公告";
-        FleetCommunicationAnnouncementManageButton.Visibility = _fleetAnnouncementCanManage
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        FleetCommunicationAnnouncementManageButton.Content = current is null
-            ? "发布公告"
-            : "管理公告";
-
-        FleetCommunicationExternalContactsPanel.Visibility = _fleetExternalContacts.Any(contact =>
-            !string.IsNullOrWhiteSpace(contact.Platform) && !string.IsNullOrWhiteSpace(contact.Value))
-            ? Visibility.Visible
-            : Visibility.Collapsed;
     }
 
     private void RefreshFleetCommunicationTimeLabels()
@@ -747,34 +648,7 @@ public partial class MainWindow
             row.RefreshTime(now);
         }
 
-        if (FleetCommunicationAnnouncementPanel?.Visibility == Visibility.Visible &&
-            _fleetNoticePublishedAt is { } publishedAt)
-        {
-            FleetCommunicationAnnouncementTimeText.Text = CommunicationTimeFormatter.Format(publishedAt, now);
-        }
-
         RefreshFleetAnnouncementTimeLabels(now);
-    }
-
-    private void FleetCommunicationExternalContactButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement { DataContext: FleetExternalContactRow contact } ||
-            string.IsNullOrWhiteSpace(contact.Value))
-        {
-            return;
-        }
-
-        try
-        {
-            System.Windows.Clipboard.SetText(contact.Value.Trim());
-            FleetChatStatusText.Text = $"已复制 {contact.Platform} 联络信息";
-            FleetChatStatusText.Foreground = StatusPalette.SuccessBrush;
-        }
-        catch
-        {
-            FleetChatStatusText.Text = "暂时无法写入剪贴板，请稍后重试。";
-            FleetChatStatusText.Foreground = StatusPalette.WarningBrush;
-        }
     }
 
     private void ResetFleetChat(string status, bool clearChannels = true)
@@ -827,6 +701,7 @@ public partial class MainWindow
         var channelId = _activeFleetChatChannel.ChannelId;
         var before = _fleetChatMessages.Min(row => row.Message.Sequence);
         _isLoadingOlderFleetChat = true;
+        FleetChatHistoryLoadingIndicator.IsActive = true;
         FleetChatHistoryStatusText.Text = "正在加载更早消息…";
         FleetChatHistoryStatusPanel.Visibility = ChatHistoryViewport.Find(FleetChatMessageList) is { } viewer &&
                                                  ChatHistoryViewport.IsNearTop(viewer)
@@ -844,7 +719,7 @@ public partial class MainWindow
             }
 
             var anchor = ChatHistoryViewport.Capture(FleetChatMessageList);
-            ReconcileFleetChatMessages(history.Messages);
+            ReconcileFleetChatMessages(channelId, history.Messages);
             _fleetChatHasOlder = history.HasOlder;
             ChatHistoryViewport.RestoreAfterPrepend(FleetChatMessageList, anchor);
         }
@@ -865,11 +740,13 @@ public partial class MainWindow
         var atTop = viewer is not null && ChatHistoryViewport.IsNearTop(viewer);
         if (_isLoadingOlderFleetChat)
         {
+            FleetChatHistoryLoadingIndicator.IsActive = true;
             FleetChatHistoryStatusText.Text = "正在加载更早消息…";
             FleetChatHistoryStatusPanel.Visibility = atTop ? Visibility.Visible : Visibility.Collapsed;
             return;
         }
 
+        FleetChatHistoryLoadingIndicator.IsActive = false;
         FleetChatHistoryStatusPanel.Visibility = Visibility.Collapsed;
     }
 
@@ -887,6 +764,7 @@ public partial class MainWindow
         _fleetChatFollowLatest = true;
         if (FleetChatHistoryStatusPanel is not null)
         {
+            FleetChatHistoryLoadingIndicator.IsActive = false;
             FleetChatHistoryStatusPanel.Visibility = Visibility.Collapsed;
             FleetChatJumpToLatestButton.Visibility = Visibility.Collapsed;
         }
@@ -905,7 +783,7 @@ public partial class MainWindow
         }
 
         var desiredChannels = ResolveFleetOverlayChatChannels();
-        var scope = OverlayDisplaySettings.NormalizeFleetChatScope(_overlaySettings.FleetChatScope);
+        const OverlayFleetChatScope scope = OverlayFleetChatScope.Fleet;
         var signature = $"{_fleetCode}|{scope}|{string.Join('|', desiredChannels.Select(channel => channel.ChannelId))}";
         if (!_fleetOverlayChatProjectionSignature.Equals(signature, StringComparison.OrdinalIgnoreCase))
         {
@@ -955,7 +833,7 @@ public partial class MainWindow
                         continue;
                     }
 
-                    _fleetOverlayChatMessages.Add(CreateFleetOverlayChatMessage(message, channel, scope));
+                    _fleetOverlayChatMessages.Add(CreateFleetOverlayChatMessage(message, channel));
                     appended = true;
                 }
 
@@ -986,31 +864,16 @@ public partial class MainWindow
 
     private FleetChatChannelRow[] ResolveFleetOverlayChatChannels()
     {
-        var scope = OverlayDisplaySettings.NormalizeFleetChatScope(_overlaySettings.FleetChatScope);
         return _fleetChatChannels
-            .Where(channel => scope switch
-            {
-                OverlayFleetChatScope.Squad => channel.Type == FleetChatChannelTypes.Squad,
-                OverlayFleetChatScope.All =>
-                    channel.Type == FleetChatChannelTypes.Fleet ||
-                    channel.Type == FleetChatChannelTypes.Squad,
-                _ => channel.Type == FleetChatChannelTypes.Fleet
-            })
-            .OrderBy(channel => channel.Type == FleetChatChannelTypes.Fleet ? 0 : 1)
+            .Where(channel => channel.Type == FleetChatChannelTypes.Fleet)
             .ToArray();
     }
 
     private OverlayChatMessage CreateFleetOverlayChatMessage(
         FleetChatMessageContract message,
-        FleetChatChannelRow channel,
-        OverlayFleetChatScope scope)
+        FleetChatChannelRow channel)
     {
         var projectionId = ResolveFleetOverlayChatProjectionId();
-        var sourceLabel = scope == OverlayFleetChatScope.All
-            ? channel.Type == FleetChatChannelTypes.Squad
-                ? _language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "小队" : "SQUAD"
-                : _language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "舰队" : "FLEET"
-            : null;
         return new OverlayChatMessage(
             ++_fleetOverlayChatProjectionSequence,
             projectionId,
@@ -1021,27 +884,23 @@ public partial class MainWindow
             false,
             !string.IsNullOrWhiteSpace(_accountId) &&
             message.SenderAccountId.Equals(_accountId, StringComparison.OrdinalIgnoreCase),
-            string.IsNullOrWhiteSpace(message.SenderRoleColor) ? "#69CCFF" : message.SenderRoleColor,
-            sourceLabel);
+            string.IsNullOrWhiteSpace(message.SenderRoleColor)
+                ? BridgeScenePalette.Resolve(BridgeSceneKind.Fleet).Accent.ToString()
+                : message.SenderRoleColor,
+            null);
     }
 
     private string ResolveFleetOverlayChatProjectionId()
     {
-        var scope = OverlayDisplaySettings.NormalizeFleetChatScope(_overlaySettings.FleetChatScope);
         return string.IsNullOrWhiteSpace(_fleetCode) || ResolveFleetOverlayChatChannels().Length == 0
             ? ""
-            : $"overlay-fleet-chat:{_fleetCode.Trim().ToUpperInvariant()}:{scope}";
+            : $"overlay-fleet-chat:{_fleetCode.Trim().ToUpperInvariant()}:{OverlayFleetChatScope.Fleet}";
     }
 
     private string ResolveFleetOverlayChatTitle()
     {
         var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
-        return OverlayDisplaySettings.NormalizeFleetChatScope(_overlaySettings.FleetChatScope) switch
-        {
-            OverlayFleetChatScope.Squad => zh ? "小队通讯" : "SQUAD COMMS",
-            OverlayFleetChatScope.All => zh ? "综合通讯" : "ALL COMMS",
-            _ => zh ? "舰队通讯" : "FLEET COMMS"
-        };
+        return zh ? "舰队通讯" : "FLEET COMMS";
     }
 
     private OverlayChatMessage[] ResolveFleetOverlayChatMessages() =>
@@ -1067,7 +926,7 @@ public partial class MainWindow
             return;
         }
 
-        var label = _language == "zh" ? "通讯" : "Comms";
+        var label = _language == "zh" ? "聊天" : "Chat";
         FleetChatRailButton.Content = _fleetChatTotalUnread > 0
             ? $"{label}  {(_fleetChatTotalUnread > 99 ? "99+" : _fleetChatTotalUnread.ToString())}"
             : label;
@@ -1093,10 +952,11 @@ public sealed class FleetChatChannelRow : INotifyPropertyChanged
     private bool _isSelected;
     private int _unreadCount;
 
-    public FleetChatChannelRow(FleetChatChannelContract channel)
+    public FleetChatChannelRow(FleetChatChannelContract channel, FrameworkElement resourceScope)
     {
         Channel = channel;
         _unreadCount = channel.UnreadCount;
+        AccentBrush = BridgeSceneContext.GetRequiredAccentBrush(resourceScope);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -1105,12 +965,10 @@ public sealed class FleetChatChannelRow : INotifyPropertyChanged
     public string Type => Channel.Type;
     public string DisplayName => Channel.DisplayName;
     public bool CanSend => Channel.CanSend;
-    public string IconGlyph => Type == FleetChatChannelTypes.Squad ? "\uE902" : "\uE8BD";
-    public Brush AccentBrush => Type == FleetChatChannelTypes.Squad
-        ? new SolidColorBrush(Color.FromRgb(132, 158, 255))
-        : new SolidColorBrush(Color.FromRgb(79, 201, 255));
+    public string IconGlyph => "\uE8BD";
+    public Brush AccentBrush { get; }
     public string PreviewText => string.IsNullOrWhiteSpace(Channel.LastMessagePreview)
-        ? Type == FleetChatChannelTypes.Squad ? "小队内部通讯" : "全舰队通讯"
+        ? "全舰队通讯"
         : Channel.LastMessagePreview;
     public string UnreadText => _unreadCount > 99 ? "99+" : _unreadCount.ToString();
     public Visibility UnreadVisibility => _unreadCount > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1147,12 +1005,21 @@ public sealed class FleetChatMessageRow : INotifyPropertyChanged
 {
     private string _timeText;
 
-    public FleetChatMessageRow(FleetChatMessageContract message, string? localAccountId)
+    public FleetChatMessageRow(
+        FleetChatMessageContract message,
+        string? localAccountId,
+        FrameworkElement resourceScope)
     {
         Message = message;
         IsSelf = !string.IsNullOrWhiteSpace(localAccountId) &&
                  message.SenderAccountId.Equals(localAccountId, StringComparison.OrdinalIgnoreCase);
-        SenderRoleBrush = TryCreateBrush(message.SenderRoleColor);
+        SenderRoleBrush = ChatPresentationBrushes.ResolveSenderRole(
+            resourceScope,
+            IsSelf,
+            message.SenderRoleColor);
+        AttachmentStatusBrush = ChatPresentationBrushes.ResolveAttachmentStatus(
+            resourceScope,
+            message.Attachment);
         _timeText = CommunicationTimeFormatter.Format(message.CreatedAt);
     }
 
@@ -1175,7 +1042,7 @@ public sealed class FleetChatMessageRow : INotifyPropertyChanged
     public bool AttachmentActionEnabled => ChatAttachmentPresentation.ActionEnabled(Attachment);
     public string AttachmentTypeText => ChatAttachmentPresentation.TypeText(Attachment);
     public string AttachmentStatusText => ChatAttachmentPresentation.StatusText(Attachment);
-    public string AttachmentStatusBrush => ChatAttachmentPresentation.StatusBrush(Attachment);
+    public Brush AttachmentStatusBrush { get; }
     public Visibility AttachmentStatusVisibility => ChatAttachmentPresentation.StatusVisibility(Attachment);
     public string AttachmentRoomActivityText => ChatAttachmentPresentation.RoomActivityText(Attachment);
     public string AttachmentRoomFactsText => ChatAttachmentPresentation.RoomFactsText(Attachment);
@@ -1206,15 +1073,4 @@ public sealed class FleetChatMessageRow : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TimeText)));
     }
 
-    private static Brush TryCreateBrush(string? value)
-    {
-        try
-        {
-            return new SolidColorBrush((Color)ColorConverter.ConvertFromString(value ?? "#72C7F3"));
-        }
-        catch
-        {
-            return new SolidColorBrush(Color.FromRgb(114, 199, 243));
-        }
-    }
 }

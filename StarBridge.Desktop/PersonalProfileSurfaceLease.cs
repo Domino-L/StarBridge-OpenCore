@@ -1,8 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using StarBridge.Desktop.Theming;
 using MediaBrushes = System.Windows.Media.Brushes;
-using MediaColor = System.Windows.Media.Color;
 using Panel = System.Windows.Controls.Panel;
 using WpfHorizontalAlignment = System.Windows.HorizontalAlignment;
 
@@ -56,7 +56,7 @@ internal sealed class PersonalProfileSurfaceLease : IDisposable
             throw new InvalidOperationException("个人资料页面当前无法移动到游戏浮层。");
         }
 
-        var placeholder = CreateSourcePlaceholder();
+        var placeholder = CreateSourcePlaceholder(destination);
         var host = new Grid
         {
             Background = MediaBrushes.Transparent,
@@ -141,14 +141,14 @@ internal sealed class PersonalProfileSurfaceLease : IDisposable
         _released?.Invoke();
     }
 
-    private static Grid CreateSourcePlaceholder()
+    private static Grid CreateSourcePlaceholder(FrameworkElement resourceScope)
     {
         var message = new TextBlock
         {
             Text = "个人资料已在游戏浮层中打开",
             HorizontalAlignment = WpfHorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(MediaColor.FromRgb(121, 165, 188)),
+            Foreground = BridgeTokenBrushes.GetRequired(resourceScope, BridgeBrushToken.Ink2),
             FontSize = 13
         };
         return new Grid

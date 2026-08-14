@@ -28,25 +28,7 @@ public partial class MainWindow
         PersonalAppConfigPathValueText.Text = DesktopAppConfig.ConfigDirectory;
         RefreshApplicationBehaviorPresentation();
         RefreshGameplayStatisticsPresentation();
-        var hasPermanentNightShadow = OverlayEntitlementPolicy.CanUseNightShadow(_accountEntitlements);
-        if (hasPermanentNightShadow)
-        {
-            PersonalNightShadowEntitlementText.Text = "已解锁 · 服务器账号资格";
-            PersonalNightShadowEntitlementText.Foreground = FindBrush("StatusSuccessBrush", Brushes.SpringGreen);
-        }
-        else if (_temporaryEntitlements.TryGetValue(OverlayEntitlementPolicy.NightShadowEntitlement, out var expiresAt) &&
-                 expiresAt > DateTimeOffset.UtcNow)
-        {
-            PersonalNightShadowEntitlementText.Text = $"临时解锁至 {expiresAt.ToLocalTime():yyyy-MM-dd HH:mm}";
-            PersonalNightShadowEntitlementText.Foreground = FindBrush("StatusWarningBrush", Brushes.Orange);
-        }
-        else
-        {
-            PersonalNightShadowEntitlementText.Text = IsLoggedIn ? "未解锁" : "登录后可验证资格";
-            PersonalNightShadowEntitlementText.Foreground = FindBrush("StatusDisabledBrush", Brushes.LightSlateGray);
-        }
-
-        var canRedeem = IsLoggedIn && !hasPermanentNightShadow;
+        var canRedeem = IsLoggedIn;
         TemporaryEntitlementCodeBox.IsEnabled = canRedeem;
         TemporaryEntitlementCodeBox.Opacity = canRedeem ? 1 : 0.58;
         RedeemTemporaryEntitlementButton.IsEnabled = canRedeem;
@@ -941,40 +923,38 @@ public partial class MainWindow
         }
 
         RedeemTemporaryEntitlementButton.IsEnabled = false;
-        TemporaryEntitlementStatusText.Text = "正在验证兑换码…";
+        TemporaryEntitlementStatusText.Text = "正在兑换…";
         try
         {
             var response = await PostNetworkJsonAsync(
                 "api/auth/entitlements/redeem",
                 new TemporaryEntitlementRedeemRequest(code));
-            if (HandleAuthorizationFailure(response.StatusCode, "临时解锁"))
+            if (HandleAuthorizationFailure(response.StatusCode, "兑换"))
             {
                 return;
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                TemporaryEntitlementStatusText.Text = await ReadResponseErrorAsync(response) ?? "兑换码验证失败。";
+                TemporaryEntitlementStatusText.Text = await ReadResponseErrorAsync(response) ?? "兑换失败。";
                 return;
             }
 
             var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
             if (auth is null)
             {
-                TemporaryEntitlementStatusText.Text = "暂时无法验证兑换码，请稍后重试。";
+                TemporaryEntitlementStatusText.Text = "暂时无法兑换，请稍后重试。";
                 return;
             }
 
             ApplyAuthResponse(auth);
             SaveCurrentConfig();
             TemporaryEntitlementCodeBox.Clear();
-            TemporaryEntitlementStatusText.Text = CanUseNightShadow
-                ? "兑换码已生效，可使用对应内容；到期后会自动恢复默认状态。"
-                : "兑换码有效，但当前未包含可用内容。";
+            TemporaryEntitlementStatusText.Text = "兑换成功。";
         }
         catch (Exception ex)
         {
-            TemporaryEntitlementStatusText.Text = UserFacingError.Describe(ex, "兑换码验证未完成，请稍后重试。");
+            TemporaryEntitlementStatusText.Text = UserFacingError.Describe(ex, "兑换未完成，请稍后重试。");
         }
         finally
         {

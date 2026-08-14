@@ -1,6 +1,8 @@
 <Window x:Class="StarBridge.Desktop.InGameBrowserWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:StarBridge.Desktop"
+        xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="游戏时浏览器"
@@ -147,7 +149,7 @@
                               HorizontalScrollBarVisibility="Hidden"
                               VerticalScrollBarVisibility="Disabled"
                               PanningMode="HorizontalOnly"
-                              PreviewMouseWheel="BrowserTabViewport_PreviewMouseWheel">
+                              local:SmoothWheelScrollBehavior.ScrollsHorizontally="True">
                     <StackPanel x:Name="BrowserTabFlow"
                                 HorizontalAlignment="Left"
                                 Orientation="Horizontal">
@@ -299,6 +301,9 @@
                         Visibility="Visible">
                     <StackPanel HorizontalAlignment="Center"
                                 VerticalAlignment="Center">
+                        <controls:BridgeLoadingIndicator x:Name="BrowserStartupLoadingIndicator"
+                                                         Margin="0,0,0,9"
+                                                         IsActive="True" />
                         <TextBlock Text="正在启动浏览器"
                                    Foreground="{StaticResource PrimaryTextBrush}"
                                    FontSize="16"
@@ -319,12 +324,24 @@
                     BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
                     BorderThickness="0,1,0,0">
                 <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <controls:BridgeLoadingIndicator x:Name="BrowserStatusLoadingIndicator"
+                                                     Margin="0,0,7,0"
+                                                     VerticalAlignment="Center"
+                                                     IsActive="False"
+                                                     Visibility="Collapsed" />
                     <TextBlock x:Name="BrowserStatusText"
+                               Grid.Column="1"
                                Text="仅允许打开 HTTP 与 HTTPS 网页"
                                Foreground="{StaticResource MutedTextBrush}"
                                FontSize="9"
                                VerticalAlignment="Center" />
                     <TextBlock Text="ESC 返回游戏"
+                               Grid.Column="2"
                                Foreground="{StaticResource MutedTextBrush}"
                                FontSize="9"
                                HorizontalAlignment="Right"

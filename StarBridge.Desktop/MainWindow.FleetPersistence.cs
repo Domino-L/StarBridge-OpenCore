@@ -8,6 +8,11 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private const string FleetCommanderRoleGroupKey = "fleet_commander";
+    private const string FleetCommanderDefaultRoleColor = FleetRoleColorPalette.Gold;
+    private const string FleetDeputyCommanderRoleGroupKey = "fleet_deputy_commander";
+    private const string FleetDeputyCommanderDefaultRoleColor = FleetRoleColorPalette.Blue;
+
     private void RenderCachedIdentity()
     {
         if (!IsLoggedIn)
@@ -96,7 +101,8 @@ public partial class MainWindow
             fleetStateJson,
             _allowEmailNotifications,
             OverlayGlobalHotkeyEnabledCheck.IsChecked == true,
-            persistedAccountId));
+            persistedAccountId,
+            _fleetStateCachedAtUtc));
         DesktopAppConfig.SaveOverlaySettings(overlaySettings);
         DesktopAppConfig.SaveOverlayLayout(overlayLayout);
         DesktopAppConfig.SaveActiveOverlayPreset(activeOverlayPreset);
@@ -107,6 +113,13 @@ public partial class MainWindow
 
     private string SerializeFleetState()
     {
+#if DEBUG
+        if (TryGetFleetProfileAcceptancePersistenceState(out var acceptanceState))
+        {
+            return acceptanceState;
+        }
+#endif
+
         var cache = new LocalFleetState(
             _hasFleet,
             _fleetName,
@@ -138,18 +151,6 @@ public partial class MainWindow
                 item.Rally,
                 item.RequiredShip,
                 item.PublishedAtText)).ToArray(),
-            _squads.Select(squad => new LocalSquadState(
-                squad.Name,
-                squad.Icon,
-                squad.Commander,
-                squad.Mission,
-                squad.RallyPoint,
-                squad.Description,
-                squad.Type,
-                squad.EmblemPath,
-                squad.UpdatedAt,
-                FleetChatIdentity.NormalizeSquadId(squad.Id, squad.Name))).ToArray(),
-            _joinedSquad?.Name,
             _fleetActionPlans.Select(plan => new LocalFleetActionPlan(
                 plan.Id,
                 plan.Title,
@@ -178,7 +179,6 @@ public partial class MainWindow
                 row.OccurrenceCount)).ToArray(),
             _fleetMemberPermissions.Values.ToArray(),
             _fleetEmailNotificationsEnabled,
-            _selectedSquad?.Name,
             _fleetJoinedAtUtc,
             _manageProfileSelectedTagIds.ToArray(),
             _fleetBannerPath,
@@ -218,7 +218,7 @@ public partial class MainWindow
             FleetNoticePublishedAt: _fleetNoticePublishedAt,
             FleetInviteCodeCreationPolicy: _fleetInviteCodeCreationPolicy,
             FleetInvitationCardPolicy: _fleetInvitationCardPolicy);
-        return JsonSerializer.Serialize(cache);
+        return LocalFleetStateCodec.Serialize(cache);
     }
 
     private LocalFleetRoleGroup[] BuildLocalFleetRoleGroups()
@@ -288,13 +288,34 @@ public partial class MainWindow
 
     private void EnsureDefaultFleetRoleGroupDefinitions()
     {
-        if (!_fleetRoleGroupDefinitions.ContainsKey("fleet_deputy_commander"))
+        if (!_fleetRoleGroupDefinitions.ContainsKey(FleetCommanderRoleGroupKey))
         {
             var row = CreateFleetRoleGroupRow(
-                "fleet_deputy_commander",
+                FleetCommanderRoleGroupKey,
+                "舰队指挥官",
+                "舰队的唯一指挥席位，默认拥有全部权限；可调整公开显示的身份颜色。",
+                FleetCommanderDefaultRoleColor,
+                0,
+                true,
+                0,
+                [
+                    FleetPermissionPolicy.EditFleetProfile,
+                    FleetPermissionPolicy.ManageAnnouncements,
+                    FleetPermissionPolicy.AnnouncementPermissionSchemaMarker,
+                    "members.review",
+                    "members.remove",
+                    "audit.view"
+                ]);
+            _fleetRoleGroupDefinitions[row.Key] = ToLocalFleetRoleGroup(row);
+        }
+
+        if (!_fleetRoleGroupDefinitions.ContainsKey(FleetDeputyCommanderRoleGroupKey))
+        {
+            var row = CreateFleetRoleGroupRow(
+                FleetDeputyCommanderRoleGroupKey,
                 "舰队副指挥官",
                 "协助舰队指挥官处理日常管理与调度。",
-                "#29AFFF",
+                FleetDeputyCommanderDefaultRoleColor,
                 1,
                 true,
                 0,
@@ -373,7 +394,11 @@ public partial class MainWindow
         var displayName = string.IsNullOrWhiteSpace(role.DisplayName)
             ? NormalizeRoleDisplayTitle(null, key)
             : role.DisplayName.Trim();
-        var color = string.IsNullOrWhiteSpace(role.Color) ? "#29AFFF" : role.Color.Trim();
+        var isCommander = key.Equals(FleetCommanderRoleGroupKey, StringComparison.OrdinalIgnoreCase);
+        var isDeputyCommander = key.Equals(FleetDeputyCommanderRoleGroupKey, StringComparison.OrdinalIgnoreCase);
+        var color = string.IsNullOrWhiteSpace(role.Color)
+            ? isCommander ? FleetCommanderDefaultRoleColor : FleetDeputyCommanderDefaultRoleColor
+            : role.Color.Trim();
         var createdAt = role.CreatedAt == default ? DateTimeOffset.UtcNow : role.CreatedAt;
         var updatedAt = role.UpdatedAt == default ? createdAt : role.UpdatedAt;
 
@@ -382,8 +407,8 @@ public partial class MainWindow
             displayName,
             role.Description?.Trim() ?? "",
             color,
-            key.Equals("fleet_deputy_commander", StringComparison.OrdinalIgnoreCase) ? 1 : Math.Max(10, role.SortOrder),
-            key.Equals("fleet_deputy_commander", StringComparison.OrdinalIgnoreCase) || role.IsSystem,
+            isCommander ? 0 : isDeputyCommander ? 1 : Math.Max(10, role.SortOrder),
+            isCommander || isDeputyCommander || role.IsSystem,
             role.IsEnabled,
             Math.Max(0, role.MemberCount),
             FleetPermissionPolicy.NormalizeRolePermissions(
@@ -402,8 +427,7 @@ public partial class MainWindow
 
     private static bool IsPersistableFleetRoleGroupKey(string? key)
     {
-        return !string.IsNullOrWhiteSpace(key) &&
-               !key.Equals("fleet_commander", StringComparison.OrdinalIgnoreCase);
+        return !string.IsNullOrWhiteSpace(key);
     }
 
     private static LocalFleetRoleGroup ToLocalFleetRoleGroup(FleetRoleGroupRow role)
@@ -469,9 +493,6 @@ public partial class MainWindow
         RefreshFleetOperationalSurfaces();
         RefreshFleetMemberManagement();
         RefreshFleetApplications();
-        RenderSquads();
-        RenderMySquad();
-        RefreshSquadActionButtons();
         RenderState();
     }
 
@@ -504,11 +525,6 @@ public partial class MainWindow
                 FleetEmailNotificationsEnabledCheck.IsChecked = _fleetEmailNotificationsEnabled;
             }
 
-            if (MySquadDescriptionBox is not null)
-            {
-                MySquadDescriptionBox.Text = _selectedSquad?.Description ?? "";
-            }
-
             if (ActionPlanEditorPanel is { Visibility: Visibility.Visible } &&
                 !string.IsNullOrWhiteSpace(_editingActionPlanId))
             {
@@ -521,7 +537,7 @@ public partial class MainWindow
                     ActionPlanDatePicker.SelectedDate = editingPlan.StartTime.Date;
                     ActionPlanTimeBox.Text = editingPlan.StartTime.ToString("HH:mm");
                     ActionPlanNotifyFleetCheck.IsChecked = editingPlan.NotifyMembers;
-                    ActionPlanEditorTitleText.Text = "编辑稍后行动";
+                    ActionPlanEditorPanel.Title = "编辑稍后行动";
                     PublishActionPlanButton.Content = "保存";
                 }
             }
@@ -541,7 +557,7 @@ public partial class MainWindow
 
         try
         {
-            var cache = JsonSerializer.Deserialize<LocalFleetState>(fleetStateJson);
+            var cache = LocalFleetStateCodec.Deserialize(fleetStateJson);
             if (cache is null)
             {
                 return;
@@ -570,7 +586,7 @@ public partial class MainWindow
             _fleetNoticePublishedAt = cache.FleetNoticePublishedAt;
             _fleetCurrentTaskTitle = cache.FleetCurrentTaskTitle ?? "";
             _fleetCurrentTaskBrief = cache.FleetCurrentTaskBrief ?? "";
-            _fleetCurrentTaskParticipants = cache.FleetCurrentTaskParticipants ?? "";
+            _fleetCurrentTaskParticipants = NormalizeFleetTaskParticipants(cache.FleetCurrentTaskParticipants);
             _fleetCurrentTaskRally = cache.FleetCurrentTaskRally ?? "";
             _fleetCurrentTaskShip = cache.FleetCurrentTaskShip ?? "";
             _fleetCurrentTaskEmailCall = cache.FleetCurrentTaskEmailCall;
@@ -591,35 +607,6 @@ public partial class MainWindow
                     item.Rally,
                     item.RequiredShip,
                     item.PublishedAtText));
-            }
-
-            _squads.Clear();
-            foreach (var squad in cache.Squads ?? [])
-            {
-                _squads.Add(new SquadRow
-                {
-                    Id = FleetChatIdentity.NormalizeSquadId(squad.Id, squad.Name),
-                    Name = squad.Name,
-                    Icon = string.IsNullOrWhiteSpace(squad.Icon) ? GetInitials(squad.Name) : squad.Icon,
-                    Commander = string.IsNullOrWhiteSpace(squad.Commander) ? "Unassigned" : squad.Commander,
-                    Mission = string.IsNullOrWhiteSpace(squad.Mission) ? "Standby" : squad.Mission,
-                    RallyPoint = string.IsNullOrWhiteSpace(squad.RallyPoint) ? "Use Global" : squad.RallyPoint,
-                    Description = string.IsNullOrWhiteSpace(squad.Description) ? "No squad briefing yet." : squad.Description,
-                    Type = string.IsNullOrWhiteSpace(squad.Type) ? "Assault" : squad.Type,
-                    EmblemPath = squad.EmblemPath,
-                    UpdatedAt = squad.UpdatedAt
-                });
-            }
-
-            _joinedSquad = _squads.FirstOrDefault(squad =>
-                squad.Name.Equals(cache.JoinedSquadName, StringComparison.OrdinalIgnoreCase));
-            _selectedSquad = string.IsNullOrWhiteSpace(cache.SelectedSquadName)
-                ? _joinedSquad
-                : _squads.FirstOrDefault(squad =>
-                    squad.Name.Equals(cache.SelectedSquadName, StringComparison.OrdinalIgnoreCase)) ?? _joinedSquad;
-            if (SquadSelectionList is not null)
-            {
-                SquadSelectionList.SelectedItem = _selectedSquad;
             }
 
             _fleetActionPlans.Clear();
@@ -717,6 +704,7 @@ public partial class MainWindow
             _fleetPublicShowActiveSystems = cache.FleetPublicShowActiveSystems;
             _fleetPublicShowActivityTime = cache.FleetPublicShowActivityTime;
             _fleetPublicShowExternalContacts = cache.FleetPublicShowExternalContacts;
+            ApplyLoadedExternalContactPublicationState(_fleetPublicShowExternalContacts);
 
             ApplyFleetEventLogFilter();
 

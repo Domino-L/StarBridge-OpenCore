@@ -1,3 +1,5 @@
+using StarBridge.Core.Presence;
+
 namespace StarBridge.Desktop;
 
 public enum FleetInfoPanelKind
@@ -11,7 +13,6 @@ public sealed record NetworkPlayerSnapshot(
     string Name,
     string? Callsign,
     string? Fleet,
-    string? Squad,
     bool Online,
     string? Ship,
     string? ShipConfidence,
@@ -28,7 +29,16 @@ public sealed record NetworkPlayerSnapshot(
     string? AccountId = null,
     int SharedEventTypes = (int)PlayerSharedEventTypes.All,
     NetworkPlayerSharedEventSnapshot[]? SharedEvents = null,
-    bool FriendsCanViewPresence = true);
+    bool FriendsCanViewPresence = true,
+    string[]? AllowedViewerAccountIds = null,
+    StarBridge.Core.Presence.PlayerSharedStateFields? FleetSharedStateFields = null,
+    string? RoomVisibilityScope = null,
+    StarBridge.Core.Presence.PlayerSharedStateFields? RoomSharedStateFields = null,
+    bool? FleetAdministratorsCanView = null,
+    bool? FleetMembersCanView = null,
+    string[]? FleetVisibilityGroupIds = null,
+    bool? RoomMembersCanView = null,
+    string[]? RoomVisibilityGroupIds = null);
 
 public sealed record PlayerPresenceHeartbeatRequest(
     bool Online,
@@ -46,7 +56,11 @@ public sealed record NetworkOwnedShipSnapshot(
     DateTimeOffset ImportedAt,
     DateTimeOffset SyncedAt = default,
     string? InstanceId = null,
-    string? RoleCategory = null);
+    string? RoleCategory = null,
+    string? CustomImageMediaId = null,
+    double CustomImageCropFocusX = 0.5,
+    double CustomImageCropFocusY = 0.5,
+    double CustomImageCropZoom = 1.0);
 
 public sealed record NetworkFleetActivityWindowSnapshot(
     string[]? Days,
@@ -64,7 +78,6 @@ public sealed record NetworkFleetSnapshot(
     string? JoinPolicy,
     string? LogoText,
     string? LogoImageData,
-    NetworkSquadSnapshot[]? Squads,
     int OnlineMembers,
     int TotalMembers,
     string? NoticeTitle,
@@ -174,7 +187,6 @@ public sealed record NetworkFleetMemberSnapshot(
     string GameName,
     string? Callsign,
     string RoleTitle,
-    string SquadName,
     bool Online,
     string? Ship,
     string? Location,
@@ -192,13 +204,16 @@ public sealed record NetworkFleetShipSnapshot(
     string DisplayName,
     string OwnerGameName,
     string? OwnerCallsign,
-    string? OwnerSquad,
     string? OwnerAvatarImageData,
     DateTimeOffset ImportedAt,
     DateTimeOffset HangarImportedAt = default,
     string? InstanceId = null,
     string? RoleCategory = null,
-    string? OwnerAccountId = null);
+    string? OwnerAccountId = null,
+    string? CustomImageMediaId = null,
+    double CustomImageCropFocusX = 0.5,
+    double CustomImageCropFocusY = 0.5,
+    double CustomImageCropZoom = 1.0);
 
 public sealed record NetworkFleetEventLogSnapshot(
     string Id,
@@ -218,35 +233,6 @@ public sealed record NetworkFleetTaskHistorySnapshot(
     string Rally,
     string RequiredShip,
     string PublishedAtText);
-
-public sealed record NetworkSquadSnapshot(
-    string Name,
-    string? Commander,
-    string? Type,
-    string? Description,
-    string? Mission = null,
-    string? RallyPoint = null,
-    string? EmblemImageData = null,
-    DateTimeOffset UpdatedAt = default,
-    string? Id = null);
-
-public sealed record FleetSquadMemberMutationRequest(
-    string FleetCode,
-    string SquadName,
-    string TargetGameName,
-    string? TargetCallsign = null);
-
-public sealed record FleetSquadCommanderTransferRequest(
-    string FleetCode,
-    string SquadName,
-    string TargetGameName,
-    string? TargetCallsign = null);
-
-public sealed record FleetSquadLeaveRequest(
-    string FleetCode,
-    string SquadName,
-    string? SuccessorGameName = null,
-    string? SuccessorCallsign = null);
 
 public sealed record NetworkActionPlanSnapshot(
     string Id,
@@ -296,7 +282,9 @@ public sealed record AuthResponse(
     string? AccountId = null,
     DateTimeOffset? IdentityBindingConfirmedAt = null,
     DateTimeOffset? IdentityBindingUpdatedAt = null,
-    bool? IdentityBindingRequired = null);
+    bool? IdentityBindingRequired = null,
+    GameIdVisibilityLocations? GameIdVisibilityLocations = null,
+    bool? GameIdVisibilityCanConfigure = null);
 
 public sealed record IdentityBindingUpdateRequest(
     string? GameName,
@@ -321,7 +309,8 @@ public sealed record PasswordResetRequest(
 public sealed record ProfileUpdateRequest(
     string? Callsign,
     bool? AllowEmailNotifications = null,
-    string? AvatarImageData = null);
+    string? AvatarImageData = null,
+    GameIdVisibilityLocations? GameIdVisibilityLocations = null);
 
 public sealed record FeedbackRequest(
     string? Contact,
@@ -509,11 +498,6 @@ public sealed record FleetInfoUpdateRequest(
 public sealed record FleetLogDeleteRequest(
     string FleetCode,
     string LogId);
-
-public sealed record FleetSquadsUpdateRequest(
-    string FleetCode,
-    NetworkSquadSnapshot[]? Squads,
-    NetworkFleetEventLogSnapshot[]? EventLog = null);
 
 public sealed record FleetDisbandRequest(
     string FleetCode,

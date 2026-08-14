@@ -29,6 +29,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using StarBridge.Desktop.Theming;
 using System.Windows.Threading;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
@@ -37,6 +38,9 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow
 {
+    private bool _findFleetFilterDrawerMode;
+    private bool _findFleetFilterDrawerOpen;
+
     private void RefreshFleetDirectoryViewState()
     {
         var status = _fleetDirectoryState.LoadStatus;
@@ -55,9 +59,9 @@ public partial class MainWindow
             FindFleetDirectoryStatusText.Text = _fleetDirectoryState.StatusMessage;
             FindFleetDirectoryStatusText.Foreground = status switch
             {
-                FleetDirectoryLoadStatus.Error => BrushFromHex("#F15B65"),
-                FleetDirectoryLoadStatus.OfflineCache => BrushFromHex("#D9A23B"),
-                _ => BrushFromHex("#29AFFF")
+                FleetDirectoryLoadStatus.Error => StatusPalette.DangerBrush,
+                FleetDirectoryLoadStatus.OfflineCache => StatusPalette.WarningBrush,
+                _ => StatusPalette.InfoBrush
             };
         }
 
@@ -65,9 +69,9 @@ public partial class MainWindow
         {
             FindFleetDirectoryStatusDot.Fill = status switch
             {
-                FleetDirectoryLoadStatus.Error => BrushFromHex("#F15B65"),
-                FleetDirectoryLoadStatus.OfflineCache => BrushFromHex("#D9A23B"),
-                _ => BrushFromHex("#29AFFF")
+                FleetDirectoryLoadStatus.Error => StatusPalette.DangerBrush,
+                FleetDirectoryLoadStatus.OfflineCache => StatusPalette.WarningBrush,
+                _ => StatusPalette.InfoBrush
             };
         }
 
@@ -267,11 +271,14 @@ public partial class MainWindow
             return true;
         }
 
-        var totalMembers = card.Snapshot.TotalMembers;
-        return small && totalMembers <= 10 ||
-               medium && totalMembers is > 10 and <= 50 ||
-               large && totalMembers is > 50 and < 300 ||
-               veryLarge && totalMembers >= 300;
+        return FleetDirectoryMemberScale.Classify(card.Snapshot.TotalMembers) switch
+        {
+            FleetDirectoryMemberScaleKind.Small => small,
+            FleetDirectoryMemberScaleKind.Medium => medium,
+            FleetDirectoryMemberScaleKind.Large => large,
+            FleetDirectoryMemberScaleKind.VeryLarge => veryLarge,
+            _ => false
+        };
     }
 
     private bool PassesFindFleetActivityFilters(NetworkFleetSnapshot snapshot)
@@ -445,7 +452,12 @@ public partial class MainWindow
 
     private void FindFleetFilterToggleButton_Click(object sender, RoutedEventArgs e)
     {
-        SetFindFleetFilterPanelVisible(true);
+        SetFindFleetFilterPanelVisible(!_findFleetFilterDrawerOpen);
+    }
+
+    private void FindFleetFilterDrawerCloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetFindFleetFilterPanelVisible(false);
     }
 
     private void FindFleetFilterApplyButton_Click(object sender, RoutedEventArgs e)
@@ -453,7 +465,7 @@ public partial class MainWindow
         _fleetDirectoryState.ApplyFilters(CaptureFindFleetFilterDraft());
         RefreshFindFleetAppliedFilters();
         ApplyFleetSearchFilter();
-        SetFindFleetFilterPanelVisible(true);
+        SetFindFleetFilterPanelVisible(!_findFleetFilterDrawerMode);
     }
 
     private void FindFleetFilterResetButton_Click(object sender, RoutedEventArgs e)
@@ -523,17 +535,87 @@ public partial class MainWindow
 
     private void SetFindFleetFilterPanelVisible(bool visible)
     {
+        _findFleetFilterDrawerOpen = _findFleetFilterDrawerMode && visible;
+
         if (FindFleetFilterPanel is not null)
         {
-            FindFleetFilterPanel.Visibility = Visibility.Visible;
+            FindFleetFilterPanel.Visibility = !_findFleetFilterDrawerMode || _findFleetFilterDrawerOpen
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         if (FindFleetFilterToggleButton is not null)
         {
-            FindFleetFilterToggleButton.Visibility = Visibility.Collapsed;
+            FindFleetFilterToggleButton.Visibility = _findFleetFilterDrawerMode
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            FindFleetFilterToggleButton.Content = _findFleetFilterDrawerOpen ? "关闭筛选" : "筛选";
+        }
+
+        if (FindFleetFilterDrawerCloseButton is not null)
+        {
+            FindFleetFilterDrawerCloseButton.Visibility = _findFleetFilterDrawerMode
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         RefreshFindFleetFilterDraftSummary();
+    }
+
+    private void FindFleetDirectorySplitPanel_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ApplyFindFleetResponsiveLayout(e.NewSize.Width);
+    }
+
+    private void ApplyFindFleetResponsiveLayout(double splitAvailableWidth)
+    {
+        if (FindFleetDirectorySplitPanel is null ||
+            !double.IsFinite(splitAvailableWidth) ||
+            splitAvailableWidth <= 0d)
+        {
+            return;
+        }
+
+        var layout = FindFleetDirectoryLayout.ResolveSplit(
+            splitAvailableWidth,
+            SystemParameters.VerticalScrollBarWidth);
+        var modeChanged = _findFleetFilterDrawerMode != layout.UseFilterDrawer;
+        _findFleetFilterDrawerMode = layout.UseFilterDrawer;
+        if (modeChanged)
+        {
+            _findFleetFilterDrawerOpen = false;
+        }
+
+        FindFleetDirectorySplitPanel.SidebarWidth = new GridLength(layout.SidebarWidth);
+        FindFleetDirectorySplitPanel.SidebarMinWidth = layout.SidebarMinWidth;
+        FindFleetDirectorySplitPanel.Gap = layout.SplitGap;
+
+        if (FindFleetFilterToggleColumn is not null)
+        {
+            FindFleetFilterToggleColumn.Width = _findFleetFilterDrawerMode
+                ? GridLength.Auto
+                : new GridLength(0d);
+        }
+
+        if (FindFleetFilterPanel is not null)
+        {
+            if (_findFleetFilterDrawerMode)
+            {
+                Controls.DirectorySplitPanel.SetRegion(FindFleetFilterPanel, Controls.DirectoryRegion.List);
+                Grid.SetColumnSpan(FindFleetFilterPanel, 3);
+                FindFleetFilterPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Right;
+                FindFleetFilterPanel.Width = FindFleetDirectoryLayout.SidebarMinWidth;
+            }
+            else
+            {
+                Controls.DirectorySplitPanel.SetRegion(FindFleetFilterPanel, Controls.DirectoryRegion.Sidebar);
+                Grid.SetColumnSpan(FindFleetFilterPanel, 1);
+                FindFleetFilterPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch;
+                FindFleetFilterPanel.Width = double.NaN;
+            }
+        }
+
+        SetFindFleetFilterPanelVisible(_findFleetFilterDrawerOpen);
     }
 
     private FleetDirectoryFilters CaptureFindFleetFilterDraft() => new FleetDirectoryFilters(
@@ -906,7 +988,7 @@ public partial class MainWindow
         return card;
     }
 
-    private static NetworkFleetCard DecorateFleetDirectoryTags(NetworkFleetCard card)
+    private NetworkFleetCard DecorateFleetDirectoryTags(NetworkFleetCard card)
     {
         var chips = BuildFleetDirectoryTagChips(card);
         var systemChips = BuildFleetDirectorySystemRecommendationChips(card);
@@ -917,7 +999,7 @@ public partial class MainWindow
         };
     }
 
-    private static IReadOnlyList<FleetDirectoryTagChip> BuildFleetDirectorySystemRecommendationChips(NetworkFleetCard card)
+    private IReadOnlyList<FleetDirectoryTagChip> BuildFleetDirectorySystemRecommendationChips(NetworkFleetCard card)
     {
         var candidates = new List<(int Priority, FleetDirectoryTagChip Chip)>();
         var snapshot = card.Snapshot;
@@ -934,14 +1016,14 @@ public partial class MainWindow
                     candidates.Add((100, CreateFleetDirectorySystemChip(
                         "时区相同",
                         "舰队默认时区与你当前时区的 UTC 偏移一致。",
-                        "#42CFB0")));
+                        BridgeBrushToken.StatusOk)));
                 }
                 else if (offsetDifference <= TimeSpan.FromHours(1))
                 {
                     candidates.Add((95, CreateFleetDirectorySystemChip(
                         "时差较小",
                         "舰队默认时区与你当前时区相差不超过 1 小时。",
-                        "#42CFB0")));
+                        BridgeBrushToken.StatusOk)));
                 }
             }
             catch (TimeZoneNotFoundException)
@@ -959,7 +1041,7 @@ public partial class MainWindow
             candidates.Add((90, CreateFleetDirectorySystemChip(
                 "无门槛",
                 "该舰队公开设置为直接加入，无需申请审核或邀请码。",
-                "#42CF7C")));
+                BridgeBrushToken.StatusOk)));
         }
 
         if (!string.Equals(snapshot.PublicMemberScaleMode, "Hidden", StringComparison.OrdinalIgnoreCase) &&
@@ -968,7 +1050,7 @@ public partial class MainWindow
             candidates.Add((85, CreateFleetDirectorySystemChip(
                 "大规模",
                 "该舰队公开成员规模达到 51 人或以上。",
-                "#29AFFF")));
+                BridgeBrushToken.StatusInfo)));
         }
 
         if (snapshot.RecruitingEnabled)
@@ -979,7 +1061,7 @@ public partial class MainWindow
             candidates.Add((110, CreateFleetDirectorySystemChip(
                 $"正在招募 · {recruitingTarget}",
                 $"该舰队当前公开招募群体：{recruitingTarget}。",
-                "#42CF7C")));
+                BridgeBrushToken.StatusOk)));
         }
 
         var publicShipCount = Math.Max(snapshot.PublicShipCount, snapshot.Ships?.Length ?? 0);
@@ -989,7 +1071,7 @@ public partial class MainWindow
             candidates.Add((70, CreateFleetDirectorySystemChip(
                 "舰船丰富",
                 "该舰队公开舰船总数达到 20 艘或以上。",
-                "#29AFFF")));
+                BridgeBrushToken.StatusInfo)));
         }
 
         if (string.Equals(snapshot.PublicShipScaleMode, "TypeSummary", StringComparison.OrdinalIgnoreCase) &&
@@ -998,7 +1080,7 @@ public partial class MainWindow
             candidates.Add((65, CreateFleetDirectorySystemChip(
                 "舰种多样",
                 "该舰队公开的舰船资源覆盖至少 3 个类型。",
-                "#29AFFF")));
+                BridgeBrushToken.StatusInfo)));
         }
 
         if (snapshot.PublicShowActiveSystems &&
@@ -1007,7 +1089,7 @@ public partial class MainWindow
             candidates.Add((60, CreateFleetDirectorySystemChip(
                 "多区域活动",
                 "该舰队公开了至少 2 个主要活跃星系。",
-                "#41BDE8")));
+                BridgeBrushToken.StatusInfo)));
         }
 
         var hasCompleteProfile = snapshot.PublicShowDescription && !string.IsNullOrWhiteSpace(snapshot.Description) &&
@@ -1019,7 +1101,7 @@ public partial class MainWindow
             candidates.Add((50, CreateFleetDirectorySystemChip(
                 "资料完整",
                 "该舰队公开了介绍、玩法标签、活动时间和主要活跃区域。",
-                "#91A5B5")));
+                BridgeBrushToken.StatusOff)));
         }
 
         return candidates
@@ -1029,22 +1111,23 @@ public partial class MainWindow
             .ToArray();
     }
 
-    private static FleetDirectoryTagChip CreateFleetDirectorySystemChip(
+    private FleetDirectoryTagChip CreateFleetDirectorySystemChip(
         string name,
         string reason,
-        string color)
+        BridgeBrushToken token)
     {
+        var accent = FleetCommandBrush(token);
         return new FleetDirectoryTagChip(
             name,
             "系统推荐",
             reason,
-            BrushFromHex(color),
-            BrushFromHex(color, 0.72),
-            BrushFromHex(color, 0.16),
+            accent,
+            CloneFleetDirectoryBrush(accent, 0.72),
+            CloneFleetDirectoryBrush(accent, 0.16),
             $"{name}：{reason}");
     }
 
-    private static IReadOnlyList<FleetDirectoryTagChip> BuildFleetDirectoryTagChips(NetworkFleetCard card)
+    private IReadOnlyList<FleetDirectoryTagChip> BuildFleetDirectoryTagChips(NetworkFleetCard card)
     {
         var rawTags = card.Snapshot.PublicShowTags && !string.IsNullOrWhiteSpace(card.Snapshot.Type)
             ? card.Snapshot.Type
@@ -1096,7 +1179,7 @@ public partial class MainWindow
             .Where(tag => !string.IsNullOrWhiteSpace(tag));
     }
 
-    private static FleetDirectoryTagChip? CreateFleetDirectoryTagChip(string rawTag)
+    private FleetDirectoryTagChip? CreateFleetDirectoryTagChip(string rawTag)
     {
         var tagText = rawTag.Trim();
         if (tagText.Length == 0 || tagText.Equals("未公开", StringComparison.OrdinalIgnoreCase))
@@ -1125,15 +1208,29 @@ public partial class MainWindow
             }
         }
 
-        var accent = BrushFromHex("#91A5B5");
+        var accent = FleetCommandBrush(BridgeBrushToken.StatusOff);
         return new FleetDirectoryTagChip(
             tagText,
             "舰队标签",
             "旧标签或未归类标签。",
             accent,
-            BrushFromHex("#91A5B5", 0.62),
-            BrushFromHex("#91A5B5", 0.14),
+            CloneFleetDirectoryBrush(accent, 0.62),
+            CloneFleetDirectoryBrush(accent, 0.14),
             tagText);
+    }
+
+    private static System.Windows.Media.Brush CloneFleetDirectoryBrush(
+        System.Windows.Media.Brush source,
+        double opacity)
+    {
+        var clone = source.CloneCurrentValue();
+        clone.Opacity = Math.Clamp(opacity, 0, 1);
+        if (clone.CanFreeze)
+        {
+            clone.Freeze();
+        }
+
+        return clone;
     }
 
     private static int CalculateFleetSearchScore(NetworkFleetCard card, string query)
@@ -1243,12 +1340,6 @@ public partial class MainWindow
     }
 
     private void FindFleetDetailCloseButton_Click(object sender, RoutedEventArgs e)
-    {
-        _fleetDirectoryState.CloseDetails();
-        ApplyFindFleetDetailPanelState();
-    }
-
-    private void FindFleetDetailScrim_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _fleetDirectoryState.CloseDetails();
         ApplyFindFleetDetailPanelState();
@@ -1491,13 +1582,42 @@ public partial class MainWindow
 
     private void ApplyFindFleetDetailPanelState()
     {
+        // SelectionChanged can fire while InitializeComponent is still
+        // constructing controls declared later in MainWindow.xaml.
+        if (FindFleetDetailPanel is null)
+        {
+            return;
+        }
+
         if (_fleetDirectoryState.IsDetailVisible)
         {
-            UiMotion.ShowModal(FindFleetDetailScrim, FindFleetDetailPanel);
+            FindFleetDetailPanel.Show();
         }
         else
         {
-            UiMotion.HideModal(FindFleetDetailScrim, FindFleetDetailPanel);
+            FindFleetDetailPanel.Hide();
+        }
+    }
+
+    private void PromoteFindFleetDetailOverlayToWindowRoot()
+    {
+        if (FindFleetDetailPanel.Parent is System.Windows.Controls.Panel panelParent &&
+            !ReferenceEquals(panelParent, MainWindowRootGrid))
+        {
+            panelParent.Children.Remove(FindFleetDetailPanel);
+        }
+
+        Grid.SetRow(FindFleetDetailPanel, 0);
+        Grid.SetRowSpan(FindFleetDetailPanel, 2);
+        Grid.SetColumn(FindFleetDetailPanel, 0);
+        Grid.SetColumnSpan(FindFleetDetailPanel, 1);
+        System.Windows.Controls.Panel.SetZIndex(FindFleetDetailPanel, 480);
+        FindFleetDetailPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch;
+        FindFleetDetailPanel.VerticalAlignment = System.Windows.VerticalAlignment.Stretch;
+        FindFleetDetailPanel.Margin = new Thickness(0);
+        if (!MainWindowRootGrid.Children.Contains(FindFleetDetailPanel))
+        {
+            MainWindowRootGrid.Children.Add(FindFleetDetailPanel);
         }
     }
 
@@ -1578,32 +1698,17 @@ public partial class MainWindow
 
         SetFindFleetInviteStatus("输入邀请码后先验证，再加入舰队。", ManageProfileStatusTone.Info);
 
-        UiMotion.ShowModal(FindFleetInviteDialogOverlay, FindFleetInviteDialogCard);
+        FindFleetInviteDialogOverlay.Show();
     }
 
     private void CloseFindFleetInviteDialog()
     {
-        UiMotion.HideModal(FindFleetInviteDialogOverlay, FindFleetInviteDialogCard);
+        FindFleetInviteDialogOverlay.Hide();
     }
 
     private void FindFleetInviteDialogCloseButton_Click(object sender, RoutedEventArgs e)
     {
         CloseFindFleetInviteDialog();
-    }
-
-    private void FindFleetInviteDialogOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (FindFleetInviteDialogCard?.IsMouseOver == true)
-        {
-            return;
-        }
-
-        CloseFindFleetInviteDialog();
-    }
-
-    private void FindFleetInviteDialogCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        e.Handled = true;
     }
 
     private async void FindFleetInviteVerifyButton_Click(object sender, RoutedEventArgs e)
@@ -1798,11 +1903,11 @@ public partial class MainWindow
         FindFleetInviteStatusText.Text = message;
         FindFleetInviteStatusText.Foreground = tone switch
         {
-            ManageProfileStatusTone.Success => FindBrush("StatusSuccessBrush", Brushes.LightGreen),
-            ManageProfileStatusTone.Warning => FindBrush("StatusWarningBrush", Brushes.Orange),
-            ManageProfileStatusTone.Danger => FindBrush("StatusDangerBrush", Brushes.IndianRed),
-            ManageProfileStatusTone.Locked => FindBrush("MutedTextBrush", Brushes.LightSlateGray),
-            _ => FindBrush("MutedTextBrush", Brushes.LightSlateGray)
+            ManageProfileStatusTone.Success => FleetCommandBrush(BridgeBrushToken.StatusOk),
+            ManageProfileStatusTone.Warning => FleetCommandBrush(BridgeBrushToken.StatusWarn),
+            ManageProfileStatusTone.Danger => FleetCommandBrush(BridgeBrushToken.StatusBad),
+            ManageProfileStatusTone.Locked => FleetCommandBrush(BridgeBrushToken.StatusOff),
+            _ => FleetCommandBrush(BridgeBrushToken.Ink2)
         };
     }
 

@@ -1,11 +1,9 @@
 using StarBridge.Core.TrustSafety;
+using StarBridge.Desktop.Controls;
+using StarBridge.Desktop.Theming;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
-using Brush = System.Windows.Media.Brush;
-using Brushes = System.Windows.Media.Brushes;
 using Button = System.Windows.Controls.Button;
-using Color = System.Windows.Media.Color;
 
 namespace StarBridge.Desktop;
 
@@ -26,6 +24,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         Func<string, Task<string?>> requestAppealDetails)
     {
         InitializeComponent();
+        BridgeSceneContext.ApplyFixed(this, BridgeSceneKind.Review);
         _loadStatus = loadStatus;
         _loadAppeals = loadAppeals;
         _submitAppeal = submitAppeal;
@@ -40,6 +39,13 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         }
 
         _loading = true;
+        ShowPageState(
+            BridgeStateKind.Loading,
+            "正在读取账号状态",
+            "正在同步生效记录与申诉进度。",
+            actionTextOverride: string.Empty);
+        OperationLoadingIndicator.IsActive = true;
+        OperationLoadingIndicator.Visibility = Visibility.Visible;
         StatusText.Text = "正在更新账号状态…";
         try
         {
@@ -53,10 +59,17 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         }
         catch
         {
+            ShowPageState(
+                BridgeStateKind.Error,
+                "暂时无法读取账号状态",
+                "请检查网络后使用右上角刷新。",
+                actionTextOverride: null);
             StatusText.Text = "暂时无法读取账号状态，请稍后重试。";
         }
         finally
         {
+            OperationLoadingIndicator.IsActive = false;
+            OperationLoadingIndicator.Visibility = Visibility.Collapsed;
             _loading = false;
         }
     }
@@ -64,10 +77,24 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
     private void Render()
     {
         var sanctions = _accountStatus?.ActiveSanctions ?? [];
+        var appeals = _appeals?.Appeals ?? [];
+        if (sanctions.Length == 0 && appeals.Length == 0)
+        {
+            SanctionListPanel.Children.Clear();
+            AppealListPanel.Children.Clear();
+            ShowPageState(
+                BridgeStateKind.Empty,
+                "账号状态正常",
+                "当前没有生效中的警告、功能限制或申诉记录。",
+                actionTextOverride: string.Empty);
+            return;
+        }
+
+        ShowContent();
         AccountStateSummaryText.Text = sanctions.Length == 0 ? "账号状态正常" : "账号存在需要留意的记录";
         AccountStateSummaryText.Foreground = sanctions.Length == 0
-            ? new SolidColorBrush(Color.FromRgb(64, 218, 146))
-            : new SolidColorBrush(Color.FromRgb(255, 181, 79));
+            ? Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.StatusOk)
+            : Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.StatusWarn);
         AccountStateDetailText.Text = sanctions.Length == 0
             ? "当前没有生效中的警告或功能限制。"
             : "你仍可以查看账号状态和提交申诉。具体影响与恢复时间请查看下方记录。";
@@ -86,7 +113,6 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         }
 
         AppealListPanel.Children.Clear();
-        var appeals = _appeals?.Appeals ?? [];
         if (appeals.Length == 0)
         {
             AppealListPanel.Children.Add(CreateEmptyMessage("你还没有提交过申诉。"));
@@ -111,7 +137,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         text.Children.Add(new TextBlock
         {
             Text = SanctionLabel(sanction.Type),
-            Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+            Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink),
             FontSize = 14,
             FontWeight = FontWeights.SemiBold
         });
@@ -119,7 +145,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         {
             Text = sanction.Summary,
             Margin = new Thickness(0, 6, 0, 0),
-            Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+            Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap
         });
@@ -129,7 +155,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
                 ? $"恢复时间：{expiresAt.ToLocalTime():yyyy-MM-dd HH:mm}"
                 : sanction.Type == AccountSanctionTypes.Warning ? "此记录不会限制功能。" : "恢复时间以审核结果为准。",
             Margin = new Thickness(0, 6, 0, 0),
-            Foreground = new SolidColorBrush(Color.FromRgb(97, 202, 255)),
+            Foreground = Theming.BridgeSceneContext.GetRequiredAccentBrush(this),
             FontSize = 10
         });
         grid.Children.Add(text);
@@ -144,7 +170,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
             IsEnabled = existingAppeal is null,
             Tag = sanction
         };
-        appealButton.SetResourceReference(StyleProperty, "SecondaryButton");
+        appealButton.SetResourceReference(StyleProperty, "BridgeDirectorySecondaryButtonStyle");
         appealButton.Click += AppealButton_Click;
         Grid.SetColumn(appealButton, 1);
         grid.Children.Add(appealButton);
@@ -157,7 +183,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         panel.Children.Add(new TextBlock
         {
             Text = $"{SanctionLabel(appeal.SanctionType)} · {AppealStatusLabel(appeal.Status)}",
-            Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+            Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink),
             FontSize = 13,
             FontWeight = FontWeights.SemiBold
         });
@@ -165,7 +191,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         {
             Text = appeal.Details,
             Margin = new Thickness(0, 6, 0, 0),
-            Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+            Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap
         });
@@ -175,7 +201,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
             {
                 Text = $"审核结果：{appeal.OutcomeSummary}",
                 Margin = new Thickness(0, 7, 0, 0),
-                Foreground = new SolidColorBrush(Color.FromRgb(97, 202, 255)),
+                Foreground = Theming.BridgeSceneContext.GetRequiredAccentBrush(this),
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap
             });
@@ -198,6 +224,8 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         }
 
         button.IsEnabled = false;
+        OperationLoadingIndicator.IsActive = true;
+        OperationLoadingIndicator.Visibility = Visibility.Visible;
         StatusText.Text = "正在提交申诉…";
         try
         {
@@ -218,16 +246,43 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
             button.IsEnabled = true;
             StatusText.Text = "申诉暂未提交，请稍后重试。";
         }
+        finally
+        {
+            OperationLoadingIndicator.IsActive = false;
+            OperationLoadingIndicator.Visibility = Visibility.Collapsed;
+        }
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
+
+    private async void PageStatePresenter_ActionInvoked(object sender, RoutedEventArgs e) => await RefreshAsync();
+
+    private void ShowPageState(
+        BridgeStateKind state,
+        string title,
+        string description,
+        string? actionTextOverride)
+    {
+        ContentScrollViewer.Visibility = Visibility.Collapsed;
+        PageStatePresenter.State = state;
+        PageStatePresenter.TitleOverride = title;
+        PageStatePresenter.DescriptionOverride = description;
+        PageStatePresenter.ActionTextOverride = actionTextOverride;
+        PageStatePresenter.Visibility = Visibility.Visible;
+    }
+
+    private void ShowContent()
+    {
+        PageStatePresenter.Visibility = Visibility.Collapsed;
+        ContentScrollViewer.Visibility = Visibility.Visible;
+    }
 
     private FrameworkElement WrapCard(FrameworkElement child) => new Border
     {
         Margin = new Thickness(0, 0, 0, 8),
         Padding = new Thickness(13),
-        Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
-        BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+        Background = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.PanelRaised),
+        BorderBrush = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Hairline),
         BorderThickness = new Thickness(1),
         Child = child
     };
@@ -236,7 +291,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
     {
         Text = text,
         Margin = new Thickness(10),
-        Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+        Foreground = Theming.BridgeTokenBrushes.GetRequired(this, Theming.BridgeBrushToken.Ink2),
         TextAlignment = TextAlignment.Center
     };
 
@@ -248,6 +303,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         AccountSanctionTypes.RoomCreationRestriction => "创建房间限制",
         AccountSanctionTypes.RoomParticipationRestriction => "房间加入与邀请限制",
         AccountSanctionTypes.FleetParticipationRestriction => "舰队创建、加入与邀请限制",
+        AccountSanctionTypes.ShipMediaUploadRestriction => "舰船图片上传限制",
         AccountSanctionTypes.SocialRestriction => "社交功能限制",
         AccountSanctionTypes.AccountRestriction => "账号功能限制",
         _ => "账号记录"

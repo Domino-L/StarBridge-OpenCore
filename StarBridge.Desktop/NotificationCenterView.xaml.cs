@@ -1,12 +1,10 @@
 using StarBridge.Core.TrustSafety;
+using StarBridge.Desktop.Controls;
+using StarBridge.Desktop.Theming;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using Brush = System.Windows.Media.Brush;
-using Brushes = System.Windows.Media.Brushes;
 using Button = System.Windows.Controls.Button;
-using Color = System.Windows.Media.Color;
-using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using Orientation = System.Windows.Controls.Orientation;
 
 namespace StarBridge.Desktop;
@@ -27,10 +25,12 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         Func<NotificationItemContract, Task> navigate)
     {
         InitializeComponent();
+        BridgeSceneContext.ApplyFixed(this, BridgeSceneKind.System);
         _reloadInbox = reloadInbox;
         _markReadAndReload = markReadAndReload;
         _loadReports = loadReports;
         _navigate = navigate;
+        ApplyTabState();
     }
 
     public Task ReloadAsync() => _showingReports ? ReloadReportsAsync() : ReloadInboxAsync();
@@ -71,7 +71,10 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         catch
         {
             ReportsListPanel.Children.Clear();
-            ReportsListPanel.Children.Add(CreateEmptyState("暂时无法读取举报记录，请稍后重试。"));
+            ShowState(
+                BridgeStateKind.Error,
+                "暂时无法读取举报记录",
+                "请检查网络后使用右上角刷新。");
         }
         finally
         {
@@ -92,9 +95,14 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
 
         if (inbox is null || inbox.Items.Length == 0)
         {
-            NotificationsListPanel.Children.Add(CreateEmptyState("目前没有新的通知。"));
+            ShowState(
+                BridgeStateKind.Empty,
+                "目前没有新的通知",
+                "需要处理的好友、舰队和房间事项会显示在这里。");
             return;
         }
+
+        HideState();
 
         foreach (var item in inbox.Items)
         {
@@ -102,17 +110,18 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         }
     }
 
-    private Border CreateNotificationCard(NotificationItemContract item)
+    private ChamferBorder CreateNotificationCard(NotificationItemContract item)
     {
         var accent = ResolveAccent(item);
-        var card = new Border
+        var card = new ChamferBorder
         {
             Margin = new Thickness(0, 0, 0, 9),
             Padding = new Thickness(13, 11, 13, 11),
-            Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+            Background = Token(BridgeBrushToken.PanelRaised),
+            BorderBrush = Token(BridgeBrushToken.RowHairline),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(2),
+            Chamfer = 7,
+            Corners = ChamferCorners.Signature,
             Opacity = item.ReadAt is null ? 1 : 0.72
         };
 
@@ -122,7 +131,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        grid.Children.Add(new Border { Background = accent, CornerRadius = new CornerRadius(2) });
+        grid.Children.Add(new Border { Background = accent });
 
         var content = new StackPanel();
         Grid.SetColumn(content, 2);
@@ -130,22 +139,22 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         meta.Children.Add(CreateLabel(CategoryLabel(item.Category), accent));
         if (item.Priority.Equals(NotificationPriorities.ActionRequired, StringComparison.OrdinalIgnoreCase))
         {
-            meta.Children.Add(CreateLabel("需要处理", new SolidColorBrush(Color.FromRgb(255, 181, 79)), new Thickness(6, 0, 0, 0)));
+            meta.Children.Add(CreateLabel("需要处理", Token(BridgeBrushToken.StatusWarn), new Thickness(6, 0, 0, 0)));
         }
         else if (item.ReadAt is null)
         {
-            meta.Children.Add(CreateLabel("未读", new SolidColorBrush(Color.FromRgb(97, 202, 255)), new Thickness(6, 0, 0, 0)));
+            meta.Children.Add(CreateLabel("未读", Token(BridgeBrushToken.StatusInfo), new Thickness(6, 0, 0, 0)));
         }
         if (item.GroupCount > 1)
         {
-            meta.Children.Add(CreateLabel($"{item.GroupCount} 条", new SolidColorBrush(Color.FromRgb(145, 167, 181)), new Thickness(6, 0, 0, 0)));
+            meta.Children.Add(CreateLabel($"{item.GroupCount} 条", Token(BridgeBrushToken.Ink3), new Thickness(6, 0, 0, 0)));
         }
         content.Children.Add(meta);
         content.Children.Add(new TextBlock
         {
             Text = item.Title,
             Margin = new Thickness(0, 7, 0, 0),
-            Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+            Foreground = Token(BridgeBrushToken.Ink),
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap
@@ -154,7 +163,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         {
             Text = item.Body,
             Margin = new Thickness(0, 5, 0, 0),
-            Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+            Foreground = Token(BridgeBrushToken.Ink2),
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap
         });
@@ -162,7 +171,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         {
             Text = FormatRelativeTime(item.CreatedAt),
             Margin = new Thickness(0, 6, 0, 0),
-            Foreground = new SolidColorBrush(Color.FromRgb(91, 121, 139)),
+            Foreground = Token(BridgeBrushToken.Ink3),
             FontSize = 10
         });
         grid.Children.Add(content);
@@ -175,7 +184,6 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
             Margin = new Thickness(14, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
             IsEnabled = item.IsAvailable,
-            Style = FindResource("SecondaryButton") as Style,
             Tag = item
         };
         action.Click += NotificationAction_Click;
@@ -191,9 +199,14 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         var reports = result?.Reports ?? [];
         if (reports.Length == 0)
         {
-            ReportsListPanel.Children.Add(CreateEmptyState("你还没有提交过举报。举报入口位于其他用户的个人资料页。"));
+            ShowState(
+                BridgeStateKind.Empty,
+                "你还没有提交过举报",
+                "举报入口位于其他用户的个人资料页。");
             return;
         }
+
+        HideState();
 
         foreach (var report in reports.OrderByDescending(item => item.CreatedAt))
         {
@@ -204,7 +217,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
             header.Children.Add(new TextBlock
             {
                 Text = report.TargetDisplayName,
-                Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+                Foreground = Token(BridgeBrushToken.Ink),
                 FontSize = 14,
                 FontWeight = FontWeights.SemiBold
             });
@@ -216,7 +229,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
             {
                 Text = $"原因：{ReportReasonLabel(report.Reason)}",
                 Margin = new Thickness(0, 7, 0, 0),
-                Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+                Foreground = Token(BridgeBrushToken.Ink2),
                 FontSize = 11
             });
             if (!string.IsNullOrWhiteSpace(report.Details))
@@ -225,7 +238,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
                 {
                     Text = report.Details,
                     Margin = new Thickness(0, 5, 0, 0),
-                    Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
+                    Foreground = Token(BridgeBrushToken.Ink2),
                     FontSize = 11,
                     TextWrapping = TextWrapping.Wrap
                 });
@@ -236,13 +249,13 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
                 {
                     Margin = new Thickness(0, 8, 0, 0),
                     Padding = new Thickness(9, 7, 9, 7),
-                    Background = new SolidColorBrush(Color.FromRgb(11, 37, 51)),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+                    Background = Token(BridgeBrushToken.Panel),
+                    BorderBrush = Token(BridgeBrushToken.Hairline),
                     BorderThickness = new Thickness(1),
                     Child = new TextBlock
                     {
                         Text = $"处理说明：{report.OutcomeSummary}",
-                        Foreground = FindResource("PrimaryTextBrush") as Brush ?? Brushes.White,
+                        Foreground = Token(BridgeBrushToken.Ink),
                         FontSize = 11,
                         TextWrapping = TextWrapping.Wrap
                     }
@@ -254,18 +267,19 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
                     ? $"提交于 {report.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm} · 更新于 {report.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}"
                     : $"提交于 {report.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}",
                 Margin = new Thickness(0, 7, 0, 0),
-                Foreground = new SolidColorBrush(Color.FromRgb(91, 121, 139)),
+                Foreground = Token(BridgeBrushToken.Ink3),
                 FontSize = 10
             });
 
-            ReportsListPanel.Children.Add(new Border
+            ReportsListPanel.Children.Add(new ChamferBorder
             {
                 Margin = new Thickness(0, 0, 0, 9),
                 Padding = new Thickness(13),
-                Background = new SolidColorBrush(Color.FromRgb(9, 27, 39)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(35, 77, 99)),
+                Background = Token(BridgeBrushToken.PanelRaised),
+                BorderBrush = Token(BridgeBrushToken.RowHairline),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(2),
+                Chamfer = 7,
+                Corners = ChamferCorners.Signature,
                 Child = panel
             });
         }
@@ -278,18 +292,43 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
             return;
         }
 
-        if (item.ActionTarget.Equals(NotificationActionTargets.MyReports, StringComparison.OrdinalIgnoreCase))
-        {
-            await _markReadAndReload([item.NotificationId]);
-            await ShowReportsAsync();
-            return;
-        }
+        await RunNotificationActionAsync(item);
+    }
 
-        await _markReadAndReload([item.NotificationId]);
-        await _navigate(item);
+    internal async Task RunNotificationActionAsync(NotificationItemContract item)
+    {
+        SetLoading(true, "正在打开通知内容…");
+        try
+        {
+            if (item.ActionTarget.Equals(NotificationActionTargets.MyReports, StringComparison.OrdinalIgnoreCase))
+            {
+                await _markReadAndReload([item.NotificationId]);
+                await ShowReportsAsync();
+                return;
+            }
+
+            await _markReadAndReload([item.NotificationId]);
+            await _navigate(item);
+        }
+        catch
+        {
+            ShowState(
+                BridgeStateKind.Error,
+                "暂时无法打开通知内容",
+                "操作未完成，请稍后重试或使用原页面入口。");
+        }
+        finally
+        {
+            SetLoading(false);
+        }
     }
 
     private async void MarkAllReadButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMarkAllReadAsync();
+    }
+
+    internal async Task RunMarkAllReadAsync()
     {
         var unread = _inbox?.Items.Where(item => item.ReadAt is null).Select(item => item.NotificationId).ToArray() ?? [];
         if (unread.Length == 0)
@@ -302,6 +341,13 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         {
             _inbox = await _markReadAndReload(unread);
             RenderInbox();
+        }
+        catch
+        {
+            ShowState(
+                BridgeStateKind.Error,
+                "暂时无法更新通知",
+                "未能将通知标为已读，请稍后重试。");
         }
         finally
         {
@@ -334,47 +380,51 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
     {
         NotificationsScrollViewer.Visibility = _showingReports ? Visibility.Collapsed : Visibility.Visible;
         ReportsScrollViewer.Visibility = _showingReports ? Visibility.Visible : Visibility.Collapsed;
-        NotificationsTabButton.Style = FindResource(_showingReports ? "SecondaryButton" : "PrimaryButton") as Style;
-        ReportsTabButton.Style = FindResource(_showingReports ? "PrimaryButton" : "SecondaryButton") as Style;
+        NotificationsTabButton.IsChecked = !_showingReports;
+        ReportsTabButton.IsChecked = _showingReports;
         MarkAllReadButton.Visibility = _showingReports ? Visibility.Collapsed : Visibility.Visible;
-        UnreadSummaryText.Visibility = _showingReports ? Visibility.Collapsed : Visibility.Visible;
+        UnreadSummaryBadge.Visibility = _showingReports ? Visibility.Collapsed : Visibility.Visible;
         ActionSummaryBadge.Visibility = !_showingReports && _inbox is { ActionRequiredCount: > 0 }
             ? Visibility.Visible
             : Visibility.Collapsed;
         StatusText.Text = _showingReports
             ? "这里仅显示你提交的举报及当前处理状态。"
-            : "通知只用于提醒和跳转，不会替代原页面的处理功能。";
+            : "通知只用于提醒和跳转，实际处理仍在原页面完成。";
     }
 
     private void SetLoading(bool loading, string? copy = null)
     {
-        LoadingPanel.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
         NotificationsScrollViewer.IsEnabled = !loading;
         ReportsScrollViewer.IsEnabled = !loading;
-        if (!string.IsNullOrWhiteSpace(copy) && LoadingPanel.Children.OfType<TextBlock>().FirstOrDefault() is { } text)
+        if (loading)
         {
-            text.Text = copy;
+            ShowState(
+                BridgeStateKind.Loading,
+                copy ?? (_showingReports ? "正在读取举报记录" : "正在读取通知"),
+                "通常只需要几秒。");
+        }
+        else if (LoadingPanel.State == BridgeStateKind.Loading)
+        {
+            HideState();
         }
     }
 
     private void RenderUnavailable(string copy)
     {
         NotificationsListPanel.Children.Clear();
-        NotificationsListPanel.Children.Add(CreateEmptyState(copy));
+        ShowState(BridgeStateKind.Error, "暂时无法读取通知", copy);
     }
 
-    private FrameworkElement CreateEmptyState(string copy) => new Border
+    private void ShowState(BridgeStateKind state, string title, string description)
     {
-        Padding = new Thickness(24),
-        Child = new TextBlock
-        {
-            Text = copy,
-            Foreground = FindResource("MutedTextBrush") as Brush ?? Brushes.LightGray,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextAlignment = TextAlignment.Center,
-            TextWrapping = TextWrapping.Wrap
-        }
-    };
+        LoadingPanel.State = state;
+        LoadingPanel.TitleOverride = title;
+        LoadingPanel.DescriptionOverride = description;
+        LoadingPanel.ActionTextOverride = string.Empty;
+        LoadingPanel.Visibility = Visibility.Visible;
+    }
+
+    private void HideState() => LoadingPanel.Visibility = Visibility.Collapsed;
 
     private Border CreateLabel(string text, Brush brush, Thickness? margin = null) => new()
     {
@@ -382,17 +432,18 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         Padding = new Thickness(7, 2, 7, 2),
         BorderBrush = brush,
         BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(2),
         Child = new TextBlock { Text = text, Foreground = brush, FontSize = 9, FontWeight = FontWeights.SemiBold }
     };
 
-    private static Brush ResolveAccent(NotificationItemContract item) => item.Category switch
+    private Brush Token(BridgeBrushToken token) => BridgeTokenBrushes.GetRequired(this, token);
+
+    private Brush ResolveAccent(NotificationItemContract item) => item.Category switch
     {
-        NotificationCategories.Fleet => new SolidColorBrush(Color.FromRgb(120, 102, 255)),
-        NotificationCategories.Room => new SolidColorBrush(Color.FromRgb(84, 207, 255)),
-        NotificationCategories.Safety => new SolidColorBrush(Color.FromRgb(255, 181, 79)),
-        NotificationCategories.System => new SolidColorBrush(Color.FromRgb(145, 167, 181)),
-        _ => new SolidColorBrush(Color.FromRgb(97, 202, 255))
+        NotificationCategories.Fleet => BridgeScenePalette.CreateAccentBrush(BridgeSceneKind.Fleet),
+        NotificationCategories.Room => BridgeScenePalette.CreateAccentBrush(BridgeSceneKind.Party),
+        NotificationCategories.Safety => Token(BridgeBrushToken.StatusWarn),
+        NotificationCategories.System => BridgeScenePalette.CreateAccentBrush(BridgeSceneKind.System),
+        _ => BridgeScenePalette.CreateAccentBrush(BridgeSceneKind.Social)
     };
 
     private static string CategoryLabel(string category) => category switch
@@ -434,11 +485,11 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
         _ => "已提交"
     };
 
-    private static Brush ReportStatusBrush(string status) => ReportStatuses.Normalize(status) switch
+    private Brush ReportStatusBrush(string status) => ReportStatuses.Normalize(status) switch
     {
-        ReportStatuses.Reviewing => new SolidColorBrush(Color.FromRgb(255, 181, 79)),
-        ReportStatuses.Actioned => new SolidColorBrush(Color.FromRgb(64, 218, 146)),
-        ReportStatuses.NoViolation => new SolidColorBrush(Color.FromRgb(145, 167, 181)),
-        _ => new SolidColorBrush(Color.FromRgb(97, 202, 255))
+        ReportStatuses.Reviewing => Token(BridgeBrushToken.StatusWarn),
+        ReportStatuses.Actioned => Token(BridgeBrushToken.StatusOk),
+        ReportStatuses.NoViolation => Token(BridgeBrushToken.StatusOff),
+        _ => Token(BridgeBrushToken.StatusInfo)
     };
 }

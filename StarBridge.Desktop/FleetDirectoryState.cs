@@ -106,8 +106,11 @@ public sealed class FleetDirectoryState
     public long BeginLoad(bool hasCachedItems)
     {
         var requestVersion = ++_requestVersion;
-        LoadStatus = hasCachedItems ? FleetDirectoryLoadStatus.Refreshing : FleetDirectoryLoadStatus.Loading;
-        StatusMessage = hasCachedItems ? "正在刷新舰队目录..." : "正在加载公开舰队...";
+        // Cached items do not make an in-flight startup request live. The
+        // shared startup gate decides whether those items may be shown after
+        // the request terminates as OfflineCache.
+        LoadStatus = FleetDirectoryLoadStatus.Loading;
+        StatusMessage = "正在加载公开舰队...";
         return requestVersion;
     }
 

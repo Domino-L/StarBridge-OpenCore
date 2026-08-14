@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using StarBridge.Core.ShipMedia;
 
 namespace StarBridge.Desktop;
 
@@ -14,8 +15,17 @@ public sealed record OwnedShipRecord(
     DateTimeOffset ImportedAt,
     DateTimeOffset AddedToDatabaseAt = default,
     DateTimeOffset SyncedAt = default,
-    string? InstanceId = null)
+    string? InstanceId = null,
+    string? CustomImageMediaId = null,
+    double CustomImageCropFocusX = 0.5,
+    double CustomImageCropFocusY = 0.5,
+    double CustomImageCropZoom = 1.0)
 {
+    public ShipImageCropFrame CustomImageCropFrame => ShipImageCropFrame.Normalize(
+        CustomImageCropFocusX,
+        CustomImageCropFocusY,
+        CustomImageCropZoom);
+
     public string ValueDisplay => ShipCatalog.Find(Code, DisplayName)?.PriceDisplay ?? "";
 
     public string ImportedAtDisplay => ImportedAt == DateTimeOffset.MinValue
@@ -30,14 +40,22 @@ public sealed record OwnedShipRecord(
 public sealed record HangarImportResult(
     IReadOnlyList<OwnedShipRecord> Ships,
     int MatchedCodes,
-    int MatchedNames);
+    int MatchedNames)
+{
+    public IReadOnlyList<HangarShipImageCandidate> ImageCandidates { get; init; } = [];
+}
+
+public sealed record HangarShipImageCandidate(
+    string Code,
+    string ImageUrl);
 
 public sealed record HangarShipCandidate(
     string Title,
     string ManufacturerCode,
     string? CreatedAtText = null,
     string? SourceTitle = null,
-    string? InstanceId = null);
+    string? InstanceId = null,
+    string? ImageUrl = null);
 
 public static partial class HangarShipImporter
 {
@@ -93,6 +111,7 @@ public static partial class HangarShipImporter
     {
         var found = new Dictionary<string, OwnedShipRecord>(StringComparer.OrdinalIgnoreCase);
         var fallbackOccurrences = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var imageCandidates = new Dictionary<string, HangarShipImageCandidate>(StringComparer.OrdinalIgnoreCase);
         var matchedTitles = 0;
         var matchedAliases = 0;
 
@@ -106,6 +125,14 @@ public static partial class HangarShipImporter
 
             matchedAliases++;
             var normalizedCode = ShipNameLocalizer.NormalizeCode(code);
+            if (Uri.TryCreate(candidate.ImageUrl?.Trim(), UriKind.Absolute, out var imageUri) &&
+                imageUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                imageCandidates.TryAdd(
+                    normalizedCode,
+                    new HangarShipImageCandidate(normalizedCode, imageUri.AbsoluteUri));
+            }
+
             var instanceId = NormalizeInstanceId(candidate.InstanceId);
             if (string.IsNullOrWhiteSpace(instanceId))
             {
@@ -128,7 +155,10 @@ public static partial class HangarShipImporter
         return new HangarImportResult(
             found.Values.OrderBy(ship => ship.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToArray(),
             matchedTitles,
-            matchedAliases);
+            matchedAliases)
+        {
+            ImageCandidates = imageCandidates.Values.ToArray()
+        };
     }
 
     public static string ResolveShipDisplayName(string? code, string language)
@@ -578,7 +608,11 @@ public static class ShipDatabaseStore
                 importedAt,
                 addedToDatabaseAt,
                 syncedAt,
-                parts.Length > 6 && !string.IsNullOrWhiteSpace(parts[6]) ? parts[6] : null));
+                parts.Length > 6 && !string.IsNullOrWhiteSpace(parts[6]) ? parts[6] : null,
+                parts.Length > 7 && !string.IsNullOrWhiteSpace(parts[7]) ? parts[7] : null,
+                ParseCropValue(parts, 8, 0.5),
+                ParseCropValue(parts, 9, 0.5),
+                ParseCropValue(parts, 10, 1.0)));
         }
 
         return ships;
@@ -597,9 +631,19 @@ public static class ShipDatabaseStore
                 ship.ImportedAt.ToString("O"),
                 (ship.AddedToDatabaseAt == default ? ship.ImportedAt : ship.AddedToDatabaseAt).ToString("O"),
                 ship.SyncedAt == default ? "" : ship.SyncedAt.ToString("O"),
-                Clean(ship.InstanceId ?? ""))),
+                Clean(ship.InstanceId ?? ""),
+                Clean(ship.CustomImageMediaId ?? ""),
+                ship.CustomImageCropFrame.FocusX.ToString("R", CultureInfo.InvariantCulture),
+                ship.CustomImageCropFrame.FocusY.ToString("R", CultureInfo.InvariantCulture),
+                ship.CustomImageCropFrame.Zoom.ToString("R", CultureInfo.InvariantCulture))),
             Encoding.UTF8);
     }
+
+    private static double ParseCropValue(string[] parts, int index, double fallback) =>
+        parts.Length > index &&
+        double.TryParse(parts[index], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : fallback;
 
     private static string GetPath(string ownerKey)
     {

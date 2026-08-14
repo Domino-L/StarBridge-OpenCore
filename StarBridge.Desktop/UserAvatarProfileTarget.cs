@@ -21,14 +21,6 @@ internal static class UserAvatarProfileTargetResolver
             player.PresenceText,
             player.IsSelf,
             StarBridge.Core.Friends.DirectMessageOrigins.FleetMember),
-        SquadMemberStatusRow member => new(
-            member.AccountId,
-            member.GameId,
-            member.Callsign,
-            member.AvatarPath,
-            member.PresenceText,
-            member.IsSelf,
-            StarBridge.Core.Friends.DirectMessageOrigins.SquadMember),
         MemberAvatarRow member => new(
             member.AccountId,
             member.GameId,

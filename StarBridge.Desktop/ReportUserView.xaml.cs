@@ -1,4 +1,5 @@
 using StarBridge.Core.TrustSafety;
+using StarBridge.Desktop.Theming;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -18,11 +19,25 @@ public partial class ReportUserView : System.Windows.Controls.UserControl
     public string Reason => ReasonComboBox.SelectedItem is ReasonOption option ? option.Value : "";
     public string Details => DetailsTextBox.Text.Trim();
 
-    public ReportUserView(string targetDisplayName, Action<ReportUserSubmission?> complete)
+    public ReportUserView(
+        string targetDisplayName,
+        Action<ReportUserSubmission?> complete,
+        string? title = null,
+        string? description = null)
     {
         InitializeComponent();
+        BridgeSceneContext.ApplyFixed(this, BridgeSceneKind.Review);
         _complete = complete;
         TargetNameText.Text = targetDisplayName;
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            HeadingText.Text = title.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            DescriptionText.Text = description.Trim();
+        }
         ReasonComboBox.ItemsSource = new[]
         {
             new ReasonOption(ReportReasons.Harassment, "骚扰或辱骂"),

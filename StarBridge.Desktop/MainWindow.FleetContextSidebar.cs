@@ -3,6 +3,7 @@ using StarBridge.Core.Events;
 using StarBridge.Core.FleetChat;
 using StarBridge.Core.Presence;
 using StarBridge.Core.State;
+using StarBridge.Desktop.Theming;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -95,7 +96,7 @@ public partial class MainWindow
                 "",
                 "前往",
                 "find-fleet",
-                FindBrush("StatusInfoBrush", Brushes.DeepSkyBlue)));
+                FleetCommandBrush(BridgeBrushToken.StatusInfo)));
             return;
         }
 
@@ -135,7 +136,7 @@ public partial class MainWindow
                 "",
                 "处理",
                 "applications",
-                FindBrush("StatusWarningBrush", Brushes.Orange));
+                FleetCommandBrush(BridgeBrushToken.StatusWarn));
         }
 
         if (!string.IsNullOrWhiteSpace(_fleetCurrentTaskTitle))
@@ -147,7 +148,7 @@ public partial class MainWindow
                 _fleetCurrentTaskTime is null ? "" : _fleetCurrentTaskTime.Value.ToString("MM-dd HH:mm"),
                 "详情",
                 "task-detail",
-                FindBrush("StatusInfoBrush", Brushes.DeepSkyBlue));
+                FleetCommandBrush(BridgeBrushToken.StatusInfo));
         }
         else if (CanCurrentUserPublishTasks())
         {
@@ -158,7 +159,7 @@ public partial class MainWindow
                 "",
                 "发布",
                 "task-manage",
-                FindBrush("StatusInfoBrush", Brushes.DeepSkyBlue));
+                FleetCommandBrush(BridgeBrushToken.StatusInfo));
         }
 
         var nextPlan = GetVisibleActionPlans()
@@ -176,8 +177,8 @@ public partial class MainWindow
                 _joinedActionPlanIds.Contains(nextPlan.Id) ? "已预约" : "查看",
                 "plan-detail",
                 _joinedActionPlanIds.Contains(nextPlan.Id)
-                    ? FindBrush("StatusSuccessBrush", Brushes.MediumSpringGreen)
-                    : FindBrush("StatusWarningBrush", Brushes.Orange));
+                    ? FleetCommandBrush(BridgeBrushToken.StatusOk)
+                    : FleetCommandBrush(BridgeBrushToken.StatusWarn));
         }
         else if (CanCurrentUserPublishPlans())
         {
@@ -188,7 +189,7 @@ public partial class MainWindow
                 "",
                 "创建",
                 "plan-manage",
-                FindBrush("StatusSuccessBrush", Brushes.MediumSpringGreen));
+                FleetCommandBrush(BridgeBrushToken.StatusOk));
         }
 
         if (!string.IsNullOrWhiteSpace(_fleetNoticeTitle))
@@ -200,7 +201,7 @@ public partial class MainWindow
                 "",
                 CanCurrentUserManageAnnouncements() ? "编辑" : "查看",
                 "notice-detail",
-                FindBrush("StatusInfoBrush", Brushes.Cyan));
+                FleetCommandBrush(BridgeBrushToken.StatusInfo));
         }
         else if (CanCurrentUserManageAnnouncements())
         {
@@ -211,7 +212,7 @@ public partial class MainWindow
                 "",
                 "发布",
                 "notice-edit",
-                FindBrush("StatusInfoBrush", Brushes.Cyan));
+                FleetCommandBrush(BridgeBrushToken.StatusInfo));
         }
 
         var canOpenManagement = CanCurrentUserOpenFleetManagement();
@@ -239,7 +240,7 @@ public partial class MainWindow
                 "",
                 "",
                 "",
-                FindBrush("StatusDisabledBrush", Brushes.LightSlateGray));
+                FleetCommandBrush(BridgeBrushToken.StatusOff));
         }
 
         var activeCount = _fleetNotificationCenterItems.Count;
@@ -250,6 +251,13 @@ public partial class MainWindow
 
     private void RefreshFleetRightContextSidebar()
     {
+        if (FleetSubTabs?.SelectedItem == AllPlayersTab)
+        {
+            _membersPanelMode = MembersPanelMode.Member;
+            RenderMemberSidebarContent();
+            return;
+        }
+
         if (FleetRightModuleOneTitleText is null)
         {
             return;
@@ -274,29 +282,11 @@ public partial class MainWindow
         ClearRightSidebarContent();
         UpdateMembersSidebarModeToggle();
 
-        if (FleetSubTabs?.SelectedItem == AllPlayersTab)
-        {
-            if (_membersPanelMode == MembersPanelMode.Admin && CanUseMembersAdminView())
-            {
-                RenderCommanderSidebarContent();
-            }
-            else
-            {
-                _membersPanelMode = MembersPanelMode.Member;
-                RenderMemberSidebarContent();
-            }
-
-            return;
-        }
-
         var mode = GetFleetRightSidebarMode();
         switch (mode)
         {
             case FleetRightSidebarMode.Commander:
                 RenderCommanderSidebarContent();
-                break;
-            case FleetRightSidebarMode.SquadLeader:
-                RenderSquadLeaderSidebarContent();
                 break;
             default:
                 RenderMemberSidebarContent();
@@ -311,9 +301,7 @@ public partial class MainWindow
             return FleetRightSidebarMode.Commander;
         }
 
-        return GetCurrentUserCommandedSquad() is not null
-            ? FleetRightSidebarMode.SquadLeader
-            : FleetRightSidebarMode.Member;
+        return FleetRightSidebarMode.Member;
     }
 
     private bool HasCurrentUserFleetAdministrationPermission()
@@ -322,11 +310,6 @@ public partial class MainWindow
                (IsCurrentUserFleetCommander() ||
                 CanCurrentUserManageFleetInfo() ||
                 CanCurrentUserRemoveMembers());
-    }
-
-    private SquadRow? GetCurrentUserCommandedSquad()
-    {
-        return _squads.FirstOrDefault(CanCurrentUserManageSquad);
     }
 
     private void ClearRightSidebarContent()
@@ -358,222 +341,163 @@ public partial class MainWindow
 
     private void ApplyFleetShipSidebarLayout()
     {
-        FleetRightModuleTwoPanel.Visibility = Visibility.Collapsed;
-        FleetRightModuleTwoRow.Height = new GridLength(0);
-        FleetRightModuleOneRow.Height = new GridLength(0.86, GridUnitType.Star);
-        FleetRightModuleThreeRow.Height = new GridLength(1.42, GridUnitType.Star);
+        FleetRightModuleOnePanel.Visibility = Visibility.Visible;
+        FleetRightModuleOneRow.Height = new GridLength(1, GridUnitType.Star);
+        FleetRightModuleTwoPanel.Visibility = Visibility.Visible;
+        FleetRightModuleTwoRow.Height = GridLength.Auto;
+        FleetRightModuleThreePanel.Visibility = Visibility.Collapsed;
+        FleetRightModuleThreeRow.Height = new GridLength(0);
+        FleetRightModuleTwoItems.Columns = 1;
+        FleetRightModuleTwoItems.Margin = new Thickness(0, 8, 0, 0);
     }
 
     private void RenderFleetShipSidebarContent()
     {
         ApplyFleetShipSidebarLayout();
 
-        var totalCount = _fleetShipInventory.Count;
-        var schedulableShips = BuildSchedulableFleetShips();
-        var flyableCount = schedulableShips.Length;
-        var onlineShips = schedulableShips
-            .Where(IsFleetShipOwnerOnline)
+        var classifiedShips = _fleetShipInventory
+            .Select(ship => (Ship: ship, Category: ClassifyFleetShipAsset(ship)))
             .ToArray();
-        var onlineFlyableCount = onlineShips.Length;
-        var onlineOwnerCount = onlineShips
-            .Select(ship => NormalizeLocalKey(ship.OwnerGameId))
-            .Where(owner => owner != "unknown")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count();
-        var primaryShip = onlineShips
-            .OrderBy(ship => GetFleetShipSpecSortRank(ship.ShipSpec, largeFirst: true))
-            .ThenByDescending(ship => ship.ShipPriceValue ?? 0m)
-            .FirstOrDefault();
+        var deployableShips = classifiedShips
+            .Where(item => item.Category == FleetShipDeployabilityCategory.Deployable)
+            .Select(item => item.Ship)
+            .ToArray();
+        var offlineCount = classifiedShips.Count(item =>
+            item.Category == FleetShipDeployabilityCategory.OwnerOffline);
+        var notFlyableCount = classifiedShips.Count(item =>
+            item.Category == FleetShipDeployabilityCategory.NotFlyable);
 
         SetRightSidebarModuleHeader(
             FleetRightModuleOneTitleText,
             FleetRightModuleOneBadge,
             FleetRightModuleOneBadgeText,
-            "可调度舰船",
-            $"{onlineFlyableCount.ToString(CultureInfo.InvariantCulture)}/{flyableCount.ToString(CultureInfo.InvariantCulture)}");
+            "可调度",
+            deployableShips.Length.ToString(CultureInfo.InvariantCulture));
 
-        if (totalCount == 0)
-        {
-            AddRightSidebarInfoRow(FleetRightModuleOneItems, "当前资产", "暂无舰船数据", "成员上传机库数据后将在这里显示。", "#91A5B5");
-        }
-        else if (primaryShip is null)
-        {
-            AddRightSidebarInfoRow(
-                FleetRightModuleOneItems,
-                "当前可调度",
-                "暂无在线可飞舰船",
-                $"在线持有人 {onlineOwnerCount.ToString(CultureInfo.InvariantCulture)} 人 / 全舰队 {totalCount.ToString(CultureInfo.InvariantCulture)} 艘",
-                "#D9A23B");
-        }
-        else
-        {
-            AddRightSidebarInfoRow(
-                FleetRightModuleOneItems,
-                "首选出动",
-                primaryShip.ShipName,
-                $"{primaryShip.OwnerDisplay} / {primaryShip.ShipSpec} / {primaryShip.ShipRoleTag}",
-                "#42CF7C");
-        }
+        var availabilityGroups = FleetShipAvailabilityGrouping.Project(
+            deployableShips.Select(ship =>
+            {
+                var flyableLoaner = IsFleetShipConcept(ship)
+                    ? ship.LoanerRows.FirstOrDefault(IsFleetShipFlyable)
+                    : null;
+                return new FleetShipAvailabilityEntry(
+                    BuildFleetShipInventoryKey(ship),
+                    FirstNonEmpty(ship.OwnerAccountId, ship.OwnerGameId, ship.OwnerCallsign, ship.OwnerDisplay),
+                    ship.OwnerDisplay,
+                    ship.ShipName,
+                    flyableLoaner is null ? ship.ShipRole : $"可飞替代 / {flyableLoaner.ShipName}",
+                    GetFleetShipSpecSortRank(ship.ShipSpec, largeFirst: true),
+                    ship.ShipPriceValue ?? 0m);
+            }));
 
-        foreach (var visual in FleetShipRoleVisuals)
+        foreach (var group in availabilityGroups)
         {
-            AddFleetShipDispatchCategoryRow(
-                visual.DisplayName,
-                visual.Category,
-                onlineShips,
-                schedulableShips,
-                visual.DispatchDescription,
-                visual.ColorHex);
+            AddFleetShipAvailabilityOwnerHeader(group.OwnerDisplay, group.Ships.Count);
+            foreach (var ship in group.Ships)
+            {
+                AddFleetShipAvailabilityRow(ship.ShipName, ship.Detail);
+            }
         }
 
+        AddRightSidebarEmptyStateIfNeeded(FleetRightModuleOneItems, "当前没有可调度舰船。");
+
+        var blockedCount = offlineCount + notFlyableCount;
         SetRightSidebarModuleHeader(
-            FleetRightModuleThreeTitleText,
-            null,
-            null,
-            "舰船动态",
-            "");
-
-        foreach (var activity in _fleetShipActivities
-                     .OrderByDescending(activity => activity.Timestamp)
-                     .ThenBy(activity => activity.ShipName, StringComparer.CurrentCultureIgnoreCase))
-        {
-            AddRightSidebarShipActivity(FleetRightModuleThreeItems, activity);
-        }
-
-        AddRightSidebarEmptyStateIfNeeded(FleetRightModuleThreeItems, "暂无舰船动态。");
+            FleetRightModuleTwoTitleText,
+            FleetRightModuleTwoBadge,
+            FleetRightModuleTwoBadgeText,
+            "暂不可调度",
+            blockedCount.ToString(CultureInfo.InvariantCulture));
+        AddRightSidebarMetric(
+            FleetRightModuleTwoItems,
+            "持有人离线",
+            offlineCount.ToString(CultureInfo.InvariantCulture),
+            FleetCommandBrush(offlineCount > 0 ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOff));
+        AddRightSidebarMetric(
+            FleetRightModuleTwoItems,
+            "当前不可飞",
+            notFlyableCount.ToString(CultureInfo.InvariantCulture),
+            FleetCommandBrush(notFlyableCount > 0 ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOff));
     }
 
-    private void SyncFleetShipActivities(
-        IReadOnlyList<FleetShipInventoryRow> currentRows,
-        bool suppressRemovalActivities = false)
+    private void AddFleetShipAvailabilityOwnerHeader(string ownerDisplay, int shipCount)
     {
-        var currentRowsByKey = currentRows
-            .GroupBy(BuildFleetShipActivityKey, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-
-        if (!_fleetShipActivitySnapshotInitialized)
+        var header = new Grid
         {
-            foreach (var row in currentRowsByKey.Values
-                         .OrderBy(row => GetFleetShipImportedSortDate(row.FleetSharedAtText)))
-            {
-                var firstSharedAt = ParseFleetShipActivityTimestamp(row.FleetSharedAtText, DateTimeOffset.UtcNow);
-                AddFleetShipActivity(row, isRemoval: false, ResolveFleetShipOwnerJoinedAt(row, firstSharedAt));
-            }
-        }
-        else
+            Margin = new Thickness(1, FleetRightModuleOneItems.Children.Count == 0 ? 0 : 4, 1, 2)
+        };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock
         {
-            var now = DateTimeOffset.UtcNow;
-            foreach (var row in currentRowsByKey.Values
-                         .Where(row => !_fleetShipActivitySnapshot.ContainsKey(BuildFleetShipActivityKey(row)))
-                         .OrderBy(row => GetFleetShipImportedSortDate(row.FleetSharedAtText)))
-            {
-                var firstSharedAt = ParseFleetShipActivityTimestamp(row.FleetSharedAtText, now);
-                AddFleetShipActivity(row, isRemoval: false, ResolveFleetShipOwnerJoinedAt(row, firstSharedAt));
-            }
-
-            foreach (var row in _fleetShipActivitySnapshot
-                         .Where(pair => !currentRowsByKey.ContainsKey(pair.Key))
-                         .Select(pair => pair.Value)
-                         .OrderBy(row => row.ShipName, StringComparer.CurrentCultureIgnoreCase))
-            {
-                if (!suppressRemovalActivities)
-                {
-                    AddFleetShipActivity(row, isRemoval: true, now);
-                }
-            }
-        }
-
-        _fleetShipActivitySnapshot.Clear();
-        foreach (var pair in currentRowsByKey)
+            Text = ownerDisplay,
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
+            FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
+            FontSize = 11.5,
+            FontWeight = FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        });
+        var count = new TextBlock
         {
-            _fleetShipActivitySnapshot[pair.Key] = pair.Value;
-        }
-
-        _fleetShipActivitySnapshotInitialized = true;
-        if (_fleetShipActivities.Count > 80)
-        {
-            _fleetShipActivities.RemoveRange(80, _fleetShipActivities.Count - 80);
-        }
+            Text = $"{shipCount} 艘",
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
+            FontFamily = new MediaFontFamily("Segoe UI"),
+            FontSize = 10.5,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(count, 1);
+        header.Children.Add(count);
+        FleetRightModuleOneItems.Children.Add(header);
     }
 
-    private void AddFleetShipActivity(FleetShipInventoryRow ship, bool isRemoval, DateTimeOffset timestamp)
+    private void AddFleetShipAvailabilityRow(string shipName, string detail)
     {
-        _fleetShipActivities.Insert(0, new FleetShipActivityRow(
-            isRemoval ? "移出舰船" : "加入舰船",
-            ship.ShipName,
-            ship.OwnerDisplay,
-            isRemoval ? "变更时间" : "加入舰队时间",
-            timestamp.ToLocalTime().ToString("yyyy-MM-dd"),
-            timestamp,
-            isRemoval,
-            IsFleetShipFlyable(ship)));
+        var row = new Grid
+        {
+            MinHeight = 30,
+            Margin = new Thickness(0, 0, 0, 1)
+        };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.Children.Add(new System.Windows.Shapes.Ellipse
+        {
+            Width = 5,
+            Height = 5,
+            Fill = FleetCommandBrush(BridgeBrushToken.StatusOk),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var content = new Grid { Margin = new Thickness(5, 0, 0, 0) };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.Children.Add(new TextBlock
+        {
+            Text = shipName,
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        });
+        var detailText = new TextBlock
+        {
+            Text = detail,
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
+            FontSize = 10,
+            Margin = new Thickness(7, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        Grid.SetColumn(detailText, 1);
+        content.Children.Add(detailText);
+        Grid.SetColumn(content, 1);
+        row.Children.Add(content);
+        FleetRightModuleOneItems.Children.Add(row);
     }
 
-    private DateTimeOffset ResolveFleetShipOwnerJoinedAt(
-        FleetShipInventoryRow ship,
-        DateTimeOffset fallback)
-    {
-        foreach (var key in new[]
-                 {
-                     BuildFleetMemberJoinIdentityKey("account", ship.OwnerAccountId),
-                     BuildFleetMemberJoinIdentityKey("game", ship.OwnerGameId),
-                     BuildFleetMemberJoinIdentityKey("callsign", ship.OwnerCallsign)
-                 })
-        {
-            if (!string.IsNullOrWhiteSpace(key) &&
-                _fleetMemberJoinedAtByIdentity.TryGetValue(key, out var joinedAt))
-            {
-                return joinedAt;
-            }
-        }
-
-        if (IsLocalPlayer(ship.OwnerGameId) &&
-            _fleetJoinedAtUtc != default &&
-            _fleetJoinedAtUtc != DateTimeOffset.MinValue)
-        {
-            return _fleetJoinedAtUtc.ToUniversalTime();
-        }
-
-        return fallback;
-    }
-
-    private static string BuildFleetShipActivityKey(FleetShipInventoryRow ship)
+    private static string BuildFleetShipInventoryKey(FleetShipInventoryRow ship)
     {
         return BuildFleetShipKey(ship.OwnerGameId, ship.ShipCode, ship.ShipInstanceId);
-    }
-
-    private static DateTimeOffset ParseFleetShipActivityTimestamp(string value, DateTimeOffset fallback)
-    {
-        var parsed = GetFleetShipImportedSortDate(value);
-        return parsed == DateTime.MinValue
-            ? fallback
-            : new DateTimeOffset(parsed);
-    }
-
-    private void ResetFleetShipActivities()
-    {
-        _fleetShipActivities.Clear();
-        _fleetShipActivitySnapshot.Clear();
-        _fleetMemberJoinedAtByIdentity.Clear();
-        _fleetShipActivitySnapshotInitialized = false;
-    }
-
-    private void AddFleetShipDispatchCategoryRow(
-        string label,
-        FleetShipRoleCategory category,
-        IReadOnlyCollection<FleetShipInventoryRow> onlineShips,
-        IReadOnlyCollection<FleetShipInventoryRow> schedulableShips,
-        string detail,
-        string accentHex)
-    {
-        var onlineCount = CountFleetShipsByRoleCategory(onlineShips, category);
-        var totalCount = CountFleetShipsByRoleCategory(schedulableShips, category);
-        AddRightSidebarInfoRow(
-            FleetRightModuleOneItems,
-            label,
-            $"{onlineCount.ToString(CultureInfo.InvariantCulture)} / {totalCount.ToString(CultureInfo.InvariantCulture)} 艘",
-            $"在线 / 全部 · {detail}",
-            onlineCount > 0 ? accentHex : "#91A5B5");
     }
 
     private FleetShipInventoryRow[] BuildSchedulableFleetShips()
@@ -594,6 +518,31 @@ public partial class MainWindow
         }
 
         return rows.ToArray();
+    }
+
+    private bool IsFleetShipDispatchableAsset(FleetShipInventoryRow ship)
+    {
+        return ClassifyFleetShipAsset(ship) == FleetShipDeployabilityCategory.Deployable;
+    }
+
+    private FleetShipDeployabilityCategory ClassifyFleetShipAsset(FleetShipInventoryRow ship)
+    {
+        var hasFlyableLoaner = IsFleetShipConcept(ship) &&
+                               ship.LoanerRows.Any(IsFleetShipFlyable);
+        return FleetShipDeployabilityPolicy.Classify(
+            ownerOnline: IsFleetShipOwnerOnline(ship),
+            isSynced: true,
+            shipFlyable: IsFleetShipFlyable(ship),
+            hasFlyableLoaner: hasFlyableLoaner);
+    }
+
+    private FleetShipInventoryRow? ResolvePreferredFleetShipDispatch()
+    {
+        return BuildSchedulableFleetShips()
+            .Where(IsFleetShipOwnerOnline)
+            .OrderBy(ship => GetFleetShipSpecSortRank(ship.ShipSpec, largeFirst: true))
+            .ThenByDescending(ship => ship.ShipPriceValue ?? 0m)
+            .FirstOrDefault();
     }
 
     private int CountFleetShipsByRoleCategory(IEnumerable<FleetShipInventoryRow> ships, FleetShipRoleCategory category)
@@ -629,11 +578,10 @@ public partial class MainWindow
     {
         var pendingApplicationRows = BuildPendingFleetApplicationRows();
         var pendingApplications = pendingApplicationRows.Length;
-        var unassignedCount = _players.Count(player => IsUnassignedSquad(player.SquadName));
+        var notInGameCount = _players.Count(player =>
+            player.ServerShardDisplayText.Equals("未进入游戏", StringComparison.Ordinal));
         var unknownShipCount = _players.Count(player => IsUnknownValue(player.RawShip) || IsUnknownValue(player.Ship));
         var unknownLocationCount = _players.Count(player => IsUnknownLocation(player.RawLocation) || IsUnknownLocation(player.Location));
-        var onlineCount = _players.Count(player => IsOnlineStatus(player.SharedOnlineStatusValue));
-        var offlineCount = Math.Max(0, _players.Count - onlineCount);
         var syncIssueCount = IsLoggedIn ? 0 : 1;
         var pendingTotal = pendingApplications;
 
@@ -655,12 +603,10 @@ public partial class MainWindow
             FleetRightModuleTwoBadgeText,
             "成员态势",
             _players.Count.ToString(CultureInfo.InvariantCulture));
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "在线成员", onlineCount.ToString(CultureInfo.InvariantCulture), "#42CF7C");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "离线成员", offlineCount.ToString(CultureInfo.InvariantCulture), "#91A5B5");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "未分配小队", unassignedCount.ToString(CultureInfo.InvariantCulture), unassignedCount > 0 ? "#D9A23B" : "#42CF7C");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "飞船未知", unknownShipCount.ToString(CultureInfo.InvariantCulture), unknownShipCount > 0 ? "#D9A23B" : "#42CF7C");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "位置未知", unknownLocationCount.ToString(CultureInfo.InvariantCulture), unknownLocationCount > 0 ? "#D9A23B" : "#42CF7C");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "同步异常", syncIssueCount.ToString(CultureInfo.InvariantCulture), syncIssueCount > 0 ? "#D9A23B" : "#42CF7C");
+        AddRightSidebarMetric(FleetRightModuleTwoItems, "未进入游戏", notInGameCount.ToString(CultureInfo.InvariantCulture), FleetCommandBrush(notInGameCount > 0 ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOk));
+        AddRightSidebarMetric(FleetRightModuleTwoItems, "飞船未知", unknownShipCount.ToString(CultureInfo.InvariantCulture), FleetCommandBrush(unknownShipCount > 0 ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOk));
+        AddRightSidebarMetric(FleetRightModuleTwoItems, "位置未知", unknownLocationCount.ToString(CultureInfo.InvariantCulture), FleetCommandBrush(unknownLocationCount > 0 ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOk));
+        AddRightSidebarMetric(FleetRightModuleTwoItems, "同步异常", syncIssueCount.ToString(CultureInfo.InvariantCulture), FleetCommandBrush(syncIssueCount > 0 ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOk));
 
         SetRightSidebarModuleHeader(
             FleetRightModuleThreeTitleText,
@@ -713,30 +659,26 @@ public partial class MainWindow
         header.Children.Add(new TextBlock
         {
             Text = "待审核申请",
-            Foreground = CreateSolidBrush("#91A5B5"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 11,
             FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center
         });
 
-        header.Children.Add(new Border
+        if (count > 0)
         {
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(2),
-            Padding = new Thickness(5, 0, 5, 1),
-            Margin = new Thickness(6, 0, 0, 0),
-            Child = new TextBlock
+            header.Children.Add(new Border
             {
-                Text = count.ToString(CultureInfo.InvariantCulture),
-                Foreground = CreateSolidBrush(count > 0 ? "#D9A23B" : "#637A89"),
-                FontFamily = new MediaFontFamily("Segoe UI"),
-                FontSize = 10.5,
-                FontWeight = FontWeights.SemiBold
-            }
-        });
+                Margin = new Thickness(6, 0, 0, 0),
+                Style = (Style)FindResource("BridgeCountBadgeStyle"),
+                Child = new TextBlock
+                {
+                    Text = count.ToString(CultureInfo.InvariantCulture),
+                    Style = (Style)FindResource("BridgeCountBadgeTextStyle")
+                }
+            });
+        }
 
         FleetRightModuleOneItems.Children.Add(header);
     }
@@ -746,8 +688,8 @@ public partial class MainWindow
         var border = new Border
         {
             MinHeight = 44,
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(7, 5, 7, 5),
@@ -757,13 +699,13 @@ public partial class MainWindow
 
         border.MouseEnter += (_, _) =>
         {
-            border.Background = CreateSolidBrush("#102737");
-            border.BorderBrush = CreateSolidBrush("#25536C");
+            border.Background = FleetCommandBrush(BridgeBrushToken.RowHover);
+            border.BorderBrush = FleetCommandBrush(BridgeBrushToken.ChipHairline);
         };
         border.MouseLeave += (_, _) =>
         {
-            border.Background = CreateSolidBrush("#0D1D29");
-            border.BorderBrush = CreateSolidBrush("#173447");
+            border.Background = FleetCommandBrush(BridgeBrushToken.Panel);
+            border.BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline);
         };
 
         var grid = new Grid { VerticalAlignment = VerticalAlignment.Center };
@@ -786,7 +728,7 @@ public partial class MainWindow
         identity.Children.Add(new TextBlock
         {
             Text = application.DisplayName,
-            Foreground = CreateSolidBrush("#E6F1F8"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
@@ -795,7 +737,7 @@ public partial class MainWindow
         identity.Children.Add(new TextBlock
         {
             Text = "申请加入舰队",
-            Foreground = CreateSolidBrush("#637A89"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 10.5,
             Margin = new Thickness(0, 2, 0, 0),
@@ -807,7 +749,7 @@ public partial class MainWindow
         var createdAt = new TextBlock
         {
             Text = application.CreatedAtText,
-            Foreground = CreateSolidBrush("#91A5B5"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontFamily = new MediaFontFamily("Segoe UI"),
             FontSize = 10.5,
             Width = 94,
@@ -838,8 +780,8 @@ public partial class MainWindow
         {
             Width = 28,
             Height = 28,
-            Background = CreateSolidBrush("#0A1823"),
-            BorderBrush = CreateSolidBrush("#28506A"),
+            Background = FleetCommandBrush(BridgeBrushToken.Rail),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.ChipHairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             SnapsToDevicePixels = true
@@ -858,7 +800,8 @@ public partial class MainWindow
         }
         else
         {
-            frame.Child = CreateIdentityBeaconAvatarPlaceholder(CreateSolidBrush("#63C7FF"));
+            frame.Child = CreateIdentityBeaconAvatarPlaceholder(
+                BridgeSceneContext.GetRequiredAccentBrush(this));
         }
 
         return frame;
@@ -868,8 +811,8 @@ public partial class MainWindow
     {
         var border = new Border
         {
-            Background = CreateSolidBrush("#081722"),
-            BorderBrush = CreateSolidBrush("#142B39"),
+            Background = FleetCommandBrush(BridgeBrushToken.Rail),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.RowHairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(8, 4, 8, 4),
@@ -880,7 +823,7 @@ public partial class MainWindow
         border.Child = new TextBlock
         {
             Text = $"还有 {remainingCount.ToString(CultureInfo.InvariantCulture)} 条待审核申请，点击全部查看",
-            Foreground = CreateSolidBrush("#637A89"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 10.5,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -908,9 +851,9 @@ public partial class MainWindow
             Height = 28,
             Tag = application,
             ToolTip = approve ? "接受申请" : "拒绝申请",
-            Background = CreateSolidBrush("#0C1D29"),
-            BorderBrush = CreateSolidBrush("#28506A"),
-            Foreground = CreateSolidBrush("#D5E5EF")
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.ChipHairline),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink)
         };
 
         if (FleetRightModuleOneItems.TryFindResource("RightSidebarDecisionButton") is Style style)
@@ -927,28 +870,29 @@ public partial class MainWindow
             button.Click += RejectFleetApplication_Click;
         }
 
-        var hoverBorder = approve ? "#42CF7C" : "#F15B65";
+        var hoverBorder = FleetCommandBrush(
+            approve ? BridgeBrushToken.StatusOk : BridgeBrushToken.StatusBad);
         button.MouseEnter += (_, _) =>
         {
-            button.Background = CreateSolidBrush("#102737");
-            button.BorderBrush = CreateSolidBrush(hoverBorder);
-            button.Foreground = CreateSolidBrush("#FFFFFF");
+            button.Background = FleetCommandBrush(BridgeBrushToken.RowHover);
+            button.BorderBrush = hoverBorder;
+            button.Foreground = FleetCommandBrush(BridgeBrushToken.Ink);
         };
         button.MouseLeave += (_, _) =>
         {
-            button.Background = CreateSolidBrush("#0C1D29");
-            button.BorderBrush = CreateSolidBrush("#28506A");
-            button.Foreground = CreateSolidBrush("#D5E5EF");
+            button.Background = FleetCommandBrush(BridgeBrushToken.Panel);
+            button.BorderBrush = FleetCommandBrush(BridgeBrushToken.ChipHairline);
+            button.Foreground = FleetCommandBrush(BridgeBrushToken.Ink);
         };
         button.PreviewMouseDown += (_, _) =>
         {
-            button.Background = CreateSolidBrush("#091721");
-            button.BorderBrush = CreateSolidBrush("#28617E");
+            button.Background = FleetCommandBrush(BridgeBrushToken.Rail);
+            button.BorderBrush = BridgeSceneContext.GetRequiredAccentBrush(this);
         };
         button.PreviewMouseUp += (_, _) =>
         {
-            button.Background = CreateSolidBrush("#102737");
-            button.BorderBrush = CreateSolidBrush(hoverBorder);
+            button.Background = FleetCommandBrush(BridgeBrushToken.RowHover);
+            button.BorderBrush = hoverBorder;
         };
 
         return button;
@@ -958,8 +902,8 @@ public partial class MainWindow
     {
         var border = new Border
         {
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(9, 7, 9, 7),
@@ -971,7 +915,7 @@ public partial class MainWindow
         stack.Children.Add(new TextBlock
         {
             Text = "暂无待审核申请",
-            Foreground = CreateSolidBrush("#C8D8E2"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold
@@ -979,7 +923,7 @@ public partial class MainWindow
         stack.Children.Add(new TextBlock
         {
             Text = "所有加入申请均已处理",
-            Foreground = CreateSolidBrush("#637A89"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 10.5,
             Margin = new Thickness(0, 3, 0, 0)
@@ -991,68 +935,96 @@ public partial class MainWindow
 
     private void RenderMemberSidebarContent()
     {
-        var local = GetLocalPlayerRow();
-        var fleetChannel = _fleetChatChannels.FirstOrDefault(channel =>
-            channel.Type == StarBridge.Core.FleetChat.FleetChatChannelTypes.Fleet);
-
-        SetRightSidebarModuleHeader(
-            FleetRightModuleOneTitleText,
-            FleetRightModuleOneBadge,
-            FleetRightModuleOneBadgeText,
-            "舰队通讯",
-            fleetChannel is { UnreadCount: > 0 }
-                ? $"{fleetChannel.UnreadText} 未读"
-                : "最新");
-
-        foreach (var message in _fleetMemberSidebarChatPreview)
+        if (FleetMemberTimelinePanel is null)
         {
-            AddRightSidebarChatPreviewRow(FleetRightModuleOneItems, message);
+            return;
         }
 
-        if (_fleetMemberSidebarChatPreview.Count == 0)
+        FleetMemberTimelinePanel.Visibility = Visibility.Visible;
+
+        var now = DateTimeOffset.Now;
+        var timeline = new List<(DateTimeOffset Timestamp, FleetNotificationCenterItemRow Row)>();
+        timeline.AddRange(_fleetMemberSidebarChatPreview.Select(message =>
+            (message.Message.CreatedAt,
+             new FleetNotificationCenterItemRow(
+                 "通讯",
+                 message.SenderCallsign,
+                 message.Text,
+                 CommunicationTimeFormatter.Format(message.Message.CreatedAt, now),
+                 "",
+                 "",
+                 null))));
+        timeline.AddRange(GetMemberVisibleFleetActivity().Select(log =>
+            (log.Timestamp,
+             new FleetNotificationCenterItemRow(
+                 ResolveFleetTimelineCategory(log),
+                 SanitizeFleetEventText(log.Title),
+                 SanitizeFleetEventText(log.Detail),
+                 CommunicationTimeFormatter.Format(log.Timestamp, now),
+                 "",
+                 "",
+                 null))));
+
+        _fleetMemberTimelineItems.Clear();
+        foreach (var entry in timeline
+                     .OrderByDescending(entry => entry.Timestamp)
+                     .Take(10))
         {
-            AddRightSidebarInfoRow(
-                FleetRightModuleOneItems,
-                "暂无舰队消息",
-                _fleetMemberSidebarChatPreviewLoaded ? "频道暂时安静" : "正在获取最新通讯",
-                "新消息会在这里显示，不会自动标记为已读。",
-                "#91A5B5");
+            _fleetMemberTimelineItems.Add(entry.Row);
         }
 
-        FleetRightModuleOneActionButton.Content = "进入舰队通讯";
-        FleetRightModuleOneActionButton.Visibility = Visibility.Visible;
+        if (_fleetMemberTimelineItems.Count == 0)
+        {
+            _fleetMemberTimelineItems.Add(new FleetNotificationCenterItemRow(
+                "资料",
+                _fleetMemberSidebarChatPreviewLoaded ? "暂无舰队动态" : "正在获取最新通讯",
+                "新通讯和成员可见事件会按时间合并显示。",
+                "",
+                "",
+                "",
+                null));
+        }
+
+        FleetMemberTimelineOpenChatButton.IsEnabled = _hasFleet;
         if (!_fleetMemberSidebarChatPreviewLoaded)
         {
             _ = RefreshFleetMemberSidebarChatPreviewAsync();
         }
+    }
 
-        SetRightSidebarModuleHeader(
-            FleetRightModuleTwoTitleText,
-            FleetRightModuleTwoBadge,
-            FleetRightModuleTwoBadgeText,
-            "我的状态",
-            local?.Status.Equals("Online", StringComparison.OrdinalIgnoreCase) == true ? "在线" : "离线");
-        FleetRightModuleTwoItems.Margin = new Thickness(0, 8, 0, 0);
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "我的角色", GetCurrentUserRoleTitle(), "#29AFFF");
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "我的小队", _joinedSquad?.Name ?? "未加入", _joinedSquad is null ? "#D9A23B" : "#42CF7C");
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "当前飞船", NormalizeOptionalDisplay(local?.Ship, "Unknown"), IsUnknownValue(local?.Ship) ? "#D9A23B" : "#E6F1F8");
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "当前位置", NormalizeOptionalDisplay(local?.Location, "地点：未知星域"), IsUnknownLocation(local?.Location) ? "#D9A23B" : "#E6F1F8");
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "服务器区域", GetGameServerRegionDisplay(), GetGameServerRegionAccent());
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "同步状态", GetNetworkSyncStatusText(), _isNetworkSyncRunning ? "#D9A23B" : IsLoggedIn ? "#42CF7C" : "#91A5B5");
-        AddRightSidebarStatusMetric(FleetRightModuleTwoItems, "游戏浮层", _overlayWindow?.IsVisible == true ? "已开启" : "未开启", _overlayWindow?.IsVisible == true ? "#42CF7C" : "#91A5B5");
-
-        SetRightSidebarModuleHeader(
-            FleetRightModuleThreeTitleText,
-            null,
-            null,
-            "舰队动态",
-            "");
-        foreach (var log in GetMemberVisibleFleetActivity())
+    private static string ResolveFleetTimelineCategory(FleetEventLogRow log)
+    {
+        var text = $"{log.Type} {log.Title} {log.Detail}";
+        if (text.Contains("小队", StringComparison.OrdinalIgnoreCase))
         {
-            AddRightSidebarActivity(FleetRightModuleThreeItems, SanitizeFleetEventText(log.Title), log.Timestamp.ToLocalTime().ToString("MM-dd HH:mm"), log.AccentBrush);
+            return "小队";
         }
 
-        AddRightSidebarEmptyStateIfNeeded(FleetRightModuleThreeItems, "暂无普通成员可见动态。");
+        if (text.Contains("公告", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("任务", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("计划", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("集结", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("通知", StringComparison.OrdinalIgnoreCase))
+        {
+            return "公告";
+        }
+
+        if (text.Contains("成员", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("加入", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("退出", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("上线", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("离线", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("移出", StringComparison.OrdinalIgnoreCase))
+        {
+            return "人员";
+        }
+
+        return "资料";
+    }
+
+    private void FleetMemberTimelineOpenChatButton_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToFleetChatFromMemberPreview();
     }
 
     private void AddRightSidebarChatPreviewRow(
@@ -1062,7 +1034,7 @@ public partial class MainWindow
         var row = new Border
         {
             Background = Brushes.Transparent,
-            BorderBrush = CreateSolidBrush("#173447"),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(0, 0, 0, 1),
             Padding = new Thickness(0, 5, 0, 7),
             Margin = new Thickness(0, 0, 0, 2)
@@ -1133,7 +1105,7 @@ public partial class MainWindow
         var time = new TextBlock
         {
             Text = message.TimeText,
-            Foreground = CreateSolidBrush("#637A89"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
             FontFamily = new MediaFontFamily("Bahnschrift"),
             FontSize = 9,
             Margin = new Thickness(8, 0, 0, 0),
@@ -1145,7 +1117,7 @@ public partial class MainWindow
         content.Children.Add(new TextBlock
         {
             Text = message.Text,
-            Foreground = CreateSolidBrush("#C8D8E2"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontSize = 10.5,
             Margin = new Thickness(0, 4, 0, 0),
             MaxHeight = 34,
@@ -1162,7 +1134,7 @@ public partial class MainWindow
     {
         var placeholder = new ContentControl
         {
-            Foreground = foreground ?? CreateSolidBrush("#79CFF4")
+            Foreground = foreground ?? BridgeSceneContext.GetRequiredAccentBrush(this)
         };
         if (TryFindResource("IdentityBeaconAvatarPlaceholderStyle") is Style placeholderStyle)
         {
@@ -1170,52 +1142,6 @@ public partial class MainWindow
         }
 
         return placeholder;
-    }
-
-    private void RenderSquadLeaderSidebarContent()
-    {
-        var squad = GetCurrentUserCommandedSquad();
-        var squadMembers = squad is null
-            ? []
-            : _players.Where(player => player.SquadName.Equals(squad.Name, StringComparison.OrdinalIgnoreCase)).ToList();
-        var onlineCount = squadMembers.Count(player => IsOnlineStatus(player.SharedOnlineStatusValue));
-        var offlineCount = Math.Max(0, squadMembers.Count - onlineCount);
-        var unknownShipCount = squadMembers.Count(player => IsUnknownValue(player.RawShip) || IsUnknownValue(player.Ship));
-        var unknownLocationCount = squadMembers.Count(player => IsUnknownLocation(player.RawLocation) || IsUnknownLocation(player.Location));
-
-        SetRightSidebarModuleHeader(
-            FleetRightModuleOneTitleText,
-            FleetRightModuleOneBadge,
-            FleetRightModuleOneBadgeText,
-            "小队指令",
-            squad is null ? "等待" : squad.Name);
-        AddRightSidebarInfoRow(FleetRightModuleOneItems, "当前小队任务", GetSquadMissionText(squad), GetSquadRallyText(squad), "#29AFFF");
-        AddRightSidebarInfoRow(FleetRightModuleOneItems, "小队集结点", squad?.RallyPoint ?? "未指定", "以小队长发布的信息为准", "#D9A23B");
-        AddRightSidebarInfoRow(FleetRightModuleOneItems, "需要确认的队员", "0 人", "暂无队员确认队列", "#42CF7C");
-
-        SetRightSidebarModuleHeader(
-            FleetRightModuleTwoTitleText,
-            FleetRightModuleTwoBadge,
-            FleetRightModuleTwoBadgeText,
-            "小队态势",
-            squadMembers.Count.ToString(CultureInfo.InvariantCulture));
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "小队在线", onlineCount.ToString(CultureInfo.InvariantCulture), "#42CF7C");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "小队离线", offlineCount.ToString(CultureInfo.InvariantCulture), "#91A5B5");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "飞船未知", unknownShipCount.ToString(CultureInfo.InvariantCulture), unknownShipCount > 0 ? "#D9A23B" : "#42CF7C");
-        AddRightSidebarMetric(FleetRightModuleTwoItems, "位置未知", unknownLocationCount.ToString(CultureInfo.InvariantCulture), unknownLocationCount > 0 ? "#D9A23B" : "#42CF7C");
-
-        SetRightSidebarModuleHeader(
-            FleetRightModuleThreeTitleText,
-            null,
-            null,
-            "小队动态",
-            "");
-        foreach (var item in BuildSquadLeaderActivityRows(squad, squadMembers))
-        {
-            AddRightSidebarActivity(FleetRightModuleThreeItems, item.Title, item.Meta, item.Brush);
-        }
-
-        AddRightSidebarEmptyStateIfNeeded(FleetRightModuleThreeItems, "暂无小队动态。");
     }
 
     private void SetRightSidebarModuleHeader(TextBlock title, Border? badge, TextBlock? badgeText, string titleText, string badgeValue)
@@ -1227,15 +1153,31 @@ public partial class MainWindow
         }
 
         badgeText.Text = badgeValue;
-        badge.Visibility = string.IsNullOrWhiteSpace(badgeValue) ? Visibility.Collapsed : Visibility.Visible;
+        badge.Visibility = string.IsNullOrWhiteSpace(badgeValue) ||
+                           badgeValue.Equals("0", StringComparison.Ordinal)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
-    private void AddRightSidebarInfoRow(System.Windows.Controls.Panel panel, string label, string value, string detail, string accentHex)
+    private void AddRightSidebarInfoRow(
+        System.Windows.Controls.Panel panel,
+        string label,
+        string value,
+        string detail,
+        string serializedAccent) =>
+        AddRightSidebarInfoRow(panel, label, value, detail, ParseRequiredSidebarAccent(serializedAccent));
+
+    private void AddRightSidebarInfoRow(
+        System.Windows.Controls.Panel panel,
+        string label,
+        string value,
+        string detail,
+        System.Windows.Media.Brush accentBrush)
     {
         var border = new Border
         {
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(7, 4, 7, 4),
@@ -1250,7 +1192,7 @@ public partial class MainWindow
         {
             Width = 6,
             Height = 6,
-            Fill = CreateSolidBrush(accentHex),
+            Fill = accentBrush,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 0)
         };
@@ -1262,14 +1204,14 @@ public partial class MainWindow
         stack.Children.Add(new TextBlock
         {
             Text = label,
-            Foreground = CreateSolidBrush("#91A5B5"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontSize = 10.5,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
         stack.Children.Add(new TextBlock
         {
             Text = value,
-            Foreground = CreateSolidBrush("#E6F1F8"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 2, 0, 0),
@@ -1280,7 +1222,7 @@ public partial class MainWindow
             stack.Children.Add(new TextBlock
             {
                 Text = detail,
-                Foreground = CreateSolidBrush("#6F8796"),
+                Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
                 FontSize = 10.5,
                 Margin = new Thickness(0, 2, 0, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -1292,12 +1234,16 @@ public partial class MainWindow
         panel.Children.Add(border);
     }
 
-    private void AddRightSidebarMetric(System.Windows.Controls.Panel panel, string label, string value, string accentHex)
+    private void AddRightSidebarMetric(
+        System.Windows.Controls.Panel panel,
+        string label,
+        string value,
+        System.Windows.Media.Brush accentBrush)
     {
         var border = new Border
         {
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(7, 4, 7, 4),
@@ -1311,7 +1257,7 @@ public partial class MainWindow
         var labelText = new TextBlock
         {
             Text = label,
-            Foreground = CreateSolidBrush("#91A5B5"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontSize = 10,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -1322,7 +1268,7 @@ public partial class MainWindow
         var valueText = new TextBlock
         {
             Text = value,
-            Foreground = CreateSolidBrush(accentHex),
+            Foreground = accentBrush,
             FontSize = 11.5,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(6, 0, 0, 0),
@@ -1336,196 +1282,68 @@ public partial class MainWindow
         panel.Children.Add(border);
     }
 
-    private void AddRightSidebarStatusMetric(System.Windows.Controls.Panel panel, string label, string value, string accentHex)
+    private void AddRightSidebarStatusMetric(
+        System.Windows.Controls.Panel panel,
+        string label,
+        string value,
+        System.Windows.Media.Brush accentBrush)
     {
-        var border = new Border
+        var row = new StackPanel
         {
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(2),
-            Padding = new Thickness(6, 2, 6, 2),
-            Margin = new Thickness(0, 0, 4, 3),
-            MinHeight = 21,
+            Style = TryFindResource("BridgeDirectoryFieldRowStyle") as Style,
+            Margin = new Thickness(0, 2, 0, 6),
             ToolTip = $"{label} / {value}"
         };
-
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var labelText = new TextBlock
         {
             Text = label,
-            Foreground = CreateSolidBrush("#7A8E9B"),
-            FontSize = 9.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis
+            Style = TryFindResource("BridgeDirectoryFieldLabelTextStyle") as Style
         };
-        Grid.SetColumn(labelText, 0);
-        grid.Children.Add(labelText);
+        row.Children.Add(labelText);
 
         var valueText = new TextBlock
         {
             Text = value,
-            Foreground = CreateSolidBrush(accentHex),
-            FontSize = 10.5,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(5, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            TextAlignment = TextAlignment.Right,
-            TextTrimming = TextTrimming.CharacterEllipsis
+            Style = TryFindResource("BridgeDirectoryFieldValueTextStyle") as Style,
+            Foreground = accentBrush,
+            MaxWidth = 126,
+            ToolTip = value
         };
-        Grid.SetColumn(valueText, 1);
-        grid.Children.Add(valueText);
+        row.Children.Add(valueText);
 
-        border.Child = grid;
-        panel.Children.Add(border);
+        panel.Children.Add(row);
     }
 
     private void AddRightSidebarActivity(System.Windows.Controls.Panel panel, string title, string timeText, System.Windows.Media.Brush accentBrush)
     {
+        _ = accentBrush;
         var grid = new Grid { Margin = new Thickness(0, 0, 0, 7) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var marker = new System.Windows.Shapes.Ellipse
-        {
-            Width = 5,
-            Height = 5,
-            Fill = accentBrush,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        Grid.SetColumn(marker, 0);
-        grid.Children.Add(marker);
 
         var titleText = new TextBlock
         {
             Text = title,
-            Foreground = CreateSolidBrush("#E6F1F8"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontSize = 11,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
-        Grid.SetColumn(titleText, 1);
+        Grid.SetColumn(titleText, 0);
         grid.Children.Add(titleText);
 
         var time = new TextBlock
         {
             Text = timeText,
-            Foreground = CreateSolidBrush("#91A5B5"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontSize = 10.5,
             Margin = new Thickness(8, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(time, 2);
+        Grid.SetColumn(time, 1);
         grid.Children.Add(time);
 
         panel.Children.Add(grid);
-    }
-
-    private void AddRightSidebarShipActivity(System.Windows.Controls.Panel panel, FleetShipActivityRow activity)
-    {
-        var border = new Border
-        {
-            Background = CreateSolidBrush("#0D1D29"),
-            BorderBrush = CreateSolidBrush("#173447"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(2),
-            Padding = new Thickness(8, 6, 8, 6),
-            Margin = new Thickness(0, 0, 0, 6),
-            MinHeight = 56,
-            SnapsToDevicePixels = true
-        };
-
-        border.MouseEnter += (_, _) =>
-        {
-            border.Background = CreateSolidBrush("#102737");
-            border.BorderBrush = CreateSolidBrush("#25536C");
-        };
-        border.MouseLeave += (_, _) =>
-        {
-            border.Background = CreateSolidBrush("#0D1D29");
-            border.BorderBrush = CreateSolidBrush("#173447");
-        };
-
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(9) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(78) });
-
-        var marker = new System.Windows.Shapes.Rectangle
-        {
-            Width = 3,
-            RadiusX = 1,
-            RadiusY = 1,
-            Fill = activity.IsRemoval
-                ? CreateSolidBrush("#F15B65")
-                : activity.IsFlyable
-                    ? CreateSolidBrush("#42CF7C")
-                    : CreateSolidBrush("#9A70E8"),
-            VerticalAlignment = VerticalAlignment.Stretch,
-            Margin = new Thickness(0, 2, 0, 2)
-        };
-        Grid.SetColumn(marker, 0);
-        grid.Children.Add(marker);
-
-        var info = new StackPanel
-        {
-            Margin = new Thickness(4, 0, 8, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        Grid.SetColumn(info, 1);
-
-        info.Children.Add(new TextBlock
-        {
-            Text = $"{activity.Action}  {activity.ShipName}",
-            Foreground = CreateSolidBrush("#E6F1F8"),
-            FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
-            FontSize = 11.5,
-            FontWeight = FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        info.Children.Add(new TextBlock
-        {
-            Text = $"持有人  {activity.OwnerDisplay}",
-            Foreground = CreateSolidBrush("#91A5B5"),
-            FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
-            FontSize = 10.5,
-            Margin = new Thickness(0, 3, 0, 0),
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        grid.Children.Add(info);
-
-        var time = new StackPanel
-        {
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        Grid.SetColumn(time, 2);
-        time.Children.Add(new TextBlock
-        {
-            Text = activity.TimeLabel,
-            Foreground = CreateSolidBrush("#637A89"),
-            FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
-            FontSize = 9.5,
-            HorizontalAlignment = HorizontalAlignment.Right
-        });
-        time.Children.Add(new TextBlock
-        {
-            Text = activity.TimeText,
-            Foreground = CreateSolidBrush("#D7E6F0"),
-            FontFamily = new MediaFontFamily("Segoe UI"),
-            FontSize = 10.5,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 3, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Right
-        });
-        grid.Children.Add(time);
-
-        border.Child = grid;
-        panel.Children.Add(border);
     }
 
     private static bool IsFleetShipFlyable(FleetShipInventoryRow ship)
@@ -1540,14 +1358,6 @@ public partial class MainWindow
                ship.ShipStatus.Contains("Concept", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static DateTime GetFleetShipImportedSortDate(string value)
-    {
-        return DateTime.TryParse(value, CultureInfo.CurrentCulture, DateTimeStyles.AssumeLocal, out var date) ||
-               DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out date)
-            ? date
-            : DateTime.MinValue;
-    }
-
     private void AddRightSidebarEmptyStateIfNeeded(System.Windows.Controls.Panel panel, string message)
     {
         if (panel.Children.Count > 0)
@@ -1558,7 +1368,7 @@ public partial class MainWindow
         panel.Children.Add(new TextBlock
         {
             Text = message,
-            Foreground = CreateSolidBrush("#91A5B5"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontSize = 11.5,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 4, 0, 0)
@@ -1631,28 +1441,14 @@ public partial class MainWindow
         return text.Contains("任务", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("集结", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("公告", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("加入", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("退出", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("上线", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("离线", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("小队", StringComparison.OrdinalIgnoreCase) ||
-               text.Contains("计划", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private IEnumerable<(string Title, string Meta, System.Windows.Media.Brush Brush)> BuildSquadLeaderActivityRows(
-        SquadRow? squad,
-        IReadOnlyCollection<PlayerRow> squadMembers)
-    {
-        if (squad is not null)
-        {
-            yield return ($"小队任务 / {GetSquadMissionText(squad)}", squad.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm"), FindBrush("StatusInfoBrush", Brushes.DeepSkyBlue));
-        }
-
-        foreach (var player in squadMembers.OrderByDescending(player => IsOnlineStatus(player.SharedOnlineStatusValue)).ThenBy(player => player.Name).Take(4))
-        {
-            var status = IsOnlineStatus(player.SharedOnlineStatusValue) ? "在线" : "离线";
-            yield return ($"{DisplayCallsign(player.Callsign, player.Name)} / {status}", player.SharedShipText, IsOnlineStatus(player.SharedOnlineStatusValue)
-                ? FindBrush("StatusSuccessBrush", Brushes.MediumSpringGreen)
-                : FindBrush("StatusDisabledBrush", Brushes.LightSlateGray));
-        }
+               text.Contains("计划", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("资料", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("介绍", StringComparison.OrdinalIgnoreCase);
     }
 
     private PlayerRow? GetLocalPlayerRow()
@@ -1687,26 +1483,6 @@ public partial class MainWindow
         return $"{_fleetCurrentTaskTitle}|{_fleetCurrentTaskTime:O}|{_fleetCurrentTaskNoticeRevision}";
     }
 
-    private string GetSquadMissionText(SquadRow? squad)
-    {
-        if (squad is null || string.IsNullOrWhiteSpace(squad.Mission) || squad.Mission.Equals("Standby", StringComparison.OrdinalIgnoreCase))
-        {
-            return "暂无小队任务";
-        }
-
-        return squad.Mission;
-    }
-
-    private string GetSquadRallyText(SquadRow? squad)
-    {
-        if (squad is null || string.IsNullOrWhiteSpace(squad.RallyPoint) || squad.RallyPoint.Equals("Use Global", StringComparison.OrdinalIgnoreCase))
-        {
-            return "集结点 / 跟随舰队";
-        }
-
-        return $"集结点 / {squad.RallyPoint}";
-    }
-
     private string GetGameServerRegionDisplay()
     {
         if (IsGameServerRegionCurrent())
@@ -1715,11 +1491,6 @@ public partial class MainWindow
         }
 
         return _isGameProcessRunning ? "等待确认" : "仅游戏中显示";
-    }
-
-    private string GetGameServerRegionAccent()
-    {
-        return IsGameServerRegionCurrent() ? "#42CF7C" : "#91A5B5";
     }
 
     private string GetNetworkSyncStatusText()
@@ -1751,7 +1522,7 @@ public partial class MainWindow
             return "等待同步";
         }
 
-        return NetworkAutoSyncCheck?.IsChecked == true ? "自动同步" : "已连接";
+        return _syncPrivacySettings.SyncEnabled ? "同步已开启" : "同步已关闭";
     }
 
     private static bool IsOnlineStatus(string? status)
@@ -1764,13 +1535,6 @@ public partial class MainWindow
 
     private static bool IsOverlayGamePresence(PlayerRow player) =>
         player.Presence == PlayerPresenceKind.InGame;
-
-    private static bool IsUnassignedSquad(string? squadName)
-    {
-        return string.IsNullOrWhiteSpace(squadName) ||
-               squadName.Equals("Unassigned", StringComparison.OrdinalIgnoreCase) ||
-               squadName.Equals("未分配", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static bool IsUnknownValue(string? value)
     {
@@ -1796,6 +1560,16 @@ public partial class MainWindow
         var brush = new SolidColorBrush((Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
         brush.Freeze();
         return brush;
+    }
+
+    private static SolidColorBrush ParseRequiredSidebarAccent(string serializedAccent)
+    {
+        if (string.IsNullOrWhiteSpace(serializedAccent))
+        {
+            throw new InvalidOperationException("A required fleet sidebar accent was empty.");
+        }
+
+        return BrushFromHex(serializedAccent);
     }
 
     private static SolidColorBrush BrushFromHex(string hex, double opacity = 1.0)

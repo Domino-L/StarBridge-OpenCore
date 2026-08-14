@@ -41,7 +41,7 @@ public partial class MainWindow
             await ShowFleetDirectoryActionNoticeAsync(
                 "你已在该舰队中",
                 $"当前账号已经是“{card.Name}”的成员。",
-                "无需再次加入，可以前往“我的舰队”查看成员、小队和舰队通讯。");
+                "无需再次加入，可以前往“我的舰队”查看成员、聊天和舰船。");
             return;
         }
 
@@ -69,7 +69,7 @@ public partial class MainWindow
                 : $"需要先离开当前舰队“{_fleetName}”。";
             var detail = isCommander
                 ? "请先在舰队管理中转移指挥权或解散当前舰队，再返回这里加入其他舰队。"
-                : $"为避免成员身份、小队和内部数据发生冲突，请先在“我的舰队”中退出，再加入“{card.Name}”。";
+                : $"为避免成员身份和内部数据发生冲突，请先在“我的舰队”中退出，再加入“{card.Name}”。";
             NetworkStatusText.Text = message;
             await ShowFleetDirectoryActionNoticeAsync(
                 "无法切换舰队",
@@ -182,7 +182,7 @@ public partial class MainWindow
             ShowOneTimeGuideHint(
                 "fleet-joined-member",
                 "舰队成员引导",
-                "你已经加入舰队。下一步可以进入“我的小队”选择或创建小队，并在“个人”页面完善呼号、头像和舰船数据库。");
+                "你已经加入舰队。可以先查看成员的飞船、地点与所在服务器，并在“个人”页面完善呼号、头像和舰船数据库。");
         }
         catch (Exception ex)
         {
@@ -327,38 +327,10 @@ public partial class MainWindow
         _fleetLogoPath = SaveNetworkFleetLogo(snapshot);
         LocalFleetText.Text = $"{_fleetName} [{_fleetCode}]";
 
-        foreach (var squad in snapshot.Squads ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(squad.Name))
-            {
-                continue;
-            }
-
-            _squads.Add(new SquadRow
-            {
-                Id = FleetChatIdentity.NormalizeSquadId(squad.Id, squad.Name),
-                Name = squad.Name,
-                Icon = GetInitials(squad.Name),
-                Commander = string.IsNullOrWhiteSpace(squad.Commander) ? "Unassigned" : squad.Commander!,
-                Type = string.IsNullOrWhiteSpace(squad.Type) ? "Assault" : squad.Type!,
-                Mission = string.IsNullOrWhiteSpace(squad.Mission) ? "Standby" : squad.Mission!,
-                RallyPoint = string.IsNullOrWhiteSpace(squad.RallyPoint) ? "Use Global" : squad.RallyPoint!,
-                Description = string.IsNullOrWhiteSpace(squad.Description) ? "No squad briefing yet." : squad.Description!,
-                EmblemPath = SaveNetworkSquadEmblem(snapshot, squad),
-                UpdatedAt = squad.UpdatedAt
-            });
-        }
-
-        _joinedSquad = null;
-        _selectedSquad = null;
-        SquadSelectionList.SelectedItem = _selectedSquad;
         MergeNetworkFleetState(snapshot);
         UpdateFleetEntryPanels();
         RefreshFleetHeader();
-        RenderSquads();
-        RenderMySquad();
         SaveCurrentConfig();
-        RefreshSquadActionButtons();
         RefreshOverlayWindow();
     }
 
@@ -393,7 +365,7 @@ public partial class MainWindow
                 return;
             }
 
-            var recommended = PickRecommendedSquadSuccessor(candidates);
+            var recommended = PickRecommendedFleetSuccessor(candidates);
             if (recommended is null)
             {
                 NetworkStatusText.Text = "没有可移交的舰队成员。";
@@ -430,6 +402,7 @@ public partial class MainWindow
             }
 
             ClearFleetState();
+            ConfirmAuthoritativeNoFleetState();
             SaveCurrentConfig();
             await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
             await PullNetworkFleetsAsync(silent: true);
@@ -474,6 +447,7 @@ public partial class MainWindow
             }
 
             ClearFleetState();
+            ConfirmAuthoritativeNoFleetState();
             DisbandFleetPasswordBox.Password = "";
             DisbandFleetStatusText.Text = "舰队已解散。";
             NetworkStatusText.Text = "舰队已从服务器移除";
@@ -513,7 +487,6 @@ public partial class MainWindow
         _selectedActionPlanId = "";
         _editingActionPlanId = "";
         _joinActionNotifyMe = false;
-        _squads.Clear();
         _fleetTaskHistory.Clear();
         _fleetActionPlans.Clear();
         _joinedActionPlanIds.Clear();
@@ -533,27 +506,18 @@ public partial class MainWindow
         _fleetRoleGroupDefinitions.Clear();
         FleetRoleSelectionOptions.Clear();
         _fleetExternalContacts.Clear();
-        _mySquadMembers.Clear();
         _remoteFleetShips.Clear();
         _fleetShipInventory.Clear();
         _fleetShipDatabaseRows.Clear();
-        _fleetShipActivitySnapshot.Clear();
-        _fleetMemberJoinedAtByIdentity.Clear();
         _localFleetShipSharedAtCache.Clear();
         _acknowledgedFleetOrderKeys.Clear();
         _fleetInstantTaskResponses.Clear();
-        ResetFleetShipActivities();
         _networkSnapshots.Clear();
+        ClearOverlayRosterAuthorizedIdentityKeys();
         var retainedPlayerNames = string.IsNullOrWhiteSpace(_localPlayer)
             ? Array.Empty<string?>()
             : new string?[] { _localPlayer };
         _fleetState.RemovePlayersExcept(retainedPlayerNames);
-        _joinedSquad = null;
-        _selectedSquad = null;
-        if (SquadSelectionList is not null)
-        {
-            SquadSelectionList.SelectedItem = null;
-        }
     }
 
     private void ClearFleetState()
@@ -588,6 +552,8 @@ public partial class MainWindow
         _fleetPublicShowActiveSystems = true;
         _fleetPublicShowActivityTime = true;
         _fleetPublicShowExternalContacts = false;
+        _fleetExternalContactPublicationMode = FleetExternalContactPublicationMode.Empty;
+        _legacyExternalContactPublicationConfirmed = false;
         _fleetActiveTime = DefaultFleetActiveTimeText;
         _fleetLogoPath = null;
         _fleetBannerPath = null;
@@ -598,10 +564,7 @@ public partial class MainWindow
         LeaveFleetButton.Visibility = Visibility.Collapsed;
         RefreshFleetHeader();
         UpdateFleetEntryPanels();
-        RenderSquads();
-        RenderMySquad();
         RefreshFleetApplications();
-        RefreshSquadActionButtons();
         RefreshFleetInfoPanel();
         RefreshFleetMemberManagement();
         RenderState();

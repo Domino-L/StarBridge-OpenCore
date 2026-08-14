@@ -16,7 +16,7 @@ public partial class MainWindow
     private AccountSafetyView? _accountSafetyView;
     private AppealModerationView? _appealModerationView;
 
-    private async void HeaderAccountSafetyMenuItem_Click(object sender, RoutedEventArgs e) =>
+    private async void PersonalAccountSafetyButton_Click(object sender, RoutedEventArgs e) =>
         await ShowAccountSafetyWorkspaceAsync();
 
     private async Task ShowAccountSafetyWorkspaceAsync()
@@ -52,14 +52,16 @@ public partial class MainWindow
                 {
                     _accountSafetyView = null;
                 }
+
+                RefreshBridgeShellForSelectedTab();
             });
         await view.RefreshAsync();
     }
 
     private Task<string?> ShowSanctionAppealDialogAsync(string sanctionLabel) =>
         ApplicationLayerHost.ShowModalAsync<string>(
-            "账号安全",
             "提交申诉",
+            "说明需要复核的事实",
             complete => new SanctionAppealView(sanctionLabel, complete),
             maxWidth: 620,
             maxHeight: 480);
@@ -82,12 +84,14 @@ public partial class MainWindow
         return await response.Content.ReadFromJsonAsync<SanctionAppealRecordContract>();
     }
 
-    private async void HeaderReportModerationMenuItem_Click(object sender, RoutedEventArgs e)
+    private async void OpenReportModerationWorkspace_Click(object sender, RoutedEventArgs e)
     {
         if (!IsLoggedIn || !_accountEntitlements.Contains(TrustSafetyEntitlements.ModerateReports))
         {
             return;
         }
+
+        SetBridgeReviewWorkspaceState("举报审核", "查看待处理举报与证据");
 
         if (_reportModerationView is not null && ApplicationLayerHost.IsShowing(_reportModerationView))
         {
@@ -99,6 +103,7 @@ public partial class MainWindow
             LoadReportModerationQueueAsync,
             LoadReportModerationDetailAsync,
             ReviewReportAsync,
+            LoadShipMediaForModerationAsync,
             string.IsNullOrWhiteSpace(_callsign) ? _accountName ?? "审核人员" : _callsign);
         _reportModerationView = view;
         ApplicationLayerHost.ShowWorkspace(
@@ -111,16 +116,21 @@ public partial class MainWindow
                 {
                     _reportModerationView = null;
                 }
-            });
+
+                RefreshBridgeShellForSelectedTab();
+            },
+            actions: CreateModerationWorkspaceActions(reportSelected: true));
         await view.RefreshAsync();
     }
 
-    private async void HeaderAppealModerationMenuItem_Click(object sender, RoutedEventArgs e)
+    private async void OpenAppealModerationWorkspace_Click(object sender, RoutedEventArgs e)
     {
         if (!IsLoggedIn || !_accountEntitlements.Contains(TrustSafetyEntitlements.ModerateReports))
         {
             return;
         }
+
+        SetBridgeReviewWorkspaceState("申诉审核", "查看处罚申诉与处理记录");
 
         if (_appealModerationView is not null && ApplicationLayerHost.IsShowing(_appealModerationView))
         {
@@ -144,9 +154,25 @@ public partial class MainWindow
                 {
                     _appealModerationView = null;
                 }
-            });
+
+                RefreshBridgeShellForSelectedTab();
+            },
+            actions: CreateModerationWorkspaceActions(reportSelected: false));
         await view.RefreshAsync();
     }
+
+    private IReadOnlyList<ApplicationLayerWorkspaceAction> CreateModerationWorkspaceActions(
+        bool reportSelected) =>
+        [
+            new(
+                "举报审核",
+                () => OpenReportModerationWorkspace_Click(this, new RoutedEventArgs()),
+                reportSelected),
+            new(
+                "申诉审核",
+                () => OpenAppealModerationWorkspace_Click(this, new RoutedEventArgs()),
+                !reportSelected)
+        ];
 
     private Task<AdminSanctionAppealQueueContract?> LoadAppealModerationQueueAsync(string? status)
     {
@@ -292,6 +318,7 @@ public partial class MainWindow
             : inbox is { UnreadCount: > 0 }
                 ? $"通知中心 · {inbox.UnreadCount} 条未读"
                 : "通知中心";
+        RefreshBridgeNotificationBadge();
     }
 
     private void ClearNotificationCenterState()
@@ -306,6 +333,8 @@ public partial class MainWindow
         {
             HeaderInboxButton.ToolTip = "通知中心";
         }
+
+        RefreshBridgeNotificationBadge();
 
         ApplicationLayerHost.CloseWorkspace();
         _notificationCenterView = null;
@@ -351,6 +380,18 @@ public partial class MainWindow
         await view.ReloadAsync();
     }
 
+    private async void HeaderMyReportsMenuItem_Click(object sender, RoutedEventArgs e) =>
+        await ShowMyReportsAsync();
+
+    private async Task ShowMyReportsAsync()
+    {
+        await ShowNotificationCenterAsync();
+        if (_notificationCenterView is not null)
+        {
+            await _notificationCenterView.ShowReportsAsync();
+        }
+    }
+
     private async Task<NotificationInboxContract?> MarkNotificationsReadAndReloadAsync(string[] notificationIds)
     {
         if (!CanSynchronizeUserData || notificationIds.Length == 0)
@@ -392,38 +433,34 @@ public partial class MainWindow
         switch (item.ActionTarget)
         {
             case NotificationActionTargets.FriendRequests:
-                ApplicationLayerHost.CloseWorkspace();
                 await NavigateToFriendRequestAsync(item.ActionEntityId);
+                ApplicationLayerHost.CloseWorkspace();
                 return;
             case NotificationActionTargets.FriendChat:
-                ApplicationLayerHost.CloseWorkspace();
                 await NavigateToFriendChatAsync(item.ActionEntityId);
+                ApplicationLayerHost.CloseWorkspace();
                 return;
             case NotificationActionTargets.FleetApplications:
-                ApplicationLayerHost.CloseWorkspace();
                 await NavigateToFleetApplicationsAsync(item.ActionEntityId);
+                ApplicationLayerHost.CloseWorkspace();
                 return;
             case NotificationActionTargets.RoomInvitations:
-                ApplicationLayerHost.CloseWorkspace();
                 await NavigateToRoomInvitationsAsync(item.ActionEntityId);
+                ApplicationLayerHost.CloseWorkspace();
                 return;
             case NotificationActionTargets.RoomApplications:
-                ApplicationLayerHost.CloseWorkspace();
                 await NavigateToRoomApplicationsAsync(item.ActionEntityId);
+                ApplicationLayerHost.CloseWorkspace();
                 return;
             case NotificationActionTargets.MyReports:
-                await ShowNotificationCenterAsync();
-                if (_notificationCenterView is not null)
-                {
-                    await _notificationCenterView.ShowReportsAsync();
-                }
+                await ShowMyReportsAsync();
                 return;
             case NotificationActionTargets.AccountSafety:
                 await ShowAccountSafetyWorkspaceAsync();
                 return;
             default:
-                ApplicationLayerHost.CloseWorkspace();
                 await ShowNotificationUnavailableAsync();
+                ApplicationLayerHost.CloseWorkspace();
                 return;
         }
     }
@@ -567,8 +604,8 @@ public partial class MainWindow
 
         var displayName = string.IsNullOrWhiteSpace(target.Callsign) ? target.Name : target.Callsign;
         var submission = await ApplicationLayerHost.ShowModalAsync<ReportUserSubmission>(
-            "安全中心",
             "举报用户",
+            "选择原因并补充说明",
             complete => new ReportUserView(displayName ?? target.Name, complete),
             maxWidth: 620,
             maxHeight: 640);

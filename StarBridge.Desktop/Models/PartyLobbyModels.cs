@@ -1,6 +1,8 @@
 namespace StarBridge.Desktop;
 
 using StarBridge.Core.Chat;
+using System.Windows.Media;
+using WpfBrush = System.Windows.Media.Brush;
 
 public enum PartyLobbyVoiceRequirement
 {
@@ -30,7 +32,7 @@ public sealed record PartyLobbyMemberPreview(
 
     public string ShipText { get; init; } = "等待舰船同步";
 
-    public string ShardText { get; init; } = "等待分线同步";
+    public string ShardText { get; init; } = "等待服务器同步";
 }
 
 public sealed record PartyLobbyJoinApplicationView(
@@ -83,11 +85,13 @@ public sealed record PartyRoomChatMessageView(
     string SenderGameId,
     string Text,
     DateTimeOffset CreatedAt,
-    ChatAttachmentContract? Attachment = null) : System.ComponentModel.INotifyPropertyChanged
+    ChatAttachmentContract? Attachment,
+    WpfBrush SenderRoleBrush,
+    WpfBrush AttachmentStatusBrush) : System.ComponentModel.INotifyPropertyChanged
 {
     private string _timeText = CommunicationTimeFormatter.Format(CreatedAt);
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-    public string SenderColor { get; init; } = "#69CCFF";
+    public string SenderColor { get; init; } = "";
 
     public string? SenderAccountId { get; init; }
 
@@ -100,8 +104,6 @@ public sealed record PartyRoomChatMessageView(
     public bool IsSelf => IsLocal;
 
     public string? AccountId => SenderAccountId;
-
-    public string SenderRoleBrush => IsLocal ? "#29AFFF" : SenderColor;
 
     public string SenderRoleTitle => "";
 
@@ -130,7 +132,6 @@ public sealed record PartyRoomChatMessageView(
     public bool AttachmentActionEnabled => ChatAttachmentPresentation.ActionEnabled(Attachment);
     public string AttachmentTypeText => ChatAttachmentPresentation.TypeText(Attachment);
     public string AttachmentStatusText => ChatAttachmentPresentation.StatusText(Attachment);
-    public string AttachmentStatusBrush => ChatAttachmentPresentation.StatusBrush(Attachment);
     public System.Windows.Visibility AttachmentStatusVisibility => ChatAttachmentPresentation.StatusVisibility(Attachment);
     public string AttachmentRoomActivityText => ChatAttachmentPresentation.RoomActivityText(Attachment);
     public string AttachmentRoomFactsText => ChatAttachmentPresentation.RoomFactsText(Attachment);

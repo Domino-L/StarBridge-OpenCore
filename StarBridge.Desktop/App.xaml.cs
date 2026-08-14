@@ -19,11 +19,19 @@ public partial class App : System.Windows.Application
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
     private EventWaitHandle? _singleInstanceActivationEvent;
-    private RegisteredWaitHandle? _singleInstanceActivationRegistration;
+    private Thread? _singleInstanceActivationThread;
+    private volatile bool _singleInstanceActivationStopping;
     private WinForms.NotifyIcon? _trayIcon;
     private TrayQuickPanel? _trayQuickPanel;
     private bool _exitRequested;
     private bool _updateRestartRequested;
+
+    static App()
+    {
+        // SceneState is a DispatcherObject. Construct its singleton on the UI
+        // thread so later async refresh work cannot accidentally claim ownership.
+        _ = Theming.SceneState.Current;
+    }
 
     internal ApplicationBehaviorSettings BehaviorSettings { get; private set; } =
         ApplicationBehaviorSettings.Default;
@@ -47,6 +55,11 @@ public partial class App : System.Windows.Application
                 WriteCrashLog(exception);
             }
         };
+
+        if (!DpiBootstrap.SetHighDpiModeAccepted || !DpiBootstrap.IsPerMonitorV2)
+        {
+            WriteDiagnosticLog($"DPI bootstrap: {DpiBootstrap.Diagnostic}");
+        }
 
 
         if (!TryAcquireSingleInstance())
@@ -90,7 +103,17 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         DisposeTrayIcon();
-        _singleInstanceActivationRegistration?.Unregister(null);
+        _singleInstanceActivationStopping = true;
+        try
+        {
+            _singleInstanceActivationEvent?.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The listener has already completed.
+        }
+
+        _singleInstanceActivationThread?.Join(millisecondsTimeout: 1000);
         _singleInstanceActivationEvent?.Dispose();
 
         if (_ownsSingleInstanceMutex)
@@ -259,16 +282,40 @@ public partial class App : System.Windows.Application
 
     private void RegisterSingleInstanceActivation()
     {
-        _singleInstanceActivationEvent = new EventWaitHandle(
+        var activationEvent = new EventWaitHandle(
             initialState: false,
             EventResetMode.AutoReset,
             SingleInstanceActivationEventName);
-        _singleInstanceActivationRegistration = ThreadPool.RegisterWaitForSingleObject(
-            _singleInstanceActivationEvent,
-            (_, _) => Dispatcher.BeginInvoke(ActivateExistingMainWindow),
-            state: null,
-            millisecondsTimeOutInterval: -1,
-            executeOnlyOnce: false);
+        _singleInstanceActivationEvent = activationEvent;
+        _singleInstanceActivationStopping = false;
+        _singleInstanceActivationThread = new Thread(() =>
+        {
+            while (true)
+            {
+                try
+                {
+                    activationEvent.WaitOne();
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+
+                if (_singleInstanceActivationStopping)
+                {
+                    return;
+                }
+
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.Send,
+                    new Action(ActivateExistingMainWindow));
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "StarBridge.SingleInstanceActivation"
+        };
+        _singleInstanceActivationThread.Start();
     }
 
     private static void SignalExistingInstance()

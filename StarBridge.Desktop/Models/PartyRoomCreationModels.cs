@@ -34,7 +34,7 @@ public sealed record PartyRoomContextTagGroup(
 
 public static class PartyRoomTagCatalog
 {
-    public const int Version = 2;
+    public const int Version = 3;
 
     public static IReadOnlyList<PartyRoomTagNode> GameplayRoots { get; } =
     [
@@ -176,7 +176,8 @@ public static class PartyRoomTagCatalog
             Node("special_nyx", "尼克斯星系",
                 Node("special_nyx_qv_station", "QV空间站"),
                 Node("special_nyx_qv_breaker_yard", "QV碎岩站"),
-                Node("special_nyx_strike_group", "战术打击群")))
+                Node("special_nyx_strike_group", "战术打击群"))),
+        Node("undecided", "不知道玩啥")
     ];
 
     public static IReadOnlyList<PartyRoomContextTagGroup> ContextGroups { get; } =
@@ -378,6 +379,7 @@ public static class PartyRoomTagCatalog
 
 public sealed record PartyRoomDisplayTag(
     string Id,
+    string CategoryId,
     string Text,
     bool IsPrimary,
     string Foreground,
@@ -386,9 +388,25 @@ public sealed record PartyRoomDisplayTag(
 
 public static class PartyRoomTagPresentation
 {
-    private const string SecondaryForeground = "#BBD0DD";
-    private const string SecondaryBackground = "#102536";
-    private const string SecondaryBorder = "#1A5370";
+    private const string NeutralForeground = "#8DA3B1";
+    private const string NeutralBackground = "#0E1821";
+    private const string NeutralBorder = "#273B48";
+
+    private static readonly IReadOnlyDictionary<string, TagPalette> GameplayRootPalettes =
+        new Dictionary<string, TagPalette>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["combat"] = new("#FF9AA2", "#321D25", "#85434D"),
+            ["industry"] = new("#F2CA68", "#302816", "#78622E"),
+            ["logistics"] = new("#8BBEFF", "#18283A", "#45688D"),
+            ["support"] = new("#75D9A3", "#173024", "#3D795B"),
+            ["exploration"] = new("#6FD5E7", "#142D34", "#3C7280"),
+            ["arena"] = new("#C09CF4", "#292039", "#674F8C"),
+            ["social"] = new("#F0A7D4", "#30202D", "#76506C"),
+            ["special"] = new("#FFB878", "#34251A", "#835D3E")
+        };
+
+    private static readonly TagPalette FallbackGameplayPalette =
+        new("#B8C5CE", "#222C34", "#50616D");
 
     public static IReadOnlyList<PartyRoomDisplayTag> Create(
         IEnumerable<string>? gameplayTagNodeIds,
@@ -424,30 +442,22 @@ public static class PartyRoomTagPresentation
     private static PartyRoomDisplayTag CreateGameplay(IReadOnlyList<PartyRoomTagNode> path)
     {
         var root = path[0];
-        var colors = root.Id.ToLowerInvariant() switch
-        {
-            "combat" => (Foreground: "#FF9AA2", Background: "#321D25", Border: "#85434D"),
-            "industry" => (Foreground: "#F2CA68", Background: "#302816", Border: "#78622E"),
-            "logistics" => (Foreground: "#8BBEFF", Background: "#18283A", Border: "#45688D"),
-            "support" => (Foreground: "#75D9A3", Background: "#173024", Border: "#3D795B"),
-            "exploration" => (Foreground: "#6FD5E7", Background: "#142D34", Border: "#3C7280"),
-            "arena" => (Foreground: "#C09CF4", Background: "#292039", Border: "#674F8C"),
-            "social" => (Foreground: "#F0A7D4", Background: "#30202D", Border: "#76506C"),
-            "special" => (Foreground: "#FFB878", Background: "#34251A", Border: "#835D3E"),
-            _ => (Foreground: "#B8C5CE", Background: "#222C34", Border: "#50616D")
-        };
+        var palette = GameplayRootPalettes.GetValueOrDefault(root.Id, FallbackGameplayPalette);
 
         return new(
             path[^1].Id,
+            root.Id.ToLowerInvariant(),
             string.Join(" · ", path.Select(node => node.Name)),
             true,
-            colors.Foreground,
-            colors.Background,
-            colors.Border);
+            palette.Foreground,
+            palette.Background,
+            palette.Border);
     }
 
     private static PartyRoomDisplayTag CreateSecondary(string id, string text) =>
-        new(id, text, false, SecondaryForeground, SecondaryBackground, SecondaryBorder);
+        new(id, "other", text, false, NeutralForeground, NeutralBackground, NeutralBorder);
+
+    private sealed record TagPalette(string Foreground, string Background, string Border);
 }
 
 public sealed record PartyRoomCreateDraft(

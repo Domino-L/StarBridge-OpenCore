@@ -1,0 +1,841 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+                    xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+                    xmlns:theming="clr-namespace:StarBridge.Desktop.Theming">
+
+    <!--
+        Phase 1 shell resources only.
+
+        AccentColor and AmbientColor brushes are intentionally created inline in
+        templates below. Never move them into this ResourceDictionary: WPF seals
+        hosted Freezables and would make the shared SceneState animation target
+        unusable. Template triggers only reveal pre-created colour layers by
+        changing Opacity.
+    -->
+
+    <sys:Double x:Key="BridgeShellModuleRailWidth">72</sys:Double>
+    <sys:Double x:Key="BridgeShellSceneBandHeight">74</sys:Double>
+
+    <!-- Shell text hierarchy. Chinese text never drops below 12 px. -->
+    <Style x:Key="BridgeSceneEyebrowTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="BridgeSceneTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontSceneName}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="BridgeSceneMetaTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="BridgePageTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontPageTitle}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+    </Style>
+
+    <Style x:Key="BridgeBodyTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontBody}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+    </Style>
+
+    <Style x:Key="BridgeAuxTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+    </Style>
+
+    <Style x:Key="BridgeDataTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeDataFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <!-- 72 px module rail. Edge-attached shell surfaces stay rectangular (D31). -->
+    <Style x:Key="BridgeRailChromeStyle" TargetType="Border">
+        <Setter Property="Width" Value="{DynamicResource BridgeShellModuleRailWidth}" />
+        <Setter Property="Background" Value="{DynamicResource BridgeRail}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0,16,0,0" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+    </Style>
+
+    <!-- WPF shows FocusVisualStyle only for keyboard navigation. A raw
+         IsKeyboardFocused trigger also fires on pointer press, which would make
+         the next module look selected before its Click has completed. -->
+    <Style x:Key="BridgeRailKeyboardFocusStyle" TargetType="{x:Type Control}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Control}">
+                    <controls:ChamferBorder Margin="1"
+                                            Background="Transparent"
+                                            BorderThickness="1"
+                                            Chamfer="9"
+                                            Corners="Signature"
+                                            IsHitTestVisible="False">
+                        <controls:ChamferBorder.BorderBrush>
+                            <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                        </controls:ChamferBorder.BorderBrush>
+                    </controls:ChamferBorder>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeRailButtonStyle" TargetType="ToggleButton">
+        <Setter Property="Width" Value="72" />
+        <Setter Property="Height" Value="64" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+        <Setter Property="Padding" Value="6" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource BridgeRailKeyboardFocusStyle}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder x:Name="BaseLayer"
+                                                Background="{TemplateBinding Background}"
+                                                Chamfer="9"
+                                                Corners="Signature" />
+
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+
+                        <controls:ChamferBorder x:Name="SelectedLayer"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.Background>
+                                <SolidColorBrush Color="{Binding AmbientColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.Background>
+                        </controls:ChamferBorder>
+
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True"
+                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                          TextElement.FontSize="{TemplateBinding FontSize}"
+                                          TextElement.FontWeight="{TemplateBinding FontWeight}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+
+                        <Border x:Name="SelectedEdge"
+                                Width="32"
+                                Height="2"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Bottom"
+                                Opacity="0"
+                                IsHitTestVisible="False">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </Border.Background>
+                        </Border>
+
+                        <controls:ChamferBorder x:Name="FocusLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SelectedLayer" Property="Opacity" Value="1" />
+                            <Setter TargetName="SelectedEdge" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.42" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        D33 owns the only pending-item badge chrome used by the main window.
+        Position remains local to each host; colour, geometry and typography do not.
+        D33.2 applies typography on the rendered TextBlock itself because AppTheme's
+        implicit TextBlock style outranks values inherited from the Border ancestor.
+        D33.3 keeps the app-wide dark-surface/light-ink grammar: the count chip uses
+        BridgeSignalSurface, while BridgeSignal owns both the text and one-pixel keyline.
+    -->
+    <Style x:Key="BridgeCountBadgeStyle" TargetType="Border">
+        <Setter Property="Visibility" Value="Collapsed" />
+        <Setter Property="MinWidth" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Padding" Value="4,0" />
+        <Setter Property="Background" Value="{DynamicResource BridgeSignalSurface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeSignal}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Panel.ZIndex" Value="8" />
+    </Style>
+
+    <Style x:Key="BridgeCountBadgeTextStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeSignal}" />
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeDataFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontLabel}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="BridgeSignalBadgeStyle" TargetType="Border">
+        <Setter Property="Visibility" Value="Collapsed" />
+        <Setter Property="Width" Value="6" />
+        <Setter Property="Height" Value="6" />
+        <Setter Property="Background" Value="{DynamicResource BridgeSignal}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
+
+    <!-- 74 px scene band. Ambient fill and the only shell glow line are inline. -->
+    <Style x:Key="BridgeSceneBandStyle" TargetType="ContentControl">
+        <Setter Property="Height" Value="{DynamicResource BridgeShellSceneBandHeight}" />
+        <Setter Property="Padding" Value="22,0,18,0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid>
+                        <Border Background="{DynamicResource BridgePanel}" />
+
+                        <Border Opacity="0.56"
+                                IsHitTestVisible="False">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding AmbientColor, Source={x:Static theming:SceneState.Current}}" />
+                            </Border.Background>
+                        </Border>
+
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+
+                        <Border Height="1"
+                                VerticalAlignment="Bottom"
+                                Opacity="0.74"
+                                IsHitTestVisible="False">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </Border.Background>
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeSceneBadgeStyle" TargetType="ContentControl">
+        <Setter Property="Width" Value="46" />
+        <Setter Property="Height" Value="46" />
+        <Setter Property="Margin" Value="0,0,14,0" />
+        <Setter Property="Padding" Value="8" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <controls:ChamferBorder Background="{DynamicResource BridgePanelRaised}"
+                                            Chamfer="10"
+                                            Corners="Signature">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </controls:ChamferBorder>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeSceneStatusBlockStyle" TargetType="ContentControl">
+        <Setter Property="MinWidth" Value="96" />
+        <Setter Property="Height" Value="46" />
+        <Setter Property="Margin" Value="0,0,4,0" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <controls:ChamferBorder Background="{DynamicResource BridgePanelRaised}"
+                                            Chamfer="5"
+                                            Corners="Signature">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </controls:ChamferBorder>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeStatusLabelStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeAuxTextStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk3}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="BridgeStatusValueStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeDataTextStyle}">
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- Semantic state variants are fixed tokens and never follow the active scene. -->
+    <Style x:Key="BridgeSceneStatusInfoTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeStatusValueStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusInfo}" />
+    </Style>
+
+    <Style x:Key="BridgeSceneStatusOkTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeStatusValueStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusOk}" />
+    </Style>
+
+    <Style x:Key="BridgeSceneStatusWarnTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeStatusValueStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusWarn}" />
+    </Style>
+
+    <Style x:Key="BridgeSceneStatusBadTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeStatusValueStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusBad}" />
+    </Style>
+
+    <Style x:Key="BridgeSceneStatusOffTextStyle"
+           TargetType="TextBlock"
+           BasedOn="{StaticResource BridgeStatusValueStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusOff}" />
+    </Style>
+
+    <!-- Compact scene-band actions keep the band stable without turning it into a dashboard. -->
+    <!-- Sized for a single row of content. Two-line label/value stacks are not used
+         in the scene band, so the taller box only added empty vertical padding. -->
+    <Style x:Key="BridgeSceneInlineButtonStyle" TargetType="Button">
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="6"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <controls:ChamferBorder x:Name="FocusLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="6"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A flyout trigger distinguishes the saved value from the transient open
+         state. Keyboard focus remains visible through the quiet hover surface;
+         the accent outline is reserved for an actually open flyout. -->
+    <Style x:Key="BridgeSceneFlyoutButtonStyle" TargetType="Button">
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="6"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <controls:ChamferBorder x:Name="OpenLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="6"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter TargetName="OpenLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Explicit visibility choices live in a compact scene-band flyout. The
+         selected edge identifies the saved state; hover never changes it. -->
+    <Style x:Key="BridgePresenceOptionButtonStyle" TargetType="Button">
+        <Setter Property="Height" Value="54" />
+        <Setter Property="Margin" Value="0,0,0,3" />
+        <Setter Property="Padding" Value="13,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder x:Name="Surface"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                Chamfer="7"
+                                                Corners="Signature" />
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="7"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                        <Border x:Name="SelectedEdge"
+                                Width="2"
+                                Margin="1,7,0,7"
+                                HorizontalAlignment="Left"
+                                Opacity="0"
+                                IsHitTestVisible="False">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </Border.Background>
+                        </Border>
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <controls:ChamferBorder x:Name="FocusLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="7"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="Surface" Property="Background" Value="{DynamicResource BridgeRowHover}" />
+                            <Setter TargetName="SelectedEdge" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Scene-band notification, settings and avatar-adjacent tool buttons. -->
+    <Style x:Key="BridgeSceneUtilityButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="38" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Margin" Value="4,0,0,0" />
+        <Setter Property="Padding" Value="8" />
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder x:Name="Surface"
+                                                Background="{TemplateBinding Background}"
+                                                Chamfer="9"
+                                                Corners="Signature" />
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <controls:ChamferBorder x:Name="FocusLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.68" />
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="0.68" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.42" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Avatar and its disclosure glyph form one account-menu trigger. -->
+    <Style x:Key="BridgeAvatarButtonStyle" TargetType="ToggleButton">
+        <Setter Property="Width" Value="66" />
+        <Setter Property="Height" Value="42" />
+        <Setter Property="Margin" Value="8,0,0,0" />
+        <Setter Property="Padding" Value="3" />
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder Background="{TemplateBinding Background}"
+                                                Chamfer="9"
+                                                Corners="Signature" />
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                        <controls:ChamferBorder x:Name="SelectedLayer"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.Background>
+                                <SolidColorBrush Color="{Binding AmbientColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.Background>
+                        </controls:ChamferBorder>
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <Border x:Name="SelectedEdge"
+                                Height="2"
+                                VerticalAlignment="Bottom"
+                                Opacity="0"
+                                IsHitTestVisible="False">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </Border.Background>
+                        </Border>
+                        <controls:ChamferBorder x:Name="FocusLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="9"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SelectedLayer" Property="Opacity" Value="1" />
+                            <Setter TargetName="SelectedEdge" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Opacity" Value="0.72" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.42" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Secondary destinations stay inside their primary module instead of multiplying rail entries. -->
+    <Style x:Key="BridgeSectionTabStyle" TargetType="ToggleButton">
+        <Setter Property="MinWidth" Value="112" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid Background="Transparent">
+                        <controls:ChamferBorder x:Name="Surface"
+                                                Background="{TemplateBinding Background}"
+                                                Chamfer="8"
+                                                Corners="Signature" />
+                        <controls:ChamferBorder x:Name="HoverLayer"
+                                                Background="{DynamicResource BridgeRowHover}"
+                                                Chamfer="8"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                        <controls:ChamferBorder x:Name="SelectedLayer"
+                                                Chamfer="8"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.Background>
+                                <SolidColorBrush Color="{Binding AmbientColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.Background>
+                        </controls:ChamferBorder>
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <Border x:Name="SelectedEdge"
+                                Height="2"
+                                VerticalAlignment="Bottom"
+                                Opacity="0"
+                                IsHitTestVisible="False">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </Border.Background>
+                        </Border>
+                        <controls:ChamferBorder x:Name="FocusLayer"
+                                                Background="Transparent"
+                                                BorderThickness="1"
+                                                Chamfer="8"
+                                                Corners="Signature"
+                                                Opacity="0"
+                                                IsHitTestVisible="False">
+                            <controls:ChamferBorder.BorderBrush>
+                                <SolidColorBrush Color="{Binding AccentColor, Source={x:Static theming:SceneState.Current}}" />
+                            </controls:ChamferBorder.BorderBrush>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SelectedLayer" Property="Opacity" Value="0.72" />
+                            <Setter TargetName="SelectedEdge" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.68" />
+                            <Setter TargetName="HoverLayer" Property="Opacity" Value="0.68" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.42" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Existing pages are hosted unchanged inside this surface. -->
+    <Style x:Key="BridgeContentHostStyle" TargetType="ContentControl">
+        <Setter Property="Background" Value="{DynamicResource BridgeGround}" />
+        <Setter Property="Padding" Value="26" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Border Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

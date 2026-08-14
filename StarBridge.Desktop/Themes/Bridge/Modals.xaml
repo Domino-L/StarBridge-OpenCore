@@ -1,0 +1,174 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="clr-namespace:StarBridge.Desktop.Controls">
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Directory.xaml" />
+    </ResourceDictionary.MergedDictionaries>
+
+    <Style x:Key="BridgeModalCloseButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome" Background="{TemplateBinding Background}">
+                        <Path Width="10"
+                              Height="10"
+                              Data="M 1,1 L 9,9 M 9,1 L 1,9"
+                              Stroke="{DynamicResource BridgeInk2}"
+                              StrokeThickness="1.4"
+                              StrokeStartLineCap="Square"
+                              StrokeEndLineCap="Square" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource BridgeRowHover}" />
+                            <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BridgeInk2}" />
+                            <Setter TargetName="Chrome" Property="BorderThickness" Value="1" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeModalTitleStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontPageTitle}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="BridgeModalDescriptionStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+        <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource BridgeFontAux}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="BridgeModalFooterStyle" TargetType="Grid">
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="BridgeModalDangerButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource BridgeDirectorySecondaryButtonStyle}">
+        <Setter Property="Foreground" Value="{DynamicResource BridgeStatusBad}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeStatusBad}" />
+    </Style>
+
+    <Style x:Key="BridgeModalStepPromptStyle" TargetType="Border">
+        <Setter Property="MaxWidth" Value="520" />
+        <Setter Property="Margin" Value="24" />
+        <Setter Property="Padding" Value="18" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Background" Value="{DynamicResource BridgePanelRaised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BridgeStatusWarn}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style TargetType="{x:Type controls:BridgeModalHost}">
+        <Setter Property="Panel.ZIndex" Value="130" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="KeyboardNavigation.TabNavigation" Value="Cycle" />
+        <Setter Property="KeyboardNavigation.ControlTabNavigation" Value="Cycle" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type controls:BridgeModalHost}">
+                    <Grid Background="{DynamicResource BridgeScrim}">
+                        <controls:ChamferBorder x:Name="PART_Card"
+                                                Width="{TemplateBinding CardWidth}"
+                                                MaxHeight="{TemplateBinding CardMaxHeight}"
+                                                Margin="32,24"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Background="{DynamicResource BridgePanelRaised}"
+                                                BorderBrush="{DynamicResource BridgeHairline}"
+                                                BorderThickness="1"
+                                                Chamfer="16"
+                                                Corners="Signature"
+                                                SnapsToDevicePixels="True"
+                                                UseLayoutRounding="True">
+                            <Grid Margin="1">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid Margin="21,15,11,13">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="38" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="4"
+                                            Height="24"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Center"
+                                            Background="{DynamicResource BridgeInk3}" />
+                                    <StackPanel Grid.Column="1"
+                                                Margin="12,0"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="{TemplateBinding Title}"
+                                                   Style="{StaticResource BridgeModalTitleStyle}" />
+                                        <TextBlock x:Name="DescriptionText"
+                                                   Margin="0,3,0,0"
+                                                   Text="{TemplateBinding Description}"
+                                                   Style="{StaticResource BridgeModalDescriptionStyle}" />
+                                    </StackPanel>
+                                    <Button x:Name="PART_CloseButton"
+                                            Grid.Column="2"
+                                            AutomationProperties.Name="关闭"
+                                            ToolTip="关闭"
+                                            Style="{StaticResource BridgeModalCloseButtonStyle}" />
+                                </Grid>
+
+                                <Border Grid.Row="1"
+                                        BorderBrush="{DynamicResource BridgeRowHairline}"
+                                        BorderThickness="0,1,0,0">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  PanningMode="VerticalOnly">
+                                        <ContentPresenter Margin="22,18,22,20"
+                                                          Content="{TemplateBinding Content}"
+                                                          ContentTemplate="{TemplateBinding ContentTemplate}" />
+                                    </ScrollViewer>
+                                </Border>
+
+                                <Border x:Name="FooterHost"
+                                        Grid.Row="2"
+                                        Padding="22,14,22,16"
+                                        BorderBrush="{DynamicResource BridgeRowHairline}"
+                                        BorderThickness="0,1,0,0">
+                                    <ContentPresenter Content="{TemplateBinding Footer}" />
+                                </Border>
+                            </Grid>
+                        </controls:ChamferBorder>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger SourceName="DescriptionText" Property="Text" Value="">
+                            <Setter TargetName="DescriptionText" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="Footer" Value="{x:Null}">
+                            <Setter TargetName="FooterHost" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

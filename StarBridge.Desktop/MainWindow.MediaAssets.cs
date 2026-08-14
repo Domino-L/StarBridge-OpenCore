@@ -45,11 +45,16 @@ public partial class MainWindow
         AppendOutput("Profile avatar updated.");
     }
 
-    private void OpenHangarReaderButton_Click(object sender, RoutedEventArgs e)
+    private async void OpenHangarReaderButton_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenHangarReaderAsync();
+    }
+
+    private Task<bool> OpenHangarReaderAsync()
     {
         if (!EnsureLoggedIn("读取官网机库需要先登录。"))
         {
-            return;
+            return Task.FromResult(false);
         }
 
         var reader = new HangarReaderWindow(_language)
@@ -59,13 +64,14 @@ public partial class MainWindow
 
         if (reader.ShowDialog() != true)
         {
-            return;
+            return Task.FromResult(false);
         }
 
         ReplaceOwnedShipsFromImport(reader.ImportedShips);
         SaveOwnedShips();
         UpdateShipDatabaseSummary(reader.ImportedShips.Count, reader.ImportedShips.Count);
         AppendOutput($"Ship database imported from WebView2 reader. ships={_ownedShips.Count}");
+        return Task.FromResult(true);
     }
 
     private async void ClearShipDatabaseButton_Click(object sender, RoutedEventArgs e)
@@ -431,7 +437,7 @@ public partial class MainWindow
             $"玩家识别：{GameNameText.Text}",
             $"游戏进程：{PersonalGameProcessText.Text}",
             $"服务器区域：{PersonalServerRegionText.Text}",
-            $"服务器分线：{PersonalShardText.Text}",
+            $"所在服务器：{PersonalShardText.Text}",
             $"当前飞船：{PersonalCurrentShipText.Text}",
             "",
             "[健康检查与建议]",
@@ -523,7 +529,7 @@ public partial class MainWindow
         _bannerPickerDropZoneDefaultBorder ??= BannerPickerDropZone.BorderBrush;
 
         ResetFleetBannerPickerUi();
-        FleetBannerPickerOverlay.Visibility = Visibility.Visible;
+        FleetBannerPickerOverlay.Show();
 
         var canRestoreDefault = !string.IsNullOrWhiteSpace(_fleetBannerPath);
         BannerPickerRestoreDefaultButton.IsEnabled = canRestoreDefault;
@@ -616,20 +622,7 @@ public partial class MainWindow
         _isBannerCropResizing = false;
         _bannerCropResizeHandle = "";
         BannerPickerCropSelection.ReleaseMouseCapture();
-        FleetBannerPickerOverlay.Visibility = Visibility.Collapsed;
-    }
-
-    private void FleetBannerPickerOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (ReferenceEquals(e.OriginalSource, FleetBannerPickerOverlay))
-        {
-            CloseFleetBannerPickerOverlay();
-        }
-    }
-
-    private void FleetBannerPickerCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        e.Handled = true;
+        FleetBannerPickerOverlay.Hide();
     }
 
     private void BannerPickerCancelButton_Click(object sender, RoutedEventArgs e)
@@ -827,9 +820,9 @@ public partial class MainWindow
         }
 
         var width = BannerPickerPreviewFrame.ActualWidth;
-        if (width <= 0 && FleetBannerPickerCard is not null)
+        if (width <= 0)
         {
-            width = Math.Max(1, FleetBannerPickerCard.ActualWidth - FleetBannerPickerCard.Padding.Left - FleetBannerPickerCard.Padding.Right);
+            width = Math.Max(1, FleetBannerPickerOverlay.CardWidth - 44);
         }
 
         if (width <= 0)
@@ -1547,198 +1540,6 @@ public partial class MainWindow
         }
 
         ChooseFleetLogo_Click(sender, new RoutedEventArgs());
-    }
-
-    private void FleetSquadBanner_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (FindVisualParent<System.Windows.Controls.Button>(e.OriginalSource as DependencyObject) is not null)
-        {
-            return;
-        }
-
-        if ((sender as FrameworkElement)?.Tag is not SquadRow squad)
-        {
-            return;
-        }
-
-        _selectedSquad = squad;
-        SquadSelectionList.SelectedItem = squad;
-        squad.IsExpanded = !squad.IsExpanded;
-    }
-
-    private void ChooseSquadEmblem_Click(object sender, RoutedEventArgs e)
-    {
-        var squad = (sender as FrameworkElement)?.Tag as SquadRow ?? _squads.FirstOrDefault();
-        ChooseSquadEmblem(squad);
-    }
-
-    private void MySquadEmblem_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        ChooseSquadEmblem(_selectedSquad);
-    }
-
-    private void FleetSquadManageButton_Click(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.Tag is not SquadRow squad ||
-            !CanCurrentUserManageSquad(squad))
-        {
-            return;
-        }
-
-        _selectedSquad = squad;
-        SquadSelectionList.SelectedItem = squad;
-        _editingFleetSquad = squad;
-        _fleetSquadEditEmblemPath = squad.EmblemPath;
-        FleetSquadManageTitleText.Text = $"管理小队 · {squad.Name}";
-        FleetSquadManageDescriptionBox.Text = squad.Description == "No squad briefing yet."
-            ? string.Empty
-            : squad.Description;
-        FleetSquadManageStatusText.Text = string.Empty;
-        LoadFleetSquadManageEmblem(squad);
-        FleetSquadManageOverlay.Visibility = Visibility.Visible;
-        FleetSquadManageDescriptionBox.Focus();
-    }
-
-    private void FleetSquadManageCancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        FleetSquadManageOverlay.Visibility = Visibility.Collapsed;
-        _editingFleetSquad = null;
-        _fleetSquadEditEmblemPath = null;
-    }
-
-    private void FleetSquadManageChooseEmblemButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_editingFleetSquad is null)
-        {
-            return;
-        }
-
-        var safeName = string.Concat(_editingFleetSquad.Name.Select(character =>
-            Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
-        var croppedPath = ChooseAndCropImage("选择小队徽标", $"squad-{safeName}-emblem.png");
-        if (croppedPath is null)
-        {
-            return;
-        }
-
-        _fleetSquadEditEmblemPath = croppedPath;
-        LoadFleetSquadManageEmblem(_editingFleetSquad, croppedPath);
-    }
-
-    private async void FleetSquadManageSaveButton_Click(object sender, RoutedEventArgs e)
-    {
-        var squad = _editingFleetSquad;
-        if (squad is null || !CanCurrentUserManageSquad(squad))
-        {
-            FleetSquadManageStatusText.Text = "当前账号无法管理这个小队。";
-            return;
-        }
-
-        var rollbackState = CaptureFleetStateForRollback();
-        FleetSquadManageSaveButton.IsEnabled = false;
-        FleetSquadManageStatusText.Foreground = FindResource("MutedTextBrush") as System.Windows.Media.Brush ?? Brushes.Gray;
-        FleetSquadManageStatusText.Text = "正在保存小队资料…";
-        try
-        {
-            squad.Description = string.IsNullOrWhiteSpace(FleetSquadManageDescriptionBox.Text)
-                ? "暂无小队介绍"
-                : FleetSquadManageDescriptionBox.Text.Trim();
-            squad.EmblemPath = _fleetSquadEditEmblemPath;
-            MarkLocalSquadEdit(squad);
-            squad.RefreshComputed();
-            RenderSquads();
-            RenderMySquad();
-            RefreshPlayerSquadEmblems();
-            RefreshOverlayWindow();
-            SaveCurrentConfig();
-
-            if (!await PushFleetSquadsAsync(silent: false))
-            {
-                RestoreFleetStateAfterFailedMutation(rollbackState, "小队资料同步失败，已恢复原有状态。");
-                _editingFleetSquad = _squads.FirstOrDefault(item =>
-                    item.Name.Equals(squad.Name, StringComparison.OrdinalIgnoreCase));
-                if (_editingFleetSquad is not null)
-                {
-                    _fleetSquadEditEmblemPath = _editingFleetSquad.EmblemPath;
-                    FleetSquadManageDescriptionBox.Text = _editingFleetSquad.Description;
-                    LoadFleetSquadManageEmblem(_editingFleetSquad);
-                }
-                FleetSquadManageStatusText.Foreground = FindResource("StatusDangerBrush") as System.Windows.Media.Brush ?? Brushes.IndianRed;
-                FleetSquadManageStatusText.Text = "保存失败，已恢复原有小队资料。请稍后重试。";
-                return;
-            }
-
-            AddFleetLog("小队", "更新小队资料", $"{GetLocalFleetActorDisplayName()} 更新了 {squad.Name}");
-            FleetSquadManageOverlay.Visibility = Visibility.Collapsed;
-            _editingFleetSquad = null;
-            _fleetSquadEditEmblemPath = null;
-        }
-        finally
-        {
-            FleetSquadManageSaveButton.IsEnabled = true;
-        }
-    }
-
-    private void LoadFleetSquadManageEmblem(SquadRow squad, string? emblemPath = null)
-    {
-        var path = emblemPath ?? squad.EmblemPath;
-        FleetSquadManageEmblemText.Text = squad.Icon;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            FleetSquadManageEmblemImage.Source = null;
-            FleetSquadManageEmblemText.Visibility = Visibility.Visible;
-            return;
-        }
-
-        try
-        {
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.UriSource = new Uri(path);
-            image.EndInit();
-            image.Freeze();
-            FleetSquadManageEmblemImage.Source = image;
-            FleetSquadManageEmblemText.Visibility = Visibility.Collapsed;
-        }
-        catch
-        {
-            FleetSquadManageEmblemImage.Source = null;
-            FleetSquadManageEmblemText.Visibility = Visibility.Visible;
-        }
-    }
-
-    private async void ChooseSquadEmblem(SquadRow? squad)
-    {
-        if (squad is null)
-        {
-            return;
-        }
-
-        var safeName = string.Concat(squad.Name.Select(character =>
-            Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
-        var croppedPath = ChooseAndCropImage("选择小队徽标", $"squad-{safeName}-emblem.png");
-        if (croppedPath is null)
-        {
-            return;
-        }
-
-        var rollbackState = CaptureFleetStateForRollback();
-        squad.EmblemPath = croppedPath;
-        MarkLocalSquadEdit(squad);
-        squad.RefreshComputed();
-        RenderSquads();
-        RenderMySquad();
-        RefreshPlayerSquadEmblems();
-        RefreshOverlayWindow();
-        SaveCurrentConfig();
-        if (!await PushFleetSquadsAsync(silent: false))
-        {
-            RestoreFleetStateAfterFailedMutation(rollbackState, "小队徽章同步失败，已恢复本地小队状态。");
-            return;
-        }
-
-        AppendOutput($"Squad emblem updated: {squad.Name}");
     }
 
     private string? ChooseAndCropImage(string title, string fileName, LocalImageStorage storage = LocalImageStorage.Cache)

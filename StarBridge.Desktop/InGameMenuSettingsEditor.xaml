@@ -3,14 +3,21 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:StarBridge.Desktop"
-             MinWidth="980"
+             xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+             MinWidth="640"
              MinHeight="560"
              IsVisibleChanged="Editor_IsVisibleChanged"
              Background="Transparent">
     <UserControl.Resources>
         <Style x:Key="EditorPanel"
-               TargetType="Border"
-               BasedOn="{StaticResource OverlaySettingsPanelStyle}" />
+               TargetType="controls:ChamferBorder">
+            <Setter Property="Chamfer" Value="8" />
+            <Setter Property="Background" Value="{DynamicResource BridgePanel}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BridgeHairline}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource BridgeInk}" />
+        </Style>
         <Style x:Key="EditorSection" TargetType="Border"
                BasedOn="{StaticResource MenuOverlaySettingsSectionStyle}" />
         <Geometry x:Key="MenuSettingsOverviewIcon">M3,4 L3,20 L21,20 M6,16 L10,12 L13,14 L18,8 L21,11 M6,7 L9,7</Geometry>
@@ -22,25 +29,16 @@
         <Geometry x:Key="MenuSettingsAppearanceIcon">M4,7 L20,7 M4,12 L20,12 M4,17 L20,17 M9,5 L9,9 M15,10 L15,14 M11,15 L11,19</Geometry>
         <Geometry x:Key="MenuSettingsAdvancedIcon">M12,3 L22,21 L2,21 Z M12,9 L12,15 M12,18 L12,18.1</Geometry>
         <SolidColorBrush x:Key="OverlaySettingsNavigationHoverWashBrush"
-                         Color="#2B2940" />
+                         Color="{Binding Color, Source={StaticResource BridgeRowHover}}" />
         <SolidColorBrush x:Key="OverlaySettingsNavigationActiveWashBrush"
-                         Color="#1E4E416E" />
+                         Color="{Binding Color, Source={StaticResource BridgeRowSelected}}" />
         <SolidColorBrush x:Key="OverlaySettingsNavigationHoverForegroundBrush"
-                         Color="#F0EDFF" />
+                         Color="{Binding Color, Source={StaticResource BridgeInk}}" />
         <SolidColorBrush x:Key="OverlaySettingsNavigationPressedForegroundBrush"
-                         Color="#D0C9FF" />
+                         Color="{Binding Color, Source={StaticResource BridgeInk2}}" />
         <SolidColorBrush x:Key="OverlaySettingsNavigationActiveForegroundBrush"
-                         Color="#F6F3FF" />
-        <Color x:Key="OverlaySettingsNavigationGlyphGlowColor">#A79BFF</Color>
-        <LinearGradientBrush x:Key="OverlaySettingsNavigationRouteLightBrush"
-                             StartPoint="0,0"
-                             EndPoint="0,1">
-            <GradientStop Color="#007B68FF" Offset="0" />
-            <GradientStop Color="#B87B68FF" Offset="0.2" />
-            <GradientStop Color="#FFE1DCFF" Offset="0.5" />
-            <GradientStop Color="#B87B68FF" Offset="0.8" />
-            <GradientStop Color="#007B68FF" Offset="1" />
-        </LinearGradientBrush>
+                         Color="{Binding Color, Source={StaticResource BridgeInk}}" />
+        <Color x:Key="OverlaySettingsNavigationGlyphGlowColor">Transparent</Color>
         <Style x:Key="EditorNavButton"
                TargetType="Button"
                BasedOn="{StaticResource OverlaySettingsGlowNavigationButtonStyle}" />
@@ -69,7 +67,7 @@
         </Style>
         <Style x:Key="EditorSwitch"
                TargetType="CheckBox"
-               BasedOn="{StaticResource OverlaySettingsSwitchRowStyle}">
+               BasedOn="{StaticResource MenuOverlaySettingsSwitchRowStyle}">
             <Setter Property="Margin" Value="0,5,0,5" />
         </Style>
         <Style x:Key="EditorButton"
@@ -97,45 +95,33 @@
                BasedOn="{StaticResource StarBridgeScrollBar}" />
     </UserControl.Resources>
 
-    <Grid>
+    <Grid x:Name="MenuEditorWorkspaceGrid"
+          SizeChanged="MenuEditorWorkspaceGrid_SizeChanged">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="190" />
-            <ColumnDefinition Width="12" />
-            <ColumnDefinition Width="520" MinWidth="460" />
-            <ColumnDefinition Width="12" />
-            <ColumnDefinition Width="*" MinWidth="340" />
+            <ColumnDefinition x:Name="MenuEditorNavigationColumn" Width="190" />
+            <ColumnDefinition x:Name="MenuEditorNavigationGapColumn" Width="12" />
+            <ColumnDefinition x:Name="MenuEditorSettingsColumn" Width="520" />
+            <ColumnDefinition x:Name="MenuEditorSettingsGapColumn" Width="12" />
+            <ColumnDefinition x:Name="MenuEditorPreviewColumn" Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Style="{StaticResource EditorPanel}">
+        <controls:ChamferBorder x:Name="MenuEditorNavigationPanel"
+                                Grid.Column="0"
+                                Style="{StaticResource EditorPanel}">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <StackPanel Margin="17,17,17,12">
-                    <TextBlock Text="游戏内工具"
-                               Foreground="{StaticResource MenuOverlaySettingsAccentBrush}"
-                               FontSize="10"
-                               FontWeight="SemiBold" />
-                    <TextBlock Text="菜单浮层"
-                               Margin="0,4,0,0"
-                               Foreground="{StaticResource TextPrimaryBrush}"
-                               FontSize="22"
-                               FontWeight="SemiBold" />
-                    <TextBlock Text="所有设置集中在一条连续页面中；右侧会立即预览尚未保存的更改。"
-                               Margin="0,7,0,0"
-                               Style="{StaticResource EditorHint}" />
-                </StackPanel>
                 <ScrollViewer x:Name="SettingsNavigationScrollViewer"
-                              Grid.Row="1"
+                              Grid.Row="0"
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
                     <Grid x:Name="SettingsNavigationContentGrid"
                           SizeChanged="SettingsNavigationContentGrid_SizeChanged">
                         <StackPanel>
                             <TextBlock Text="快速设置"
-                                       Margin="16,4,0,4"
+                                       Margin="16,14,0,4"
                                        Style="{StaticResource OverlaySettingsNavigationCategoryTextStyle}"
                                        FontSize="9.5" />
                             <Button x:Name="OverviewNavigationButton"
@@ -203,19 +189,19 @@
                                     Style="{StaticResource EditorNavButton}"
                                     Click="NavigationButton_Click" />
                         </StackPanel>
-                        <Border x:Name="SettingsNavigationActiveRail"
-                                Height="38"
-                                Margin="4,0,0,0"
-                                Style="{StaticResource MenuOverlaySettingsActiveRailStyle}">
-                            <Border.RenderTransform>
+                        <controls:ChamferBorder x:Name="SettingsNavigationActiveRail"
+                                                Height="38"
+                                                Margin="4,0,0,0"
+                                                Style="{StaticResource MenuOverlaySettingsActiveRailStyle}">
+                            <controls:ChamferBorder.RenderTransform>
                                 <TranslateTransform x:Name="SettingsNavigationActiveRailTransform" />
-                            </Border.RenderTransform>
-                        </Border>
+                            </controls:ChamferBorder.RenderTransform>
+                        </controls:ChamferBorder>
                     </Grid>
                 </ScrollViewer>
-                <StackPanel Grid.Row="2" Margin="16">
+                <StackPanel Grid.Row="1" Margin="16">
                     <Border Height="1" Margin="0,0,0,10"
-                            Background="{StaticResource OverlaySettingsSoftBorderBrush}" />
+                            Background="{DynamicResource BridgeHairline}" />
                     <TextBlock x:Name="RailHotkeyText"
                                Text="Alt + M"
                                Foreground="{StaticResource MenuOverlaySettingsAccentBrush}"
@@ -226,9 +212,11 @@
                                Style="{StaticResource EditorHint}" />
                 </StackPanel>
             </Grid>
-        </Border>
+        </controls:ChamferBorder>
 
-        <Border Grid.Column="2" Style="{StaticResource EditorPanel}">
+        <controls:ChamferBorder x:Name="MenuEditorSettingsPanel"
+                                Grid.Column="2"
+                                Style="{StaticResource EditorPanel}">
             <ScrollViewer x:Name="SettingsScrollViewer"
                           Padding="14,14,14,32"
                           VerticalScrollBarVisibility="Auto"
@@ -262,7 +250,7 @@
                                                Margin="0,4,0,0"
                                                Style="{StaticResource EditorHint}" />
                                 </StackPanel>
-                                <Border Grid.Column="1" Background="{StaticResource OverlaySettingsSoftBorderBrush}" />
+                                <Border Grid.Column="1" Background="{DynamicResource BridgeHairline}" />
                                 <StackPanel Grid.Column="2" Margin="14,0,0,0">
                                     <TextBlock Text="更改状态"
                                                Foreground="{StaticResource MenuOverlaySettingsAccentBrush}"
@@ -315,15 +303,20 @@
                                         Margin="0,10,0,0"
                                         Padding="10,6"
                                         HorizontalAlignment="Left"
-                                        Background="{StaticResource OverlaySettingsFieldBrush}"
+                                        Background="{DynamicResource BridgePanel}"
                                         BorderBrush="{StaticResource TextTertiaryBrush}"
                                         BorderThickness="1"
                                         CornerRadius="3">
                                     <StackPanel Orientation="Horizontal">
+                                        <controls:BridgeLoadingIndicator x:Name="HotkeyLoadingIndicator"
+                                                                         Margin="0,0,7,0"
+                                                                         VerticalAlignment="Center"
+                                                                         IsActive="True" />
                                         <Ellipse x:Name="HotkeyStatusIndicator"
                                                  Width="6" Height="6" Margin="0,0,7,0"
                                                  VerticalAlignment="Center"
-                                                 Fill="{StaticResource TextTertiaryBrush}" />
+                                                 Fill="{StaticResource TextTertiaryBrush}"
+                                                 Visibility="Collapsed" />
                                         <TextBlock x:Name="HotkeyStatusText"
                                                    Text="正在检查"
                                                    Foreground="{StaticResource TextTertiaryBrush}"
@@ -369,8 +362,8 @@
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <Border Padding="9,5"
-                                                    Background="{StaticResource OverlaySettingsFieldBrush}"
-                                                    BorderBrush="{StaticResource OverlaySettingsSoftBorderBrush}"
+                                                    Background="{DynamicResource BridgePanel}"
+                                                    BorderBrush="{DynamicResource BridgeRowHairline}"
                                                     BorderThickness="1"
                                                     CornerRadius="3">
                                                 <Grid>
@@ -527,11 +520,6 @@
                                 <TextBlock Text="动态图会以静态预览打开，避免在游戏后台持续占用资源。"
                                            Margin="0,6,0,0"
                                            Style="{StaticResource EditorHint}" />
-                                <TextBlock x:Name="ImageWindowLimitText" Text="同时打开：5 张" Style="{StaticResource EditorFieldLabel}" />
-                                <Slider x:Name="ImageWindowLimitSlider" Minimum="1" Maximum="5"
-                                        Style="{StaticResource EditorSlider}"
-                                        TickFrequency="1" IsSnapToTickEnabled="True"
-                                        ValueChanged="SettingsControl_Changed" />
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource EditorSection}">
@@ -540,8 +528,8 @@
                                 <TextBlock Text="保存位置" Style="{StaticResource EditorFieldLabel}" />
                                 <Border Height="34"
                                         Padding="10,0"
-                                        Background="{StaticResource OverlaySettingsFieldBrush}"
-                                        BorderBrush="{StaticResource OverlaySettingsSoftBorderBrush}"
+                                        Background="{DynamicResource BridgePanel}"
+                                        BorderBrush="{DynamicResource BridgeRowHairline}"
                                         BorderThickness="1"
                                         CornerRadius="4">
                                     <TextBlock x:Name="ScreenshotDirectoryText"
@@ -761,31 +749,54 @@
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
-        </Border>
+        </controls:ChamferBorder>
 
-        <Border Grid.Column="4"
-                Padding="10"
-                Style="{StaticResource EditorPanel}">
+        <controls:ChamferBorder x:Name="MenuEditorPreviewPanel"
+                                Grid.Column="4"
+                                Padding="10"
+                                Style="{StaticResource EditorPanel}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <StackPanel Margin="0,0,0,10">
-                    <TextBlock Text="菜单布局"
-                               Foreground="{StaticResource TextPrimaryBrush}"
-                               FontSize="18"
-                               FontWeight="SemiBold" />
-                    <TextBlock Text="右侧按当前游戏显示器比例显示菜单；尚未保存的调整会立即出现在这里。"
-                               Margin="0,5,0,0"
-                               Style="{StaticResource EditorHint}" />
-                </StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="菜单布局"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   FontSize="18"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="右侧按当前游戏显示器比例显示菜单；尚未保存的调整会立即出现在这里。"
+                                   Margin="0,5,0,0"
+                                   Style="{StaticResource EditorHint}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Top">
+                        <Button x:Name="MenuEditorCompactNavigationButton"
+                                Content="分类"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource EditorButton}"
+                                Visibility="Collapsed"
+                                Click="MenuEditorCompactNavigationButton_Click" />
+                        <Button x:Name="MenuEditorCompactSettingsButton"
+                                Content="设置"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource EditorButton}"
+                                Visibility="Collapsed"
+                                Click="MenuEditorCompactSettingsButton_Click" />
+                    </StackPanel>
+                </Grid>
                 <local:InGameMenuPreviewSurface x:Name="PreviewSurface"
                                                 Grid.Row="1"
                                                 HorizontalAlignment="Stretch"
                                                 VerticalAlignment="Stretch"
-                                                Background="{StaticResource OverlaySettingsPanelBrush}"
+                                                Background="{DynamicResource BridgeGround}"
                                                 BorderBrush="{StaticResource MenuOverlaySettingsAccentBrush}"
                                                 BorderThickness="1"
                                                 ClipToBounds="True"
@@ -799,6 +810,6 @@
                                TextWrapping="Wrap" />
                 </Border>
             </Grid>
-        </Border>
+        </controls:ChamferBorder>
     </Grid>
 </UserControl>

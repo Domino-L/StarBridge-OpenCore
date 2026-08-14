@@ -24,6 +24,7 @@ public partial class InGameMenuPreviewSurface : UserControl
     public InGameMenuPreviewSurface()
     {
         InitializeComponent();
+        InGameMenuVisualContext.Apply(this);
         _clockTimer.Tick += (_, _) => RefreshClock();
         Loaded += (_, _) =>
         {
@@ -247,13 +248,9 @@ public partial class InGameMenuPreviewSurface : UserControl
 
     private void ApplyAppearanceSettings(InGameMenuSettings settings)
     {
-        PreviewBackgroundDimLayer.Fill = new SolidColorBrush(
-            WpfColor.FromArgb(
-                (byte)Math.Round(
-                    settings.BackgroundDimPercent / 100d * byte.MaxValue),
-                0,
-                6,
-                11));
+        PreviewBackgroundDimLayer.Fill = InGameMenuVisualContext.CreateDimBrush(
+            this,
+            settings.BackgroundDimPercent);
         var interfaceScale = settings.InterfaceScalePercent <= 0
             ? 1d
             : settings.InterfaceScalePercent / 100d;
@@ -269,6 +266,10 @@ public partial class InGameMenuPreviewSurface : UserControl
             element.RenderTransformOrigin = origin;
             element.RenderTransform = new ScaleTransform(scale, scale);
         }
+
+        var strongBorder = InGameMenuVisualContext.ResolveStrongBorder(this, settings.HighContrast);
+        PreviewMenuDockContainer.BorderBrush = strongBorder;
+        PreviewMenuContextPanel.BorderBrush = strongBorder;
     }
 
     private static double ResolveDimension(

@@ -66,7 +66,7 @@ internal static class PlayerRowCollectionSynchronizer
         return -1;
     }
 
-    private static bool HasSameIdentity(PlayerRow left, PlayerRow right)
+    internal static bool HasSameIdentity(PlayerRow left, PlayerRow right)
     {
         if (!string.IsNullOrWhiteSpace(left.AccountId) &&
             !string.IsNullOrWhiteSpace(right.AccountId))
@@ -76,4 +76,51 @@ internal static class PlayerRowCollectionSynchronizer
 
         return left.Name.Equals(right.Name, StringComparison.OrdinalIgnoreCase);
     }
+}
+
+internal static class FleetMemberRosterOrderPolicy
+{
+    public static IReadOnlyList<PlayerRow> OrderForDisplay(IReadOnlyList<PlayerRow> source) =>
+        source
+            .Select((row, index) => new IndexedRow(row, index))
+            .OrderBy(item => PresenceRank(item.Row.SharedPresence))
+            .ThenBy(item => item.Row.IsFleetCommander ? 0 : 1)
+            .ThenBy(item => item.Row.HasFleetPosition ? 0 : 1)
+            .ThenBy(item => item.Index)
+            .Select(item => item.Row)
+            .ToArray();
+
+    public static IReadOnlyList<PlayerRow> PreserveDisplayOrder(
+        IReadOnlyList<PlayerRow> current,
+        IReadOnlyList<PlayerRow> updated)
+    {
+        var remaining = updated.ToList();
+        var preserved = new List<PlayerRow>(updated.Count);
+
+        foreach (var currentRow in current)
+        {
+            var matchIndex = remaining.FindIndex(candidate =>
+                PlayerRowCollectionSynchronizer.HasSameIdentity(currentRow, candidate));
+            if (matchIndex < 0)
+            {
+                continue;
+            }
+
+            preserved.Add(remaining[matchIndex]);
+            remaining.RemoveAt(matchIndex);
+        }
+
+        preserved.AddRange(remaining);
+        return preserved;
+    }
+
+    private static int PresenceRank(StarBridge.Core.Presence.PlayerPresenceKind presence) => presence switch
+    {
+        StarBridge.Core.Presence.PlayerPresenceKind.InGame => 0,
+        StarBridge.Core.Presence.PlayerPresenceKind.AppOnline or
+            StarBridge.Core.Presence.PlayerPresenceKind.Away => 1,
+        _ => 2
+    };
+
+    private readonly record struct IndexedRow(PlayerRow Row, int Index);
 }

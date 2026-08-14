@@ -82,6 +82,7 @@ public partial class InGameMenuWindow : Window
     internal InGameMenuWindow()
     {
         InitializeComponent();
+        InGameMenuVisualContext.Apply(this);
         Activated += Window_Activated;
         IsVisibleChanged += Window_IsVisibleChanged;
         _clockTimer.Tick += (_, _) => RefreshLocalClock();
@@ -96,6 +97,8 @@ public partial class InGameMenuWindow : Window
 
             _noticeResetTimer.Stop();
             NoticeText.Text = "菜单浮层已就绪";
+            Controls.InGameLoadingPresentation.Apply(NoticeLoadingIndicator, false);
+            Controls.InGameLoadingPresentation.Apply(NoticePopupLoadingIndicator, false);
             NoticePopup.Visibility = Visibility.Collapsed;
         };
         RefreshLocalClock();
@@ -346,12 +349,7 @@ public partial class InGameMenuWindow : Window
     private void ApplyAppearanceSettings(InGameMenuSettings settings)
     {
         var dim = Math.Clamp(settings.BackgroundDimPercent, 0, 100);
-        BackgroundDimLayer.Fill = new SolidColorBrush(
-            WpfColor.FromArgb(
-                (byte)Math.Round(dim / 100d * byte.MaxValue),
-                0,
-                6,
-                11));
+        BackgroundDimLayer.Fill = InGameMenuVisualContext.CreateDimBrush(this, dim);
 
         var interfaceScale = settings.InterfaceScalePercent <= 0
             ? 1d
@@ -372,14 +370,9 @@ public partial class InGameMenuWindow : Window
         System.Windows.Controls.ToolTipService.SetInitialShowDelay(
             RootGrid,
             settings.ToolTipDelayMilliseconds);
-        var strongBorder = settings.HighContrast
-            ? new SolidColorBrush(WpfColor.FromRgb(100, 213, 255))
-            : FindResource("MenuBorderStrongBrush") as WpfBrush;
-        if (strongBorder is not null)
-        {
-            MenuDockContainer.BorderBrush = strongBorder;
-            MenuContextPanel.BorderBrush = strongBorder;
-        }
+        var strongBorder = InGameMenuVisualContext.ResolveStrongBorder(this, settings.HighContrast);
+        MenuDockContainer.BorderBrush = strongBorder;
+        MenuContextPanel.BorderBrush = strongBorder;
     }
 
     private void ApplyLayoutPreset(
@@ -479,10 +472,15 @@ public partial class InGameMenuWindow : Window
         ApplyInformationOverlayState(_informationOverlayEnabled);
     }
 
-    internal void ShowNotice(string text, string? detail = null)
+    internal void ShowNotice(
+        string text,
+        string? detail = null,
+        bool isLoading = false)
     {
         NoticeText.Text = text;
         NoticePopupTitle.Text = text;
+        Controls.InGameLoadingPresentation.Apply(NoticeLoadingIndicator, isLoading);
+        Controls.InGameLoadingPresentation.Apply(NoticePopupLoadingIndicator, isLoading);
         NoticePopupDetail.Text = detail ?? "";
         NoticePopupDetail.Visibility = string.IsNullOrWhiteSpace(detail)
             ? Visibility.Collapsed

@@ -1,4 +1,5 @@
 using StarBridge.Core.Presence;
+using System.Windows;
 using MediaBrush = System.Windows.Media.Brush;
 
 namespace StarBridge.Desktop;
@@ -18,7 +19,6 @@ internal sealed record InGameFleetMemberRow(
     PlayerPresenceKind Presence,
     string Role,
     bool IsCommander,
-    string SquadName,
     string Ship,
     string Location,
     string Server,
@@ -26,7 +26,6 @@ internal sealed record InGameFleetMemberRow(
     bool CanOpenProfile,
     bool CanMessage,
     bool IsSameServer = false,
-    bool IsCurrentUserSquad = false,
     MediaBrush? RoleAccent = null,
     bool? HasServerSession = null)
 {
@@ -37,18 +36,12 @@ internal sealed record InGameFleetMemberRow(
         : StatusPalette.InfoBrush);
     public MediaBrush CoordinationBrush => IsSameServer
         ? StatusPalette.SuccessBrush
-        : IsCurrentUserSquad
-            ? StatusPalette.WarningBrush
-            : PresenceBrush;
+        : PresenceBrush;
     public string IdentityText => string.IsNullOrWhiteSpace(GameId) ||
                                     Callsign.Equals(GameId, StringComparison.OrdinalIgnoreCase)
         ? Callsign
         : $"{Callsign} · {GameId}";
     public string RoleText => string.IsNullOrWhiteSpace(Role) ? "舰队成员" : Role;
-    public string SquadText => string.IsNullOrWhiteSpace(SquadName) ||
-                                  SquadName.Equals("Unassigned", StringComparison.OrdinalIgnoreCase)
-        ? "未加入小队"
-        : SquadName;
     public string ShipText => PlayerSessionStatePresentation.ResolveShip(
         Presence,
         HasServerSession,
@@ -65,39 +58,12 @@ internal sealed record InGameFleetMemberRow(
         ? "你"
         : IsSameServer
             ? "同服务器"
-            : IsCurrentUserSquad
-                ? "我的小队"
-                : PresenceText;
+            : PresenceText;
     public string ContextText => string.Join(
         " · ",
-        new[] { SquadText, ShipText, LocationText, ServerText }
+        new[] { ShipText, LocationText, ServerText }
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.CurrentCultureIgnoreCase));
-}
-
-internal sealed record InGameFleetSquadRow(
-    string Id,
-    string Name,
-    string Icon,
-    string? EmblemSource,
-    string Commander,
-    string Type,
-    string Description,
-    int MemberCount,
-    int OnlineCount,
-    string MemberNames,
-    InGameFleetMemberRow[] Members,
-    bool IsCurrentUserSquad)
-{
-    public int InGameCount => Members.Count(member =>
-        member.Presence == PlayerPresenceKind.InGame);
-    public string CountText => $"{OnlineCount} / {MemberCount} 在线";
-    public string InGameCountText => $"{InGameCount} 人游戏中";
-    public string CommanderText => $"指挥官 · {Commander}";
-    public string TypeText => string.IsNullOrWhiteSpace(Type) ? "类型待补充" : Type;
-    public MediaBrush StateBrush => OnlineCount > 0
-        ? StatusPalette.SuccessBrush
-        : StatusPalette.DisabledBrush;
 }
 
 internal sealed record InGameFleetShipRow(
@@ -106,12 +72,15 @@ internal sealed record InGameFleetShipRow(
     string Code,
     string? ImageSource,
     string Owner,
-    string Squad,
     string Spec,
     string Role,
     string Status,
     string Value,
-    bool OwnerIsOnline)
+    bool OwnerIsOnline,
+    string? CustomImageMediaId = null,
+    string? ShipInstanceId = null,
+    string? OwnerAccountId = null,
+    bool CanReportCustomImage = false)
 {
     public string EnglishName => string.IsNullOrWhiteSpace(Code) ||
                                  Name.Equals(Code, StringComparison.OrdinalIgnoreCase)
@@ -121,10 +90,7 @@ internal sealed record InGameFleetShipRow(
                                     Name.Equals(Code, StringComparison.OrdinalIgnoreCase)
         ? Name
         : $"{Name} · {Code}";
-    public string CaptainText => string.IsNullOrWhiteSpace(Squad) ||
-                                   Squad.Equals("Unassigned", StringComparison.OrdinalIgnoreCase)
-        ? Owner
-        : $"{Owner} / {Squad}";
+    public string CaptainText => Owner;
     public string OwnerPresenceText => OwnerIsOnline ? "在线" : "离线";
     public MediaBrush OwnerPresenceBrush => OwnerIsOnline
         ? StatusPalette.SuccessBrush
@@ -134,6 +100,7 @@ internal sealed record InGameFleetShipRow(
         new[] { Spec, Role, Status }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
     public string ValueText => string.IsNullOrWhiteSpace(Value) ? "价值未公布" : Value;
+    public Visibility ShipImageReportVisibility => CanReportCustomImage ? Visibility.Visible : Visibility.Collapsed;
 }
 
 internal enum InGameFleetShipOwnerFilter
@@ -175,7 +142,6 @@ internal sealed record InGameFleetSnapshot(
     int AwayMembers,
     int OfflineMembers,
     InGameFleetMemberRow[] Members,
-    InGameFleetSquadRow[] Squads,
     InGameFleetShipRow[] Ships,
     string StatusText,
     string Fingerprint)
@@ -190,7 +156,6 @@ internal sealed record InGameFleetSnapshot(
             null,
             "",
             "",
-            [],
             [],
             [],
             statusText);
@@ -208,7 +173,6 @@ internal static class InGameFleetProjection
         string announcementTitle,
         string announcementContent,
         IEnumerable<InGameFleetMemberRow> members,
-        IEnumerable<InGameFleetSquadRow> squads,
         IEnumerable<InGameFleetShipRow> ships,
         string statusText)
     {
@@ -218,11 +182,6 @@ internal static class InGameFleetProjection
             .ThenBy(member => PresenceRank(member.Presence))
             .ThenByDescending(member => member.IsCommander)
             .ThenBy(member => member.Callsign, StringComparer.CurrentCultureIgnoreCase)
-            .ToArray();
-        var squadRows = squads
-            .OrderByDescending(squad => squad.IsCurrentUserSquad)
-            .ThenByDescending(squad => squad.OnlineCount)
-            .ThenBy(squad => squad.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
         var shipRows = ships
             .OrderBy(ship => ship.Number)
@@ -243,7 +202,6 @@ internal static class InGameFleetProjection
             announcementTitle,
             announcementContent,
             memberRows,
-            squadRows,
             shipRows,
             statusText);
 
@@ -262,7 +220,6 @@ internal static class InGameFleetProjection
             away,
             offline,
             memberRows,
-            squadRows,
             shipRows,
             statusText,
             fingerprint);
@@ -284,18 +241,12 @@ internal static class InGameFleetProjection
             return 0;
         }
 
-        if (member.IsCurrentUserSquad &&
-            PlayerPresence.IsOnline(member.Presence))
-        {
-            return 1;
-        }
-
         return member.Presence switch
         {
-            PlayerPresenceKind.InGame => 2,
-            PlayerPresenceKind.AppOnline => 3,
-            PlayerPresenceKind.Away => 4,
-            _ => 5
+            PlayerPresenceKind.InGame => 1,
+            PlayerPresenceKind.AppOnline => 2,
+            PlayerPresenceKind.Away => 3,
+            _ => 4
         };
     }
 
@@ -309,7 +260,6 @@ internal static class InGameFleetProjection
         string announcementTitle,
         string announcementContent,
         IEnumerable<InGameFleetMemberRow> members,
-        IEnumerable<InGameFleetSquadRow> squads,
         IEnumerable<InGameFleetShipRow> ships,
         string statusText)
     {
@@ -333,7 +283,6 @@ internal static class InGameFleetProjection
             value.Add(member.Presence);
             AddText(ref value, member.Role);
             value.Add(member.IsCommander);
-            AddText(ref value, member.SquadName);
             AddText(ref value, member.Ship);
             AddText(ref value, member.Location);
             AddText(ref value, member.Server);
@@ -341,29 +290,7 @@ internal static class InGameFleetProjection
             value.Add(member.CanOpenProfile);
             value.Add(member.CanMessage);
             value.Add(member.IsSameServer);
-            value.Add(member.IsCurrentUserSquad);
             AddText(ref value, member.RoleAccent?.ToString());
-        }
-
-        foreach (var squad in squads)
-        {
-            AddText(ref value, squad.Id);
-            AddText(ref value, squad.Name);
-            AddText(ref value, squad.EmblemSource);
-            AddText(ref value, squad.Commander);
-            AddText(ref value, squad.Type);
-            AddText(ref value, squad.Description);
-            value.Add(squad.MemberCount);
-            value.Add(squad.OnlineCount);
-            AddText(ref value, squad.MemberNames);
-            foreach (var member in squad.Members)
-            {
-                AddText(ref value, member.AccountId);
-                AddText(ref value, member.Callsign);
-                AddText(ref value, member.GameId);
-                value.Add(member.Presence);
-            }
-            value.Add(squad.IsCurrentUserSquad);
         }
 
         foreach (var ship in ships)
@@ -373,12 +300,15 @@ internal static class InGameFleetProjection
             AddText(ref value, ship.Code);
             AddText(ref value, ship.ImageSource);
             AddText(ref value, ship.Owner);
-            AddText(ref value, ship.Squad);
             AddText(ref value, ship.Spec);
             AddText(ref value, ship.Role);
             AddText(ref value, ship.Status);
             AddText(ref value, ship.Value);
             value.Add(ship.OwnerIsOnline);
+            AddText(ref value, ship.CustomImageMediaId);
+            AddText(ref value, ship.ShipInstanceId);
+            AddText(ref value, ship.OwnerAccountId);
+            value.Add(ship.CanReportCustomImage);
         }
 
         return value.ToHashCode().ToString("X8");
@@ -394,4 +324,14 @@ internal sealed class InGameFleetMemberActionRequestedEventArgs(
 {
     internal InGameFleetMemberRow Member { get; } = member;
     internal InGameFleetMemberAction Action { get; } = action;
+}
+
+internal sealed class InGameFleetShipImageReportRequestedEventArgs(InGameFleetShipRow ship) : EventArgs
+{
+    internal InGameFleetShipRow Ship { get; } = ship;
+}
+
+internal sealed class InGameFleetShipImagePreviewRequestedEventArgs(InGameFleetShipRow ship) : EventArgs
+{
+    internal InGameFleetShipRow Ship { get; } = ship;
 }

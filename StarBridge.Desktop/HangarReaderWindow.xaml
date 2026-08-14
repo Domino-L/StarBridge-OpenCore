@@ -3,6 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+        xmlns:theming="clr-namespace:StarBridge.Desktop.Theming"
         Title="官网机库扫描器"
         Icon="/Assets/Brand/StarBridge_AppIcon.ico"
         Width="1320"
@@ -12,10 +14,55 @@
         WindowStartupLocation="CenterOwner"
         WindowStyle="None"
         ResizeMode="CanResize"
-        Background="{StaticResource PageBackgroundBrush}"
+        Background="{DynamicResource BridgeGround}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         StateChanged="HangarReaderWindow_StateChanged">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Bridge/Shell.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/Directory.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="BridgeCaptionButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="48" />
+                <Setter Property="Height" Value="50" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource BridgeInk2}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="{DynamicResource BridgeCjkFont}" />
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Chrome" Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource BridgeRowHover}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource BridgeRowSelected}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="BridgeCloseCaptionButtonStyle"
+                   TargetType="Button"
+                   BasedOn="{StaticResource BridgeCaptionButtonStyle}">
+                <Setter Property="Foreground" Value="{DynamicResource BridgeStatusBad}" />
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0"
                             ResizeBorderThickness="7"
@@ -24,8 +71,8 @@
                             UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
 
-    <Border Background="{StaticResource PageBackgroundBrush}"
-            BorderBrush="{StaticResource AccentDimBrush}"
+    <Border Background="{DynamicResource BridgeGround}"
+            BorderBrush="{DynamicResource BridgeHairline}"
             BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions>
@@ -36,14 +83,14 @@
             <Border Grid.RowSpan="2"
                     Height="2"
                     VerticalAlignment="Top"
-                    Background="{StaticResource AccentBrush}"
+                    Background="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                     Opacity="0.72"
                     Panel.ZIndex="10"
                     IsHitTestVisible="False" />
 
             <Border Grid.Row="0"
-                    Background="#F0162634"
-                    BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
+                    Background="{DynamicResource BridgeRail}"
+                    BorderBrush="{DynamicResource BridgeHairline}"
                     BorderThickness="0,0,0,1"
                     MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                 <Grid>
@@ -60,10 +107,9 @@
                         <Border Width="30"
                                 Height="30"
                                 Margin="0,0,11,0"
-                                Background="#102637"
-                                BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
-                                BorderThickness="1"
-                                CornerRadius="4">
+                                Background="{DynamicResource BridgePanelRaised}"
+                                BorderBrush="{DynamicResource BridgeHairline}"
+                                BorderThickness="1">
                             <Image Source="/Assets/Brand/StarBridge_AppIcon.ico"
                                    Width="20"
                                    Height="20"
@@ -73,49 +119,48 @@
                         </Border>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="官网机库扫描器"
-                                       Foreground="{StaticResource PrimaryTextBrush}"
-                                       FontSize="14"
-                                       FontWeight="SemiBold" />
+                                       Style="{StaticResource BridgeSceneTitleTextStyle}" />
                             <TextBlock Text="读取 RSI My Hangar，并导入星海舰桥"
                                        Margin="0,1,0,0"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10" />
+                                       Style="{StaticResource BridgeSceneMetaTextStyle}" />
                         </StackPanel>
                     </StackPanel>
 
                     <Button Grid.Column="1"
+                            Content="—"
                             Tag="Minimize"
                             AutomationProperties.Name="最小化"
                             ToolTip="最小化"
-                            Style="{StaticResource WindowCaptionButton}"
+                            Style="{StaticResource BridgeCaptionButtonStyle}"
                             Click="MinimizeWindowButton_Click" />
                     <Button Grid.Column="2"
                             x:Name="MaximizeWindowButton"
+                            Content="□"
                             Tag="Maximize"
                             AutomationProperties.Name="最大化"
                             ToolTip="最大化"
-                            Style="{StaticResource WindowCaptionButton}"
+                            Style="{StaticResource BridgeCaptionButtonStyle}"
                             Click="MaximizeWindowButton_Click" />
                     <Button Grid.Column="3"
+                            Content="×"
                             Tag="Close"
                             AutomationProperties.Name="关闭"
                             ToolTip="关闭"
-                            Style="{StaticResource CloseWindowCaptionButton}"
+                            Style="{StaticResource BridgeCloseCaptionButtonStyle}"
                             Click="CloseButton_Click" />
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="1"
-                  Margin="14">
+            <Grid Grid.Row="1" Margin="14">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0"
-                        Style="{StaticResource HudPanel}"
-                        Margin="0,0,0,12"
-                        Padding="13,10">
+                <controls:ChamferBorder Grid.Row="0"
+                                        Style="{StaticResource BridgeDirectoryHeaderStyle}"
+                                        Margin="0,0,0,12"
+                                        Padding="13,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="3" />
@@ -127,46 +172,38 @@
 
                         <Border Grid.Column="0"
                                 Margin="0,2,12,2"
-                                Background="{StaticResource AccentBrush}"
-                                CornerRadius="1" />
+                                Background="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
 
-                        <StackPanel Grid.Column="1"
-                                    Margin="0,0,10,0">
+                        <StackPanel Grid.Column="1" Margin="0,0,10,0">
                             <TextBlock Text="机库地址"
                                        Margin="0,0,0,4"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10" />
+                                       Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
                             <TextBox x:Name="AddressBox"
-                                     Height="34"
-                                     Padding="10,0"
-                                     Text="https://robertsspaceindustries.com/en/account/pledges"
-                                     VerticalContentAlignment="Center" />
+                                     Style="{StaticResource BridgeDirectoryTextBoxStyle}"
+                                     Text="https://robertsspaceindustries.com/en/account/pledges" />
                         </StackPanel>
 
                         <Button Grid.Column="2"
                                 x:Name="GoButton"
-                                Height="34"
                                 Margin="0,18,8,0"
                                 Content="打开"
-                                Style="{StaticResource SecondaryButton}"
+                                Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
                                 Click="GoButton_Click" />
                         <Button Grid.Column="3"
                                 x:Name="ScanFullHangarButton"
-                                Height="34"
                                 Margin="0,18,8,0"
                                 Content="扫描整库"
-                                Style="{StaticResource PrimaryButton}"
+                                Style="{StaticResource BridgeDirectoryPrimaryButtonStyle}"
                                 Click="ScanFullHangarButton_Click" />
                         <Button Grid.Column="4"
                                 x:Name="ImportButton"
-                                Height="34"
                                 Margin="0,18,0,0"
                                 Content="导入舰船库"
                                 IsEnabled="False"
-                                Style="{StaticResource PrimaryButton}"
+                                Style="{StaticResource BridgeDirectoryPrimaryButtonStyle}"
                                 Click="ImportButton_Click" />
                     </Grid>
-                </Border>
+                </controls:ChamferBorder>
 
                 <Grid Grid.Row="1">
                     <Grid.ColumnDefinitions>
@@ -174,12 +211,10 @@
                         <ColumnDefinition Width="382" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0"
-                            Background="#FF050B12"
-                            BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
-                            BorderThickness="1"
-                            CornerRadius="5"
-                            ClipToBounds="True">
+                    <controls:ChamferBorder Grid.Column="0"
+                                            Style="{StaticResource BridgeDirectorySurfaceStyle}"
+                                            Padding="0"
+                                            ClipToBounds="True">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="38" />
@@ -187,8 +222,8 @@
                             </Grid.RowDefinitions>
 
                             <Border Grid.Row="0"
-                                    Background="{StaticResource AvionicsGlassPanelBrush}"
-                                    BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
+                                    Background="{DynamicResource BridgePanelRaised}"
+                                    BorderBrush="{DynamicResource BridgeRowHairline}"
                                     BorderThickness="0,0,0,1">
                                 <Grid Margin="13,0">
                                     <Grid.ColumnDefinitions>
@@ -199,32 +234,30 @@
                                     <Ellipse Width="7"
                                              Height="7"
                                              Margin="0,0,8,0"
-                                             Fill="{StaticResource AccentBrush}"
+                                             Fill="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                                              VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1"
                                                Text="RSI 机库网页"
                                                VerticalAlignment="Center"
-                                               Foreground="{StaticResource PrimaryTextBrush}"
-                                               FontSize="12"
-                                               FontWeight="SemiBold" />
+                                               Style="{StaticResource BridgeDirectorySectionTitleStyle}" />
                                     <TextBlock Grid.Column="2"
                                                Text="官方网页通道"
                                                VerticalAlignment="Center"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               FontSize="10" />
+                                               Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
                                 </Grid>
                             </Border>
 
-                            <wv2:WebView2 Grid.Row="1"
-                                          x:Name="HangarWebView"
-                                          Source="https://robertsspaceindustries.com/en/account/pledges" />
+                            <Border Grid.Row="1" Background="{DynamicResource BridgeGround}">
+                                <wv2:WebView2 x:Name="HangarWebView"
+                                              Source="https://robertsspaceindustries.com/en/account/pledges" />
+                            </Border>
                         </Grid>
-                    </Border>
+                    </controls:ChamferBorder>
 
-                    <Border Grid.Column="1"
-                            Style="{StaticResource HudPanel}"
-                            Margin="12,0,0,0"
-                            Padding="0">
+                    <controls:ChamferBorder Grid.Column="1"
+                                            Style="{StaticResource BridgeDirectorySurfaceStyle}"
+                                            Margin="12,0,0,0"
+                                            Padding="0">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -235,17 +268,15 @@
 
                             <Border Grid.Row="0"
                                     Padding="16,14,16,12"
-                                    Background="{StaticResource AvionicsGlassPanelBrush}"
-                                    BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
+                                    Background="{DynamicResource BridgePanelRaised}"
+                                    BorderBrush="{DynamicResource BridgeRowHairline}"
                                     BorderThickness="0,0,0,1">
                                 <StackPanel>
                                     <TextBlock Text="扫描说明"
-                                               Foreground="{StaticResource AccentBrush}"
-                                               FontSize="17"
-                                               FontWeight="SemiBold" />
-                                    <TextBlock Text="登录 RSI 后打开 My Hangar，再开始扫描。应用只读取当前账号的舰船条目，不会保存 RSI 账号或密码。"
+                                               Style="{StaticResource BridgePageTitleTextStyle}" />
+                                    <TextBlock Text="登录 RSI 后打开 My Hangar，再开始扫描。应用会读取当前账号的舰船条目与页面图片；图片只保存在本机，不会自动上传，RSI 账号或密码也不会被保存。"
                                                Margin="0,7,0,0"
-                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Style="{StaticResource BridgeBodyTextStyle}"
                                                TextWrapping="Wrap"
                                                LineHeight="20" />
                                 </StackPanel>
@@ -253,86 +284,73 @@
 
                             <Border Grid.Row="1"
                                     Margin="16,14,16,0"
-                                    Padding="12,10"
-                                    Background="#7407111B"
-                                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="4">
+                                    Style="{StaticResource BridgeDirectoryStatusBannerStyle}">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="3" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Background="{StaticResource AccentBrush}"
-                                            CornerRadius="1" />
-                                    <StackPanel Grid.Column="1"
-                                                Margin="10,0,0,0">
+                                    <Border Background="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+                                    <controls:BridgeLoadingIndicator x:Name="ReaderLoadingIndicator"
+                                                                     Grid.Column="1"
+                                                                     Margin="10,0,0,0"
+                                                                     VerticalAlignment="Center"
+                                                                     Visibility="Collapsed" />
+                                    <StackPanel Grid.Column="2" Margin="10,0,0,0">
                                         <TextBlock Text="当前状态"
-                                                   Foreground="{StaticResource MutedTextBrush}"
-                                                   FontSize="10" />
+                                                   Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
                                         <TextBlock x:Name="ReaderStatusText"
                                                    Text="等待整库扫描。"
                                                    Margin="0,3,0,0"
-                                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                                   Style="{StaticResource BridgeBodyTextStyle}"
                                                    TextWrapping="Wrap"
                                                    LineHeight="19" />
                                     </StackPanel>
                                 </Grid>
                             </Border>
 
-                            <Grid Grid.Row="2"
-                                  Margin="16,10,16,10">
+                            <Grid Grid.Row="2" Margin="16,10,16,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="8" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
-                                <Border Padding="10,8"
-                                        Background="#650B1924"
-                                        BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="4">
+                                <Border Style="{StaticResource BridgeDirectoryCardStyle}" Padding="10,8">
                                     <StackPanel>
                                         <TextBlock Text="扫描进度"
-                                                   Foreground="{StaticResource MutedTextBrush}"
-                                                   FontSize="10" />
+                                                   Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
                                         <TextBlock x:Name="PageShipCountText"
                                                    Text="扫描页数：0"
                                                    Margin="0,3,0,0"
-                                                   Foreground="{StaticResource AccentBrush}"
-                                                   FontWeight="SemiBold" />
+                                                   Style="{StaticResource BridgeDataTextStyle}"
+                                                   Foreground="{DynamicResource BridgeMetricDuration}" />
                                     </StackPanel>
                                 </Border>
 
-                                <Border Grid.Column="2"
-                                        Padding="10,8"
-                                        Background="#650B1924"
-                                        BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="4">
+                                <Border Grid.Column="2" Style="{StaticResource BridgeDirectoryCardStyle}" Padding="10,8">
                                     <StackPanel>
                                         <TextBlock Text="已识别舰船"
-                                                   Foreground="{StaticResource MutedTextBrush}"
-                                                   FontSize="10" />
+                                                   Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
                                         <TextBlock x:Name="TotalShipCountText"
                                                    Text="累计：0"
                                                    Margin="0,3,0,0"
-                                                   Foreground="{StaticResource AccentBrush}"
-                                                   FontWeight="SemiBold" />
+                                                   Style="{StaticResource BridgeDataTextStyle}"
+                                                   Foreground="{DynamicResource BridgeMetricValue}" />
                                     </StackPanel>
                                 </Border>
                             </Grid>
 
                             <Border Grid.Row="3"
                                     Margin="16,0,16,16"
-                                    Background="{StaticResource FieldBackBrush}"
-                                    BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
+                                    Background="{DynamicResource BridgeGround}"
+                                    BorderBrush="{DynamicResource BridgeRowHairline}"
                                     BorderThickness="1"
-                                    CornerRadius="4"
                                     ClipToBounds="True">
                                 <ListView x:Name="DetectedShipsList"
                                           Background="Transparent"
+                                          Foreground="{DynamicResource BridgeInk}"
                                           BorderThickness="0"
                                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                     <ListView.View>
@@ -348,7 +366,7 @@
                                 </ListView>
                             </Border>
                         </Grid>
-                    </Border>
+                    </controls:ChamferBorder>
                 </Grid>
             </Grid>
         </Grid>

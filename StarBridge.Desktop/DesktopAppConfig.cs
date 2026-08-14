@@ -20,7 +20,8 @@ internal sealed record DesktopAppConfig(
     string? FleetStateJson,
     bool AllowEmailNotifications = true,
     bool EnableOverlayGlobalHotkey = true,
-    string? AccountId = null)
+    string? AccountId = null,
+    DateTimeOffset? FleetStateCachedAtUtc = null)
 {
     public static readonly string ConfigDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -84,7 +85,14 @@ internal sealed record DesktopAppConfig(
             lines.Length > 15 && bool.TryParse(lines[15], out var enableOverlayGlobalHotkey)
                 ? enableOverlayGlobalHotkey
                 : true,
-            lines.Length > 16 ? EmptyToNull(lines[16]) : null);
+            lines.Length > 16 ? EmptyToNull(lines[16]) : null,
+            lines.Length > 17 && DateTimeOffset.TryParse(
+                lines[17],
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var fleetStateCachedAtUtc)
+                ? fleetStateCachedAtUtc.ToUniversalTime()
+                : null);
     }
 
     public static void Save(DesktopAppConfig config)
@@ -107,7 +115,8 @@ internal sealed record DesktopAppConfig(
             config.FleetStateJson ?? "",
             config.AllowEmailNotifications.ToString(),
             config.EnableOverlayGlobalHotkey.ToString(),
-            config.AccountId ?? ""
+            config.AccountId ?? "",
+            config.FleetStateCachedAtUtc?.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? ""
         };
 
         try

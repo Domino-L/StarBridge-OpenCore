@@ -18,7 +18,6 @@ internal sealed record PlayerActivityMemberState(
     string Initials,
     string? AvatarSource,
     string? AccountId,
-    string SquadName,
     PlayerPresenceKind Presence,
     bool IsSelf,
     bool AllowsPresenceEvents,
@@ -27,8 +26,7 @@ internal sealed record PlayerActivityMemberState(
 internal sealed record PlayerActivityNotificationContext(
     bool IsAppBackground,
     bool IsGameRunning,
-    bool IsOverlayRunning,
-    string? LocalSquadName);
+    bool IsOverlayRunning);
 
 internal sealed record PlayerActivityDesktopNotification(
     PlayerActivityNotificationKind Kind,
@@ -119,10 +117,7 @@ internal sealed class PlayerActivityNotificationTracker
         return settings.PlayerActivityScope switch
         {
             PlayerActivityNotificationScope.PartyRoom => member.IsInPartyRoom,
-            PlayerActivityNotificationScope.Fleet => true,
-            _ => !string.IsNullOrWhiteSpace(context.LocalSquadName) &&
-                 !context.LocalSquadName.Equals("Unassigned", StringComparison.OrdinalIgnoreCase) &&
-                 member.SquadName.Equals(context.LocalSquadName, StringComparison.OrdinalIgnoreCase)
+            _ => true
         };
     }
 

@@ -4,6 +4,7 @@ using StarBridge.Core.Presence;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media;
+using WpfBrush = System.Windows.Media.Brush;
 
 namespace StarBridge.Desktop;
 
@@ -234,7 +235,9 @@ internal sealed record FriendChatMessageRow(
     bool IsLocal,
     string SenderCallsign,
     string SenderGameId,
-    string? SenderAvatarImageData) : INotifyPropertyChanged
+    string? SenderAvatarImageData,
+    WpfBrush SenderRoleBrush,
+    WpfBrush AttachmentStatusBrush) : INotifyPropertyChanged
 {
     private string _timeText = CommunicationTimeFormatter.Format(Message.CreatedAt);
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -249,7 +252,6 @@ internal sealed record FriendChatMessageRow(
     public bool AttachmentActionEnabled => ChatAttachmentPresentation.ActionEnabled(Attachment);
     public string AttachmentTypeText => ChatAttachmentPresentation.TypeText(Attachment);
     public string AttachmentStatusText => ChatAttachmentPresentation.StatusText(Attachment);
-    public string AttachmentStatusBrush => ChatAttachmentPresentation.StatusBrush(Attachment);
     public Visibility AttachmentStatusVisibility => ChatAttachmentPresentation.StatusVisibility(Attachment);
     public string AttachmentRoomActivityText => ChatAttachmentPresentation.RoomActivityText(Attachment);
     public string AttachmentRoomFactsText => ChatAttachmentPresentation.RoomFactsText(Attachment);
@@ -260,7 +262,6 @@ internal sealed record FriendChatMessageRow(
         ? ""
         : $"@ {SenderGameId}";
     public string SenderRoleTitle => "";
-    public string SenderRoleBrush => IsLocal ? "#29AFFF" : "#69CCFF";
     public Visibility RoleVisibility => Visibility.Collapsed;
     public bool IsSystem => false;
     public bool IsSelf => IsLocal;

@@ -85,8 +85,8 @@ internal sealed class OverlaySkinPreviewCard : FrameworkElement
         DrawStandardPanel(
             dc,
             new Rect(12, 43, 146, 42),
-            "SQUAD STATUS",
-            ["FLEET  04 / 04", "SERVER  LIVE"],
+            "FLEET OVERVIEW",
+            ["ONLINE  04 / 04", "SAME SERVER  03"],
             emphasizeFirstRow: true);
         DrawStandardPanel(
             dc,
@@ -123,7 +123,7 @@ internal sealed class OverlaySkinPreviewCard : FrameworkElement
         DrawGrid(dc, "#15343A", 20, 0.28);
         DrawCalibrationCorners(dc, "#4B837F");
 
-        DrawLagrangePanel(dc, new Rect(12, 42, 150, 43), "SQUAD FIELD", ["EQUILIBRIUM  0.97"]);
+        DrawLagrangePanel(dc, new Rect(12, 42, 150, 43), "FLEET OVERVIEW", ["SAME SERVER  03"]);
         DrawLagrangePanel(dc, new Rect(12, 85, 150, 49), "MEMBER FIELD", ["NODES  06 / 06"]);
         DrawLagrangePanel(dc, new Rect(12, 134, 150, 34), "COMMS FIELD", ["MESH  STABLE"]);
         DrawLagrangePanel(dc, new Rect(175, 13, 212, 39), "FIELD NOTICE", ["ANCHOR NETWORK SYNCHRONIZED"]);

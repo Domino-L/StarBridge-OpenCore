@@ -18,7 +18,6 @@ internal enum InGameChatChannelKind
 {
     Private,
     Fleet,
-    Squad,
     Room
 }
 
@@ -65,6 +64,7 @@ internal sealed record InGameSocialSnapshot(
     string FriendStatusText,
     string SearchStatusText,
     bool IsSearchActive,
+    bool IsSearchLoading,
     string LocalCallsign,
     string LocalGameId,
     string? LocalAvatarSource,

@@ -35,7 +35,6 @@ public static class FleetShipInventoryRowChangeDetector
                && current.OwnerDisplay == incoming.OwnerDisplay
                && current.OwnerCallsign == incoming.OwnerCallsign
                && current.OwnerGameId == incoming.OwnerGameId
-               && current.OwnerSquad == incoming.OwnerSquad
                && current.OwnerAvatarPath == incoming.OwnerAvatarPath
                && current.OwnerInitials == incoming.OwnerInitials
                && current.ImportedAtText == incoming.ImportedAtText
@@ -45,10 +44,16 @@ public static class FleetShipInventoryRowChangeDetector
                && current.ShipStatus == incoming.ShipStatus
                && current.ShipPrice == incoming.ShipPrice
                && current.ShipImagePath == incoming.ShipImagePath
-               && current.OwnerSquadEmblemPath == incoming.OwnerSquadEmblemPath
                && current.ShipInstanceId == incoming.ShipInstanceId
                && current.ShipRoleColorHex == incoming.ShipRoleColorHex
                && current.OwnerAccountId == incoming.OwnerAccountId
+               && current.CustomImageMediaId == incoming.CustomImageMediaId
+               && current.CanReportCustomImage == incoming.CanReportCustomImage
+               && current.CustomImageCropFocusX.Equals(incoming.CustomImageCropFocusX)
+               && current.CustomImageCropFocusY.Equals(incoming.CustomImageCropFocusY)
+               && current.CustomImageCropZoom.Equals(incoming.CustomImageCropZoom)
+               && current.OwnerOnlineStatus == incoming.OwnerOnlineStatus
+               && current.OwnerLiveStatus == incoming.OwnerLiveStatus
                && AreEquivalent(current.LoanerRows, incoming.LoanerRows);
     }
 }

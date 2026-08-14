@@ -239,6 +239,7 @@ public partial class MainWindow
             SyncPrivacyCommandReadinessCheck.IsChecked = _syncPrivacySettings.CommandReadinessSummaryVisible;
             SyncPrivacyHideLowConfidenceLocationCheck.IsChecked = _syncPrivacySettings.HideLowConfidenceLocation;
             SyncPrivacyFriendsPresenceCheck.IsChecked = _syncPrivacySettings.FriendsCanViewPresence;
+            ApplyDualAxisPrivacySettingsToEditor();
             UpdateSyncPrivacyOptionsEnabledState();
         }
         finally
@@ -257,13 +258,24 @@ public partial class MainWindow
         }
 
         var enabled = SyncPrivacyMasterCheck.IsChecked == true;
+        if (DualAxisPrivacyEditor is not null)
+        {
+            _dualAxisPrivacySettings = (_dualAxisPrivacySettings with
+            {
+                PublicationEnabled = enabled
+            }).Normalize();
+            await CommitDualAxisPrivacyEditorAsync();
+            return;
+        }
+
         _syncPrivacySettings = _syncPrivacySettings with
         {
             SyncEnabled = enabled,
             SyncConsentCompleted = true,
             SyncConsentVersion = CurrentSyncConsentVersion
         };
-        SyncPrivacySettings.Save(_syncPrivacySettings);
+        SaveSyncPrivacySettingsAndRefreshDualAxis();
+        ApplyNetworkSyncMasterState();
         UpdateSyncPrivacyOptionsEnabledState();
         UpdateSyncPrivacySummary();
         UpdateShipDatabaseSummary();
@@ -271,7 +283,7 @@ public partial class MainWindow
         if (!enabled)
         {
             ReplaceRemoteFleetShipsForOwner(_localPlayer, _callsign, [], refresh: false);
-            RefreshFleetShipInventory(suppressRemovalActivities: true);
+            RefreshFleetShipInventory();
         }
 
         if (IsLoggedIn)
@@ -293,6 +305,8 @@ public partial class MainWindow
         var enabled = _syncPrivacySettings.SyncEnabled;
         SyncPrivacyOptionsHost.IsEnabled = enabled;
         SyncPrivacyOptionsHost.Opacity = enabled ? 1 : 0.48;
+        DualAxisPrivacyEditor.IsEnabled = enabled;
+        DualAxisPrivacyEditor.Opacity = enabled ? 1 : 0.48;
         SyncPrivacyTaskOnlineStatusCheck.IsEnabled = enabled && !FleetActionFeatureSettingsLocked;
         SyncPrivacyTaskShipStatusCheck.IsEnabled = enabled && !FleetActionFeatureSettingsLocked;
         SyncPrivacyTaskLocationStatusCheck.IsEnabled = enabled && !FleetActionFeatureSettingsLocked;
@@ -316,7 +330,6 @@ public partial class MainWindow
             PlayerEventSharingServerCheck.IsChecked = _playerEventSharingSettings.EventTypes.HasFlag(PlayerSharedEventTypes.Server);
             PlayerEventSharingShipCheck.IsChecked = _playerEventSharingSettings.EventTypes.HasFlag(PlayerSharedEventTypes.Ship);
             PlayerEventSharingLocationCheck.IsChecked = _playerEventSharingSettings.EventTypes.HasFlag(PlayerSharedEventTypes.Location);
-            PlayerEventSharingSquadCheck.IsChecked = _playerEventSharingSettings.EventTypes.HasFlag(PlayerSharedEventTypes.Squad);
             PlayerEventSharingLifeCheck.IsChecked = _playerEventSharingSettings.EventTypes.HasFlag(PlayerSharedEventTypes.Life);
         }
         finally
@@ -357,10 +370,6 @@ public partial class MainWindow
         {
             eventTypes |= PlayerSharedEventTypes.Location;
         }
-        if (PlayerEventSharingSquadCheck.IsChecked == true)
-        {
-            eventTypes |= PlayerSharedEventTypes.Squad;
-        }
         if (PlayerEventSharingLifeCheck.IsChecked == true)
         {
             eventTypes |= PlayerSharedEventTypes.Life;
@@ -374,7 +383,7 @@ public partial class MainWindow
             _sharedLifeEvents.Clear();
         }
 
-        PlayerEventSharingSettingsStore.Save(_playerEventSharingSettings);
+        SavePlayerEventSharingSettingsAndRefreshDualAxis();
         RefreshPlayerEventSharingPresentation();
         UpdateSyncPrivacySummary();
         NetworkStatusText.Text = "事件共享设置已保存";
@@ -422,9 +431,6 @@ public partial class MainWindow
             SyncServerInfo = IsSwitchOn(SyncPrivacyServerInfoCheck),
             SyncOnlyInGame = true,
             VisibilityScope = visibilityScope,
-            FleetMembersVisible = visibilityScope == SyncPrivacyVisibilityScope.Fleet,
-            SquadMembersVisible = visibilityScope is SyncPrivacyVisibilityScope.Squad or SyncPrivacyVisibilityScope.Fleet,
-            AdminOnlyVisible = visibilityScope == SyncPrivacyVisibilityScope.AdminOnly,
             PersonalHangarVisible = IsSwitchOn(SyncPrivacyPersonalHangarVisibleCheck),
             TaskOnlineStatusVisible = IsSwitchOn(SyncPrivacyTaskOnlineStatusCheck),
             TaskShipStatusVisible = IsSwitchOn(SyncPrivacyTaskShipStatusCheck),
@@ -439,7 +445,7 @@ public partial class MainWindow
             FriendsCanViewPresence = IsSwitchOn(SyncPrivacyFriendsPresenceCheck)
         }).NormalizeVisibilityScope());
 
-        SyncPrivacySettings.Save(_syncPrivacySettings);
+        SaveSyncPrivacySettingsAndRefreshDualAxis();
         NetworkStatusText.Text = "同步与隐私设置已保存";
         UpdateShipDatabaseSummary();
         UpdateSyncPrivacySummary();
@@ -455,11 +461,11 @@ public partial class MainWindow
                 _callsign,
                 _syncPrivacySettings.PersonalHangarVisible ? BuildFleetShipSnapshots(includeOwnerAvatarImage: true) : [],
                 refresh: false);
-            RefreshFleetShipInventory(suppressRemovalActivities: !_syncPrivacySettings.PersonalHangarVisible);
+            RefreshFleetShipInventory();
         }
 
         if (IsLoggedIn &&
-            (personalHangarVisibilityChanged || friendPresenceVisibilityChanged || NetworkAutoSyncCheck.IsChecked == true))
+            (personalHangarVisibilityChanged || friendPresenceVisibilityChanged || _syncPrivacySettings.SyncEnabled))
         {
             _ = PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
         }
@@ -472,24 +478,136 @@ public partial class MainWindow
             return;
         }
 
-        var summary = SyncPrivacySummaryPresentation.Build(
-            _syncPrivacySettings,
-            _playerEventSharingSettings);
-
-        SyncPrivacyEnabledSummaryText.Text = $"已开启 {summary.EnabledCount} 项";
-        SyncPrivacyDisabledSummaryText.Text = $"已关闭 {summary.DisabledCount} 项";
+        var projection = BuildPrivacyAudienceProjection();
+        var fleetFieldCount = CountStatusFields(projection.FleetStatusFields);
+        var roomFieldCount = CountStatusFields(projection.RoomStatusFields);
+        SyncPrivacyEnabledSummaryText.Text = $"舰队可见 {fleetFieldCount} 项";
+        SyncPrivacyDisabledSummaryText.Text = roomFieldCount > 0
+            ? $"同房间可见 {roomFieldCount} 项"
+            : "同房间不共享";
 
         if (SyncPrivacyVisibilitySummaryText is not null)
         {
-            var scope = _syncPrivacySettings.EffectiveVisibilityScope;
-            SyncPrivacyVisibilitySummaryText.Text = _syncPrivacySettings.SyncEnabled
-                ? $"当前可见范围：{FormatSyncPrivacyVisibilityScope(scope)}"
-                : "同步信息已关闭";
+            SyncPrivacyVisibilitySummaryText.Text = !_dualAxisPrivacySettings.PublicationEnabled
+                ? "同步信息已关闭"
+                : DualAxisPrivacyPanel.FormatPolicySummary(projection);
             if (SyncPrivacyScopeDescriptionText is not null)
             {
-                SyncPrivacyScopeDescriptionText.Text = GetSyncPrivacyVisibilityScopeDescription(scope);
+                SyncPrivacyScopeDescriptionText.Text = GetSyncPrivacyVisibilityScopeDescription(
+                    _syncPrivacySettings.EffectiveVisibilityScope);
             }
         }
+
+        RefreshSpecifiedVisibilityMembersPresentation();
+    }
+
+    private static int CountStatusFields(PlayerSharedStateFields fields) =>
+        Enum.GetValues<PlayerSharedStateFields>()
+            .Count(field => field is not (
+                                PlayerSharedStateFields.None or
+                                PlayerSharedStateFields.All or
+                                PlayerSharedStateFields.SharedEvents) &&
+                            fields.HasFlag(field));
+
+    private void SyncPrivacySpecifiedMembersSelectButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedAccountIds = (_syncPrivacySettings.SpecifiedMemberAccountIds ?? [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _isUpdatingSpecifiedMemberSelection = true;
+        try
+        {
+            _specifiedVisibilityMembers.Clear();
+            foreach (var player in _players
+                         .Where(player => !player.IsSelf && !string.IsNullOrWhiteSpace(player.AccountId))
+                         .GroupBy(player => player.AccountId!, StringComparer.OrdinalIgnoreCase)
+                         .Select(group => group.First())
+                         .OrderBy(player => DisplayCallsign(player.Callsign, player.Name), StringComparer.OrdinalIgnoreCase))
+            {
+                _specifiedVisibilityMembers.Add(new SpecifiedVisibilityMemberRow
+                {
+                    AccountId = player.AccountId!,
+                    Callsign = DisplayCallsign(player.Callsign, player.Name),
+                    GameId = player.Name,
+                    AvatarPath = player.AvatarPath,
+                    IsSelected = selectedAccountIds.Contains(player.AccountId!)
+                });
+            }
+        }
+        finally
+        {
+            _isUpdatingSpecifiedMemberSelection = false;
+        }
+
+        SpecifiedVisibilityMembersEmptyText.Visibility = _specifiedVisibilityMembers.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RefreshSpecifiedVisibilitySelectionText();
+        SpecifiedVisibilityMembersOverlay.Show();
+    }
+
+    private void SpecifiedVisibilityMemberCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingSpecifiedMemberSelection)
+        {
+            return;
+        }
+
+        var selectedCount = _specifiedVisibilityMembers.Count(member => member.IsSelected);
+        if (selectedCount > PlayerSharedStateVisibility.MaxSpecifiedMembers &&
+            sender is System.Windows.Controls.CheckBox { DataContext: SpecifiedVisibilityMemberRow row })
+        {
+            _isUpdatingSpecifiedMemberSelection = true;
+            row.IsSelected = false;
+            _isUpdatingSpecifiedMemberSelection = false;
+        }
+
+        RefreshSpecifiedVisibilitySelectionText();
+    }
+
+    private void SpecifiedVisibilityMembersSaveButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = PlayerSharedStateVisibility.NormalizeSpecifiedMemberAccountIds(
+            _specifiedVisibilityMembers
+                .Where(member => member.IsSelected)
+                .Select(member => member.AccountId));
+        _syncPrivacySettings = (_syncPrivacySettings with
+        {
+            SpecifiedMemberAccountIds = selected
+        }).NormalizeVisibilityScope();
+        SaveSyncPrivacySettingsAndRefreshDualAxis();
+        SpecifiedVisibilityMembersOverlay.Hide();
+        RefreshSpecifiedVisibilityMembersPresentation();
+        UpdateSyncPrivacySummary();
+        QueueRealtimeNetworkSnapshotPush();
+    }
+
+    private void SpecifiedVisibilityMembersCancelButton_Click(object sender, RoutedEventArgs e)
+    {
+        SpecifiedVisibilityMembersOverlay.Hide();
+    }
+
+    private void RefreshSpecifiedVisibilitySelectionText()
+    {
+        var selectedCount = _specifiedVisibilityMembers.Count(member => member.IsSelected);
+        SpecifiedVisibilityMembersSelectionText.Text =
+            $"已选择 {selectedCount.ToString(CultureInfo.InvariantCulture)} / {PlayerSharedStateVisibility.MaxSpecifiedMembers}";
+    }
+
+    private void RefreshSpecifiedVisibilityMembersPresentation()
+    {
+        if (SyncPrivacySpecifiedMembersRow is null || SyncPrivacySpecifiedMembersCountText is null)
+        {
+            return;
+        }
+
+        var selectedCount = (_syncPrivacySettings.SpecifiedMemberAccountIds ?? []).Length;
+        SyncPrivacySpecifiedMembersRow.Visibility =
+            _syncPrivacySettings.EffectiveVisibilityScope == SyncPrivacyVisibilityScope.SpecifiedMembers
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        SyncPrivacySpecifiedMembersCountText.Text =
+            $"{selectedCount.ToString(CultureInfo.InvariantCulture)} 名成员";
     }
 
     private void ManageFleetTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -609,7 +727,7 @@ public partial class MainWindow
 
         SyncPrivacyScopePrivateRadio.IsChecked = scope == SyncPrivacyVisibilityScope.Private;
         SyncPrivacyScopeAdminRadio.IsChecked = scope == SyncPrivacyVisibilityScope.AdminOnly;
-        SyncPrivacyScopeSquadRadio.IsChecked = scope == SyncPrivacyVisibilityScope.Squad;
+        SyncPrivacyScopeSpecifiedRadio.IsChecked = scope == SyncPrivacyVisibilityScope.SpecifiedMembers;
         SyncPrivacyScopeFleetRadio.IsChecked = scope == SyncPrivacyVisibilityScope.Fleet;
     }
 
@@ -625,9 +743,9 @@ public partial class MainWindow
             return SyncPrivacyVisibilityScope.AdminOnly;
         }
 
-        if (SyncPrivacyScopeSquadRadio?.IsChecked == true)
+        if (SyncPrivacyScopeSpecifiedRadio?.IsChecked == true)
         {
-            return SyncPrivacyVisibilityScope.Squad;
+            return SyncPrivacyVisibilityScope.SpecifiedMembers;
         }
 
         return SyncPrivacyVisibilityScope.Fleet;
@@ -638,7 +756,7 @@ public partial class MainWindow
         {
             SyncPrivacyVisibilityScope.Private => "仅自己",
             SyncPrivacyVisibilityScope.AdminOnly => "管理员",
-            SyncPrivacyVisibilityScope.Squad => "小队",
+            SyncPrivacyVisibilityScope.SpecifiedMembers => "指定成员",
             SyncPrivacyVisibilityScope.Fleet => "全舰队",
             _ => "全舰队"
         };
@@ -648,7 +766,7 @@ public partial class MainWindow
         {
             SyncPrivacyVisibilityScope.Private => "Private",
             SyncPrivacyVisibilityScope.AdminOnly => "AdminOnly",
-            SyncPrivacyVisibilityScope.Squad => "Squad",
+            SyncPrivacyVisibilityScope.SpecifiedMembers => "SpecifiedMembers",
             _ => "Fleet"
         };
 
@@ -658,6 +776,24 @@ public partial class MainWindow
                               _syncPrivacySettings.HideStatusBeforeGameStart ||
                               _syncPrivacySettings.StopSyncAfterGameExit) &&
                              !_isGameProcessRunning;
+        var dualAxisWire = DualAxisPrivacyTakeover.ToWire(_dualAxisPrivacySettings);
+        if (dualAxisWire.UsesDualAxisWire)
+        {
+            var hasAudience = dualAxisWire.FleetAdministratorsCanView ||
+                              dualAxisWire.FleetMembersCanView ||
+                              dualAxisWire.FleetVisibilityGroupIds.Length > 0 ||
+                              dualAxisWire.RoomMembersCanView ||
+                              dualAxisWire.RoomVisibilityGroupIds.Length > 0;
+            var fields = dualAxisWire.FleetFields | dualAxisWire.RoomFields;
+            return FleetPresencePrivacyPolicy.Resolve(
+                _localPresence,
+                _syncPrivacySettings.PresenceVisibilityMode,
+                _dualAxisPrivacySettings.PublicationEnabled,
+                hasAudience,
+                !hideLiveStatus,
+                fields.HasFlag(PlayerSharedStateFields.Presence));
+        }
+
         return FleetPresencePrivacyPolicy.Resolve(
             _localPresence,
             _syncPrivacySettings.PresenceVisibilityMode,
@@ -698,7 +834,7 @@ public partial class MainWindow
         {
             SyncPrivacyVisibilityScope.Private => "仅在本机显示，不向舰队共享状态。",
             SyncPrivacyVisibilityScope.AdminOnly => "仅舰队管理者可查看允许共享的状态。",
-            SyncPrivacyVisibilityScope.Squad => "小队成员和管理者可查看允许共享的状态。",
+            SyncPrivacyVisibilityScope.SpecifiedMembers => "仅你选择的舰队成员和管理者可查看允许共享的状态。",
             SyncPrivacyVisibilityScope.Fleet => "全舰队成员可以查看允许共享的状态。",
             _ => "全舰队成员可以查看允许共享的状态。"
         };
@@ -805,7 +941,7 @@ public partial class MainWindow
                Enum.TryParse<PlayerActivityNotificationScope>(item.Tag?.ToString(), true, out var scope) &&
                Enum.IsDefined(scope)
             ? scope
-            : PlayerActivityNotificationScope.Squad;
+            : PlayerActivityNotificationScope.Fleet;
     }
 
     private DesktopNotificationPosition GetSelectedPlayerActivityNotificationPosition()
@@ -844,7 +980,7 @@ public partial class MainWindow
         {
             PlayerActivityNotificationScope.PartyRoom => "当前组队房间",
             PlayerActivityNotificationScope.Fleet => "全舰队",
-            _ => "当前小队"
+            _ => "全舰队"
         };
         var position = _notificationSettings.PlayerActivityPosition switch
         {

@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using StarBridge.Core.PartyRooms;
 using StarBridge.Core.Chat;
 using StarBridge.Core.Presence;
+using StarBridge.Desktop.Theming;
 
 namespace StarBridge.Desktop;
 
@@ -94,7 +95,8 @@ public partial class MainWindow
         _partyRoomRefreshTimer.Tick += async (_, _) =>
         {
             RefreshPartyRoomCommunicationTimeLabels();
-            if (CanSynchronizeUserData &&
+            if (!IsPartyLobbyAcceptanceMode &&
+                CanSynchronizeUserData &&
                 GetPresenceSharingDecision().CanReceiveRealtime &&
                 (PartyLobbyPage.Visibility == Visibility.Visible ||
                  ShouldRefreshPartyRoomForDesktopNotifications()))
@@ -104,6 +106,7 @@ public partial class MainWindow
         };
         _partyRoomRefreshTimer.Start();
         RefreshPartyLobbyShell();
+        InitializeDirectoryAcceptanceScenarios();
     }
 
     private void RefreshPartyRoomCommunicationTimeLabels()
@@ -240,7 +243,6 @@ public partial class MainWindow
     private void OpenPartyRoomInvitationPanel(bool showHostFriends)
     {
         _partyRoomInvitationPanelShowsHostFriends = showHostFriends;
-        PartyRoomInvitationEyebrowText.Text = showHostFriends ? "INVITE FRIENDS" : "PARTY INVITATIONS";
         PartyRoomInvitationTitleText.Text = showHostFriends ? "邀请好友" : "房间邀请";
         PartyRoomInvitationSubtitleText.Text = showHostFriends
             ? "邀请好友直接加入当前房间；已在房间中的好友不会重复显示。"
@@ -564,8 +566,8 @@ public partial class MainWindow
         var count = _receivedPartyRoomInvitations.Length;
         PartyLobbyInvitationsButton.Content = count > 0 ? $"房间邀请  {count}" : "房间邀请";
         PartyLobbyInvitationsButton.Foreground = count > 0
-            ? FindBrush("AccentBrush", System.Windows.Media.Brushes.DeepSkyBlue)
-            : FindBrush("PrimaryTextBrush", System.Windows.Media.Brushes.White);
+            ? BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.StatusInfo)
+            : BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
         RefreshNavigationActivityBadges();
     }
 
@@ -1427,13 +1429,14 @@ public partial class MainWindow
             return;
         }
 
-        var answer = StarBridgeMessageBox.Show(
-            this,
-            "关闭后，所有成员都会离开且房间无法恢复。",
-            "关闭临时房间",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-        if (answer != MessageBoxResult.Yes)
+        if (!await ShowAppConfirmationAsync(
+                "关闭临时房间",
+                "关闭后，所有成员都会离开当前房间。",
+                "临时房间关闭后无法恢复。",
+                "关闭房间",
+                "取消",
+                danger: true,
+                footerText: "请确认当前房间已不再需要。"))
         {
             return;
         }
@@ -1452,12 +1455,10 @@ public partial class MainWindow
                     return;
                 }
 
-                StarBridgeMessageBox.Show(
-                    this,
-                    mutation?.Error ?? "服务器暂时无法关闭房间，请稍后重试。",
+                await ShowAppNoticeAsync(
                     "关闭临时房间",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                    mutation?.Error ?? "服务器暂时无法关闭房间，请稍后重试。",
+                    "房间仍然保留，没有执行关闭。");
                 return;
             }
 
@@ -1469,17 +1470,20 @@ public partial class MainWindow
         }
         catch
         {
-            StarBridgeMessageBox.Show(
-                this,
-                "无法连接房间服务器；房间仍然保留，没有执行关闭。",
+            await ShowAppNoticeAsync(
                 "关闭临时房间",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                "无法连接房间服务器。",
+                "房间仍然保留，没有执行关闭。");
         }
     }
 
     private async Task RefreshPartyRoomsFromServerAsync(bool showErrors = false)
     {
+        if (IsPartyLobbyAcceptanceMode)
+        {
+            return;
+        }
+
         if (!CanSynchronizeUserData)
         {
             ClearPartyRoomState();
@@ -1496,6 +1500,8 @@ public partial class MainWindow
         {
             return;
         }
+
+        RefreshPartyLobbyLoadingPresentation();
 
         try
         {
@@ -1621,6 +1627,7 @@ public partial class MainWindow
         finally
         {
             _partyRoomDirectoryRefreshRunningSessions.Remove(session);
+            RefreshPartyLobbyLoadingPresentation();
         }
     }
 
@@ -1872,7 +1879,9 @@ public partial class MainWindow
                 message.SenderGameId,
                 message.Text,
                 message.CreatedAt,
-                message.Attachment)
+                message.Attachment,
+                ChatPresentationBrushes.ResolveSenderRole(this, isLocal, message.SenderColor),
+                ChatPresentationBrushes.ResolveAttachmentStatus(this, message.Attachment))
             {
                 SenderColor = message.SenderColor,
                 SenderAccountId = message.SenderAccountId ?? senderMember?.AccountId,
@@ -2084,6 +2093,7 @@ public partial class MainWindow
         RefreshPartyLobbyFilter();
         ShowCurrentPartyRoom(resetRoomCodeVisibility: true);
         RefreshOverlaySceneAfterPartyRoomChanged();
+        RefreshBridgeSceneBandStatus();
         _ = RefreshPartyRoomChatAsync(showErrors: false);
     }
 
@@ -2102,6 +2112,7 @@ public partial class MainWindow
         PartyCurrentRoomPanel.Visibility = Visibility.Collapsed;
         RefreshPartyLobbyFilter();
         RefreshOverlaySceneAfterPartyRoomChanged();
+        RefreshBridgeSceneBandStatus();
     }
 
     private void ClearPartyRoomState()
@@ -2119,6 +2130,7 @@ public partial class MainWindow
         PartyCurrentRoomPanel.Visibility = Visibility.Collapsed;
         RefreshPartyLobbyFilter();
         RefreshOverlaySceneAfterPartyRoomChanged();
+        RefreshBridgeSceneBandStatus();
     }
 
     private void RefreshOverlaySceneAfterPartyRoomChanged()
@@ -2382,7 +2394,6 @@ public partial class MainWindow
     private void SetPartyRoomCreateMode(bool isEditing)
     {
         _isEditingPartyRoom = isEditing;
-        PartyRoomCreateEyebrowText.Text = isEditing ? "ROOM SETTINGS" : "CREATE PARTY ROOM";
         PartyRoomCreateTitleText.Text = isEditing ? "房间设置" : "创建临时房间";
         PartyRoomCreateSubtitleText.Text = isEditing
             ? "修改后会立即同步给房间内成员与大厅。"
@@ -2480,17 +2491,53 @@ public partial class MainWindow
     {
         if (PartyLobbyRoomList is null ||
             PartyLobbyRoomEmptyPanel is null ||
-            PartyLobbyResultCountText is null)
+            PartyLobbyResultCountText is null ||
+            PartyLobbyRoomLoadingState is null ||
+            PartyLobbyRefreshLoadingIndicator is null)
+        {
+            return;
+        }
+
+        RefreshPartyLobbyLoadingPresentation();
+    }
+
+    private void RefreshPartyLobbyLoadingPresentation()
+    {
+        if (PartyLobbyRoomList is null ||
+            PartyLobbyRoomEmptyPanel is null ||
+            PartyLobbyResultCountText is null ||
+            PartyLobbyRoomLoadingState is null ||
+            PartyLobbyRefreshLoadingIndicator is null)
         {
             return;
         }
 
         var visibleCount = _partyLobbyRoomsView?.Cast<object>().Count() ?? 0;
-        PartyLobbyResultCountText.Text = visibleCount == 0 ? "暂无可加入房间" : $"{visibleCount} 个可加入房间";
-        PartyLobbyRoomEmptyPanel.Visibility = visibleCount == 0 ? Visibility.Visible : Visibility.Collapsed;
-        PartyLobbyRoomList.Visibility = visibleCount == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var isLoading = _partyRoomDirectoryRefreshRunningSessions.Count > 0 ||
+                        IsPartyLobbyLoadingAcceptanceMode;
+        var showBlockingLoading = isLoading && visibleCount == 0;
+        var showInlineLoading = isLoading && visibleCount > 0;
 
-        if (visibleCount == 0)
+        PartyLobbyRoomLoadingState.Visibility = showBlockingLoading
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PartyLobbyRefreshLoadingIndicator.IsActive = showInlineLoading;
+        PartyLobbyRefreshLoadingIndicator.Visibility = showInlineLoading
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PartyLobbyResultCountText.Text = showBlockingLoading
+            ? "正在同步"
+            : visibleCount == 0
+                ? "暂无可加入房间"
+                : $"{visibleCount} 个可加入房间";
+        PartyLobbyRoomEmptyPanel.Visibility = !isLoading && visibleCount == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PartyLobbyRoomList.Visibility = visibleCount > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (!isLoading && visibleCount == 0)
         {
             PartyLobbyRoomList.SelectedItem = null;
             RefreshPartyLobbyPreview(null);

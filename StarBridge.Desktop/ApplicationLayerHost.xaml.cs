@@ -2,8 +2,15 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using StarBridge.Desktop.Theming;
+using MediaBrush = System.Windows.Media.Brush;
 
 namespace StarBridge.Desktop;
+
+public sealed record ApplicationLayerWorkspaceAction(
+    string Label,
+    Action Invoke,
+    bool IsSelected = false);
 
 public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
 {
@@ -21,6 +28,8 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
     private FrameworkElement? _workspaceContent;
     private object? _modalToken;
     private IInputElement? _focusBeforeLayer;
+    private bool _dismissWorkspaceOnBackdrop;
+    private bool _dismissModalOnBackdrop;
 
     public ApplicationLayerHost()
     {
@@ -36,7 +45,9 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
         string title,
         string subtitle,
         FrameworkElement content,
-        Action? closed = null)
+        Action? closed = null,
+        bool dismissOnBackdrop = false,
+        IReadOnlyList<ApplicationLayerWorkspaceAction>? actions = null)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -53,10 +64,13 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
             previousClosed?.Invoke();
         }
 
+        ApplyContentScene(content, WorkspaceFrame);
         _workspaceContent = content;
         _workspaceClosed = closed;
+        _dismissWorkspaceOnBackdrop = dismissOnBackdrop;
         WorkspaceTitleText.Text = title;
         WorkspaceSubtitleText.Text = subtitle;
+        ConfigureWorkspaceActions(actions);
         WorkspaceContentPresenter.Content = content;
         WorkspaceLayer.Visibility = Visibility.Visible;
         Visibility = Visibility.Visible;
@@ -75,7 +89,8 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
         string subtitle,
         Func<Action<TResult?>, FrameworkElement> contentFactory,
         double maxWidth,
-        double maxHeight)
+        double maxHeight,
+        bool dismissOnBackdrop = false)
     {
         ArgumentNullException.ThrowIfNull(contentFactory);
 
@@ -101,12 +116,14 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
         }
 
         var content = contentFactory(Complete);
+        ApplyContentScene(content, ModalFrame);
         ModalTitleText.Text = title;
         ModalSubtitleText.Text = subtitle;
         ModalFrame.MaxWidth = Math.Max(460, maxWidth);
         ModalFrame.MaxHeight = Math.Max(340, maxHeight);
         ModalContentPresenter.Content = content;
         _dismissModal = () => Complete(default);
+        _dismissModalOnBackdrop = dismissOnBackdrop;
         ModalLayer.Visibility = Visibility.Visible;
         Visibility = Visibility.Visible;
 
@@ -126,7 +143,10 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
 
         WorkspaceLayer.Visibility = Visibility.Collapsed;
         WorkspaceContentPresenter.Content = null;
+        ClearContentScene(WorkspaceFrame);
+        ConfigureWorkspaceActions(null);
         _workspaceContent = null;
+        _dismissWorkspaceOnBackdrop = false;
         var closed = _workspaceClosed;
         _workspaceClosed = null;
         closed?.Invoke();
@@ -160,8 +180,10 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
     {
         _dismissModal = null;
         _modalToken = null;
+        _dismissModalOnBackdrop = false;
         ModalLayer.Visibility = Visibility.Collapsed;
         ModalContentPresenter.Content = null;
+        ClearContentScene(ModalFrame);
         UpdateHostVisibilityAndFocus();
     }
 
@@ -186,6 +208,40 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
     {
         content.Focus();
         content.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+    }
+
+    private void ConfigureWorkspaceActions(
+        IReadOnlyList<ApplicationLayerWorkspaceAction>? actions)
+    {
+        WorkspaceActionButtonsPanel.Children.Clear();
+        if (actions is null)
+        {
+            WorkspaceCloseButton.Margin = new Thickness(0);
+            return;
+        }
+
+        foreach (var action in actions)
+        {
+            var button = new System.Windows.Controls.Button
+            {
+                Content = action.Label,
+                Height = 34,
+                MinWidth = 92,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            button.SetResourceReference(
+                FrameworkElement.StyleProperty,
+                action.IsSelected
+                    ? "BridgeDirectoryPrimaryButtonStyle"
+                    : "BridgeDirectorySecondaryButtonStyle");
+            if (!action.IsSelected)
+            {
+                button.Click += (_, _) => action.Invoke();
+            }
+            WorkspaceActionButtonsPanel.Children.Add(button);
+        }
+
+        WorkspaceCloseButton.Margin = new Thickness(0);
     }
 
     private void UpdateWorkspaceFrameSize()
@@ -214,7 +270,72 @@ public partial class ApplicationLayerHost : System.Windows.Controls.UserControl
 
     private void WorkspaceCloseButton_Click(object sender, RoutedEventArgs e) => CloseWorkspace();
 
+    private void WorkspaceLayer_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_dismissWorkspaceOnBackdrop &&
+            ReferenceEquals(e.OriginalSource, WorkspaceLayer))
+        {
+            e.Handled = true;
+            CloseWorkspace();
+        }
+    }
+
     private void ModalCloseButton_Click(object sender, RoutedEventArgs e) => CloseModal();
+
+    private void ModalLayer_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_dismissModalOnBackdrop &&
+            ReferenceEquals(e.OriginalSource, ModalLayer))
+        {
+            e.Handled = true;
+            CloseModal();
+        }
+    }
+
+    private static void ApplyContentScene(FrameworkElement content, DependencyObject frame)
+    {
+        ApplyLocalSceneBrush(
+            content,
+            frame,
+            BridgeSceneContext.AccentBrushProperty,
+            BridgeSceneContext.GetAccentBrush,
+            BridgeSceneContext.SetAccentBrush);
+        ApplyLocalSceneBrush(
+            content,
+            frame,
+            BridgeSceneContext.AmbientBrushProperty,
+            BridgeSceneContext.GetAmbientBrush,
+            BridgeSceneContext.SetAmbientBrush);
+    }
+
+    private static void ApplyLocalSceneBrush(
+        FrameworkElement content,
+        DependencyObject frame,
+        DependencyProperty property,
+        Func<DependencyObject, MediaBrush?> resolve,
+        Action<DependencyObject, MediaBrush?> apply)
+    {
+        if (content.ReadLocalValue(property) == DependencyProperty.UnsetValue)
+        {
+            frame.ClearValue(property);
+            return;
+        }
+
+        var brush = resolve(content);
+        if (brush is null)
+        {
+            frame.ClearValue(property);
+            return;
+        }
+
+        apply(frame, brush);
+    }
+
+    private static void ClearContentScene(DependencyObject frame)
+    {
+        frame.ClearValue(BridgeSceneContext.AccentBrushProperty);
+        frame.ClearValue(BridgeSceneContext.AmbientBrushProperty);
+    }
 
     private void ApplicationLayerHost_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {

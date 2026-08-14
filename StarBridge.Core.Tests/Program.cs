@@ -35,6 +35,20 @@ var tests = new (string Name, Action Test)[]
     ("Presence wire values normalize old and new clients", PresenceWireValuesNormalizeOldAndNewClients),
     ("Invisible presence receives but never publishes realtime state", InvisiblePresenceReceivesWithoutPublishing),
     ("Offline presence disables realtime state in both directions", OfflinePresenceDisablesRealtimeState),
+    ("Missing visibility scope preserves the fleet default", MissingVisibilityScopePreservesFleetDefault),
+    ("Known visibility scopes preserve their policies", KnownVisibilityScopesPreserveTheirPolicies),
+    ("Unknown visibility scopes fail closed", UnknownVisibilityScopesFailClosed),
+    ("Legacy shared-state payload keeps fleet access and closes the room axis", LegacySharedStatePayloadKeepsFleetAndClosesRoomAxis),
+    ("Room visibility recognizes only the room-member scope", RoomVisibilityRecognizesOnlyRoomMemberScope),
+    ("Fleet and room grants combine per shared-state field", FleetAndRoomGrantsCombinePerSharedStateField),
+    ("Private visibility groups require their current axis relationship", PrivateVisibilityGroupsRequireCurrentAxisRelationship),
+    ("Legacy specified members migrate to equivalent administrator and private-group sources", LegacySpecifiedMembersMigrateToEquivalentAudienceSources),
+    ("Audience summaries project the real policy without mixing event delivery into visible state", AudienceSummariesProjectTheRealPolicy),
+    ("Game ID visibility is configurable only when a distinct callsign can replace it", GameIdVisibilityRequiresADistinctCallsign),
+    ("Accepted friends receive online presence but not fleet or room state", AcceptedFriendsReceivePresenceOnly),
+    ("Self and friend shared-state behavior stays compatible", SelfAndFriendSharedStateBehaviorStaysCompatible),
+    ("Shared-state field catalog stays closed", SharedStateFieldCatalogStaysClosed),
+    ("Specified member visibility is normalized as a publisher-owned closed list", SpecifiedMemberVisibilityIsPublisherOwnedClosedList),
     ("Unconfirmed game identity requires binding", UnconfirmedGameIdentityRequiresBinding),
     ("Confirmed matching game identity allows synchronization", ConfirmedMatchingGameIdentityAllowsSynchronization),
     ("Confirmed mismatched game identity blocks synchronization", ConfirmedMismatchedGameIdentityBlocksSynchronization),
@@ -832,6 +846,451 @@ static void ConfirmedMismatchedGameIdentityBlocksSynchronization()
 
     AssertEqual(IdentityVerificationState.Mismatch, assessment.State, "binding state");
     AssertEqual(false, assessment.CanSynchronize, "sync permission");
+}
+
+static void SpecifiedMemberVisibilityIsPublisherOwnedClosedList()
+{
+    var input = Enumerable.Range(0, 105)
+        .Select(index => index == 1 ? " account-0 " : $"account-{index}")
+        .Cast<string?>()
+        .Concat([null, "", "ACCOUNT-2"]);
+    var normalized = PlayerSharedStateVisibility.NormalizeSpecifiedMemberAccountIds(input);
+
+    AssertEqual(PlayerSharedStateVisibility.MaxSpecifiedMembers, normalized.Length, "server-safe list limit");
+    AssertEqual("account-0", normalized[0], "account IDs are trimmed");
+    AssertEqual(true, PlayerSharedStateVisibility.IncludesAccount(normalized, "ACCOUNT-2"), "listed viewer is admitted");
+    AssertEqual(false, PlayerSharedStateVisibility.IncludesAccount(normalized, "not-listed"), "unlisted viewer is rejected");
+    AssertEqual(
+        PlayerSharedStateVisibility.SpecifiedMembersScope,
+        PlayerSharedStateVisibility.NormalizeScope("Squad"),
+        "legacy squad scope becomes a publisher-owned list scope");
+    var legacyEmptyPublisherList = PlayerSharedStateVisibility.NormalizeSpecifiedMemberAccountIds(null);
+    AssertEqual(0, legacyEmptyPublisherList.Length, "legacy squad scope starts with no publisher-owned viewers");
+    AssertEqual(false,
+        PlayerSharedStateVisibility.IncludesAccount(legacyEmptyPublisherList, "viewer-account"),
+        "legacy squad scope cannot publish to a retired shared container");
+
+    // Red-capability proof: the same predicate distinguishes a missing account
+    // instead of merely proving that a list field exists.
+    if (PlayerSharedStateVisibility.IncludesAccount(normalized, "synthetic-missing-account"))
+    {
+        throw new InvalidOperationException("closed-list predicate accepted a synthetic missing account");
+    }
+}
+
+static void UnknownVisibilityScopesFailClosed()
+{
+    AssertEqual(
+        PlayerSharedStateVisibility.PrivateScope,
+        PlayerSharedStateVisibility.NormalizeScope("RoomMembers"),
+        "a future non-empty visibility scope cannot inherit fleet-wide access");
+}
+
+static void LegacySharedStatePayloadKeepsFleetAndClosesRoomAxis()
+{
+    var legacyPolicy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: null,
+        FleetFields: null,
+        RoomScope: null,
+        RoomFields: null,
+        FriendsCanViewPresence: false);
+
+    var fleetFields = PlayerSharedStateAudiencePolicy.Resolve(
+        legacyPolicy,
+        new PlayerSharedStateViewerFacts(IsFleetMember: true));
+    AssertEqual(
+        PlayerSharedStateFields.All & ~PlayerSharedStateFields.PersonalHangar,
+        fleetFields,
+        "missing legacy fleet fields preserve state but not a private hangar");
+    AssertEqual(
+        PlayerSharedStateFields.All,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            legacyPolicy with { PersonalHangarSharedWithFleet = true },
+            new PlayerSharedStateViewerFacts(IsFleetMember: true)),
+        "the legacy hangar switch still grants the hangar field");
+
+    var roomFields = PlayerSharedStateAudiencePolicy.Resolve(
+        legacyPolicy,
+        new PlayerSharedStateViewerFacts(IsRoomMember: true));
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        roomFields,
+        "missing room policy cannot inherit the legacy fleet grant");
+}
+
+static void RoomVisibilityRecognizesOnlyRoomMemberScope()
+{
+    var unknownRoomPolicy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.PrivateScope,
+        FleetFields: PlayerSharedStateFields.All,
+        RoomScope: "FutureRoomGuests",
+        RoomFields: PlayerSharedStateFields.All,
+        FriendsCanViewPresence: false);
+    var roomViewer = new PlayerSharedStateViewerFacts(IsRoomMember: true);
+
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        PlayerSharedStateAudiencePolicy.Resolve(unknownRoomPolicy, roomViewer),
+        "an unrecognized room scope fails closed");
+
+    AssertEqual(
+        PlayerSharedStateFields.All,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            unknownRoomPolicy with { RoomScope = PlayerSharedStateAudiencePolicy.RoomMembersScope },
+            roomViewer),
+        "the explicit room-member scope grants its configured fields");
+
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            unknownRoomPolicy with
+            {
+                RoomScope = PlayerSharedStateAudiencePolicy.RoomMembersScope,
+                RoomFields = null
+            },
+            roomViewer),
+        "missing room field switches default to all fields closed");
+}
+
+static void FleetAndRoomGrantsCombinePerSharedStateField()
+{
+    var policy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.FleetScope,
+        FleetFields: PlayerSharedStateFields.Presence | PlayerSharedStateFields.Location,
+        RoomScope: PlayerSharedStateAudiencePolicy.RoomMembersScope,
+        RoomFields: PlayerSharedStateFields.Ship | PlayerSharedStateFields.Server,
+        FriendsCanViewPresence: false);
+    var expectedUnion = PlayerSharedStateFields.Presence |
+                        PlayerSharedStateFields.Ship |
+                        PlayerSharedStateFields.Location |
+                        PlayerSharedStateFields.Server;
+
+    AssertEqual(
+        expectedUnion,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(IsFleetMember: true, IsRoomMember: true)),
+        "fleet and room grants form a field union instead of an all-or-nothing bundle");
+    AssertEqual(
+        PlayerSharedStateFields.Presence | PlayerSharedStateFields.Location,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(IsFleetMember: true)),
+        "a fleet-only viewer receives only fleet-axis fields");
+    AssertEqual(
+        PlayerSharedStateFields.Ship | PlayerSharedStateFields.Server,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(IsRoomMember: true)),
+        "a room-only viewer receives only room-axis fields");
+
+    var wholeBundleMutant = PlayerSharedStateFields.All;
+    AssertEqual(
+        false,
+        wholeBundleMutant == expectedUnion,
+        "red-capability control rejects the former whole-bundle grant");
+}
+
+static void PrivateVisibilityGroupsRequireCurrentAxisRelationship()
+{
+    var policy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.FleetScope,
+        FleetFields: PlayerSharedStateFields.Presence | PlayerSharedStateFields.Location,
+        RoomScope: PlayerSharedStateAudiencePolicy.RoomMembersScope,
+        RoomFields: PlayerSharedStateFields.Ship | PlayerSharedStateFields.Server,
+        FriendsCanViewPresence: false,
+        UsesFleetAudienceSources: true,
+        FleetAdministratorsCanView: false,
+        FleetMembersCanView: false,
+        UsesRoomAudienceSources: true,
+        RoomMembersCanView: false);
+
+    AssertEqual(
+        PlayerSharedStateFields.Presence | PlayerSharedStateFields.Location,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(
+                IsFleetMember: true,
+                IsSelectedFleetVisibilityGroupMember: true)),
+        "a selected private group grants only the configured fleet-axis fields to a current fleet member");
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(IsSelectedFleetVisibilityGroupMember: true)),
+        "remaining in a private group cannot outlive fleet membership");
+
+    AssertEqual(
+        PlayerSharedStateFields.Ship | PlayerSharedStateFields.Server,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(
+                IsRoomMember: true,
+                IsSelectedRoomVisibilityGroupMember: true)),
+        "a selected private group grants only the configured room-axis fields to a current room member");
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy,
+            new PlayerSharedStateViewerFacts(IsSelectedRoomVisibilityGroupMember: true)),
+        "remaining in a private group cannot outlive room membership");
+
+    AssertEqual(
+        PlayerSharedStateFields.All & ~PlayerSharedStateFields.PersonalHangar,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy with
+            {
+                FleetFields = PlayerSharedStateFields.Presence | PlayerSharedStateFields.Location,
+                RoomFields = PlayerSharedStateFields.Ship | PlayerSharedStateFields.Server |
+                             PlayerSharedStateFields.SharedEvents
+            },
+            new PlayerSharedStateViewerFacts(
+                IsFleetMember: true,
+                IsSelectedFleetVisibilityGroupMember: true,
+                IsRoomMember: true,
+                IsSelectedRoomVisibilityGroupMember: true)),
+        "fleet and room private-group grants union per field");
+}
+
+static void LegacySpecifiedMembersMigrateToEquivalentAudienceSources()
+{
+    var legacyPolicy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.SpecifiedMembersScope,
+        FleetFields: PlayerSharedStateFields.All,
+        RoomScope: null,
+        RoomFields: null,
+        FriendsCanViewPresence: false);
+    var migratedPolicy = legacyPolicy with
+    {
+        UsesFleetAudienceSources = true,
+        FleetAdministratorsCanView = true,
+        FleetMembersCanView = false
+    };
+
+    foreach (var viewer in new[]
+             {
+                 (IsAdmin: false, IsSpecified: false),
+                 (IsAdmin: false, IsSpecified: true),
+                 (IsAdmin: true, IsSpecified: false),
+                 (IsAdmin: true, IsSpecified: true)
+             })
+    {
+        var legacy = PlayerSharedStateAudiencePolicy.Resolve(
+            legacyPolicy,
+            new PlayerSharedStateViewerFacts(
+                IsFleetMember: true,
+                IsFleetPrivacyAdmin: viewer.IsAdmin,
+                IsSpecifiedFleetMember: viewer.IsSpecified));
+        var migrated = PlayerSharedStateAudiencePolicy.Resolve(
+            migratedPolicy,
+            new PlayerSharedStateViewerFacts(
+                IsFleetMember: true,
+                IsFleetPrivacyAdmin: viewer.IsAdmin,
+                IsSelectedFleetVisibilityGroupMember: viewer.IsSpecified));
+
+        AssertEqual(
+            legacy,
+            migrated,
+            $"legacy and migrated audiences match for admin={viewer.IsAdmin}, specified={viewer.IsSpecified}");
+    }
+}
+
+static void AudienceSummariesProjectTheRealPolicy()
+{
+    var policy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.PrivateScope,
+        FleetFields: PlayerSharedStateFields.Presence |
+                     PlayerSharedStateFields.Ship |
+                     PlayerSharedStateFields.SharedEvents,
+        RoomScope: PlayerSharedStateVisibility.PrivateScope,
+        RoomFields: PlayerSharedStateFields.Location |
+                    PlayerSharedStateFields.Server,
+        FriendsCanViewPresence: true,
+        UsesFleetAudienceSources: true,
+        FleetAdministratorsCanView: true,
+        FleetMembersCanView: false,
+        UsesRoomAudienceSources: true,
+        RoomMembersCanView: false);
+
+    var projection = PlayerSharedStateAudienceProjectionPolicy.Project(
+        policy,
+        hasSelectedFleetGroups: false,
+        hasSelectedRoomGroups: true);
+
+    AssertEqual(
+        PlayerSharedStateFields.Presence | PlayerSharedStateFields.Ship,
+        projection.FleetAdministrators.StatusFields,
+        "the administrator summary is the real fleet policy with event delivery removed");
+    AssertEqual(true, projection.FleetAdministrators.ReceivesSharedEvents,
+        "event delivery remains available as its own projected fact");
+    AssertEqual(PlayerSharedStateFields.None, projection.FleetMembers.StatusFields,
+        "an ordinary fleet member is not described as visible when only administrators are selected");
+    AssertEqual(
+        PlayerSharedStateFields.Location | PlayerSharedStateFields.Server,
+        projection.SelectedRoomGroupMembers.StatusFields,
+        "the selected same-room audience is projected through the room relationship gate");
+    AssertEqual(PlayerSharedStateFields.None, projection.RoomMembers.StatusFields,
+        "unselected same-room members remain closed");
+    AssertEqual(
+        PlayerSharedStateFields.Presence,
+        projection.AcceptedFriends.StatusFields,
+        "the online-only friend grant is represented by the same authoritative policy");
+
+    var directAdministrator = PlayerSharedStateAudiencePolicy.Resolve(
+        policy,
+        new PlayerSharedStateViewerFacts(IsFleetMember: true, IsFleetPrivacyAdmin: true));
+    AssertEqual(directAdministrator, projection.FleetAdministrators.VisibleFields,
+        "the typed projection cannot drift from PlayerSharedStateAudiencePolicy.Resolve");
+}
+
+static void GameIdVisibilityRequiresADistinctCallsign()
+{
+    var legacy = GameIdVisibilityPolicy.Normalize(
+        callsign: "Aegis",
+        gameId: "pilot_alpha",
+        storedLocations: null);
+    AssertEqual(GameIdVisibilityLocations.All, legacy.Locations,
+        "legacy accounts keep every existing game-ID display surface enabled");
+    AssertEqual(true, legacy.CanConfigure,
+        "a distinct callsign allows the publisher to configure game-ID display");
+
+    var selected = GameIdVisibilityPolicy.Normalize(
+        callsign: "Aegis",
+        gameId: "pilot_alpha",
+        storedLocations: GameIdVisibilityLocations.Fleet | GameIdVisibilityLocations.Friends);
+    AssertEqual(true, GameIdVisibilityPolicy.ShouldShow(selected, GameIdVisibilityLocations.Fleet),
+        "fleet display follows the selected surface");
+    AssertEqual(false, GameIdVisibilityPolicy.ShouldShow(selected, GameIdVisibilityLocations.PartyRoom),
+        "room display remains closed when not selected");
+    AssertEqual(true, GameIdVisibilityPolicy.ShouldShow(selected, GameIdVisibilityLocations.Friends),
+        "friend display follows the selected surface");
+    AssertEqual(false, GameIdVisibilityPolicy.ShouldShow(selected, GameIdVisibilityLocations.PersonalProfile),
+        "public profile display remains closed when not selected");
+
+    foreach (var unavailableCallsign in new string?[] { null, "", "pilot_alpha", " PILOT_ALPHA " })
+    {
+        var locked = GameIdVisibilityPolicy.Normalize(
+            unavailableCallsign,
+            "pilot_alpha",
+            GameIdVisibilityLocations.None);
+        AssertEqual(GameIdVisibilityLocations.All, locked.Locations,
+            "without a distinct callsign every game-ID surface stays enabled");
+        AssertEqual(false, locked.CanConfigure,
+            "without a distinct callsign the setting is locked");
+    }
+
+    var unknownOnly = GameIdVisibilityPolicy.Normalize(
+        "Aegis",
+        "pilot_alpha",
+        (GameIdVisibilityLocations)128);
+    AssertEqual(GameIdVisibilityLocations.None, unknownOnly.Locations,
+        "unknown stored bits do not silently broaden game-ID disclosure");
+}
+
+static void SelfAndFriendSharedStateBehaviorStaysCompatible()
+{
+    var privatePolicy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.PrivateScope,
+        FleetFields: PlayerSharedStateFields.None,
+        RoomScope: null,
+        RoomFields: null,
+        FriendsCanViewPresence: true);
+
+    AssertEqual(
+        PlayerSharedStateFields.All,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            privatePolicy,
+            new PlayerSharedStateViewerFacts(IsSelf: true)),
+        "self keeps the complete publisher snapshot");
+    AssertEqual(
+        PlayerSharedStateFields.Presence,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            privatePolicy,
+            new PlayerSharedStateViewerFacts(IsAcceptedFriend: true)),
+        "the accepted-friend grant exposes online presence without fleet or room state");
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            privatePolicy with { FriendsCanViewPresence = false },
+            new PlayerSharedStateViewerFacts(IsAcceptedFriend: true)),
+        "disabling the existing friend grant still removes it");
+}
+
+static void AcceptedFriendsReceivePresenceOnly()
+{
+    var policy = new PlayerSharedStatePublicationPolicy(
+        FleetScope: PlayerSharedStateVisibility.PrivateScope,
+        FleetFields: PlayerSharedStateFields.All,
+        RoomScope: PlayerSharedStateAudiencePolicy.RoomMembersScope,
+        RoomFields: PlayerSharedStateFields.All,
+        FriendsCanViewPresence: true,
+        PersonalHangarSharedWithFleet: true);
+    var friend = new PlayerSharedStateViewerFacts(IsAcceptedFriend: true);
+
+    AssertEqual(
+        PlayerSharedStateFields.Presence,
+        PlayerSharedStateAudiencePolicy.Resolve(policy, friend),
+        "the friend preference grants online presence without ship location server event or hangar fields");
+    AssertEqual(
+        PlayerSharedStateFields.Presence,
+        PlayerSharedStateAudienceProjectionPolicy.Project(policy).AcceptedFriends.StatusFields,
+        "the user-facing summary projects the same presence-only friend grant");
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        PlayerSharedStateAudiencePolicy.Resolve(
+            policy with { FriendsCanViewPresence = false },
+            friend),
+        "turning off friend presence removes the only friend field grant");
+}
+
+static void SharedStateFieldCatalogStaysClosed()
+{
+    AssertEqual(
+        "None,Presence,Ship,Location,Server,SharedEvents,PersonalHangar,All",
+        string.Join(',', Enum.GetNames<PlayerSharedStateFields>()),
+        "the field-mask catalog changes only with an explicit guard update");
+
+    var unknownBit = (PlayerSharedStateFields)(1 << 12);
+    var fields = PlayerSharedStateAudiencePolicy.Resolve(
+        new PlayerSharedStatePublicationPolicy(
+            FleetScope: PlayerSharedStateVisibility.FleetScope,
+            FleetFields: unknownBit,
+            RoomScope: null,
+            RoomFields: null,
+            FriendsCanViewPresence: false),
+        new PlayerSharedStateViewerFacts(IsFleetMember: true));
+    AssertEqual(
+        PlayerSharedStateFields.None,
+        fields,
+        "an unrecognized future field bit cannot become visible by default");
+}
+
+static void MissingVisibilityScopePreservesFleetDefault()
+{
+    AssertEqual(
+        PlayerSharedStateVisibility.FleetScope,
+        PlayerSharedStateVisibility.NormalizeScope(null),
+        "a missing legacy scope keeps the product default");
+    AssertEqual(
+        PlayerSharedStateVisibility.FleetScope,
+        PlayerSharedStateVisibility.NormalizeScope("  \t"),
+        "a blank legacy scope keeps the product default");
+}
+
+static void KnownVisibilityScopesPreserveTheirPolicies()
+{
+    (string Input, string Expected)[] cases =
+    [
+        ("Private", PlayerSharedStateVisibility.PrivateScope),
+        ("AdminOnly", PlayerSharedStateVisibility.AdminOnlyScope),
+        ("SpecifiedMembers", PlayerSharedStateVisibility.SpecifiedMembersScope),
+        ("Fleet", PlayerSharedStateVisibility.FleetScope)
+    ];
+
+    foreach (var (input, expected) in cases)
+    {
+        AssertEqual(expected, PlayerSharedStateVisibility.NormalizeScope(input), $"known scope {input}");
+    }
 }
 
 static void ChatHistoryPagerLoadsNewestThenOlderPages()

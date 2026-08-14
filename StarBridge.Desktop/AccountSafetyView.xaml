@@ -1,8 +1,18 @@
 <UserControl x:Class="StarBridge.Desktop.AccountSafetyView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
              Focusable="True"
-             Background="{StaticResource PageBackgroundBrush}">
+             Background="{DynamicResource BridgeGround}">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Bridge/Shell.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/Directory.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -15,71 +25,76 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="账号状态与申诉"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           FontSize="22"
-                           FontWeight="SemiBold" />
-                <TextBlock Text="查看账号当前状态、恢复时间，以及已经提交的申诉。"
-                           Margin="0,6,0,0"
-                           Foreground="{StaticResource MutedTextBrush}"
-                           FontSize="12" />
-            </StackPanel>
+            <TextBlock Text="查看账号当前状态、恢复时间，以及已经提交的申诉。"
+                       VerticalAlignment="Center"
+                       Style="{StaticResource BridgeBodyTextStyle}"
+                       TextWrapping="Wrap" />
             <Button Grid.Column="1"
                     Content="刷新"
                     Width="82"
                     Height="34"
-                    VerticalAlignment="Bottom"
-                    Style="{StaticResource SecondaryButton}"
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
                     Click="RefreshButton_Click" />
         </Grid>
 
-        <ScrollViewer Grid.Row="1"
-                      Margin="0,16,0,0"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled">
-            <StackPanel>
-                <Border Style="{StaticResource HudPanel}" Padding="15">
-                    <StackPanel>
-                        <TextBlock Text="当前账号状态"
-                                   Foreground="#61CAFF"
-                                   FontSize="13"
-                                   FontWeight="SemiBold" />
-                        <TextBlock x:Name="AccountStateSummaryText"
-                                   Margin="0,7,0,0"
-                                   Foreground="{StaticResource PrimaryTextBrush}"
-                                   FontSize="16"
-                                   FontWeight="SemiBold"
-                                   Text="正在读取…" />
-                        <TextBlock x:Name="AccountStateDetailText"
-                                   Margin="0,6,0,0"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   FontSize="11"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
+        <Grid Grid.Row="1" Margin="0,14,0,0">
+            <ScrollViewer x:Name="ContentScrollViewer"
+                          Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <controls:ChamferBorder Style="{StaticResource BridgeDirectorySurfaceStyle}" Padding="15">
+                        <StackPanel>
+                            <TextBlock Text="当前账号状态"
+                                       Style="{StaticResource BridgeDirectorySectionTitleStyle}" />
+                            <TextBlock x:Name="AccountStateSummaryText"
+                                       Margin="0,7,0,0"
+                                       Style="{StaticResource BridgeDirectoryFieldPrimaryValueTextStyle}" />
+                            <TextBlock x:Name="AccountStateDetailText"
+                                       Margin="0,6,0,0"
+                                       Style="{StaticResource BridgeBodyTextStyle}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </controls:ChamferBorder>
 
-                <TextBlock Text="当前记录"
-                           Margin="0,18,0,8"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           FontSize="15"
-                           FontWeight="SemiBold" />
-                <StackPanel x:Name="SanctionListPanel" />
+                    <TextBlock Text="当前记录"
+                               Margin="0,18,0,8"
+                               Style="{StaticResource BridgeDirectorySectionTitleStyle}" />
+                    <StackPanel x:Name="SanctionListPanel" />
 
-                <TextBlock Text="我的申诉"
-                           Margin="0,18,0,8"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           FontSize="15"
-                           FontWeight="SemiBold" />
-                <StackPanel x:Name="AppealListPanel" />
-            </StackPanel>
-        </ScrollViewer>
+                    <TextBlock Text="我的申诉"
+                               Margin="0,18,0,8"
+                               Style="{StaticResource BridgeDirectorySectionTitleStyle}" />
+                    <StackPanel x:Name="AppealListPanel" />
+                </StackPanel>
+            </ScrollViewer>
 
-        <TextBlock x:Name="StatusText"
-                   Grid.Row="2"
-                   Margin="0,10,0,0"
-                   Foreground="{StaticResource MutedTextBrush}"
-                   FontSize="11"
-                   Text="申诉提交后会进入人工审核，请勿重复提交。" />
+            <controls:BridgeStatePresenter x:Name="PageStatePresenter"
+                                           Panel.ZIndex="2"
+                                           State="Loading"
+                                           TitleOverride="正在读取账号状态"
+                                           DescriptionOverride="正在同步生效记录与申诉进度。"
+                                           ActionTextOverride=""
+                                           ActionInvoked="PageStatePresenter_ActionInvoked" />
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <controls:BridgeLoadingIndicator x:Name="OperationLoadingIndicator"
+                                             Width="15"
+                                             Height="15"
+                                             Margin="0,0,8,0"
+                                             VerticalAlignment="Center"
+                                             Visibility="Collapsed" />
+            <TextBlock x:Name="StatusText"
+                       Grid.Column="1"
+                       Style="{StaticResource BridgeDirectoryAuxTextStyle}"
+                       Text="申诉提交后会进入人工审核，请勿重复提交。" />
+        </Grid>
     </Grid>
 </UserControl>

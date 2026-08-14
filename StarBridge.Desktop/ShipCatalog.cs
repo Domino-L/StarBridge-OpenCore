@@ -224,6 +224,12 @@ public static partial class ShipCatalog
         string? code,
         string? displayName)
     {
+        var importedHangarImage = HangarImportedShipImageCache.Resolve(code);
+        if (!string.IsNullOrWhiteSpace(importedHangarImage))
+        {
+            return importedHangarImage;
+        }
+
         return !string.IsNullOrWhiteSpace(catalog?.ImagePath)
             ? catalog.ImagePath
             : ShipMediaManifestCatalog.FindImagePath(code, displayName) ?? "";

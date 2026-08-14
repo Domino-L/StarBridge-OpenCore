@@ -86,6 +86,12 @@ public partial class MainWindow
         GuidedTourPrimaryButton.Visibility = Visibility.Collapsed;
         GuidedTourEyebrowText.Text = "首次启航";
 
+        if (IsBridgeShellEnabled && TryConfigureBridgeFeatureTourStep(step))
+        {
+            ScheduleGuidedTourLayout();
+            return;
+        }
+
         switch (step)
         {
             case GuideStep.Introduction:
@@ -111,16 +117,16 @@ public partial class MainWindow
                 break;
             case GuideStep.OpenAccountMenu:
                 ConfigureClickStep(
-                    PersonalNavButton,
-                    "打开头像菜单",
-                    "点击右上角头像，从这里进入账号与识别设置。",
-                    "准备 · 账号入口");
+                    IsBridgeShellEnabled ? BridgeSettingsButton : HeaderSettingsButton,
+                    "打开设置",
+                    "点击右上角的设置按钮，进入应用设置。",
+                    "准备 · 设置入口");
                 break;
             case GuideStep.OpenIdentitySettings:
                 ConfigureClickStep(
-                    PersonalNavButton,
+                    PersonalDashboardIdentityButton,
                     "进入账号与识别",
-                    "头像菜单已经打开，请点击“账号与识别”。这里集中管理登录、头像、Game.log 与游戏身份。",
+                    "点击左侧的“账号与识别”。这里集中管理登录、头像、Game.log 与游戏身份。",
                     "准备 · 账号与识别");
                 break;
             case GuideStep.SelectLog:
@@ -151,7 +157,7 @@ public partial class MainWindow
                 ConfigureOverviewStep(
                     MyFleetNavButton,
                     "我的舰队",
-                    "查看舰队成员、小队、通讯、公告、事件与舰船。尚未加入舰队时，也可以从这里创建舰队。",
+                    "查看舰队成员、聊天、公告、事件与舰船。尚未加入舰队时，也可以从这里创建舰队。",
                     "顶部导航 · 3 / 5");
                 break;
             case GuideStep.MySquadOverview:
@@ -181,6 +187,50 @@ public partial class MainWindow
         }
 
         ScheduleGuidedTourLayout();
+    }
+
+    private bool TryConfigureBridgeFeatureTourStep(GuideStep step)
+    {
+        switch (step)
+        {
+            case GuideStep.HomeOverview:
+                ConfigureOverviewStep(
+                    BridgeFleetNavButton,
+                    "舰队",
+                    "寻找或管理舰队，并在舰队内查看成员、舰船和舰队聊天。",
+                    "模块导航 · 1 / 5");
+                return true;
+            case GuideStep.FindFleetOverview:
+                ConfigureOverviewStep(
+                    BridgePartyNavButton,
+                    "房间",
+                    "寻找或创建临时房间；房间成员与房间聊天都留在当前房间中。",
+                    "模块导航 · 2 / 5");
+                return true;
+            case GuideStep.MyFleetOverview:
+                ConfigureOverviewStep(
+                    BridgePersonalNavButton,
+                    "我的",
+                    "从头像菜单进入个人资料、我的机库、账号识别与安全记录。",
+                    "模块导航 · 3 / 5");
+                return true;
+            case GuideStep.MySquadOverview:
+                ConfigureOverviewStep(
+                    BridgeSocialNavButton,
+                    "好友",
+                    "处理好友申请、查看好友状态，并单独进行好友私信。",
+                    "模块导航 · 4 / 5");
+                return true;
+            case GuideStep.OverlayOverview:
+                ConfigureOverviewStep(
+                    BridgeOverlayNavButton,
+                    "游戏浮层",
+                    "管理信息浮层、菜单浮层、游戏内工具及其显示方式。",
+                    "模块导航 · 5 / 5");
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void ConfigureOverviewStep(
@@ -411,10 +461,12 @@ public partial class MainWindow
         var cardHeight = Math.Min(GuidedTourCoachCard.DesiredSize.Height, overlayHeight - 32);
         GuidedTourCoachCard.Width = cardWidth;
 
-        var cardPoint = _guideMode == GuideMode.Initial &&
-                        _guideStep == GuideStep.OpenIdentitySettings
-            ? CalculateAccountMenuSafeCardPosition(targetRect, cardWidth, cardHeight, overlayWidth, overlayHeight)
-            : CalculateGuideCardPosition(targetRect, cardWidth, cardHeight, overlayWidth, overlayHeight);
+        var cardPoint = CalculateGuideCardPosition(
+            targetRect,
+            cardWidth,
+            cardHeight,
+            overlayWidth,
+            overlayHeight);
         cardPoint = SnapPointToDevicePixels(cardPoint, GuidedTourOverlay);
         MoveGuideElement(GuidedTourCoachCard, GuidedTourCardTransform, cardPoint.X, cardPoint.Y, animate: targetChanged);
 
@@ -595,7 +647,7 @@ public partial class MainWindow
         if (!animate ||
             double.IsNaN(previousLeft) ||
             double.IsNaN(previousTop) ||
-            !SystemParameters.ClientAreaAnimation)
+            !UiMotion.IsEnabled)
         {
             transform.BeginAnimation(TranslateTransform.XProperty, null);
             transform.BeginAnimation(TranslateTransform.YProperty, null);

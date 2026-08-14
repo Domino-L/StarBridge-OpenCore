@@ -42,6 +42,7 @@ public partial class InGameSocialWindow : Window
     internal InGameSocialWindow()
     {
         InitializeComponent();
+        Theming.BridgeSceneContext.ApplyFixed(this, Theming.BridgeSceneKind.Social);
         InGameToolWindowBehavior.PreventSnapMaximize(this);
     }
 
@@ -69,10 +70,20 @@ public partial class InGameSocialWindow : Window
             SocialContentPanel.Visibility = snapshot.IsAvailable
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            Controls.InGameLoadingPresentation.Apply(
+                UnavailableLoadingIndicator,
+                !snapshot.IsAvailable &&
+                snapshot.FriendDirectoryState == InGameFriendDirectoryState.Loading);
 
-            FriendList.ItemsSource = snapshot.Friends;
-            IncomingRequestList.ItemsSource = snapshot.IncomingRequests;
-            FriendSearchResultList.ItemsSource = snapshot.SearchResults;
+            FriendList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+                FriendList.ItemsSource as IEnumerable<FriendCenterRow>,
+                snapshot.Friends);
+            IncomingRequestList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+                IncomingRequestList.ItemsSource as IEnumerable<FriendCenterRow>,
+                snapshot.IncomingRequests);
+            FriendSearchResultList.ItemsSource = InGameSnapshotItemIdentity.PreserveEqualInstances(
+                FriendSearchResultList.ItemsSource as IEnumerable<FriendCenterRow>,
+                snapshot.SearchResults);
             IncomingRequestsPanel.Visibility = snapshot.IncomingRequests.Length > 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
@@ -82,8 +93,16 @@ public partial class InGameSocialWindow : Window
             FriendCollectionPanel.Visibility = snapshot.IsSearchActive
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-            FriendDirectoryStatusText.Text = snapshot.FriendStatusText;
-            FriendSearchStatusText.Text = snapshot.SearchStatusText;
+            Controls.InGameLoadingPresentation.Apply(
+                FriendDirectoryStatusText,
+                FriendDirectoryLoadingIndicator,
+                snapshot.FriendStatusText,
+                snapshot.FriendDirectoryState == InGameFriendDirectoryState.Loading);
+            Controls.InGameLoadingPresentation.Apply(
+                FriendSearchStatusText,
+                FriendSearchLoadingIndicator,
+                snapshot.SearchStatusText,
+                snapshot.IsSearchLoading);
             FriendsEmptyState.Visibility =
                 snapshot.FriendDirectoryState == InGameFriendDirectoryState.Ready &&
                 snapshot.Friends.Length == 0
@@ -108,7 +127,10 @@ public partial class InGameSocialWindow : Window
     {
         var isChannels = _section == InGameSocialSection.Channels;
         var pane = isChannels ? snapshot.Channels : snapshot.DirectMessages;
-        ConversationList.ItemsSource = pane.Conversations;
+        var conversations = InGameSnapshotItemIdentity.PreserveEqualInstances(
+            ConversationList.ItemsSource as IEnumerable<InGameChatChannelRow>,
+            pane.Conversations);
+        ConversationList.ItemsSource = conversations;
         MessageList.ItemsSource = pane.Messages;
         ConversationEmptyState.Visibility = pane.Conversations.Length == 0
             ? Visibility.Visible
@@ -116,19 +138,19 @@ public partial class InGameSocialWindow : Window
 
         CommunicationDirectoryTitleText.Text = isChannels ? "频道" : "私聊";
         CommunicationDirectoryDetailText.Text = isChannels
-            ? "查看舰队、小队和房间中的消息"
+            ? "查看舰队和房间中的消息"
             : "只显示你和好友的一对一消息";
-        ConversationEmptyTitleText.Text = isChannels ? "还没有可用频道" : "还没有私聊会话";
-        ConversationEmptyDetailText.Text = isChannels
-            ? "加入舰队、小队或房间后，频道会显示在这里。"
+        ConversationEmptyState.TitleOverride = isChannels ? "还没有可用频道" : "还没有私聊会话";
+        ConversationEmptyState.DescriptionOverride = isChannels
+            ? "加入舰队或房间后，频道会显示在这里。"
             : "从好友列表选择一位好友，即可开始私聊。";
         ChatNoSelectionTitleText.Text = isChannels ? "选择一个频道" : "选择一位好友";
         ChatNoSelectionDetailText.Text = isChannels
-            ? "选择舰队、小队或房间频道查看消息。"
+            ? "选择舰队或房间频道查看消息。"
             : "从左侧选择一位好友开始私聊。";
 
         var activeKey = pane.ActiveConversation?.Key;
-        ConversationList.SelectedItem = pane.Conversations.FirstOrDefault(row =>
+        ConversationList.SelectedItem = conversations.FirstOrDefault(row =>
             row.Key.Equals(activeKey, StringComparison.OrdinalIgnoreCase));
         var hasActiveConversation = pane.ActiveConversation is not null;
         ChatNoSelectionState.Visibility = hasActiveConversation
@@ -145,7 +167,7 @@ public partial class InGameSocialWindow : Window
                                   (isChannels ? "选择一个频道" : "选择一位好友");
         ActiveUserDetailText.Text = pane.ActiveConversation?.ContextText ??
                                     (isChannels
-                                        ? "从左侧选择舰队、小队或房间频道"
+                                        ? "从左侧选择舰队或房间频道"
                                         : "从左侧选择一位好友");
         if (pane.ActiveConversation is { Kind: InGameChatChannelKind.Private } &&
             pane.ActiveUser is { } activeUser)
@@ -169,7 +191,6 @@ public partial class InGameSocialWindow : Window
             ActiveUserRelationText.Text = activeConversation.Kind switch
             {
                 InGameChatChannelKind.Fleet => "舰队频道",
-                InGameChatChannelKind.Squad => "小队频道",
                 InGameChatChannelKind.Room => "房间频道",
                 _ => string.Empty
             };
@@ -188,7 +209,7 @@ public partial class InGameSocialWindow : Window
             : pane.StatusText;
     }
 
-    internal void ResetAccountState(string statusText)
+    internal void ResetAccountState(string statusText, bool isLoading = false)
     {
         FriendSearchBox.Clear();
         MessageInputBox.Clear();
@@ -199,9 +220,12 @@ public partial class InGameSocialWindow : Window
             [],
             new InGameConversationPaneSnapshot([], [], null, null, false, statusText),
             new InGameConversationPaneSnapshot([], [], null, null, false, statusText),
-            InGameFriendDirectoryState.Unavailable,
+            isLoading
+                ? InGameFriendDirectoryState.Loading
+                : InGameFriendDirectoryState.Unavailable,
             statusText,
             "输入呼号或游戏 ID 查找用户",
+            false,
             false,
             "",
             "",
@@ -249,7 +273,7 @@ public partial class InGameSocialWindow : Window
         {
             InGameSocialSection.Friends => "添加好友、处理申请并直接开始私聊",
             InGameSocialSection.DirectMessages => "只显示你和好友的一对一消息",
-            _ => "查看舰队、小队和房间中的消息"
+            _ => "查看舰队和房间中的消息"
         };
         if (_snapshot is not null)
         {
@@ -447,9 +471,6 @@ public partial class InGameSocialWindow : Window
             DragMove();
         }
     }
-
-    private void MinimizeButton_Click(object sender, RoutedEventArgs e) =>
-        WindowState = WindowState.Minimized;
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) =>
         Close();

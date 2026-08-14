@@ -1,111 +1,162 @@
 <UserControl x:Class="StarBridge.Desktop.NotificationCenterView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+             xmlns:theming="clr-namespace:StarBridge.Desktop.Theming"
              Focusable="True"
-             Background="{StaticResource PageBackgroundBrush}">
-    <Grid Background="{StaticResource PageBackgroundBrush}" Margin="18">
+             Background="{DynamicResource BridgeGround}">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Bridge/Shell.xaml" />
+                <ResourceDictionary Source="Themes/Bridge/Directory.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style TargetType="{x:Type Button}"
+                   BasedOn="{StaticResource BridgeDirectorySecondaryButtonStyle}" />
+
+            <Style x:Key="NotificationCenterTabStyle"
+                   TargetType="{x:Type ToggleButton}"
+                   BasedOn="{StaticResource BridgeSectionTabStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                        <Grid Background="Transparent">
+                            <controls:ChamferBorder x:Name="Surface"
+                                                    Background="{TemplateBinding Background}"
+                                                    Chamfer="7"
+                                                    Corners="Signature" />
+                            <controls:ChamferBorder x:Name="HoverLayer"
+                                                    Background="{DynamicResource BridgeRowHover}"
+                                                    Chamfer="7"
+                                                    Corners="Signature"
+                                                    Opacity="0"
+                                                    IsHitTestVisible="False" />
+                            <controls:ChamferBorder x:Name="SelectedLayer"
+                                                    Background="{Binding Path=(theming:BridgeSceneContext.AmbientBrush), RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                    Chamfer="7"
+                                                    Corners="Signature"
+                                                    Opacity="0"
+                                                    IsHitTestVisible="False" />
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            <Border x:Name="SelectedEdge"
+                                    Height="2"
+                                    VerticalAlignment="Bottom"
+                                    Background="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                            <controls:ChamferBorder x:Name="FocusLayer"
+                                                    Background="Transparent"
+                                                    BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                    BorderThickness="1"
+                                                    Chamfer="7"
+                                                    Corners="Signature"
+                                                    Opacity="0"
+                                                    IsHitTestVisible="False" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="HoverLayer" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="SelectedLayer" Property="Opacity" Value="0.72" />
+                                <Setter TargetName="SelectedEdge" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{DynamicResource BridgeInk}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Surface" Property="Opacity" Value="0.68" />
+                                <Setter TargetName="HoverLayer" Property="Opacity" Value="0.68" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="FocusLayer" Property="Opacity" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid Margin="18"
+          Background="{DynamicResource BridgeGround}"
+          UseLayoutRounding="True">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid>
+        <Grid Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="NOTIFICATIONS"
-                           Foreground="#61CAFF"
-                           FontSize="10"
-                           FontWeight="SemiBold" />
-                <TextBlock Text="通知中心"
-                           Margin="0,5,0,0"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           FontSize="22"
-                           FontWeight="SemiBold" />
-                <TextBlock Text="汇总需要你留意的好友申请、舰队与房间事项。实际处理仍在原页面完成。"
-                           Margin="0,6,0,0"
-                           Foreground="{StaticResource MutedTextBrush}"
-                           FontSize="12"
-                           TextWrapping="Wrap" />
+
+            <StackPanel Orientation="Horizontal">
+                <ToggleButton x:Name="NotificationsTabButton"
+                              Content="通知"
+                              Style="{StaticResource NotificationCenterTabStyle}"
+                              Click="NotificationsTabButton_Click" />
+                <ToggleButton x:Name="ReportsTabButton"
+                              Content="我的举报"
+                              Style="{StaticResource NotificationCenterTabStyle}"
+                              Click="ReportsTabButton_Click" />
             </StackPanel>
 
-            <StackPanel Grid.Column="1"
+            <StackPanel Grid.Column="2"
+                        Margin="12,0"
                         Orientation="Horizontal"
-                        VerticalAlignment="Bottom">
+                        VerticalAlignment="Center">
+                <Border x:Name="UnreadSummaryBadge"
+                        Margin="0,0,8,0"
+                        Style="{StaticResource BridgeCountBadgeStyle}"
+                        Visibility="Visible">
+                    <TextBlock x:Name="UnreadSummaryText"
+                               Text="未读 0"
+                               Style="{StaticResource BridgeCountBadgeTextStyle}" />
+                </Border>
+                <Border x:Name="ActionSummaryBadge"
+                        Style="{StaticResource BridgeCountBadgeStyle}"
+                        Background="{DynamicResource BridgePanelRaised}"
+                        BorderBrush="{DynamicResource BridgeStatusWarn}">
+                    <TextBlock x:Name="ActionSummaryText"
+                               Text="待处理 0"
+                               Style="{StaticResource BridgeCountBadgeTextStyle}"
+                               Foreground="{DynamicResource BridgeStatusWarn}" />
+                </Border>
+            </StackPanel>
+
+            <StackPanel Grid.Column="3"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center">
                 <Button x:Name="MarkAllReadButton"
                         Content="全部标为已读"
-                        Height="34"
                         MinWidth="112"
                         Margin="0,0,8,0"
-                        Style="{StaticResource SecondaryButton}"
                         Click="MarkAllReadButton_Click" />
                 <Button Content="刷新"
-                        Height="34"
                         MinWidth="76"
-                        Style="{StaticResource SecondaryButton}"
                         Click="RefreshButton_Click" />
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1" Margin="0,16,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Button x:Name="NotificationsTabButton"
-                    Content="通知"
-                    Height="34"
-                    MinWidth="92"
-                    Style="{StaticResource PrimaryButton}"
-                    Click="NotificationsTabButton_Click" />
-            <Button x:Name="ReportsTabButton"
-                    Grid.Column="1"
-                    Content="我的举报"
-                    Height="34"
-                    MinWidth="92"
-                    Margin="8,0,0,0"
-                    Style="{StaticResource SecondaryButton}"
-                    Click="ReportsTabButton_Click" />
-            <StackPanel Grid.Column="3"
-                        Orientation="Horizontal"
-                        VerticalAlignment="Center">
-                <Border Padding="9,4"
-                        Background="#102B3A"
-                        BorderBrush="#28536B"
-                        BorderThickness="1"
-                        CornerRadius="2">
-                    <TextBlock x:Name="UnreadSummaryText"
-                               Text="未读 0"
-                               Foreground="#8FDFFF"
-                               FontSize="11"
-                               FontWeight="SemiBold" />
-                </Border>
-                <Border x:Name="ActionSummaryBadge"
-                        Margin="8,0,0,0"
-                        Padding="9,4"
-                        Background="#38251B"
-                        BorderBrush="#A86E2E"
-                        BorderThickness="1"
-                        CornerRadius="2"
-                        Visibility="Collapsed">
-                    <TextBlock x:Name="ActionSummaryText"
-                               Text="待处理 0"
-                               Foreground="#FFC56B"
-                               FontSize="11"
-                               FontWeight="SemiBold" />
-                </Border>
-            </StackPanel>
-        </Grid>
-
-        <Border Grid.Row="2"
-                Style="{StaticResource HudPanel}"
-                Padding="14">
+        <controls:ChamferBorder Grid.Row="1"
+                                Padding="14"
+                                Background="{DynamicResource BridgePanel}"
+                                BorderBrush="{DynamicResource BridgeHairline}"
+                                BorderThickness="1"
+                                Chamfer="8"
+                                Corners="Signature">
             <Grid>
                 <ScrollViewer x:Name="NotificationsScrollViewer"
                               VerticalScrollBarVisibility="Auto"
@@ -120,24 +171,19 @@
                     <StackPanel x:Name="ReportsListPanel" />
                 </ScrollViewer>
 
-                <StackPanel x:Name="LoadingPanel"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Visibility="Collapsed">
-                    <ProgressBar Width="220" Height="3" IsIndeterminate="True" />
-                    <TextBlock Text="正在读取通知…"
-                               Margin="0,10,0,0"
-                               Foreground="{StaticResource MutedTextBrush}"
-                               HorizontalAlignment="Center" />
-                </StackPanel>
+                <controls:BridgeStatePresenter x:Name="LoadingPanel"
+                                               Panel.ZIndex="2"
+                                               State="Loading"
+                                               TitleOverride="正在读取通知"
+                                               ActionTextOverride=""
+                                               Visibility="Collapsed" />
             </Grid>
-        </Border>
+        </controls:ChamferBorder>
 
         <TextBlock x:Name="StatusText"
-                   Grid.Row="3"
+                   Grid.Row="2"
                    Margin="0,10,0,0"
-                   Foreground="{StaticResource MutedTextBrush}"
-                   FontSize="11"
-                   Text="通知只用于提醒和跳转，不会替代原页面的处理功能。" />
+                   Style="{StaticResource BridgeDirectoryAuxTextStyle}"
+                   Text="通知只用于提醒和跳转，实际处理仍在原页面完成。" />
     </Grid>
 </UserControl>

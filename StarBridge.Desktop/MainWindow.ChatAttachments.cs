@@ -31,8 +31,17 @@ public partial class MainWindow
     private void PartyRoomChatAttachmentButton_Click(object sender, RoutedEventArgs e) =>
         OpenChatAttachmentMenu((Button)sender, ChatAttachmentTarget.PartyRoom);
 
-    private void FriendChatAttachmentButton_Click(object sender, RoutedEventArgs e) =>
+    private void FriendChatAttachmentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsFriendCenterAcceptanceMode)
+        {
+            FriendChatStatusText.Text = "模拟场景不会发送附件或邀请。";
+            FriendChatStatusText.Foreground = StatusPalette.InfoBrush;
+            return;
+        }
+
         OpenChatAttachmentMenu((Button)sender, ChatAttachmentTarget.DirectMessage);
+    }
 
     private void OpenChatAttachmentMenu(Button anchor, ChatAttachmentTarget target) =>
         OpenChatAttachmentMenu(new ChatAttachmentDestination(anchor, target));

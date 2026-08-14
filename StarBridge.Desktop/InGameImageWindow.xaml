@@ -6,7 +6,7 @@
         Icon="/Assets/Brand/StarBridge_AppIcon.ico"
         Width="780"
         Height="560"
-        MinWidth="780"
+        MinWidth="420"
         MinHeight="260"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
@@ -108,10 +108,9 @@
                         <ColumnDefinition Width="40" />
                         <ColumnDefinition Width="40" />
                         <ColumnDefinition Width="48" />
-                        <ColumnDefinition Width="48" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Margin="16,0,92,0"
+                    <StackPanel Margin="16,0"
                                  VerticalAlignment="Center">
                         <TextBlock Text="游戏时参考图"
                                    Foreground="{StaticResource PrimaryTextBrush}"
@@ -127,15 +126,6 @@
                                    LineHeight="14"
                                    TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-
-                    <TextBlock x:Name="ImageWindowCountText"
-                               Grid.Column="0"
-                               Margin="0,0,14,0"
-                               Text="参考图 1 / 5"
-                               Foreground="{StaticResource MutedTextBrush}"
-                               FontSize="10"
-                               HorizontalAlignment="Right"
-                               VerticalAlignment="Center" />
 
                     <Button x:Name="ImageSettingsToggleButton"
                             Grid.Column="1"
@@ -165,11 +155,6 @@
                         </Viewbox>
                     </Button>
                     <Button Grid.Column="3"
-                            Tag="Minimize"
-                            ToolTip="最小化"
-                            Style="{StaticResource WindowCaptionButton}"
-                            Click="MinimizeButton_Click" />
-                    <Button Grid.Column="4"
                             Tag="Close"
                             ToolTip="关闭参考图"
                             Style="{StaticResource CloseWindowCaptionButton}"
@@ -183,15 +168,16 @@
                     Background="{StaticResource AvionicsGlassPanelBrush}"
                     BorderBrush="{StaticResource AvionicsGlassSoftEdgeBrush}"
                     BorderThickness="0,0,0,1"
+                    SizeChanged="ImageToolbar_SizeChanged"
                     Visibility="Visible">
-                <Grid x:Name="ImageSettingsPanel">
+                <Grid>
+                    <Grid x:Name="ImageSettingsPanel">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="34" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="108" />
-                        <ColumnDefinition Width="94" />
                         <ColumnDefinition Width="66" />
                         <ColumnDefinition Width="72" />
                         <ColumnDefinition Width="76" />
@@ -205,52 +191,62 @@
                             Content="选择图片"
                             Style="{StaticResource PrimaryButton}"
                             Click="ChooseImageButton_Click" />
-                    <Button Grid.Column="1"
+                    <Button x:Name="FitImageButton"
+                            Grid.Column="1"
                             Height="34"
                             Margin="8,0,0,0"
-                            Content="新增参考图"
-                            Style="{StaticResource SecondaryButton}"
-                            Click="NewImageButton_Click" />
-                    <Button Grid.Column="2"
-                            Height="34"
-                            Margin="8,0,0,0"
+                            Padding="8,0"
                             Content="适应"
                             Style="{StaticResource SecondaryButton}"
                             Click="FitButton_Click" />
-                    <Button Grid.Column="3"
+                    <Button x:Name="ActualSizeImageButton"
+                            Grid.Column="2"
                             Height="34"
                             Margin="8,0,0,0"
+                            Padding="8,0"
                             Content="100%"
                             Style="{StaticResource SecondaryButton}"
                             Click="ActualSizeButton_Click" />
                     <Button x:Name="CropImageButton"
-                            Grid.Column="4"
+                            Grid.Column="3"
                             Height="34"
                             Margin="8,0,0,0"
+                            Padding="8,0"
                             Content="裁剪"
                             ToolTip="拖动框选要保留的图片区域"
                             Style="{StaticResource SecondaryButton}"
                             Click="CropImageButton_Click" />
                     <Button x:Name="ZoomRegionButton"
-                            Grid.Column="5"
+                            Grid.Column="4"
                             Height="34"
                             Margin="8,0,0,0"
+                            Padding="8,0"
                             Content="局部放大"
                             ToolTip="拖动框选要放大查看的图片区域"
                             Style="{StaticResource SecondaryButton}"
                             Click="ZoomRegionButton_Click" />
                     <Button x:Name="ResetImageEditsButton"
-                            Grid.Column="6"
+                            Grid.Column="5"
                             Height="34"
                             Margin="8,0,0,0"
+                            Padding="8,0"
                             Content="重置裁剪"
                             ToolTip="恢复完整原图"
                             IsEnabled="False"
                             Style="{StaticResource SecondaryButton}"
                             Click="ResetImageEditsButton_Click" />
 
+                    <ComboBox x:Name="ImageViewportModeComboBox"
+                              Grid.Column="6"
+                              Width="144"
+                              Height="34"
+                              HorizontalAlignment="Right"
+                              DisplayMemberPath="DisplayName"
+                              Style="{StaticResource OverlaySettingsComboBoxStyle}"
+                              SelectionChanged="ImageViewportModeComboBox_SelectionChanged" />
+
                     <Grid Grid.Row="1"
-                          Grid.ColumnSpan="8"
+                          Grid.ColumnSpan="7"
                           Margin="0,7,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="42" />
@@ -305,6 +301,169 @@
                                    HorizontalAlignment="Right"
                                    VerticalAlignment="Center" />
                     </Grid>
+                    </Grid>
+
+                    <Grid x:Name="CompactImageSettingsPanel"
+                          Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="34" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="108" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="104" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Height="34"
+                                    Content="选择图片"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Click="ChooseImageButton_Click" />
+                            <Button x:Name="CompactSettingsToggleButton"
+                                    Grid.Column="2"
+                                    Height="34"
+                                    Content="展开设置"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="CompactSettingsToggleButton_Click" />
+                        </Grid>
+
+                        <Popup x:Name="CompactSettingsPopup"
+                               PlacementTarget="{Binding ElementName=CompactImageSettingsPanel}"
+                               Placement="Relative"
+                               HorizontalOffset="0"
+                               VerticalOffset="42"
+                               AllowsTransparency="True"
+                               StaysOpen="True"
+                               Closed="CompactSettingsPopup_Closed">
+                            <Border Width="520"
+                                    Padding="12"
+                                    Background="{StaticResource AvionicsGlassPanelBrush}"
+                                    BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"
+                                    BorderThickness="1">
+                        <Grid x:Name="CompactSettingsBody">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="34" />
+                                <RowDefinition Height="6" />
+                                <RowDefinition Height="28" />
+                                <RowDefinition Height="4" />
+                                <RowDefinition Height="28" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0"
+                                        Height="34"
+                                        Margin="0,0,4,0"
+                                        Padding="8,0"
+                                        Content="适应"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="FitButton_Click" />
+                                <Button Grid.Column="1"
+                                        Height="34"
+                                        Margin="2,0"
+                                        Padding="8,0"
+                                        Content="100%"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="ActualSizeButton_Click" />
+                                <Button Grid.Column="2"
+                                        Height="34"
+                                        Margin="2,0"
+                                        Padding="8,0"
+                                        Content="{Binding Content, ElementName=CropImageButton}"
+                                        ToolTip="{Binding ToolTip, ElementName=CropImageButton}"
+                                        IsEnabled="{Binding IsEnabled, ElementName=CropImageButton}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="CropImageButton_Click" />
+                                <Button Grid.Column="3"
+                                        Height="34"
+                                        Margin="2,0"
+                                        Padding="8,0"
+                                        Content="{Binding Content, ElementName=ZoomRegionButton}"
+                                        ToolTip="{Binding ToolTip, ElementName=ZoomRegionButton}"
+                                        IsEnabled="{Binding IsEnabled, ElementName=ZoomRegionButton}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="ZoomRegionButton_Click" />
+                                <Button Grid.Column="4"
+                                        Height="34"
+                                        Margin="4,0,0,0"
+                                        Padding="8,0"
+                                        Content="{Binding Content, ElementName=ResetImageEditsButton}"
+                                        ToolTip="{Binding ToolTip, ElementName=ResetImageEditsButton}"
+                                        IsEnabled="{Binding IsEnabled, ElementName=ResetImageEditsButton}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Click="ResetImageEditsButton_Click" />
+                            </Grid>
+
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="144" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="CompactImageViewportModeComboBox"
+                                          Grid.Column="0"
+                                          Height="28"
+                                          DisplayMemberPath="DisplayName"
+                                          ItemsSource="{Binding ItemsSource, ElementName=ImageViewportModeComboBox}"
+                                          SelectedItem="{Binding SelectedItem, ElementName=ImageViewportModeComboBox, Mode=TwoWay}"
+                                          ToolTip="{Binding ToolTip, ElementName=ImageViewportModeComboBox}"
+                                          Style="{StaticResource OverlaySettingsComboBoxStyle}" />
+                                <Slider Grid.Column="1"
+                                        Height="28"
+                                        Margin="8,0,8,0"
+                                        Minimum="{Binding Minimum, ElementName=ZoomSlider}"
+                                        Maximum="{Binding Maximum, ElementName=ZoomSlider}"
+                                        Value="{Binding Value, ElementName=ZoomSlider, Mode=TwoWay}"
+                                        ToolTip="缩放"
+                                        VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding Text, ElementName=ZoomValueText}"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Grid Grid.Row="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="透明度"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10"
+                                           VerticalAlignment="Center" />
+                                <Slider Grid.Column="1"
+                                        Height="28"
+                                        Margin="0,0,8,0"
+                                        Minimum="{Binding Minimum, ElementName=ImageOpacitySlider}"
+                                        Maximum="{Binding Maximum, ElementName=ImageOpacitySlider}"
+                                        Value="{Binding Value, ElementName=ImageOpacitySlider, Mode=TwoWay}"
+                                        VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding Text, ElementName=ImageOpacityValueText}"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           FontFamily="Bahnschrift"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </Grid>
+                            </Border>
+                        </Popup>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -313,7 +472,9 @@
                   Background="#01060A"
                   PreviewMouseLeftButtonDown="ImageSurface_MouseLeftButtonDown"
                   PreviewMouseLeftButtonUp="ImageSurface_MouseLeftButtonUp"
-                  PreviewMouseMove="ImageSurface_MouseMove">
+                  PreviewMouseMove="ImageSurface_MouseMove"
+                  PreviewMouseWheel="ImageSurface_PreviewMouseWheel"
+                  LostMouseCapture="ImageSurface_LostMouseCapture">
                 <ScrollViewer x:Name="ImageScrollViewer"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"

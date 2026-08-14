@@ -49,9 +49,14 @@ internal static partial class ShipMediaManifestCatalog
         string manifestPath,
         string payloadRoot)
     {
-        if (!File.Exists(manifestPath) || !Directory.Exists(payloadRoot))
+        if (!Directory.Exists(payloadRoot))
         {
             return EmptyIndex();
+        }
+
+        if (!File.Exists(manifestPath))
+        {
+            return LoadLegacyThumbnailIndex(payloadRoot);
         }
 
         try
@@ -64,6 +69,15 @@ internal static partial class ShipMediaManifestCatalog
                 files.ValueKind != JsonValueKind.Array)
             {
                 return EmptyIndex();
+            }
+
+            // The media-free public package intentionally carries an empty manifest.
+            // An in-place upgrade from 0.4 can still have the user's previously installed
+            // ship images on disk, so keep those local files usable without redistributing
+            // them in the new package.
+            if (files.GetArrayLength() == 0)
+            {
+                return LoadLegacyThumbnailIndex(payloadRoot);
             }
 
             var payloadRootFull = Path.GetFullPath(payloadRoot)
@@ -134,6 +148,66 @@ internal static partial class ShipMediaManifestCatalog
             exception is IOException or
             UnauthorizedAccessException or
             JsonException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return EmptyIndex();
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> LoadLegacyThumbnailIndex(string payloadRoot)
+    {
+        try
+        {
+            var thumbnailRoot = Path.GetFullPath(
+                Path.Combine(payloadRoot, "Data", "ShipImages"));
+            if (!Directory.Exists(thumbnailRoot) ||
+                (File.GetAttributes(thumbnailRoot) & FileAttributes.ReparsePoint) != 0)
+            {
+                return EmptyIndex();
+            }
+
+            var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var filePath in Directory.EnumerateFiles(
+                         thumbnailRoot,
+                         "*",
+                         SearchOption.TopDirectoryOnly))
+            {
+                if ((File.GetAttributes(filePath) & FileAttributes.ReparsePoint) != 0)
+                {
+                    continue;
+                }
+
+                var extension = Path.GetExtension(filePath).ToLowerInvariant();
+                if (extension is not (".jpg" or ".jpeg" or ".png"))
+                {
+                    continue;
+                }
+
+                var key = NormalizeLookupKey(Path.GetFileNameWithoutExtension(filePath));
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                var relativePath = Path.Combine(
+                    "Data",
+                    "ShipImages",
+                    Path.GetFileName(filePath));
+                if (index.TryGetValue(key, out var existingPath) &&
+                    !existingPath.Equals(relativePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return EmptyIndex();
+                }
+
+                index[key] = relativePath;
+            }
+
+            return index;
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            UnauthorizedAccessException or
             ArgumentException or
             NotSupportedException)
         {

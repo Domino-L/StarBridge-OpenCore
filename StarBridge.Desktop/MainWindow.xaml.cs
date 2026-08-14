@@ -48,6 +48,9 @@ namespace StarBridge.Desktop;
 
 public partial class MainWindow : Window, IAppUpdateUi
 {
+    private const bool UseBridgeShell = true;
+    private static bool IsBridgeShellEnabled => UseBridgeShell;
+
     private sealed record OverlayPresetEntry(string Id, string Name);
 
     private sealed record OverlayPresetManifest(List<OverlayPresetEntry> Presets);
@@ -90,8 +93,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         OverlayEventNotificationTypes.SameServer,
         OverlayEventNotificationTypes.ShipChange,
         OverlayEventNotificationTypes.LocationChange,
-        OverlayEventNotificationTypes.SquadChange,
-        OverlayEventNotificationTypes.CommanderChange,
         OverlayEventNotificationTypes.OnlineSummary,
         OverlayEventNotificationTypes.PrimaryServer,
         OverlayEventNotificationTypes.DeathAndRespawn,
@@ -248,7 +249,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         Status,
         Price,
         Owner,
-        Squad,
         Role
     }
 
@@ -298,7 +298,6 @@ public partial class MainWindow : Window, IAppUpdateUi
     private enum FleetRightSidebarMode
     {
         Commander,
-        SquadLeader,
         Member
     }
 
@@ -325,16 +324,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         Notifications,
         SecurityFeedback
     }
-
-    private sealed record FleetShipActivityRow(
-        string Action,
-        string ShipName,
-        string OwnerDisplay,
-        string TimeLabel,
-        string TimeText,
-        DateTimeOffset Timestamp,
-        bool IsRemoval,
-        bool IsFlyable);
 
     private sealed record FleetInstantTaskResponseStats(
         int ConfirmedCount,
@@ -459,10 +448,13 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private readonly RegexLogEventParser _parser = new();
     private readonly FleetState _fleetState = new();
+    private DateTimeOffset? _fleetStateCachedAtUtc;
+    private readonly StartupDataGateController _startupDataGate = new();
+    private CancellationTokenSource? _startupDataSyncCts;
     private readonly QuantumTravelContextTracker _quantumTravelContext = new();
     private readonly ObservableCollection<PlayerRow> _players = [];
-    private readonly ObservableCollection<SquadRow> _squads = [];
-    private readonly ObservableCollection<SquadMemberStatusRow> _mySquadMembers = [];
+    private readonly ObservableCollection<SpecifiedVisibilityMemberRow> _specifiedVisibilityMembers = [];
+    private readonly ObservableCollection<PrivateVisibilityGroupRow> _privateVisibilityGroups = [];
     private readonly ObservableCollection<NetworkFleetCard> _networkFleets = [];
     private readonly List<NetworkFleetCard> _allNetworkFleets = [];
     private bool _isFleetBannerDirectoryBackfillInProgress;
@@ -471,12 +463,8 @@ public partial class MainWindow : Window, IAppUpdateUi
     private readonly ObservableCollection<PersonalHangarPreviewRow> _personalHangarPreviewRows = [];
     private readonly ObservableCollection<FleetShipInventoryRow> _fleetShipInventory = [];
     private readonly ObservableCollection<FleetShipInventoryRow> _fleetShipDatabaseRows = [];
-    private readonly Dictionary<string, FleetShipInventoryRow> _fleetShipActivitySnapshot = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<FleetShipActivityRow> _fleetShipActivities = [];
     private string? _fleetShipSidebarSnapshot;
     private readonly Dictionary<string, DateTimeOffset> _localFleetShipSharedAtCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DateTimeOffset> _fleetMemberJoinedAtByIdentity = new(StringComparer.OrdinalIgnoreCase);
-    private bool _fleetShipActivitySnapshotInitialized;
     private FleetShipSortColumn _fleetShipSortColumn = FleetShipSortColumn.Spec;
     private bool _fleetShipSortDescending = true;
     private string _fleetShipDatabaseFilter = "全部";
@@ -488,6 +476,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     private readonly ObservableCollection<FleetEventLogRow> _fleetEventTimelineRows = [];
     private readonly ObservableCollection<FleetEventActionPlanRow> _fleetEventActionPlanRows = [];
     private readonly ObservableCollection<FleetNotificationCenterItemRow> _fleetNotificationCenterItems = [];
+    private readonly ObservableCollection<FleetNotificationCenterItemRow> _fleetMemberTimelineItems = [];
     private readonly ObservableCollection<FleetRoleGroupRow> _fleetSystemRoleGroups = [];
     private readonly ObservableCollection<FleetRoleGroupRow> _fleetCustomRoleGroups = [];
     private readonly ObservableCollection<FleetPermissionGroupRow> _fleetSelectedRolePermissionGroups = [];
@@ -532,7 +521,6 @@ public partial class MainWindow : Window, IAppUpdateUi
     private string _findFleetInviteCode = "";
     private readonly Dictionary<string, LocalFleetMemberPermission> _fleetMemberPermissions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, NetworkPlayerSnapshot> _networkSnapshots = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DateTimeOffset> _localSquadEditTimes = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _localFleetLogoEditTime;
     private DateTimeOffset _localFleetBannerEditTime;
     private DateTimeOffset _fleetJoinedAtUtc = DateTimeOffset.MinValue;
@@ -542,19 +530,12 @@ public partial class MainWindow : Window, IAppUpdateUi
     private readonly HashSet<string> _acknowledgedFleetOrderKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _fleetInstantTaskResponses = new(StringComparer.OrdinalIgnoreCase);
     private MembersPanelMode _membersPanelMode = MembersPanelMode.Admin;
-    private bool _membersPanelModeTouched;
     private bool _isPersonalRightSidebarCompact;
     private bool _isClosingPersonalDisplayNameEditor;
     private const double PersonalConsoleActivityItemHeight = 30;
     private const double PersonalConsoleActivityItemGap = 7;
     private const int PersonalConsoleActivityMinItems = 2;
     private const int PersonalConsoleActivityMaxItems = 5;
-    private CancellationTokenSource? _squadDescriptionSyncCts;
-    private SquadRow? _selectedSquad;
-    private SquadRow? _joinedSquad;
-    private SquadRow? _editingFleetSquad;
-    private string? _fleetSquadEditEmblemPath;
-    private int _squadPreviewLimit = 4;
     private readonly GridViewColumn PlayerNameColumn = new();
     private readonly GridViewColumn PlayerStatusColumn = new();
     private readonly GridViewColumn PlayerShipColumn = new();
@@ -587,7 +568,6 @@ public partial class MainWindow : Window, IAppUpdateUi
     private string? _accountId;
     private readonly AccountSessionCoordinator _accountSessionCoordinator = new();
     private bool _isAccountTransition;
-    private bool _accountSessionRequiresFreshSync;
     private bool _authenticationExpired;
     private string? _lastAnimatedHeaderConnectionStatus;
     private string? _lastNetworkPlayerSnapshotFingerprint;
@@ -726,6 +706,8 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _fleetPublicShowActiveSystems = true;
     private bool _fleetPublicShowActivityTime = true;
     private bool _fleetPublicShowExternalContacts;
+    private FleetExternalContactPublicationMode _fleetExternalContactPublicationMode;
+    private bool _legacyExternalContactPublicationConfirmed;
     private string _activeManageTagCategoryId = FleetTagCategoryDefinitions[0].Id;
     private string _fleetCurrentTaskTitle = "";
     private string _fleetCurrentTaskBrief = "";
@@ -753,8 +735,24 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _joinActionNotifyMe;
     private string? _callsign;
     private bool _allowEmailNotifications = true;
+    private GameIdVisibilityPreference _gameIdVisibilityPreference =
+        GameIdVisibilityPolicy.Normalize(null, null, null);
+    private bool _isSavingGameIdVisibility;
+    private bool _gameIdVisibilitySavePending;
     private SyncPrivacySettings _syncPrivacySettings = SyncPrivacySettings.Default;
     private PlayerEventSharingSettings _playerEventSharingSettings = PlayerEventSharingSettings.Default;
+    private readonly DualAxisPrivacySettingsStore _dualAxisPrivacySettingsStore = new(
+        DesktopAppConfig.ConfigDirectory);
+    private DualAxisPrivacySettings _dualAxisPrivacySettings = DualAxisPrivacySettings.Migrate(
+        SyncPrivacySettings.Default,
+        PlayerEventSharingSettings.Default);
+    private PrivateVisibilityGroupClient? _privateVisibilityGroupClient;
+    private PrivateVisibilityGroupDirectoryLoader? _privateVisibilityGroupLoader;
+    private PrivateVisibilityGroupMutationGate? _privateVisibilityGroupMutationGate;
+    private bool _isApplyingDualAxisPrivacyEditor;
+    private bool _isSavingDualAxisPrivacy;
+    private string? _editingVisibilityGroupId;
+    private string? _editingVisibilityGroupLocalReferenceId;
     private NotificationSettings _notificationSettings = NotificationSettings.Default;
     private string _gameServerRegion = "未知";
     private string _gameServerShard = "";
@@ -772,12 +770,14 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _isOverlayEditorEdgeSnapEnabled = true;
     private bool _isOverlayLayoutLocked;
     private bool _isOverlayEditorFullScreen;
+    private bool _isOverlayEditorCompact;
+    private bool _isOverlayEditorInspectorOpen;
+    private OverlayEditorCompactDrawer _overlayEditorCompactDrawer;
     private bool _overlayInspectorWasOpenBeforeFullScreen;
     private bool _overlayInspectorReturnStateCaptured;
     private double _overlayInspectorReturnScrollOffset;
     private string? _overlayInspectorReturnSectionKey;
     private bool _isOverlayEditorLivePreviewEnabled;
-    private OverlayEditorSimulationSample? _overlayEditorSimulationSample;
     private bool _isOverlayFullScreenToolsOpen = true;
     private bool _isOverlayEditorLayoutDirty;
     private DateTimeOffset? _overlayEditorLastSavedAt;
@@ -826,16 +826,20 @@ public partial class MainWindow : Window, IAppUpdateUi
     private OverlayEditorFullScreenSnapshot? _overlayEditorFullScreenSnapshot;
     private OverlayDisplaySettings _overlaySettings = OverlayDisplaySettings.Default;
 
+    private enum OverlayEditorCompactDrawer
+    {
+        None,
+        Categories,
+        Settings,
+        Inspector
+    }
+
     private sealed record OverlayEditorHistoryState(
         string Layout,
         OverlayDisplaySettings Settings,
         string? SelectedModuleKey,
         bool EventNotificationSelected,
         bool CrosshairSelected);
-
-    private sealed record OverlayEditorSimulationSample(
-        string CurrentSquadName,
-        OverlayEditorSampleMember[] Members);
 
     private sealed record OverlayEditorFullScreenSnapshot(
         WindowState WindowState,
@@ -922,6 +926,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _pendingPrivacyOfflineClear;
     private bool _isNetworkSyncIssueRetrying;
     private bool _isRefreshingAccountPanel;
+    private bool _isUpdatingSpecifiedMemberSelection;
     private bool _isRelayLatencyProbeRunning;
     private int _networkSyncFailureCount;
     private int _presenceHeartbeatFailureCount;
@@ -936,7 +941,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     private TaskCompletionSource<bool>? _appConfirmationSource;
     private TaskCompletionSource<bool>? _overlayAppearanceUnlockSource;
     private TaskCompletionSource<SyncChoiceResult?>? _syncChoiceSource;
-    private TaskCompletionSource<SquadSuccessorOption?>? _fleetSuccessorSource;
+    private TaskCompletionSource<FleetSuccessorOption?>? _fleetSuccessorSource;
     private TaskCompletionSource<bool>? _updateConfirmationSource;
     private bool _updateOverlayCanClose;
     private bool _startupUpdateCheckQueued;
@@ -975,12 +980,16 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         _isLoadingSettings = true;
         InitializeComponent();
+        HelpReleaseHistoryList.ItemsSource = AppReleaseHistoryCatalog.Entries;
+        ConfigureBridgeShellMode();
+        PromoteFindFleetDetailOverlayToWindowRoot();
         ContentRendered += MainWindow_ContentRendered;
         _inGameMenuCoordinator.ActionRequested += InGameMenuCoordinator_ActionRequested;
         _inGameMenuCoordinator.Closed += InGameMenuCoordinator_Closed;
         _inGameMenuCoordinator.FleetRefreshRequested += InGameMenuCoordinator_FleetRefreshRequested;
         _inGameMenuCoordinator.FleetCommunicationRequested += InGameMenuCoordinator_FleetCommunicationRequested;
         _inGameMenuCoordinator.FleetMemberActionRequested += InGameMenuCoordinator_FleetMemberActionRequested;
+        _inGameMenuCoordinator.FleetShipImageReportRequested += InGameMenuCoordinator_FleetShipImageReportRequested;
         _inGameMenuCoordinator.SocialRefreshRequested += InGameMenuCoordinator_SocialRefreshRequested;
         _inGameMenuCoordinator.SocialConversationRequested += InGameMenuCoordinator_SocialConversationRequested;
         _inGameMenuCoordinator.SocialChannelRequested += InGameMenuCoordinator_SocialChannelRequested;
@@ -1017,6 +1026,7 @@ public partial class MainWindow : Window, IAppUpdateUi
             () => _authToken,
             () => CanSynchronizeUserData);
         _personalProfileRepository = new PersonalProfileRemoteRepository(_relayClient);
+        InitializeDualAxisPrivacyEditor();
         _appUpdateService = new AppUpdateService(
             _networkClient,
             BuildNetworkUri,
@@ -1028,10 +1038,10 @@ public partial class MainWindow : Window, IAppUpdateUi
         Title = appDisplayTitle;
         WindowTitleText.Text = appDisplayTitle;
         PlayersList.ItemsSource = _players;
-        SquadsList.ItemsSource = _squads;
+        SpecifiedVisibilityMembersList.ItemsSource = _specifiedVisibilityMembers;
         InitializeFleetRosterSearch();
-        SquadSelectionList.ItemsSource = _squads;
-        MySquadMembersList.ItemsSource = _mySquadMembers;
+        InitializeFleetMemberAcceptanceScenarios();
+        InitializeFleetProfileAcceptanceScenarios();
         FindFleetResults.ItemsSource = _networkFleets;
         OwnedShipsList.ItemsSource = _ownedShips;
         PersonalHangarDistributionLegend.ItemsSource = _personalHangarDistributionRows;
@@ -1047,6 +1057,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         FleetEventLogList.ItemsSource = _fleetEventLogs;
         FleetEventActionPlanList.ItemsSource = _fleetEventActionPlanRows;
         FleetNotificationCenterList.ItemsSource = _fleetNotificationCenterItems;
+        FleetMemberTimelineList.ItemsSource = _fleetMemberTimelineItems;
         FleetSystemRoleGroupList.ItemsSource = _fleetSystemRoleGroups;
         FleetCustomRoleGroupList.ItemsSource = _fleetCustomRoleGroups;
         FleetRolePermissionGroupsList.ItemsSource = _fleetSelectedRolePermissionGroups;
@@ -1076,12 +1087,20 @@ public partial class MainWindow : Window, IAppUpdateUi
         _accountName = config.AccountName;
         _authToken = hasSavedSession ? config.AuthToken : null;
         _accountId = hasSavedSession ? config.AccountId : null;
+        _fleetStateCachedAtUtc = config.FleetStateCachedAtUtc;
+        if (hasSavedSession)
+        {
+            _accountSessionCoordinator.Begin(
+                default,
+                new AccountSessionIdentity(_accountId, _accountName));
+        }
         _avatarPath = config.AvatarPath;
         _callsign = config.Callsign;
         BindGameplayStatisticsOwner();
         _allowEmailNotifications = FleetActionFeatureSettingsLocked ? false : config.AllowEmailNotifications;
         _syncPrivacySettings = ApplyFleetActionSettingsLock(SyncPrivacySettings.Load());
         _playerEventSharingSettings = PlayerEventSharingSettingsStore.Load();
+        ReloadDualAxisPrivacySettings();
         _notificationSettings = ApplyFleetActionSettingsLock(NotificationSettings.Load());
         _notificationSettings = _notificationSettings with
         {
@@ -1115,6 +1134,14 @@ public partial class MainWindow : Window, IAppUpdateUi
         {
             LoadFleetState(config.FleetStateJson);
         }
+        if (hasSavedSession)
+        {
+            BeginStartupDataGate(_accountSessionCoordinator.Capture());
+        }
+        else
+        {
+            RefreshStartupDataGatePresentation();
+        }
         RefreshAccountPanel();
         RenderCachedIdentity();
         EnsureAvatarStoredAsUserAsset();
@@ -1133,8 +1160,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         _isLoadingSettings = false;
 
         RefreshFleetHeader();
-        RenderSquads();
-        RenderMySquad();
         UpdateFleetEntryPanels();
         Loaded += (_, _) =>
         {
@@ -1284,7 +1309,7 @@ public partial class MainWindow : Window, IAppUpdateUi
             ShowOneTimeGuideHint(
                 "party-lobby-page",
                 "组队大厅",
-                "这里用于寻找临时队友，不会改变你在舰队中的正式小队编制。舰队小队请前往“我的舰队 > 小队”查看。");
+                "这里用于寻找临时队友；舰队内的长期协作关系仍由成员、聊天与权限管理承载。");
         }
     }
 
@@ -1328,6 +1353,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         ShowPersonalSection(PersonalSection.AppSettings);
         ShowPersonalDashboardSection(PersonalDashboardSection.AppSettings);
         QueueMainPageReveal(previousTab);
+        NotifyGuidedTourAction(GuideStep.OpenAccountMenu);
     }
 
     private void OpenPersonalIdentitySettings_Click(object sender, RoutedEventArgs e)
@@ -1371,8 +1397,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         FrameworkElement? content = FleetSubTabs.SelectedItem switch
         {
-            _ when FleetSubTabs.SelectedItem == AllPlayersTab => FleetMembersDeckPanel,
-            _ when FleetSubTabs.SelectedItem == SquadsTab => FleetSquadsDeckPanel,
+            _ when FleetSubTabs.SelectedItem == AllPlayersTab => FleetMembersDirectorySplitPanel,
             TabItem tab => tab.Content as FrameworkElement,
             _ => null
         };
@@ -1399,31 +1424,10 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         StarBridgeMessageBox.Show(
             this,
-            "临时组队大厅即将开放。当前可以先前往“我的舰队 > 小队”查看和加入舰队编制。",
+            "组队大厅暂时不可用，请稍后重试。",
             "组队大厅",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
-    }
-
-    private void PartyLobbyOpenFleetSquads_Click(object sender, RoutedEventArgs e)
-    {
-        NavigateToFleetSquads();
-    }
-
-    private void NavigateToFleetSquads()
-    {
-        if (!TryLeaveOverlayEditorTab())
-        {
-            return;
-        }
-
-        MainTabs.SelectedItem = FleetTab;
-        FleetSubTabs.SelectedItem = SquadsTab;
-        UpdateFleetEntryPanels();
-        RefreshFleetRailHeaders();
-        RefreshFleetMainContentView();
-        SetActiveNav(MyFleetNavButton);
-        RenderSquads();
     }
 
     private void PersonalSectionButton_Click(object sender, RoutedEventArgs e)
@@ -1506,6 +1510,10 @@ public partial class MainWindow : Window, IAppUpdateUi
         };
 
         ShowPersonalDashboardSection(section);
+        if (section == PersonalDashboardSection.Identity)
+        {
+            NotifyGuidedTourAction(GuideStep.OpenIdentitySettings);
+        }
     }
 
     private void ShowPersonalDashboardSection(PersonalDashboardSection section)
@@ -1530,6 +1538,10 @@ public partial class MainWindow : Window, IAppUpdateUi
         if (section == PersonalDashboardSection.AppSettings)
         {
             RefreshPersonalApplicationSettings();
+        }
+        else if (section == PersonalDashboardSection.SyncPrivacy)
+        {
+            _ = RefreshPrivateVisibilityGroupsAsync();
         }
     }
 
@@ -1894,15 +1906,17 @@ public partial class MainWindow : Window, IAppUpdateUi
         _appConfirmationSource?.TrySetResult(false);
         _appConfirmationSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        AppConfirmTitleText.Text = title;
+        AppConfirmOverlay.Title = title;
         AppConfirmMessageText.Text = message;
         AppConfirmDetailText.Text = detail;
         AppConfirmPrimaryButton.Content = confirmText;
         AppConfirmCancelButton.Content = cancelText;
         AppConfirmFooterText.Text = footerText;
-        AppConfirmPrimaryButton.Style = (Style)FindResource(danger ? "DangerButton" : "PrimaryButton");
+        AppConfirmPrimaryButton.Style = (Style)FindResource(
+            danger ? "BridgeModalDangerButtonStyle" : "BridgeDirectoryPrimaryButtonStyle");
+        AppConfirmPrimaryButton.IsDefault = !danger;
         AppConfirmCancelButton.Visibility = showCancel ? Visibility.Visible : Visibility.Collapsed;
-        AppConfirmOverlay.Visibility = Visibility.Visible;
+        AppConfirmOverlay.Show();
         if (showCancel)
         {
             AppConfirmCancelButton.Focus();
@@ -1946,7 +1960,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         var source = _appConfirmationSource;
         _appConfirmationSource = null;
-        AppConfirmOverlay.Visibility = Visibility.Collapsed;
+        AppConfirmOverlay.Hide();
         source?.TrySetResult(confirmed);
         SchedulePendingOverlayAppearanceUnlockNotice();
     }
@@ -2122,7 +2136,6 @@ public partial class MainWindow : Window, IAppUpdateUi
 
         if (transition.AccountChanged)
         {
-            _accountSessionRequiresFreshSync = true;
             _isAccountTransition = true;
             try
             {
@@ -2140,6 +2153,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         _accountName = incomingAccount;
         _accountId = auth.AccountId;
         _authToken = auth.Token;
+        ReloadDualAxisPrivacySettings();
         _accountEntitlements.Clear();
         foreach (var entitlement in auth.Entitlements ?? [])
         {
@@ -2157,6 +2171,11 @@ public partial class MainWindow : Window, IAppUpdateUi
             }
         }
         _callsign = auth.Callsign;
+        _gameIdVisibilityPreference = GameIdVisibilityPolicy.Normalize(
+            auth.Callsign,
+            auth.GameName ?? _localPlayer,
+            auth.GameIdVisibilityLocations);
+        ApplyGameIdVisibilityToEditor();
         UpdateIdentityBindingFromAuth(auth, showPrompt: IsLoaded);
         RefreshDirectMessagePrivacyAuthenticationState();
 
@@ -2427,11 +2446,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         }
 
         StopNetworkSyncTimers();
-        if (NetworkAutoSyncCheck.IsChecked == true)
-        {
-            NetworkAutoSyncCheck.IsChecked = false;
-        }
-
         _authenticationExpired = true;
         ClearAuthenticatedLocalState();
         SaveCurrentConfig(clearSavedSession: true);
@@ -2498,11 +2512,12 @@ public partial class MainWindow : Window, IAppUpdateUi
             HeaderAccountSafetyMenuItem.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            HeaderReportModerationMenuItem.Visibility = IsLoggedIn &&
-                                                        _accountEntitlements.Contains(TrustSafetyEntitlements.ModerateReports)
+            HeaderMyReportsMenuItem.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            HeaderAppealModerationMenuItem.Visibility = HeaderReportModerationMenuItem.Visibility;
+            PersonalAccountSafetyButton.Visibility = IsLoggedIn
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             HeaderLoginMenuItem.Header = IsLoggedIn ? "切换账号" : "登录 / 注册";
             HeaderLogoutMenuItem.Visibility = IsLoggedIn
                 ? Visibility.Visible
@@ -2580,6 +2595,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         finally
         {
             _isRefreshingAccountPanel = false;
+            RefreshBridgeShellAccountState();
             RefreshHeaderStatusBar();
         }
     }
@@ -2838,8 +2854,8 @@ public partial class MainWindow : Window, IAppUpdateUi
             PersonalPuHealthHintText,
             puReady ? "正常" : "等待确认",
             puReady
-                ? "已确认服务器分线、区域与当前会话信息。"
-                : "进入服务器后显示分线、区域与当前飞船。",
+                ? "已确认所在服务器、区域与当前会话信息。"
+                : "进入服务器后显示所在服务器、区域与当前飞船。",
             puReady ? successBrush : warningBrush);
 
         SetHealthCheck(
@@ -3363,13 +3379,6 @@ public partial class MainWindow : Window, IAppUpdateUi
                 : Visibility.Collapsed;
         }
 
-        if (SquadRequiresFleetPanel is not null)
-        {
-            SquadRequiresFleetPanel.Visibility = _hasFleet
-                ? Visibility.Collapsed
-                : Visibility.Visible;
-        }
-
         RefreshOverlayWindow();
     }
 
@@ -3653,6 +3662,13 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
+        if (FleetShipDetailsOverlay.Visibility == Visibility.Visible && e.Key == Key.Escape)
+        {
+            CloseFleetShipDetailsOverlay();
+            e.Handled = true;
+            return;
+        }
+
         if (_isOverlayEditorFullScreen && e.Key == Key.Escape)
         {
             if (!TryExitOverlayEditorFullScreen())
@@ -4034,6 +4050,9 @@ public partial class MainWindow : Window, IAppUpdateUi
 
         _fleetState.RefreshShipInferences(DateTimeOffset.Now);
         var nextPlayers = new List<PlayerRow>();
+        var localServerShard = _localPresence == PlayerPresenceKind.InGame && IsGameServerRegionCurrent()
+            ? _gameServerShard
+            : null;
 
         foreach (var player in _fleetState.Players)
         {
@@ -4078,13 +4097,10 @@ public partial class MainWindow : Window, IAppUpdateUi
                     : rawLocation;
             }
 
-            var playerSquadName = isLocalPlayer
-                ? _joinedSquad?.Name ?? "Unassigned"
-                : networkSnapshot?.Squad ?? "Unassigned";
-            var playerSquadEmblemPath = GetSquadEmblemPath(playerSquadName);
             var playerCallsign = isLocalPlayer
                 ? DisplayCallsign(_callsign, displayPlayerName)
                 : DisplayCallsign(networkSnapshot?.Callsign, displayPlayerName);
+            var isFleetCommander = IsFleetCommander(displayPlayerName, playerCallsign);
             var serverShard = isLocalPlayer && IsGameServerRegionCurrent()
                 ? _gameServerShard
                 : networkSnapshot?.ServerShard;
@@ -4123,6 +4139,12 @@ public partial class MainWindow : Window, IAppUpdateUi
             var sharedLocation = isLocalPlayer
                 ? displayLocation
                 : null;
+            var serverRelationship = FleetServerRelationship.Resolve(
+                presence,
+                isLocalPlayer,
+                serverShard,
+                _localPresence,
+                localServerShard);
             nextPlayers.Add(new PlayerRow(
                 displayPlayerName,
                 online ? "Online" : "Offline",
@@ -4132,14 +4154,12 @@ public partial class MainWindow : Window, IAppUpdateUi
                 playerCallsign,
                 isLocalPlayer ? _avatarPath : networkSnapshot?.AvatarImageData,
                 GetInitials(displayPlayerName),
-                playerSquadName,
-                GetFleetRole(displayPlayerName, playerCallsign),
+                GetFleetRole(displayPlayerName, playerCallsign, isFleetCommander),
                 GetFleetNameBrush(displayPlayerName),
                 rawShip,
                 shipConfidence,
                 locationConfidence,
                 rawLocation,
-                playerSquadEmblemPath,
                 isLocalPlayer,
                 CanShowMemberActionsForCurrentUser(),
                 serverShard,
@@ -4153,20 +4173,26 @@ public partial class MainWindow : Window, IAppUpdateUi
                 sharedLocation,
                 isLocalPlayer
                     ? _playerEventSharingSettings.ToWireValue()
-                    : networkSnapshot?.SharedEventTypes ?? (int)PlayerSharedEventTypes.All));
+                    : networkSnapshot?.SharedEventTypes ?? (int)PlayerSharedEventTypes.All,
+                hasServerSession,
+                isFleetCommander,
+                GetFleetConfiguredRoleColorBrush(displayPlayerName, playerCallsign, isFleetCommander),
+                HasFleetPosition: isFleetCommander ||
+                                  GetFleetPermission(displayPlayerName, playerCallsign)?.PermissionEnabled == true)
+            {
+                ResolvedServerRelationship = serverRelationship
+            });
         }
 
-        PlayerRowCollectionSynchronizer.Synchronize(_players, nextPlayers);
+        SynchronizeFleetMemberRows(nextPlayers);
 
+        var onlineMemberCount = _players.Count(player => IsOnlineStatus(player.SharedOnlineStatusValue));
         TotalMembersText.Text = _players.Count.ToString();
-        OnlineMembersText.Text = _players.Count(player => IsOnlineStatus(player.SharedOnlineStatusValue)).ToString();
+        OnlineMembersText.Text = $"{onlineMemberCount} / {_players.Count}";
         RefreshFleetShipInventory();
         RefreshFleetHeader();
-        RenderSquads();
-        RenderMySquad();
         RefreshFleetMemberManagement();
         RefreshFleetApplications();
-        RefreshSquadActionButtons();
         RefreshOverlayWindow();
         ProcessPlayerActivityDesktopNotifications();
         RefreshFriendPresenceFromFleetSnapshots();
@@ -4235,9 +4261,9 @@ public partial class MainWindow : Window, IAppUpdateUi
         };
     }
 
-    private string GetFleetRole(string playerName, string? callsign)
+    private string GetFleetRole(string playerName, string? callsign, bool? isFleetCommander = null)
     {
-        if (IsFleetCommander(playerName, callsign))
+        if (isFleetCommander ?? IsFleetCommander(playerName, callsign))
         {
             return "舰队指挥官";
         }
@@ -4281,6 +4307,28 @@ public partial class MainWindow : Window, IAppUpdateUi
         }
 
         return FindBrush("MutedTextBrush", Brushes.LightGray);
+    }
+
+    private System.Windows.Media.Brush? GetFleetConfiguredRoleColorBrush(
+        string playerName,
+        string? callsign,
+        bool isFleetCommander)
+    {
+        var roleKey = FleetCommanderRoleGroupKey;
+        if (!isFleetCommander)
+        {
+            var permission = GetFleetPermission(playerName, callsign);
+            if (permission is null || !permission.PermissionEnabled)
+            {
+                return null;
+            }
+
+            roleKey = NormalizeRoleGroupKey(permission.RoleGroupKey, permission.RoleTitle);
+        }
+
+        return _fleetRoleGroupDefinitions.TryGetValue(roleKey, out var role)
+            ? StatusPalette.TryBrushFromHex(role.Color)
+            : null;
     }
 
     private LocalFleetMemberPermission? GetFleetPermission(string? playerName, string? callsign = null)
@@ -4518,38 +4566,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         }
     }
 
-    private string? GetSquadEmblemPath(string? squadName)
-    {
-        if (string.IsNullOrWhiteSpace(squadName))
-        {
-            return null;
-        }
-
-        var emblemPath = _squads
-            .FirstOrDefault(squad => squad.Name.Equals(squadName, StringComparison.OrdinalIgnoreCase))
-            ?.EmblemPath;
-
-        return !string.IsNullOrWhiteSpace(emblemPath) &&
-               (File.Exists(emblemPath) || IsImageDataValue(emblemPath))
-            ? emblemPath
-            : null;
-    }
-
-    private void RefreshPlayerSquadEmblems()
-    {
-        for (var index = 0; index < _players.Count; index++)
-        {
-            var player = _players[index];
-            var squadEmblemPath = GetSquadEmblemPath(player.SquadName);
-            if (player.SquadEmblemPath == squadEmblemPath)
-            {
-                continue;
-            }
-
-            _players[index] = player with { SquadEmblemPath = squadEmblemPath };
-        }
-    }
-
     private void SelectFirstVisibleManageFleetTab()
     {
         if (ManageFleetTabs is null)
@@ -4714,13 +4730,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         return playerName.Equals(GetGameNameFromDisplayName(_fleetChiefCommander), StringComparison.OrdinalIgnoreCase) ||
                (!string.IsNullOrWhiteSpace(callsign) &&
                 callsign.Equals(GetCallsignFromDisplayName(_fleetChiefCommander), StringComparison.OrdinalIgnoreCase));
-    }
-
-    private System.Windows.Media.Brush GetSquadNameBrush(SquadRow squad, PlayerRow player)
-    {
-        return IsSquadCommander(squad, player)
-            ? FindBrush("SquadCommanderNameBrush", Brushes.Aquamarine)
-            : FindBrush("PrimaryTextBrush", Brushes.White);
     }
 
     private static System.Windows.Media.Brush FindBrush(string key, System.Windows.Media.Brush fallback)
@@ -4985,7 +4994,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         var snapshot = await Task.Run(() => TryFindLatestGameServerShardInLog(logPath!));
         if (snapshot is null)
         {
-            return new GameServerLogRefreshResult(false, false, false, "", "", "未在当前 Game.log 中找到服务器分线记录。");
+            return new GameServerLogRefreshResult(false, false, false, "", "", "未在当前 Game.log 中找到服务器记录。");
         }
 
         if (snapshot.IsLoggedOut || string.IsNullOrWhiteSpace(snapshot.Shard))
@@ -5191,6 +5200,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         {
             RefreshHomeDashboard();
         }
+
     }
 
 
@@ -5217,6 +5227,12 @@ public partial class MainWindow : Window, IAppUpdateUi
 
         App.WriteDiagnosticLog($"overlay-perf operation={operation} elapsedMs={stopwatch.Elapsed.TotalMilliseconds:F1}");
     }
+
+    // Shared by multiple MainWindow partials. This used to live in the overlay
+    // editor file even though the in-game snapshot builder also depended on it;
+    // keeping it on the root partial prevents either feature from owning the seam.
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "";
 
 
 

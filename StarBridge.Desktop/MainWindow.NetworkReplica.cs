@@ -33,7 +33,6 @@ public partial class MainWindow
         _latestFleetMemberPresenceFingerprint =
             FleetPassiveRefreshPolicy.BuildMemberPresenceFingerprint(snapshot.Members);
 
-        MergeNetworkFleetSquads(snapshot);
 
         if (string.IsNullOrWhiteSpace(snapshot.Name) || string.IsNullOrWhiteSpace(snapshot.Code))
         {
@@ -98,7 +97,7 @@ public partial class MainWindow
         {
             _fleetCurrentTaskTitle = snapshot.CurrentTaskTitle ?? "";
             _fleetCurrentTaskBrief = snapshot.CurrentTaskBrief ?? "";
-            _fleetCurrentTaskParticipants = snapshot.CurrentTaskParticipants ?? "";
+            _fleetCurrentTaskParticipants = NormalizeFleetTaskParticipants(snapshot.CurrentTaskParticipants);
             _fleetCurrentTaskRally = snapshot.CurrentTaskRally ?? "";
             _fleetCurrentTaskShip = snapshot.CurrentTaskShip ?? "";
             _fleetCurrentTaskTime = snapshot.CurrentTaskTime;
@@ -151,13 +150,15 @@ public partial class MainWindow
         }
 
         RebuildJoinedActionPlanIdsFromParticipants();
+        // The timestamp belongs to this exact authoritative cache write. Other
+        // settings saves persist the value unchanged and never fabricate one.
+        _fleetStateCachedAtUtc = DateTimeOffset.UtcNow;
         SaveCurrentConfig();
         RenderState();
         RefreshFleetOperationalSurfaces();
         RefreshFleetMemberManagement();
         RefreshFleetApplications();
         RefreshFleetInvites();
-        RefreshSquadActionButtons();
     }
 
     private void ApplyNetworkFleetProfileFields(NetworkFleetSnapshot snapshot)
@@ -213,6 +214,7 @@ public partial class MainWindow
         _fleetWebsiteUrl = NormalizeOptionalField(snapshot.WebsiteUrl);
         SetFleetExternalContacts((snapshot.ExternalContacts ?? [])
             .Select(contact => new LocalFleetExternalContact(contact.Platform, contact.Value)));
+        ApplyLoadedExternalContactPublicationState(snapshot.PublicShowExternalContacts);
 
         if (!string.IsNullOrWhiteSpace(snapshot.TimeZoneId))
         {
@@ -247,6 +249,13 @@ public partial class MainWindow
 
     private bool ShouldKeepLocalFleetProfileFields(NetworkFleetSnapshot snapshot)
     {
+#if DEBUG
+        if (IsFleetProfileAcceptanceMode)
+        {
+            return true;
+        }
+#endif
+
         if (_isManageProfileEditMode && _isManageProfileDirty)
         {
             return true;
@@ -489,7 +498,6 @@ public partial class MainWindow
     private void MergeFleetMembers(NetworkFleetMemberSnapshot[]? members)
     {
         var safeMembers = FleetMemberDisplaySanitizer.Canonicalize(members);
-        _fleetMemberJoinedAtByIdentity.Clear();
         foreach (var emailKey in _networkSnapshots.Keys.Where(FleetMemberDisplaySanitizer.IsEmail).ToArray())
         {
             _networkSnapshots.Remove(emailKey);
@@ -506,28 +514,27 @@ public partial class MainWindow
             }
 
             var gameName = member.GameName.Trim();
-            RegisterFleetMemberJoinedAt(member);
+            RegisterLocalFleetMemberJoinedAt(member);
             var memberSnapshotKey = GetNetworkSnapshotKey(member.AccountId, gameName);
             _networkSnapshots.TryGetValue(memberSnapshotKey, out var previousMemberSnapshot);
             var publicProfileId = UserAvatarProfileIdentityPolicy.PreserveKnownPublicId(
                 member.AccountId,
                 previousMemberSnapshot?.AccountId);
             var memberSnapshot = new NetworkPlayerSnapshot(
-                gameName,
-                DisplayCallsign(member.Callsign, gameName),
-                _fleetName,
-                string.IsNullOrWhiteSpace(member.SquadName) ? "Unassigned" : member.SquadName,
-                member.Online,
-                string.IsNullOrWhiteSpace(member.Ship) ? "Unknown" : member.Ship,
-                string.IsNullOrWhiteSpace(member.Ship) ||
+                Name: gameName,
+                Callsign: DisplayCallsign(member.Callsign, gameName),
+                Fleet: _fleetName,
+                Online: member.Online,
+                Ship: string.IsNullOrWhiteSpace(member.Ship) ? "Unknown" : member.Ship,
+                ShipConfidence: string.IsNullOrWhiteSpace(member.Ship) ||
                 member.Ship.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
                     ? "None"
                     : "Low",
-                string.IsNullOrWhiteSpace(member.Location) ? "Unknown" : member.Location,
-                string.IsNullOrWhiteSpace(member.LocationConfidence) ? "Low" : member.LocationConfidence,
-                member.LastUpdated == default ? DateTimeOffset.UtcNow : member.LastUpdated,
-                member.AvatarImageData,
-                null,
+                Location: string.IsNullOrWhiteSpace(member.Location) ? "Unknown" : member.Location,
+                LocationConfidence: string.IsNullOrWhiteSpace(member.LocationConfidence) ? "Low" : member.LocationConfidence,
+                LastUpdated: member.LastUpdated == default ? DateTimeOffset.UtcNow : member.LastUpdated,
+                AvatarImageData: member.AvatarImageData,
+                OwnedShips: null,
                 ServerShard: member.ServerShard,
                 ServerRegion: member.ServerRegion,
                 LiveStatus: member.LiveStatus,
@@ -556,7 +563,7 @@ public partial class MainWindow
 
     }
 
-    private void RegisterFleetMemberJoinedAt(NetworkFleetMemberSnapshot member)
+    private void RegisterLocalFleetMemberJoinedAt(NetworkFleetMemberSnapshot member)
     {
         if (member.JoinedAt == default || member.JoinedAt == DateTimeOffset.MinValue)
         {
@@ -572,26 +579,6 @@ public partial class MainWindow
             _fleetJoinedAtUtc = joinedAt;
         }
 
-        foreach (var key in new[]
-                 {
-                     BuildFleetMemberJoinIdentityKey("account", member.AccountId),
-                     BuildFleetMemberJoinIdentityKey("game", member.GameName),
-                     BuildFleetMemberJoinIdentityKey("callsign", member.Callsign)
-                 }
-                 .Where(key => !string.IsNullOrWhiteSpace(key)))
-        {
-            if (!_fleetMemberJoinedAtByIdentity.TryGetValue(key, out var existing) || joinedAt < existing)
-            {
-                _fleetMemberJoinedAtByIdentity[key] = joinedAt;
-            }
-        }
-    }
-
-    private static string BuildFleetMemberJoinIdentityKey(string kind, string? value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? ""
-            : $"{kind}:{value.Trim()}";
     }
 
     private void ApplyFleetMemberSnapshotToState(NetworkPlayerSnapshot snapshot)
@@ -859,7 +846,6 @@ public partial class MainWindow
         }
 
         var changed = false;
-        var joinedDifferentFleetFromSnapshot = false;
         if (string.IsNullOrWhiteSpace(_callsign) && !string.IsNullOrWhiteSpace(snapshot.Callsign))
         {
             _callsign = snapshot.Callsign!;
@@ -882,47 +868,6 @@ public partial class MainWindow
         {
             MarkFleetDirectorySyncPending();
             return;
-        }
-
-        if (_hasFleet)
-        {
-            var snapshotSquad = joinedDifferentFleetFromSnapshot ? "Unassigned" : snapshot.Squad?.Trim();
-            if (string.IsNullOrWhiteSpace(snapshotSquad) ||
-                snapshotSquad.Equals("Unassigned", StringComparison.OrdinalIgnoreCase))
-            {
-                if (_joinedSquad is not null)
-                {
-                    var previousJoinedSquad = _joinedSquad;
-                    _joinedSquad = null;
-                    if (_selectedSquad is not null &&
-                        _selectedSquad.Name.Equals(previousJoinedSquad.Name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _selectedSquad = null;
-                    }
-
-                    SquadSelectionList.SelectedItem = _selectedSquad;
-                    changed = true;
-                }
-            }
-            else
-            {
-                var squad = _squads.FirstOrDefault(item =>
-                    item.Name.Equals(snapshotSquad, StringComparison.OrdinalIgnoreCase));
-                if (squad is not null && !ReferenceEquals(_joinedSquad, squad))
-                {
-                    _joinedSquad = squad;
-                    _selectedSquad = squad;
-                    SquadSelectionList.SelectedItem = _selectedSquad;
-                    changed = true;
-                }
-            }
-        }
-
-        if (_hasFleet && _joinedSquad is not null && _selectedSquad is null)
-        {
-            _selectedSquad = _joinedSquad;
-            SquadSelectionList.SelectedItem = _selectedSquad;
-            changed = true;
         }
 
         if (!changed)
@@ -1035,176 +980,6 @@ public partial class MainWindow
         }
 
         await PushFleetDirectoryAsync(silent);
-    }
-
-    private void MergeNetworkFleetSquads(NetworkFleetSnapshot snapshot)
-    {
-        var changed = false;
-        var remoteSquadSnapshots = snapshot.Squads ?? [];
-        var remoteSquadNames = remoteSquadSnapshots
-            .Where(squad => !string.IsNullOrWhiteSpace(squad.Name))
-            .Select(squad => squad.Name.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (snapshot.Squads is not null)
-        {
-            var removedSquadNames = _squads
-                .Where(squad => !remoteSquadNames.Contains(squad.Name) &&
-                                !HasRecentLocalSquadEdit(squad.Name))
-                .Select(squad => squad.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (removedSquadNames.Count > 0)
-            {
-                for (var index = _squads.Count - 1; index >= 0; index--)
-                {
-                    if (removedSquadNames.Contains(_squads[index].Name))
-                    {
-                        _squads.RemoveAt(index);
-                        changed = true;
-                    }
-                }
-
-                if (_joinedSquad is not null && removedSquadNames.Contains(_joinedSquad.Name))
-                {
-                    _joinedSquad = null;
-                }
-
-                if (_selectedSquad is not null && removedSquadNames.Contains(_selectedSquad.Name))
-                {
-                    _selectedSquad = _joinedSquad;
-                    SquadSelectionList.SelectedItem = _selectedSquad;
-                }
-            }
-        }
-
-        foreach (var squadSnapshot in remoteSquadSnapshots)
-        {
-            if (string.IsNullOrWhiteSpace(squadSnapshot.Name))
-            {
-                continue;
-            }
-
-            var existing = _squads.FirstOrDefault(squad =>
-                squad.Name.Equals(squadSnapshot.Name, StringComparison.OrdinalIgnoreCase));
-            if (existing is null)
-            {
-                _squads.Add(new SquadRow
-                {
-                    Id = FleetChatIdentity.NormalizeSquadId(squadSnapshot.Id, squadSnapshot.Name),
-                    Name = squadSnapshot.Name,
-                    Icon = GetInitials(squadSnapshot.Name),
-                    Commander = string.IsNullOrWhiteSpace(squadSnapshot.Commander) ? "Unassigned" : squadSnapshot.Commander!,
-                    Mission = string.IsNullOrWhiteSpace(squadSnapshot.Mission) ? "Standby" : squadSnapshot.Mission!,
-                    RallyPoint = string.IsNullOrWhiteSpace(squadSnapshot.RallyPoint) ? "Use Global" : squadSnapshot.RallyPoint!,
-                    Type = string.IsNullOrWhiteSpace(squadSnapshot.Type) ? "Assault" : squadSnapshot.Type!,
-                    Description = string.IsNullOrWhiteSpace(squadSnapshot.Description) ? "No squad briefing yet." : squadSnapshot.Description!,
-                    EmblemPath = SaveNetworkSquadEmblem(snapshot, squadSnapshot),
-                    UpdatedAt = squadSnapshot.UpdatedAt
-                });
-                changed = true;
-                continue;
-            }
-
-            if (ShouldPreserveLocalSquad(existing, squadSnapshot))
-            {
-                continue;
-            }
-
-            var nextId = FleetChatIdentity.NormalizeSquadId(squadSnapshot.Id, squadSnapshot.Name);
-            var nextCommander = string.IsNullOrWhiteSpace(squadSnapshot.Commander) ? existing.Commander : squadSnapshot.Commander!;
-            var nextMission = string.IsNullOrWhiteSpace(squadSnapshot.Mission) ? existing.Mission : squadSnapshot.Mission!;
-            var nextRallyPoint = string.IsNullOrWhiteSpace(squadSnapshot.RallyPoint) ? existing.RallyPoint : squadSnapshot.RallyPoint!;
-            var nextType = string.IsNullOrWhiteSpace(squadSnapshot.Type) ? existing.Type : squadSnapshot.Type!;
-            var nextDescription = string.IsNullOrWhiteSpace(squadSnapshot.Description) ? existing.Description : squadSnapshot.Description!;
-            var remoteHasTimestamp = squadSnapshot.UpdatedAt != default;
-            var nextUpdatedAt = remoteHasTimestamp
-                ? squadSnapshot.UpdatedAt
-                : existing.UpdatedAt;
-            if (remoteHasTimestamp && existing.UpdatedAt != default && nextUpdatedAt < existing.UpdatedAt)
-            {
-                continue;
-            }
-
-            var nextEmblemPath = SaveNetworkSquadEmblem(snapshot, squadSnapshot);
-            if (nextEmblemPath is null && !string.IsNullOrWhiteSpace(squadSnapshot.EmblemImageData))
-            {
-                nextEmblemPath = existing.EmblemPath;
-            }
-            if (existing.Id != nextId ||
-                existing.Commander != nextCommander ||
-                existing.Mission != nextMission ||
-                existing.RallyPoint != nextRallyPoint ||
-                existing.Type != nextType ||
-                existing.Description != nextDescription ||
-                existing.EmblemPath != nextEmblemPath ||
-                existing.UpdatedAt != nextUpdatedAt)
-            {
-                existing.Id = nextId;
-                existing.Commander = nextCommander;
-                existing.Mission = nextMission;
-                existing.RallyPoint = nextRallyPoint;
-                existing.Type = nextType;
-                existing.Description = nextDescription;
-                existing.EmblemPath = nextEmblemPath;
-                existing.UpdatedAt = nextUpdatedAt;
-                existing.RefreshComputed();
-                changed = true;
-            }
-        }
-
-        if (changed)
-        {
-            RenderSquads();
-            RenderMySquad();
-            RefreshOverlayWindow();
-            SaveCurrentConfig();
-        }
-    }
-
-    private void MarkLocalSquadEdit(SquadRow squad)
-    {
-        if (string.IsNullOrWhiteSpace(squad.Name))
-        {
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        squad.UpdatedAt = now;
-        _localSquadEditTimes[squad.Name.Trim()] = now;
-    }
-
-    private bool ShouldPreserveLocalSquad(SquadRow existing, NetworkSquadSnapshot remote)
-    {
-        if (!HasRecentLocalSquadEdit(existing.Name))
-        {
-            return false;
-        }
-
-        if (remote.UpdatedAt == default || existing.UpdatedAt >= remote.UpdatedAt)
-        {
-            return true;
-        }
-
-        _localSquadEditTimes.Remove(existing.Name.Trim());
-        return false;
-    }
-
-    private bool HasRecentLocalSquadEdit(string? squadName)
-    {
-        if (string.IsNullOrWhiteSpace(squadName) ||
-            !_localSquadEditTimes.TryGetValue(squadName.Trim(), out var editedAt))
-        {
-            return false;
-        }
-
-        if (DateTimeOffset.UtcNow - editedAt <= LocalSquadEditProtectionWindow)
-        {
-            return true;
-        }
-
-        _localSquadEditTimes.Remove(squadName.Trim());
-        return false;
     }
 
     private void MarkLocalFleetLogoEdit()

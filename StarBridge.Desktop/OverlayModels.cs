@@ -181,6 +181,8 @@ public enum OverlayEventNotificationTypes
     SameServer = 1 << 2,
     ShipChange = 1 << 3,
     LocationChange = 1 << 4,
+    // Bits 5 and 6 are retired squad-event slots. Keep later values stable so
+    // existing serialized presets continue to decode correctly.
     SquadChange = 1 << 5,
     CommanderChange = 1 << 6,
     OnlineSummary = 1 << 7,
@@ -192,8 +194,6 @@ public enum OverlayEventNotificationTypes
           SameServer |
           ShipChange |
           LocationChange |
-          SquadChange |
-          CommanderChange |
           OnlineSummary |
           PrimaryServer |
           DeathAndRespawn |
@@ -239,8 +239,6 @@ public sealed record OverlayEventNotificationDurationOverrides(
             OverlayEventNotificationTypes.SameServer => SameServer,
             OverlayEventNotificationTypes.ShipChange => ShipChange,
             OverlayEventNotificationTypes.LocationChange => LocationChange,
-            OverlayEventNotificationTypes.SquadChange => SquadChange,
-            OverlayEventNotificationTypes.CommanderChange => CommanderChange,
             OverlayEventNotificationTypes.OnlineSummary => OnlineSummary,
             OverlayEventNotificationTypes.PrimaryServer => PrimaryServer,
             OverlayEventNotificationTypes.DeathAndRespawn => DeathAndRespawn,
@@ -267,8 +265,6 @@ public sealed record OverlayEventNotificationDurationOverrides(
             OverlayEventNotificationTypes.SameServer => this with { SameServer = seconds },
             OverlayEventNotificationTypes.ShipChange => this with { ShipChange = seconds },
             OverlayEventNotificationTypes.LocationChange => this with { LocationChange = seconds },
-            OverlayEventNotificationTypes.SquadChange => this with { SquadChange = seconds },
-            OverlayEventNotificationTypes.CommanderChange => this with { CommanderChange = seconds },
             OverlayEventNotificationTypes.OnlineSummary => this with { OnlineSummary = seconds },
             OverlayEventNotificationTypes.PrimaryServer => this with { PrimaryServer = seconds },
             OverlayEventNotificationTypes.DeathAndRespawn => this with { DeathAndRespawn = seconds },
@@ -286,8 +282,9 @@ public sealed record OverlayEventNotificationDurationOverrides(
             Format(SameServer),
             Format(ShipChange),
             Format(LocationChange),
-            Format(SquadChange),
-            Format(CommanderChange),
+            // Retired squad-event duration slots: preserve positions, not values.
+            Format(InheritDefaultSeconds),
+            Format(InheritDefaultSeconds),
             Format(OnlineSummary),
             Format(PrimaryServer),
             Format(DeathAndRespawn),
@@ -308,8 +305,8 @@ public sealed record OverlayEventNotificationDurationOverrides(
             Read(parts, 2),
             Read(parts, 3),
             Read(parts, 4),
-            Read(parts, 5),
-            Read(parts, 6),
+            InheritDefaultSeconds,
+            InheritDefaultSeconds,
             Read(parts, 7),
             Read(parts, 8),
             Read(parts, 9),
@@ -860,8 +857,10 @@ public sealed record OverlayDisplaySettings(
     public static OverlayChatTextEdgeStrength NormalizeChatTextEdgeStrength(OverlayChatTextEdgeStrength value) =>
         Enum.IsDefined(value) ? value : Default.ChatTextEdgeStrength;
 
+    // Slot 68 stays in the wire format for positional compatibility, but the
+    // retired squad/all scopes no longer have live behavior.
     public static OverlayFleetChatScope NormalizeFleetChatScope(OverlayFleetChatScope value) =>
-        Enum.IsDefined(value) ? value : Default.FleetChatScope;
+        OverlayFleetChatScope.Fleet;
 
     public static double NormalizeCommunicationEventDuration(double value) =>
         double.IsFinite(value) ? Math.Clamp(value, 2, 12) : Default.CommunicationEventDurationSeconds;
@@ -1109,169 +1108,6 @@ public sealed record OverlayChatMessage(
     string SenderColor,
     string? SourceLabel = null);
 
-public sealed class SquadRow : System.ComponentModel.INotifyPropertyChanged
-{
-    private string _commander = "未分配";
-    private string _description = "暂无小队简介。";
-    private string? _emblemPath;
-    private bool _isExpanded;
-    private bool _isJoinedByCurrentUser;
-    private bool _canManageByCurrentUser;
-
-    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-
-    public string Id { get; set; } = "";
-
-    public string Name { get; set; } = "未命名小队";
-
-    public string Icon { get; set; } = "?";
-
-    public string Commander
-    {
-        get => _commander;
-        set
-        {
-            _commander = value;
-            OnChanged(nameof(Commander));
-            RefreshComputed();
-        }
-    }
-
-    public string Mission { get; set; } = "待命";
-
-    public string RallyPoint { get; set; } = "使用全局集结点";
-
-    public string Description
-    {
-        get => _description;
-        set
-        {
-            _description = value;
-            OnChanged(nameof(Description));
-        }
-    }
-
-    public string Type { get; set; } = "突击";
-
-    public string? EmblemPath
-    {
-        get => _emblemPath;
-        set
-        {
-            _emblemPath = value;
-            OnChanged(nameof(EmblemPath));
-        }
-    }
-
-    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-
-    public ObservableCollection<MemberAvatarRow> Members { get; } = [];
-
-    public ObservableCollection<MemberAvatarRow> PreviewMembers { get; } = [];
-
-    public ObservableCollection<SquadMemberStatusRow> StatusMembers { get; } = [];
-
-    public string CommanderLine => $"指挥官 / {Commander}";
-
-    public string MissionLine => $"任务 / {Mission}";
-
-    public string RallyLine => $"集结点 / {RallyPoint}";
-
-    public string SummaryLine => $"{Members.Count} 名成员 / {OnlineCount} 人在线";
-
-    public int MemberCount => Members.Count;
-
-    public int OnlineCount => Members.Count(member => string.Equals(member.Status, "Online", StringComparison.OrdinalIgnoreCase));
-
-    public string MemberCountLine => $"{MemberCount} 名成员";
-
-    public string OnlineCountLine => $"{OnlineCount} 人在线";
-
-    public int PreviewOverflowCount => Math.Max(0, MemberCount - PreviewMembers.Count);
-
-    public string PreviewOverflowLine => $"+{PreviewOverflowCount}";
-
-    public string SquadStatusLine => MemberCount == 0
-        ? "离线"
-        : OnlineCount == 0
-            ? "离线"
-            : OnlineCount == MemberCount
-                ? "在线"
-                : "部分在线";
-
-    public Brush SquadStatusBrush => MemberCount == 0
-        ? StatusPalette.DisabledBrush
-        : OnlineCount == 0
-            ? StatusPalette.DisabledBrush
-            : OnlineCount == MemberCount
-                ? StatusPalette.SuccessBrush
-                : StatusPalette.InfoBrush;
-
-    public string TypeLine => $"类型 / {Type}";
-
-    public bool IsExpanded
-    {
-        get => _isExpanded;
-        set
-        {
-            _isExpanded = value;
-            OnChanged(nameof(IsExpanded));
-        }
-    }
-
-    public bool IsJoinedByCurrentUser
-    {
-        get => _isJoinedByCurrentUser;
-        set
-        {
-            if (_isJoinedByCurrentUser == value)
-            {
-                return;
-            }
-
-            _isJoinedByCurrentUser = value;
-            OnChanged(nameof(IsJoinedByCurrentUser));
-        }
-    }
-
-    public bool CanManageByCurrentUser
-    {
-        get => _canManageByCurrentUser;
-        set
-        {
-            if (_canManageByCurrentUser == value)
-            {
-                return;
-            }
-
-            _canManageByCurrentUser = value;
-            OnChanged(nameof(CanManageByCurrentUser));
-        }
-    }
-
-    public void RefreshComputed()
-    {
-        OnChanged(nameof(CommanderLine));
-        OnChanged(nameof(MissionLine));
-        OnChanged(nameof(RallyLine));
-        OnChanged(nameof(SummaryLine));
-        OnChanged(nameof(MemberCount));
-        OnChanged(nameof(OnlineCount));
-        OnChanged(nameof(MemberCountLine));
-        OnChanged(nameof(OnlineCountLine));
-        OnChanged(nameof(PreviewOverflowCount));
-        OnChanged(nameof(PreviewOverflowLine));
-        OnChanged(nameof(SquadStatusLine));
-        OnChanged(nameof(SquadStatusBrush));
-        OnChanged(nameof(TypeLine));
-    }
-
-    private void OnChanged(string propertyName)
-    {
-        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propertyName));
-    }
-}
-
 public sealed record MemberAvatarRow(
     string Name,
     string Initials,
@@ -1474,7 +1310,7 @@ public sealed class OverlayLayoutItem
         return key switch
         {
             "Notice" => "通讯事件",
-            "Squads" => "小队态势",
+            "Squads" => "舰队总览",
             "Members" => "成员状态",
             "Chat" => "场景通讯",
             _ => key

@@ -7,8 +7,6 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
 using Brush = System.Windows.Media.Brush;
-using Color = System.Windows.Media.Color;
-using ColorConverter = System.Windows.Media.ColorConverter;
 
 namespace StarBridge.Desktop;
 
@@ -116,7 +114,6 @@ public partial class MainWindow
     private void RenderFleetAnnouncementSurfaces()
     {
         RefreshFleetHeaderAnnouncement();
-        RefreshFleetCommunicationOverview();
         RenderFleetAnnouncementCenter();
     }
 
@@ -128,11 +125,28 @@ public partial class MainWindow
         }
 
         var title = _fleetCurrentAnnouncement?.Title ?? _fleetNoticeTitle;
-        FleetHeaderAnnouncementTitleText.Text = string.IsNullOrWhiteSpace(title)
-            ? _language.Equals("zh", StringComparison.OrdinalIgnoreCase)
-                ? "暂无公告 · 点击查看"
-                : "No bulletin · Open center"
-            : title;
+        var content = _fleetCurrentAnnouncement?.Content ?? _fleetNoticeContent;
+        var useChinese = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        var presentation = FleetHeaderAnnouncementProjection.Project(title, content, useChinese);
+
+        FleetHeaderAnnouncementTitleText.Inlines.Clear();
+        FleetHeaderAnnouncementTitleText.Inlines.Add(
+            new System.Windows.Documents.Run(presentation.TitleText));
+        if (presentation.ContentSuffix.Length > 0)
+        {
+            FleetHeaderAnnouncementTitleText.Inlines.Add(
+                new System.Windows.Documents.Run(presentation.ContentSuffix)
+                {
+                    Foreground = FleetCommandBrush(Theming.BridgeBrushToken.Ink3)
+                });
+        }
+
+        FleetHeaderAnnouncementTitleText.ToolTip = presentation.AccessibleText;
+        System.Windows.Automation.AutomationProperties.SetName(
+            FleetHeaderAnnouncementButton,
+            useChinese
+                ? $"公告：{presentation.AccessibleText}"
+                : $"Bulletin: {presentation.AccessibleText}");
         FleetHeaderAnnouncementButton.IsEnabled = _hasFleet;
     }
 
@@ -218,15 +232,15 @@ public partial class MainWindow
 
     private async Task OpenFleetAnnouncementCenterAsync()
     {
-        FleetActivitySchedulePanel.Visibility = Visibility.Collapsed;
+        FleetActivitySchedulePanel.Hide();
         await RefreshFleetAnnouncementsAsync(showErrors: true);
         RenderFleetAnnouncementCenter();
-        FleetAnnouncementCenterPanel.Visibility = Visibility.Visible;
+        FleetAnnouncementCenterPanel.Show();
     }
 
     private void CloseFleetAnnouncementCenterButton_Click(object sender, RoutedEventArgs e)
     {
-        FleetAnnouncementCenterPanel.Visibility = Visibility.Collapsed;
+        FleetAnnouncementCenterPanel.Hide();
         ResetWithdrawAnnouncementConfirmation();
     }
 
@@ -342,10 +356,10 @@ public partial class MainWindow
             }
 
             ApplyFleetAnnouncementTimeline(result.Timeline);
-            FleetNoticeEditorPanel.Visibility = Visibility.Collapsed;
+            FleetNoticeEditorPanel.Hide();
             if (_returnToAnnouncementCenterAfterEdit)
             {
-                FleetAnnouncementCenterPanel.Visibility = Visibility.Visible;
+                FleetAnnouncementCenterPanel.Show();
                 SetFleetAnnouncementStatus(
                     _fleetAnnouncementEditorCreatesNew ? "新公告已发布。" : "当前公告已更新。",
                     StatusPalette.SuccessBrush);
@@ -391,14 +405,14 @@ public partial class MainWindow
 
         _fleetAnnouncementEditorCreatesNew = createNew || _fleetCurrentAnnouncement is null;
         _returnToAnnouncementCenterAfterEdit = returnToCenter;
-        FleetAnnouncementCenterPanel.Visibility = Visibility.Collapsed;
-        FleetNoticeEditorHeadingText.Text = _fleetAnnouncementEditorCreatesNew ? "发布舰队公告" : "编辑当前公告";
+        FleetAnnouncementCenterPanel.Hide();
+        FleetNoticeEditorPanel.Title = _fleetAnnouncementEditorCreatesNew ? "发布舰队公告" : "编辑当前公告";
         PublishFleetNoticeButton.Content = _fleetAnnouncementEditorCreatesNew ? "发布公告" : "保存修订";
         FleetNoticeTitleBox.Text = _fleetAnnouncementEditorCreatesNew ? "" : _fleetCurrentAnnouncement?.Title ?? _fleetNoticeTitle;
         FleetNoticeContentBox.Text = _fleetAnnouncementEditorCreatesNew ? "" : _fleetCurrentAnnouncement?.Content ?? _fleetNoticeContent;
         FleetNoticeValidationText.Text = "";
         FleetNoticeValidationText.Foreground = StatusPalette.WarningBrush;
-        FleetNoticeEditorPanel.Visibility = Visibility.Visible;
+        FleetNoticeEditorPanel.Show();
         FleetNoticeTitleBox.Focus();
     }
 
@@ -435,8 +449,8 @@ public partial class MainWindow
         _fleetAnnouncementCanManage = false;
         _isRefreshingFleetAnnouncements = false;
         _isMutatingFleetAnnouncement = false;
-        FleetAnnouncementCenterPanel.Visibility = Visibility.Collapsed;
-        FleetNoticeEditorPanel.Visibility = Visibility.Collapsed;
+        FleetAnnouncementCenterPanel.Hide();
+        FleetNoticeEditorPanel.Hide();
         ResetWithdrawAnnouncementConfirmation();
         RenderFleetAnnouncementSurfaces();
     }
@@ -454,8 +468,6 @@ public partial class MainWindow
 
 public sealed class FleetAnnouncementRow : INotifyPropertyChanged
 {
-    private static readonly Brush ArchivedBrush = CreateBrush("#718A9A");
-    private static readonly Brush WithdrawnBrush = CreateBrush("#D9828B");
     private string _timeText;
 
     public FleetAnnouncementRow(FleetAnnouncementContract announcement)
@@ -473,9 +485,9 @@ public sealed class FleetAnnouncementRow : INotifyPropertyChanged
     public string StateText => Announcement.State.Equals(FleetAnnouncementStates.Withdrawn, StringComparison.OrdinalIgnoreCase)
         ? "已撤下"
         : "已归档";
-    public Brush StateBrush => Announcement.State.Equals(FleetAnnouncementStates.Withdrawn, StringComparison.OrdinalIgnoreCase)
-        ? WithdrawnBrush
-        : ArchivedBrush;
+    public bool IsWithdrawn => Announcement.State.Equals(
+        FleetAnnouncementStates.Withdrawn,
+        StringComparison.OrdinalIgnoreCase);
     public string TimeText
     {
         get => _timeText;
@@ -496,10 +508,4 @@ public sealed class FleetAnnouncementRow : INotifyPropertyChanged
     public void RefreshTime(DateTimeOffset now) =>
         TimeText = CommunicationTimeFormatter.Format(Announcement.UpdatedAt, now);
 
-    private static Brush CreateBrush(string color)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-        brush.Freeze();
-        return brush;
-    }
 }

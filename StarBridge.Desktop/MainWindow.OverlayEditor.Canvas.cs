@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using StarBridge.Core.Events;
 using StarBridge.Core.State;
+using StarBridge.Desktop.Theming;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -360,7 +361,7 @@ public partial class MainWindow
                 ? Brushes.Transparent
                 : new SolidColorBrush(Color.FromArgb(backgroundAlpha, 5, 18, 28)),
             BorderBrush = isSelected
-                ? Brushes.WhiteSmoke
+                ? BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink)
                 : usesCustomChrome
                     ? Brushes.Transparent
                     : accent,
@@ -460,7 +461,8 @@ public partial class MainWindow
 
         if (isSelected)
         {
-            var badge = CreateOverlayEditorSelectedModuleBadge(Brushes.WhiteSmoke);
+            var badge = CreateOverlayEditorSelectedModuleBadge(
+                BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink));
             badge.HorizontalAlignment = HorizontalAlignment.Right;
             badge.Margin = new Thickness(0, 7, 7, 0);
             Grid.SetColumnSpan(badge, 3);
@@ -648,7 +650,7 @@ public partial class MainWindow
 
         if (element is Border border)
         {
-            border.BorderBrush = Brushes.WhiteSmoke;
+            border.BorderBrush = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
             border.BorderThickness = new Thickness(2);
         }
 
@@ -1208,10 +1210,19 @@ public partial class MainWindow
             return;
         }
 
+        _isOverlayEditorInspectorOpen = open;
         if (open && !_isOverlayEditorFullScreen)
         {
             CaptureOverlayInspectorReturnState();
-            OverlayInspectorPanel.Visibility = Visibility.Visible;
+            if (_isOverlayEditorCompact)
+            {
+                _overlayEditorCompactDrawer = OverlayEditorCompactDrawer.Inspector;
+                ApplyOverlayEditorResponsiveState();
+            }
+            else
+            {
+                OverlayInspectorPanel.Visibility = Visibility.Visible;
+            }
             OverlayInspectorScrollViewer?.ScrollToTop();
             return;
         }
@@ -1220,6 +1231,11 @@ public partial class MainWindow
         if (!open && !_isOverlayEditorFullScreen)
         {
             RestoreOverlaySettingsAfterInspector();
+            if (_isOverlayEditorCompact)
+            {
+                _overlayEditorCompactDrawer = OverlayEditorCompactDrawer.Settings;
+                ApplyOverlayEditorResponsiveState();
+            }
         }
     }
 

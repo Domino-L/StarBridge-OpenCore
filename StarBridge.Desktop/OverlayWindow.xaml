@@ -98,6 +98,24 @@
                 </Canvas>
             </Grid>
         </DataTemplate>
+        <DataTemplate x:Key="OverlayOverviewLocationTemplate">
+            <Grid Margin="0,0,10,3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding DisplayName}"
+                           Foreground="{Binding DataContext.TextBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                           FontSize="10"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding DisplayMetricText}"
+                           Foreground="{Binding DataContext.MutedBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                           FontSize="10"
+                           TextAlignment="Right"
+                           Margin="8,0,0,0" />
+            </Grid>
+        </DataTemplate>
     </Window.Resources>
 
     <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False" Opacity="{Binding OverlayOpacity}">
@@ -160,12 +178,85 @@
             <Grid>
                 <StackPanel Margin="10,8,14,8">
                     <TextBlock Text="{Binding SquadsTitle}" Style="{StaticResource OverlayTitle}" />
-                    <Grid Margin="0,9,0,0"
-                          Visibility="{Binding SquadStatusCompactVisibility}">
+                    <StackPanel Margin="0,9,0,0"
+                                Visibility="{Binding FleetOverviewVisibility}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding SquadStatusPrimaryName}"
+                                       Foreground="{Binding SquadStatusBrush}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SquadStatusSummary}"
+                                       Foreground="{Binding TextBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="10,0,0,0" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding SquadStatusServerSummary}"
+                                       Foreground="{Binding TextBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="10,0,0,0" />
+                        </Grid>
+                        <TextBlock Text="{Binding SquadStatusFocusLine}"
+                                   Visibility="{Binding FleetOverviewFocusVisibility}"
+                                   Foreground="{Binding MutedBrush}"
+                                   FontSize="10"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,6,0,0" />
+                        <Grid Visibility="{Binding OverviewLocationPlaceholderVisibility}"
+                              Margin="0,7,10,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding OverviewLocationPlaceholder}"
+                                       Foreground="{Binding TextBrush}"
+                                       FontSize="10"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding OverviewLocationPlaceholderMetric}"
+                                       Foreground="{Binding MutedBrush}"
+                                       FontSize="10"
+                                       TextAlignment="Right"
+                                       Margin="8,0,0,0" />
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding OverviewVisibleLocations}"
+                                      ItemTemplate="{StaticResource OverlayOverviewLocationTemplate}"
+                                      Visibility="{Binding OverviewLocationsHorizontalVisibility}"
+                                      Margin="0,7,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Rows="1" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding OverviewVisibleLocations}"
+                                      ItemTemplate="{StaticResource OverlayOverviewLocationTemplate}"
+                                      Visibility="{Binding OverviewLocationsVerticalVisibility}"
+                                      Margin="0,7,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </StackPanel>
+                    <Grid Visibility="{Binding PartyOverviewVisibility}">
+                        <Grid Margin="0,9,0,0"
+                              Visibility="{Binding SquadStatusCompactVisibility}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -234,14 +325,14 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                    </Grid>
-                    <StackPanel Margin="0,10,0,0"
-                                Visibility="{Binding SquadStatusDetailVisibility}">
+                        </Grid>
+                        <StackPanel Margin="0,10,0,0"
+                                    Visibility="{Binding SquadStatusDetailVisibility}">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="{Binding SquadStatusPrimaryName}"
                                        Foreground="{Binding TextBrush}"
@@ -301,7 +392,8 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                    </StackPanel>
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
                 <Path Style="{StaticResource OverlayScanPath}"
                       Data="M0,34 L0,120"

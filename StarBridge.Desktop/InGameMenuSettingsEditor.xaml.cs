@@ -82,6 +82,13 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
         public override string ToString() => DisplayName;
     }
 
+    private enum MenuEditorCompactDrawer
+    {
+        None,
+        Navigation,
+        Settings
+    }
+
     private static readonly IReadOnlyDictionary<InGameMenuTool, string>
         ToolDisplayNames = new Dictionary<InGameMenuTool, string>
         {
@@ -110,6 +117,8 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
     private bool _navigationWheelInterruptionAttached;
     private bool _navigationActiveRailInitialized;
     private string _screenshotDirectory = "";
+    private bool _isMenuEditorCompact;
+    private MenuEditorCompactDrawer _menuEditorCompactDrawer;
 
     public ObservableCollection<InGameMenuToolSettingItem> ToolItems
     {
@@ -217,6 +226,8 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         HotkeyStatusBadge.BorderBrush = brush;
+        Controls.InGameLoadingPresentation.Apply(HotkeyLoadingIndicator, false);
+        HotkeyStatusIndicator.Visibility = Visibility.Visible;
         HotkeyStatusIndicator.Fill = brush;
         HotkeyStatusText.Foreground = brush;
         HotkeyStatusText.Text = status;
@@ -357,7 +368,6 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
             ImageOpacitySlider.Value = settings.ImageDefaultOpacity;
             RememberImageAdjustmentsCheck.IsChecked = settings.RememberImageAdjustments;
             ImageDefaultPinnedCheck.IsChecked = settings.ImageDefaultPinned;
-            ImageWindowLimitSlider.Value = settings.ImageWindowLimit;
             PauseAnimatedImagesCheck.IsChecked = settings.PauseHiddenAnimatedImages;
 
             _screenshotDirectory = settings.ScreenshotDirectory;
@@ -466,7 +476,7 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
             ImageDefaultOpacity = (int)Math.Round(ImageOpacitySlider.Value),
             RememberImageAdjustments = RememberImageAdjustmentsCheck.IsChecked == true,
             ImageDefaultPinned = ImageDefaultPinnedCheck.IsChecked == true,
-            ImageWindowLimit = (int)Math.Round(ImageWindowLimitSlider.Value),
+            ImageWindowLimit = 1,
             PauseHiddenAnimatedImages = PauseAnimatedImagesCheck.IsChecked == true,
             ScreenshotDirectory = _screenshotDirectory,
             ScreenshotFormat = ChoiceValue(ScreenshotFormatCombo, current.ScreenshotFormat),
@@ -631,8 +641,6 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
             $"标签页上限：{(int)Math.Round(BrowserTabLimitSlider.Value)}";
         ImageOpacityText.Text =
             $"默认透明度：{(int)Math.Round(ImageOpacitySlider.Value)}%";
-        ImageWindowLimitText.Text =
-            $"同时打开：{(int)Math.Round(ImageWindowLimitSlider.Value)} 张";
         ScreenshotQualityText.Text =
             $"JPEG 质量：{(int)Math.Round(ScreenshotQualitySlider.Value)}%";
         SnapDistanceText.Text =
@@ -756,11 +764,145 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
             new InGameMenuSettingsActionEventArgs(action));
     }
 
+    private void MenuEditorWorkspaceGrid_SizeChanged(
+        object sender,
+        SizeChangedEventArgs e) => ApplyMenuEditorResponsiveState();
+
+    private void MenuEditorCompactNavigationButton_Click(
+        object sender,
+        RoutedEventArgs e) => SetMenuEditorCompactDrawer(
+            _menuEditorCompactDrawer == MenuEditorCompactDrawer.Navigation
+                ? MenuEditorCompactDrawer.None
+                : MenuEditorCompactDrawer.Navigation);
+
+    private void MenuEditorCompactSettingsButton_Click(
+        object sender,
+        RoutedEventArgs e) => SetMenuEditorCompactDrawer(
+            _menuEditorCompactDrawer == MenuEditorCompactDrawer.Settings
+                ? MenuEditorCompactDrawer.None
+                : MenuEditorCompactDrawer.Settings);
+
+    private void SetMenuEditorCompactDrawer(MenuEditorCompactDrawer drawer)
+    {
+        _menuEditorCompactDrawer = _isMenuEditorCompact
+            ? drawer
+            : MenuEditorCompactDrawer.None;
+        ApplyMenuEditorResponsiveState();
+    }
+
+    private void ApplyMenuEditorResponsiveState()
+    {
+        if (MenuEditorWorkspaceGrid is null ||
+            MenuEditorNavigationPanel is null ||
+            MenuEditorSettingsPanel is null ||
+            MenuEditorPreviewPanel is null ||
+            MenuEditorNavigationColumn is null ||
+            MenuEditorNavigationGapColumn is null ||
+            MenuEditorSettingsColumn is null ||
+            MenuEditorSettingsGapColumn is null ||
+            MenuEditorPreviewColumn is null)
+        {
+            return;
+        }
+
+        var layout = MenuOverlaySettingsResponsiveLayout.Resolve(
+            MenuEditorWorkspaceGrid.ActualWidth);
+        _isMenuEditorCompact = layout.UsesCompactDrawers;
+
+        if (_isMenuEditorCompact)
+        {
+            MenuEditorNavigationColumn.Width = new GridLength(0);
+            MenuEditorNavigationGapColumn.Width = new GridLength(0);
+            MenuEditorSettingsColumn.Width = new GridLength(0);
+            MenuEditorSettingsGapColumn.Width = new GridLength(0);
+            MenuEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
+
+            Grid.SetColumn(MenuEditorPreviewPanel, 0);
+            Grid.SetColumnSpan(MenuEditorPreviewPanel, 5);
+            ConfigureMenuEditorDrawer(
+                MenuEditorNavigationPanel,
+                Math.Min(300, Math.Max(280, MenuEditorWorkspaceGrid.ActualWidth - 12)));
+            ConfigureMenuEditorDrawer(
+                MenuEditorSettingsPanel,
+                Math.Min(
+                    MenuOverlaySettingsResponsiveLayout.SettingsWidth,
+                    Math.Max(320, MenuEditorWorkspaceGrid.ActualWidth - 12)));
+            MenuEditorNavigationPanel.Visibility =
+                _menuEditorCompactDrawer == MenuEditorCompactDrawer.Navigation
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            MenuEditorSettingsPanel.Visibility =
+                _menuEditorCompactDrawer == MenuEditorCompactDrawer.Settings
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+        else
+        {
+            _menuEditorCompactDrawer = MenuEditorCompactDrawer.None;
+            MenuEditorNavigationColumn.Width = new GridLength(layout.NavigationColumnWidth);
+            MenuEditorNavigationGapColumn.Width = new GridLength(
+                MenuOverlaySettingsResponsiveLayout.InterColumnGap);
+            MenuEditorSettingsColumn.Width = new GridLength(layout.SettingsColumnWidth);
+            MenuEditorSettingsGapColumn.Width = new GridLength(
+                MenuOverlaySettingsResponsiveLayout.InterColumnGap);
+            MenuEditorPreviewColumn.Width = new GridLength(1, GridUnitType.Star);
+
+            RestoreMenuEditorRail(MenuEditorNavigationPanel, 0);
+            RestoreMenuEditorRail(MenuEditorSettingsPanel, 2);
+            MenuEditorNavigationPanel.Visibility = Visibility.Visible;
+            MenuEditorSettingsPanel.Visibility = Visibility.Visible;
+            Grid.SetColumn(MenuEditorPreviewPanel, 4);
+            Grid.SetColumnSpan(MenuEditorPreviewPanel, 1);
+            System.Windows.Controls.Panel.SetZIndex(MenuEditorPreviewPanel, 0);
+        }
+
+        MenuEditorCompactNavigationButton.Visibility = _isMenuEditorCompact
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        MenuEditorCompactSettingsButton.Visibility = _isMenuEditorCompact
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private static void ConfigureMenuEditorDrawer(
+        FrameworkElement panel,
+        double width)
+    {
+        Grid.SetColumn(panel, 0);
+        Grid.SetColumnSpan(panel, 5);
+        panel.Width = width;
+        panel.HorizontalAlignment = System.Windows.HorizontalAlignment.Left;
+        panel.Margin = new Thickness(0, 0, 10, 0);
+        System.Windows.Controls.Panel.SetZIndex(panel, 40);
+    }
+
+    private static void RestoreMenuEditorRail(
+        FrameworkElement panel,
+        int column)
+    {
+        Grid.SetColumn(panel, column);
+        Grid.SetColumnSpan(panel, 1);
+        panel.Width = double.NaN;
+        panel.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch;
+        panel.Margin = new Thickness(0);
+        System.Windows.Controls.Panel.SetZIndex(panel, 0);
+    }
+
     private void NavigationButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is WpfButton button)
         {
-            ScrollToSection(button.Uid);
+            if (_isMenuEditorCompact)
+            {
+                SetMenuEditorCompactDrawer(MenuEditorCompactDrawer.Settings);
+                Dispatcher.BeginInvoke(
+                    () => ScrollToSection(button.Uid),
+                    DispatcherPriority.Loaded);
+            }
+            else
+            {
+                ScrollToSection(button.Uid);
+            }
         }
     }
 
@@ -799,7 +941,11 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
         }
 
         Dispatcher.BeginInvoke(
-            () => SetActiveSection(_activeSection),
+            () =>
+            {
+                ApplyMenuEditorResponsiveState();
+                SetActiveSection(_activeSection);
+            },
             DispatcherPriority.Loaded);
     }
 
@@ -1062,7 +1208,7 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
             SettingsNavigationActiveRailTransform.Y = targetY;
 
             if (!animate ||
-                !SystemParameters.ClientAreaAnimation ||
+                !UiMotion.IsEnabled ||
                 Math.Abs(targetY - currentY) < 0.5)
             {
                 _navigationActiveRailInitialized = true;

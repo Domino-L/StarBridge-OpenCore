@@ -1,0 +1,53 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!-- 基底与层级：层级只用背景明度表达，不叠加描边 -->
+    <SolidColorBrush x:Key="BridgeGround"        Color="#070D12" />
+    <SolidColorBrush x:Key="BridgeRail"          Color="#0A1218" />
+    <SolidColorBrush x:Key="BridgePanel"         Color="#0E1821" />
+    <SolidColorBrush x:Key="BridgePanelRaised"   Color="#132029" />
+    <SolidColorBrush x:Key="BridgeRowHover"      Color="#111C25" />
+    <SolidColorBrush x:Key="BridgeRowSelected"   Color="#131F29" />
+    <SolidColorBrush x:Key="BridgeHairline"      Color="#1D2D38" />
+    <SolidColorBrush x:Key="BridgeRowHairline"   Color="#14202A" />
+    <SolidColorBrush x:Key="BridgeChipHairline"  Color="#273B48" />
+
+    <!-- 应用内弹窗唯一遮罩。任何主窗口弹窗都必须经 BridgeModalHost 消费。 -->
+    <SolidColorBrush x:Key="BridgeScrim" Color="#D9040910" />
+
+    <!-- 墨色 -->
+    <SolidColorBrush x:Key="BridgeInk"  Color="#DCE7EF" />
+    <SolidColorBrush x:Key="BridgeInk2" Color="#8DA3B1" />
+    <SolidColorBrush x:Key="BridgeInk3" Color="#5C7181" />
+
+    <!-- 状态五色：跨模块恒定，任何场景下都不变 -->
+    <SolidColorBrush x:Key="BridgeStatusInfo" Color="#52B7F5" />
+    <SolidColorBrush x:Key="BridgeStatusOk"   Color="#43D87A" />
+    <SolidColorBrush x:Key="BridgeStatusWarn" Color="#D9A441" />
+    <SolidColorBrush x:Key="BridgeStatusBad"  Color="#D2685E" />
+    <SolidColorBrush x:Key="BridgeStatusOff"  Color="#46545D" />
+
+    <!-- Data metrics are not runtime states. They keep a stable semantic accent
+         without borrowing the current scene colour or the status vocabulary. -->
+    <SolidColorBrush x:Key="BridgeMetricInfo"     Color="#52B7F5" />
+    <SolidColorBrush x:Key="BridgeMetricValue"    Color="#43D87A" />
+    <SolidColorBrush x:Key="BridgeMetricDuration" Color="#A998FF" />
+
+    <!-- 待办信号：只表示“有属于我的事项等待处理”，不得用于状态或装饰 -->
+    <SolidColorBrush x:Key="BridgeSignal" Color="#7DDDE3" />
+    <SolidColorBrush x:Key="BridgeSignalSurface" Color="#14343A" />
+
+    <FontFamily x:Key="BridgeCjkFont">Microsoft YaHei UI</FontFamily>
+    <FontFamily x:Key="BridgeDataFont">Consolas</FontFamily>
+
+    <!-- 字号阶梯。中文最小 12；11 只允许用于 Consolas 的拉丁/数字标签 -->
+    <sys:Double x:Key="BridgeFontMetric">22</sys:Double>
+    <sys:Double x:Key="BridgeFontPageTitle">18</sys:Double>
+    <sys:Double x:Key="BridgeFontSceneName">17</sys:Double>
+    <sys:Double x:Key="BridgeFontBodyStrong">14</sys:Double>
+    <sys:Double x:Key="BridgeFontBody">13</sys:Double>
+    <sys:Double x:Key="BridgeFontAux">12</sys:Double>
+    <sys:Double x:Key="BridgeFontLabel">11</sys:Double>
+
+</ResourceDictionary>

@@ -50,6 +50,23 @@ public partial class InGameBrowserWindow : Window
             _pages.Count < _settings.BrowserTabLimit;
     }
 
+    private void SetBrowserStatus(string text, bool isLoading = false) =>
+        Controls.InGameLoadingPresentation.Apply(
+            BrowserStatusText,
+            BrowserStatusLoadingIndicator,
+            text,
+            isLoading);
+
+    private void SetStartupLoading(bool isLoading)
+    {
+        LoadingOverlay.Visibility = isLoading
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        Controls.InGameLoadingPresentation.Apply(
+            BrowserStartupLoadingIndicator,
+            isLoading);
+    }
+
     internal void ShowForMenu()
     {
         if (WindowState == WindowState.Minimized)
@@ -89,9 +106,9 @@ public partial class InGameBrowserWindow : Window
                 CoreWebView2BrowsingDataKinds.AllProfile);
         }
 
-        BrowserStatusText.Text = profiles.Length == 0
+        SetBrowserStatus(profiles.Length == 0
             ? "浏览器尚未启动，没有可清理的数据"
-            : "浏览器数据已清理";
+            : "浏览器数据已清理");
     }
 
     private async Task SuspendBrowserPagesAsync()
@@ -158,7 +175,7 @@ public partial class InGameBrowserWindow : Window
 
         if (ReferenceEquals(page, ActivePage))
         {
-            LoadingOverlay.Visibility = Visibility.Visible;
+            SetStartupLoading(true);
         }
 
         try
@@ -168,7 +185,7 @@ public partial class InGameBrowserWindow : Window
             page.IsInitialized = true;
             if (ReferenceEquals(page, ActivePage))
             {
-                LoadingOverlay.Visibility = Visibility.Collapsed;
+                SetStartupLoading(false);
             }
 
             Navigate(page, initialUri);
@@ -177,10 +194,10 @@ public partial class InGameBrowserWindow : Window
         {
             App.WriteCrashLog(exception);
             page.Title = "浏览器不可用";
-            BrowserStatusText.Text = UserFacingError.Describe(
+            SetBrowserStatus(UserFacingError.Describe(
                 exception,
-                "浏览器未能启动，请确认 WebView2 Runtime 已安装。");
-            LoadingOverlay.Visibility = Visibility.Visible;
+                "浏览器未能启动，请确认 WebView2 Runtime 已安装。"));
+            SetStartupLoading(true);
         }
     }
 
@@ -273,7 +290,7 @@ public partial class InGameBrowserWindow : Window
                 _homePage,
                 out var uri))
         {
-            BrowserStatusText.Text = "请输入搜索内容或有效的 HTTP、HTTPS 地址";
+            SetBrowserStatus("请输入搜索内容或有效的 HTTP、HTTPS 地址");
             AddressBox.SelectAll();
             AddressBox.Focus();
             return;
@@ -289,7 +306,7 @@ public partial class InGameBrowserWindow : Window
     {
         if (page.View.CoreWebView2 is null)
         {
-            BrowserStatusText.Text = "浏览器仍在启动，请稍候";
+            SetBrowserStatus("浏览器仍在启动，请稍候", isLoading: true);
             return;
         }
 
@@ -297,7 +314,7 @@ public partial class InGameBrowserWindow : Window
         if (ReferenceEquals(page, ActivePage))
         {
             AddressBox.Text = uri.AbsoluteUri;
-            BrowserStatusText.Text = $"正在打开 {uri.Host}";
+            SetBrowserStatus($"正在打开 {uri.Host}", isLoading: true);
         }
 
         page.View.CoreWebView2.Navigate(uri.AbsoluteUri);
@@ -318,7 +335,7 @@ public partial class InGameBrowserWindow : Window
             if (page is null || ReferenceEquals(page, ActivePage))
             {
                 AddressBox.Text = uri.AbsoluteUri;
-                BrowserStatusText.Text = $"正在打开 {uri.Host}";
+                SetBrowserStatus($"正在打开 {uri.Host}", isLoading: true);
             }
 
             return;
@@ -327,7 +344,7 @@ public partial class InGameBrowserWindow : Window
         e.Cancel = true;
         if (page is null || ReferenceEquals(page, ActivePage))
         {
-            BrowserStatusText.Text = "已阻止不受支持的网页地址";
+            SetBrowserStatus("已阻止不受支持的网页地址");
         }
     }
 
@@ -345,9 +362,9 @@ public partial class InGameBrowserWindow : Window
         if (InGameBrowserAddressPolicy.TryNormalize(page.View.Source?.AbsoluteUri, out var uri))
         {
             AddressBox.Text = uri.AbsoluteUri;
-            BrowserStatusText.Text = e.IsSuccess
+            SetBrowserStatus(e.IsSuccess
                 ? uri.Host
-                : $"网页打开失败：{e.WebErrorStatus}";
+                : $"网页打开失败：{e.WebErrorStatus}");
         }
     }
 
@@ -383,7 +400,7 @@ public partial class InGameBrowserWindow : Window
         }
         else
         {
-            BrowserStatusText.Text = "已阻止不受支持的新窗口";
+            SetBrowserStatus("已阻止不受支持的新窗口");
         }
     }
 
@@ -400,7 +417,7 @@ public partial class InGameBrowserWindow : Window
         e.State = CoreWebView2PermissionState.Deny;
         e.Handled = true;
         Dispatcher.BeginInvoke(
-            () => BrowserStatusText.Text = "游戏时浏览器不会授予网页设备权限",
+            () => SetBrowserStatus("游戏时浏览器不会授予网页设备权限"),
             DispatcherPriority.Background);
     }
 
@@ -411,7 +428,7 @@ public partial class InGameBrowserWindow : Window
         e.Cancel = true;
         e.Handled = true;
         Dispatcher.BeginInvoke(
-            () => BrowserStatusText.Text = "当前版本暂不支持从游戏时浏览器下载文件",
+            () => SetBrowserStatus("当前版本暂不支持从游戏时浏览器下载文件"),
             DispatcherPriority.Background);
     }
 
@@ -455,8 +472,7 @@ public partial class InGameBrowserWindow : Window
     {
         if (_pages.Count >= _settings.BrowserTabLimit)
         {
-            BrowserStatusText.Text =
-                $"最多同时打开 {_settings.BrowserTabLimit} 个页面";
+            SetBrowserStatus($"最多同时打开 {_settings.BrowserTabLimit} 个页面");
             return;
         }
 
@@ -475,9 +491,7 @@ public partial class InGameBrowserWindow : Window
 
         BrowserHost.Children.Clear();
         BrowserHost.Children.Add(page.View);
-        LoadingOverlay.Visibility = page.IsInitialized
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        SetStartupLoading(!page.IsInitialized);
         UpdateNavigationControls(page);
         ScheduleBrowserTabLayout();
     }
@@ -525,21 +539,6 @@ public partial class InGameBrowserWindow : Window
         }
     }
 
-    private void BrowserTabViewport_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (BrowserTabViewport.ScrollableWidth <= 0)
-        {
-            return;
-        }
-
-        BrowserTabViewport.ScrollToHorizontalOffset(
-            Math.Clamp(
-                BrowserTabViewport.HorizontalOffset - e.Delta,
-                0,
-                BrowserTabViewport.ScrollableWidth));
-        e.Handled = true;
-    }
-
     private async void CloseBrowserPageButton_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
@@ -575,12 +574,12 @@ public partial class InGameBrowserWindow : Window
                 out var uri))
         {
             AddressBox.Text = uri.AbsoluteUri;
-            BrowserStatusText.Text = uri.Host;
+            SetBrowserStatus(uri.Host);
         }
         else if (!page.IsInitialized)
         {
             AddressBox.Text = _homePage.AbsoluteUri;
-            BrowserStatusText.Text = "正在启动浏览器";
+            SetBrowserStatus("正在启动浏览器", isLoading: true);
         }
     }
 
@@ -604,7 +603,7 @@ public partial class InGameBrowserWindow : Window
     {
         if (BrowserView.CoreWebView2 is null)
         {
-            BrowserStatusText.Text = "浏览器仍在启动，请稍候";
+            SetBrowserStatus("浏览器仍在启动，请稍候", isLoading: true);
             return;
         }
 

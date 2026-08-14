@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -10,6 +9,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using StarBridge.Core.Presence;
 using SharpGen.Runtime;
 using Vortice;
 using Vortice.DCommon;
@@ -160,8 +160,6 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private readonly Dictionary<(string Text, IDWriteTextFormat Format), float> _textWidthCache = [];
     private ID2D1StrokeStyle? _cornerStrokeStyle;
     private Dictionary<BrushKey, ID2D1SolidColorBrush>? _frameBrushes;
-    private readonly Dictionary<string, OverlayCompositionBitmapData?> _squadEmblemSnapshots = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, ID2D1Bitmap> _squadEmblemBitmaps = new(StringComparer.OrdinalIgnoreCase);
     private OverlayCompositionFrameState? _state;
     private bool _lagrangeGlowMaskOnly;
     private DateTimeOffset _lagrangeStartupStartedAtUtc = DateTimeOffset.MinValue;
@@ -184,14 +182,15 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private int _mouseInputDiagnosticsCount;
 
     public OverlayCompositionHudWindow(
-        IEnumerable<SquadRow> squads,
-        IEnumerable<PlayerRow> players,
+        OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
         IEnumerable<OverlayLayoutItem> layout,
         OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         WpfRect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,
@@ -204,7 +203,17 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _surfaceBounds = NormalizeSurfaceBounds(surfaceBounds);
         _startupTransitionContext = startupTransitionContext;
         ResolveDpiScale();
-        _viewModel = new OverlayViewModel(squads, players, settings, language, hasFleet, commandState, localShard, sceneContext, chatMessages);
+        _viewModel = new OverlayViewModel(
+            roster,
+            settings,
+            rosterSelectionSettings,
+            language,
+            hasFleet,
+            commandState,
+            localPresence,
+            localShard,
+            sceneContext,
+            chatMessages);
         _viewModel.PropertyChanged += OverlayViewModel_PropertyChanged;
         ApplyLayoutDependentViewModelState();
     }
@@ -420,13 +429,14 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     }
 
     public void Refresh(
-        IEnumerable<SquadRow> squads,
-        IEnumerable<PlayerRow> players,
+        OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
         OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         WpfRect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,
@@ -442,7 +452,17 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _surfaceBounds = NormalizeSurfaceBounds(surfaceBounds);
         _startupTransitionContext = startupTransitionContext;
         ResolveDpiScale();
-        _viewModel.Refresh(squads, players, settings, language, hasFleet, commandState, localShard, sceneContext, chatMessages);
+        _viewModel.Refresh(
+            roster,
+            settings,
+            rosterSelectionSettings,
+            language,
+            hasFleet,
+            commandState,
+            localPresence,
+            localShard,
+            sceneContext,
+            chatMessages);
         ApplyLayoutDependentViewModelState();
         PublishStateToRenderer(forceEventPulse: false);
     }
@@ -539,7 +559,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private bool ShouldPlayVerdictStartup()
     {
         return _settings.EnableStartupTransition &&
-               SystemParameters.ClientAreaAnimation &&
+               UiMotion.IsEnabled &&
                _settings.Skin == OverlaySkin.Verdict &&
                _settings.StartupTransitionStyle == OverlayStartupTransitionStyle.VerdictProtocol;
     }
@@ -905,6 +925,11 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         var eventStyle = new OverlayCompositionModuleStyle(
             OverlayLayoutItem.NormalizeTextOpacity(_settings.EventNotificationTextOpacity),
             OverlayLayoutItem.NormalizeBackgroundOpacity(_settings.EventNotificationBackgroundOpacity));
+        var overviewTopLocations = _viewModel.OverviewTopLocations.Take(2).ToArray();
+        var overviewLocationLayout = OverlayOverviewLocationLayout.Resolve(
+            squadsRect.Width,
+            squadsRect.Height,
+            overviewTopLocations);
 
         return new OverlayCompositionFrameState(
             width,
@@ -939,8 +964,10 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             _viewModel.SquadStatusSummary,
             _viewModel.SquadStatusServerSummary,
             _viewModel.SquadStatusFocusLine,
-            _viewModel.SquadStatusDetailVisibility == WpfVisibility.Visible,
-            SnapshotSquads(_viewModel.SquadStatusDetailVisibility == WpfVisibility.Visible ? _viewModel.Squads : _viewModel.CompactSquads),
+            _viewModel.OverviewLocationPlaceholder,
+            _viewModel.OverviewLocationPlaceholderMetric,
+            overviewTopLocations,
+            overviewLocationLayout,
             _viewModel.MembersTitle,
             SnapshotMembers(_viewModel.Members),
             _viewModel.ChatTitle,
@@ -984,8 +1011,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             _layout,
             Math.Max(1, _surfaceBounds.Width),
             Math.Max(1, _surfaceBounds.Height));
-        var squadsRect = ResolveItemRect("Squads", resolvedItems);
-        _viewModel.ApplySquadStatusDisplayMode(_settings.SquadStatusDisplayMode, squadsRect.Width, squadsRect.Height);
+        var membersRect = ResolveItemRect("Members", resolvedItems);
+        _viewModel.ApplyMemberViewport(membersRect.Height);
         _viewModel.ApplyChatBarrageViewportWidth(Math.Max(1, _surfaceBounds.Width));
     }
 
@@ -1313,12 +1340,6 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _innerGlowEffect?.Dispose();
         _outerGlowEffect?.Dispose();
         DisposeAppearanceResources();
-        foreach (var bitmap in _squadEmblemBitmaps.Values)
-        {
-            bitmap.Dispose();
-        }
-        _squadEmblemBitmaps.Clear();
-        _squadEmblemSnapshots.Clear();
         _d2dDeviceContext?.Dispose();
         _d2dDevice?.Dispose();
         _d2dFactory?.Dispose();
@@ -1619,8 +1640,10 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         string SquadSummary,
         string SquadServerSummary,
         string SquadFocusLine,
-        bool SquadDetailed,
-        IReadOnlyList<OverlayCompositionSquadRow> SquadRows,
+        string OverviewLocationPlaceholder,
+        string OverviewLocationPlaceholderMetric,
+        IReadOnlyList<OverlayOverviewLocationCount> OverviewTopLocations,
+        OverlayOverviewLocationLayoutResult OverviewLocationLayout,
         string MembersTitle,
         IReadOnlyList<OverlayCompositionMemberRow> MemberRows,
         string ChatTitle,
@@ -1657,23 +1680,6 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
 
         public bool VerdictStyle => RenderKind == OverlaySkinRenderKind.Verdict;
     }
-
-    private sealed record OverlayCompositionSquadRow(
-        string Name,
-        string Icon,
-        string DetailLine,
-        string SummaryLine,
-        HudColor StatusColor,
-        string? EmblemPath,
-        OverlayCompositionBitmapData? Emblem,
-        bool IsPartyRoomIcon);
-
-    private sealed record OverlayCompositionBitmapData(
-        string CacheKey,
-        int Width,
-        int Height,
-        int Stride,
-        byte[] Pixels);
 
     private sealed record OverlayCompositionMemberRow(
         string DisplayName,

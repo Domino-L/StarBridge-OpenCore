@@ -15,9 +15,6 @@ public static class ChatHistoryViewport
 {
     private const double EdgeTolerance = 24;
     private const double HistoryPrefetchDistance = 180;
-    private const double WheelScrollDistance = 36;
-    private const double MaximumPendingDistance = 108;
-    private const double ScrollResponse = 34;
     private static readonly ConditionalWeakTable<System.Windows.Controls.ListBox, SmoothScrollState> SmoothScrollStates = new();
 
     public static ScrollViewer? Find(DependencyObject? root)
@@ -132,20 +129,22 @@ public static class ChatHistoryViewport
             }
 
             var currentOffset = _viewer.VerticalOffset;
-            var inputDistance = -wheelSteps * WheelScrollDistance;
+            var inputDistance = -wheelSteps * SmoothWheelScrollBehavior.ResolveWheelDistance(_viewer);
             var pendingDistance = _targetOffset - currentOffset;
             if (Math.Abs(pendingDistance) > 0.35 && Math.Sign(inputDistance) != Math.Sign(pendingDistance))
             {
                 _targetOffset = currentOffset;
             }
 
+            var maximumPendingDistance = SmoothWheelScrollBehavior.ResolveMaximumPendingDistance(
+                _viewer.ViewportHeight);
             _targetOffset = Math.Clamp(
                 _targetOffset + inputDistance,
-                Math.Max(0, currentOffset - MaximumPendingDistance),
-                Math.Min(_viewer.ScrollableHeight, currentOffset + MaximumPendingDistance));
+                Math.Max(0, currentOffset - maximumPendingDistance),
+                Math.Min(_viewer.ScrollableHeight, currentOffset + maximumPendingDistance));
             e.Handled = true;
 
-            if (!SystemParameters.ClientAreaAnimation)
+            if (!UiMotion.IsEnabled)
             {
                 _viewer.ScrollToVerticalOffset(_targetOffset);
                 ResetTargetAfterExternalScroll();
@@ -210,7 +209,7 @@ public static class ChatHistoryViewport
                 return;
             }
 
-            var interpolation = 1 - Math.Exp(-ScrollResponse * elapsedSeconds);
+            var interpolation = 1 - Math.Exp(-SmoothWheelScrollBehavior.ScrollResponse * elapsedSeconds);
             _viewer.ScrollToVerticalOffset(_viewer.VerticalOffset + remaining * interpolation);
         }
 

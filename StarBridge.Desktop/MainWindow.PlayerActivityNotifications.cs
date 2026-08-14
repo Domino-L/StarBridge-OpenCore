@@ -38,7 +38,6 @@ public partial class MainWindow
                 player.Initials,
                 player.AvatarPath,
                 player.AccountId,
-                player.SquadName,
                 player.SharedPresence,
                 player.IsSelf,
                 player.AllowsSharedEvent(PlayerSharedEventTypes.Presence),
@@ -68,7 +67,6 @@ public partial class MainWindow
                     GetInitials(DisplayCallsign(partyMember.Callsign, partyMember.GameId)),
                     partyMember.AvatarImageData,
                     partyMember.AccountId,
-                    "",
                     PlayerPresencePresentation.ResolveShared(partyMember.PresenceText, partyMember.PresenceText),
                     isSelf,
                     AllowsPresenceEvents: true,
@@ -79,8 +77,7 @@ public partial class MainWindow
         var context = new PlayerActivityNotificationContext(
             IsAppBackground: !IsActive || !IsVisible || WindowState == WindowState.Minimized,
             IsGameRunning: _isGameProcessRunning,
-            IsOverlayRunning: IsOverlayRunning,
-            LocalSquadName: _joinedSquad?.Name);
+            IsOverlayRunning: IsOverlayRunning);
         var notifications = _playerActivityNotificationTracker.Evaluate(
             members,
             _notificationSettings,

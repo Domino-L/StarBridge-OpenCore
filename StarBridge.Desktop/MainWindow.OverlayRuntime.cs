@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using StarBridge.Core.Presence;
 using WinForms = System.Windows.Forms;
 
 namespace StarBridge.Desktop;
@@ -121,7 +122,6 @@ public partial class MainWindow
     {
         UpdateMaximizeButtonText();
         UpdateOverlayVisibilityForMainWindowState();
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(RefreshSquadPreviewLimitFromLayout));
     }
 
     private void UpdateOverlayVisibilityForMainWindowState()
@@ -149,16 +149,6 @@ public partial class MainWindow
         RefreshOverlayWindow();
         RefreshPersonalIdentityConsole();
         RefreshOverlayOverviewSummary();
-    }
-
-    private void FleetSquadsDeckPanel_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) < 24)
-        {
-            return;
-        }
-
-        RefreshSquadPreviewLimitFromLayout();
     }
 
     private void LanguageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -277,7 +267,6 @@ public partial class MainWindow
 
     private void ToggleOverlayWindow(bool focusGameWindow = true)
     {
-        RenderSquads();
         if (_inGameMenuCoordinator.IsOpen)
         {
             _inGameMenuCoordinator.Close(InGameMenuExitMode.SwitchToInformationOverlay);
@@ -420,6 +409,7 @@ public partial class MainWindow
         _overlayWindow = CreateOverlayHost(
             overlaySettings,
             commandState,
+            _localPresence,
             localShard,
             surfaceBounds,
             transitionContext);
@@ -443,21 +433,25 @@ public partial class MainWindow
     private IOverlayHost CreateOverlayHost(
         OverlayDisplaySettings overlaySettings,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         Rect surfaceBounds,
         OverlayStartupTransitionContext transitionContext)
     {
         var projection = BuildOverlayAccessProjection(overlaySettings, commandState);
         AppendOutput("OVERLAY | render-mode=DirectComposition | DC HUD");
+        var roster = ResolveOverlayAuthorizedRoster(projection.Scene);
+        var rosterSettings = GetOverlayRosterSelectionSettings();
         return new OverlayCompositionHudWindow(
-            projection.Scene.Squads,
-            projection.Scene.Players,
+            roster,
             projection.ChatMessages,
             _overlayLayout,
             projection.Settings,
+            rosterSettings,
             _language,
             projection.Scene.HasContent,
             projection.CommandState,
+            localPresence,
             localShard,
             surfaceBounds,
             transitionContext,
@@ -469,7 +463,6 @@ public partial class MainWindow
         OverlayCommandState commandState)
     {
         var scene = ResolveCurrentOverlayScene(overlaySettings);
-        overlaySettings = scene.ApplySceneSettings(overlaySettings);
         commandState = scene.ApplySceneCommandState(
             commandState,
             _language.Equals("zh", StringComparison.OrdinalIgnoreCase));
@@ -486,7 +479,6 @@ public partial class MainWindow
         var effectiveSettings = settings ?? _overlaySettings;
         var scene = OverlaySceneResolver.Resolve(
             effectiveSettings.ScenePreference,
-            _squads,
             _players,
             _hasFleet,
             _currentPartyRoom,
@@ -983,18 +975,19 @@ public partial class MainWindow
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            RenderSquads();
             var projection = BuildOverlayAccessProjection(
                 GetEffectiveOverlaySettings(),
                 BuildOverlayCommandState());
+            var roster = ResolveOverlayAuthorizedRoster(projection.Scene);
             _overlayWindow.Refresh(
-                projection.Scene.Squads,
-                projection.Scene.Players,
+                roster,
                 projection.ChatMessages,
                 projection.Settings,
+                GetOverlayRosterSelectionSettings(),
                 _language,
                 projection.Scene.HasContent,
                 projection.CommandState,
+                _localPresence,
                 IsGameServerRegionCurrent() ? _gameServerShard : "",
                 ResolveOverlayTargetSurfaceBounds(),
                 BuildOverlayStartupTransitionContext(projection.Settings),

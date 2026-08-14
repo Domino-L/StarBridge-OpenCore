@@ -224,7 +224,11 @@ public sealed record PersonalProfileHangarShipContract(
     string DisplayName,
     DateTimeOffset ImportedAt,
     DateTimeOffset SyncedAt = default,
-    string? RoleCategory = null);
+    string? RoleCategory = null,
+    string? CustomImageMediaId = null,
+    double CustomImageCropFocusX = 0.5,
+    double CustomImageCropFocusY = 0.5,
+    double CustomImageCropZoom = 1.0);
 
 public sealed record PersonalProfileHangarContract(
     PersonalProfileHangarShipContract[] Ships);

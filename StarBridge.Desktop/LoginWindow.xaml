@@ -69,7 +69,7 @@
                        Foreground="{StaticResource AccentBrush}" />
             <TextBlock Grid.Row="1"
                        Margin="0,10,0,18"
-                       Text="登录后可同步舰队、小队、任务与玩家状态。你也可以先跳过，以浏览模式进入应用。"
+                       Text="登录后可同步舰队、任务与玩家状态。你也可以先跳过，以浏览模式进入应用。"
                        Foreground="{StaticResource MutedTextBrush}"
                        TextWrapping="Wrap" />
 

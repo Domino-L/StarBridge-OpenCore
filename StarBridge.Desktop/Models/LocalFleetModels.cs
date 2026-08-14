@@ -23,14 +23,11 @@ public sealed record LocalFleetState(
     string? FleetCurrentTaskHistoryKey,
     int FleetCurrentTaskNoticeRevision,
     LocalFleetTaskHistory[]? TaskHistory,
-    LocalSquadState[]? Squads,
-    string? JoinedSquadName,
     LocalFleetActionPlan[]? ActionPlans,
     string[]? JoinedActionPlanIds,
     LocalFleetEventLog[]? EventLog,
     LocalFleetMemberPermission[]? MemberPermissions = null,
     bool FleetEmailNotificationsEnabled = true,
-    string? SelectedSquadName = null,
     DateTimeOffset FleetJoinedAt = default,
     string[]? FleetTagIds = null,
     string? FleetBannerPath = null,
@@ -107,18 +104,6 @@ public sealed record LocalFleetTaskHistory(
     string Rally,
     string RequiredShip,
     string PublishedAtText);
-
-public sealed record LocalSquadState(
-    string Name,
-    string Icon,
-    string Commander,
-    string Mission,
-    string RallyPoint,
-    string Description,
-    string Type,
-    string? EmblemPath,
-    DateTimeOffset UpdatedAt = default,
-    string? Id = null);
 
 public sealed record LocalFleetActionPlan(
     string Id,

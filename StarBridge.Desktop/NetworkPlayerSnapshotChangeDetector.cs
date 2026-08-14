@@ -13,7 +13,6 @@ public static class NetworkPlayerSnapshotChangeDetector
             Append(builder, player.Name);
             Append(builder, player.Callsign);
             Append(builder, player.Fleet);
-            Append(builder, player.Squad);
             Append(builder, player.Online ? "1" : "0");
             Append(builder, player.Ship);
             Append(builder, player.ShipConfidence);
@@ -43,6 +42,10 @@ public static class NetworkPlayerSnapshotChangeDetector
                 Append(builder, ship.Source);
                 Append(builder, ship.ImportedAt.UtcTicks.ToString());
                 Append(builder, ship.RoleCategory);
+                Append(builder, ship.CustomImageMediaId);
+                Append(builder, ship.CustomImageCropFocusX.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                Append(builder, ship.CustomImageCropFocusY.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                Append(builder, ship.CustomImageCropZoom.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             }
         }
 

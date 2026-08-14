@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using StarBridge.Desktop.Theming;
 
 namespace StarBridge.Desktop;
 
@@ -27,6 +28,7 @@ public partial class HangarReaderWindow : Window
     public HangarReaderWindow(string language)
     {
         InitializeComponent();
+        BridgeSceneContext.ApplyFixed(this, BridgeSceneKind.Hangar);
         _language = language;
         DetectedShipsList.ItemsSource = _detectedShips;
         Loaded += async (_, _) =>
@@ -64,6 +66,8 @@ public partial class HangarReaderWindow : Window
 
         _isScanning = true;
         _scanCompleted = false;
+        ReaderLoadingIndicator.IsActive = true;
+        ReaderLoadingIndicator.Visibility = Visibility.Visible;
         _detectedShips.Clear();
         ImportButton.IsEnabled = false;
         ScanFullHangarButton.IsEnabled = false;
@@ -87,6 +91,7 @@ public partial class HangarReaderWindow : Window
             var pageCount = 0;
             var matchedCodes = 0;
             var matchedNames = 0;
+            var imageCandidates = new Dictionary<string, HangarShipImageCandidate>(StringComparer.OrdinalIgnoreCase);
 
             for (var page = 1; page <= totalPages; page++)
             {
@@ -101,6 +106,10 @@ public partial class HangarReaderWindow : Window
                 matchedCodes += result.MatchedCodes;
                 matchedNames += result.MatchedNames;
                 AddDetectedShips(result.Ships);
+                foreach (var imageCandidate in result.ImageCandidates)
+                {
+                    imageCandidates.TryAdd(imageCandidate.Code, imageCandidate);
+                }
                 pageCount++;
 
                 PageShipCountText.Text = $"扫描页数：{pageCount}/{totalPages}";
@@ -108,9 +117,14 @@ public partial class HangarReaderWindow : Window
                 ReaderStatusText.Text = $"正在扫描：第 {pageCount}/{totalPages} 页，累计识别 {_detectedShips.Count} 艘。";
             }
 
+            ReaderStatusText.Text = imageCandidates.Count == 0
+                ? "舰船记录读取完成，当前页面没有提供可读取的舰船图片。"
+                : $"舰船记录读取完成，正在读取 {imageCandidates.Count} 张舰船图片…";
+            var imageSummary = await HangarImportedShipImageCache.ImportAsync(imageCandidates.Values);
+
             _scanCompleted = true;
             ImportButton.IsEnabled = _detectedShips.Count > 0;
-            ReaderStatusText.Text = $"整库扫描完成：扫描 {pageCount} 页，页面 Ship 条目 {matchedCodes}，已识别 {matchedNames}，累计 {_detectedShips.Count} 艘。";
+            ReaderStatusText.Text = $"整库扫描完成：扫描 {pageCount} 页，页面舰船条目 {matchedCodes} 个，已识别 {matchedNames} 个，累计 {_detectedShips.Count} 艘；本地可用图片 {imageSummary.AvailableCount}/{imageSummary.CandidateCount} 张。";
         }
         catch (Exception exception)
         {
@@ -121,6 +135,8 @@ public partial class HangarReaderWindow : Window
         finally
         {
             _isScanning = false;
+            ReaderLoadingIndicator.IsActive = false;
+            ReaderLoadingIndicator.Visibility = Visibility.Collapsed;
             ScanFullHangarButton.IsEnabled = true;
             GoButton.IsEnabled = true;
         }
@@ -215,6 +231,76 @@ public partial class HangarReaderWindow : Window
               const totalPages = Math.max(page, 1, ...pagerPages);
               const kinds = Array.from(document.querySelectorAll('.kind'));
               const ships = [];
+              const normalizeImageUrl = value => {
+                if (!value || value.startsWith('data:') || value.startsWith('blob:')) {
+                  return '';
+                }
+                try {
+                  const url = new URL(value, window.location.href);
+                  return url.protocol === 'https:' ? url.href : '';
+                } catch {
+                  return '';
+                }
+              };
+              const readLargestSrcsetUrl = value => {
+                if (!value) {
+                  return '';
+                }
+                return value
+                  .split(',')
+                  .map(entry => {
+                    const parts = entry.trim().split(/\s+/);
+                    const descriptor = parts[1] || '1x';
+                    const score = descriptor.endsWith('w')
+                      ? Number.parseFloat(descriptor)
+                      : Number.parseFloat(descriptor) * 1000;
+                    return { url: parts[0] || '', score: Number.isFinite(score) ? score : 0 };
+                  })
+                  .sort((left, right) => right.score - left.score)
+                  .map(entry => normalizeImageUrl(entry.url))
+                  .find(Boolean) || '';
+              };
+              const readImageUrl = root => {
+                if (!root) {
+                  return '';
+                }
+                const selectors = [
+                  '.image img',
+                  '.pledge-image img',
+                  '.thumbnail img',
+                  '.item-image img',
+                  'img'
+                ];
+                for (const selector of selectors) {
+                  for (const image of root.querySelectorAll(selector)) {
+                    const values = [
+                      readLargestSrcsetUrl(image.getAttribute('data-srcset')),
+                      readLargestSrcsetUrl(image.getAttribute('srcset')),
+                      image.getAttribute('data-original'),
+                      image.getAttribute('data-large-src'),
+                      image.getAttribute('data-src'),
+                      image.getAttribute('data-lazy-src'),
+                      image.currentSrc,
+                      image.getAttribute('src')
+                    ];
+                    for (const value of values) {
+                      const resolved = normalizeImageUrl(value || '');
+                      if (resolved) {
+                        return resolved;
+                      }
+                    }
+                  }
+                }
+                for (const element of root.querySelectorAll('[style*="background"]')) {
+                  const background = element.style.backgroundImage || getComputedStyle(element).backgroundImage || '';
+                  const match = background.match(/url\(["']?([^"')]+)["']?\)/i);
+                  const resolved = normalizeImageUrl(match ? match[1] : '');
+                  if (resolved) {
+                    return resolved;
+                  }
+                }
+                return '';
+              };
               kinds.forEach((kind, itemIndex) => {
                 const kindText = (kind.textContent || '').trim().toLowerCase();
                 if (kindText !== 'ship' && kindText !== '飞船') {
@@ -238,6 +324,7 @@ public partial class HangarReaderWindow : Window
                   ? (pledge.querySelector('.title-col h3')?.textContent || '').replace(/\s+/g, ' ').trim()
                   : '';
                 const sourceTitle = pledgeName || pledgeTitle;
+                const imageUrl = readImageUrl(item) || readImageUrl(pledge);
                 const dateCol = pledge ? pledge.querySelector('.date-col') : null;
                 const createdAtText = dateCol
                   ? (dateCol.textContent || '')
@@ -263,7 +350,8 @@ public partial class HangarReaderWindow : Window
                     SourceTitle: sourceTitle,
                     InstanceId: explicitInstanceId
                       ? `rsi:${explicitInstanceId.trim()}`
-                      : `page:${page}:item:${itemIndex + 1}`
+                      : null,
+                    ImageUrl: imageUrl
                   });
                 }
               });
@@ -407,7 +495,7 @@ public partial class HangarReaderWindow : Window
         return string.Join(
             "|",
             candidates
-                .Select(candidate => $"{candidate.InstanceId?.Trim()}::{candidate.Title.Trim()}::{candidate.ManufacturerCode.Trim()}::{candidate.CreatedAtText?.Trim()}::{candidate.SourceTitle?.Trim()}")
+                .Select(candidate => $"{candidate.InstanceId?.Trim()}::{candidate.Title.Trim()}::{candidate.ManufacturerCode.Trim()}::{candidate.CreatedAtText?.Trim()}::{candidate.SourceTitle?.Trim()}::{candidate.ImageUrl?.Trim()}")
                 .OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
     }
 

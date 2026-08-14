@@ -11,7 +11,8 @@ internal sealed record InGameRoomSnapshot(
 internal sealed record InGameRoomChatSnapshot(
     object[] Messages,
     bool CanSend,
-    string StatusText);
+    string StatusText,
+    bool IsLoading = false);
 
 internal sealed record InGameRoomInvitationSnapshot(
     bool CanInvite,

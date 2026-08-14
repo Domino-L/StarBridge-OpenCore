@@ -63,7 +63,7 @@ public partial class MainWindow
             new OverlayGuidePage(
                 OverlayModulesCategoryButton,
                 "模块与内容",
-                "这里统一管理通讯提醒、队伍概况、成员信息、场景通讯和事件通知。关闭模块会让它从画面和工作台中隐藏；模块要显示什么、停留多久以及如何排列，则在模块工作台中调整。",
+                "这里统一管理通讯提醒、舰队总览、成员信息、场景通讯和事件通知。关闭模块会让它从画面和工作台中隐藏；模块要显示什么、停留多久以及如何排列，则在模块工作台中调整。",
                 "modules"),
             new OverlayGuidePage(
                 OverlayOpenModuleWorkbenchButton,

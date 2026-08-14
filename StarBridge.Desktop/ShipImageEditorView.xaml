@@ -1,0 +1,220 @@
+<UserControl x:Class="StarBridge.Desktop.ShipImageEditorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:StarBridge.Desktop"
+             Focusable="True"
+             Background="{StaticResource PageBackgroundBrush}">
+    <Grid Margin="18" Background="{StaticResource PageBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="SHIP IMAGE"
+                       Foreground="#50C9FF"
+                       FontSize="10"
+                       FontWeight="SemiBold" />
+            <TextBlock Text="上传前调整图片"
+                       Margin="0,5,0,0"
+                       Foreground="{StaticResource PrimaryTextBrush}"
+                       FontSize="22"
+                       FontWeight="SemiBold" />
+            <TextBlock Text="机库和舰船详情会完整保留图片；比例不同时会等比缩放并留边。拖动右侧取景框，可单独调整个人资料和列表中的方形缩略图。"
+                       Margin="0,6,0,0"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="12"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="250" />
+            </Grid.ColumnDefinitions>
+
+            <Border Background="#06131C"
+                    BorderBrush="#28536B"
+                    BorderThickness="1"
+                    CornerRadius="2"
+                    ClipToBounds="True">
+                <Grid>
+                    <Image x:Name="MainPreviewImage"
+                           Margin="12"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Stretch"
+                           VerticalAlignment="Stretch" />
+                    <TextBlock x:Name="PreviewPlaceholderText"
+                               Text="正在准备图片…"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="12" />
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Column="1"
+                          Margin="14,0,0,0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock Text="方形展示预览"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               FontSize="12"
+                               FontWeight="SemiBold" />
+                    <Border x:Name="SquareCropViewport"
+                            Width="190"
+                            Height="190"
+                            Margin="0,8,0,0"
+                            HorizontalAlignment="Left"
+                            Background="#06131C"
+                            BorderBrush="#28536B"
+                            BorderThickness="1"
+                            CornerRadius="2"
+                            ClipToBounds="True"
+                            Cursor="SizeAll"
+                            MouseLeftButtonDown="SquareCropViewport_MouseLeftButtonDown"
+                            MouseMove="SquareCropViewport_MouseMove"
+                            MouseLeftButtonUp="SquareCropViewport_MouseLeftButtonUp"
+                            LostMouseCapture="SquareCropViewport_LostMouseCapture">
+                        <Grid>
+                            <local:ShipImageCropView x:Name="SquarePreviewImage"
+                                                     FocusX="0.5"
+                                                     FocusY="0.5"
+                                                     Zoom="1" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="按住图片拖动取景。这个调整不会改变机库中的完整原图。"
+                               Width="220"
+                               Margin="0,7,0,0"
+                               HorizontalAlignment="Left"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="10"
+                               TextWrapping="Wrap" />
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="方形画面缩放"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold" />
+                        <Button Grid.Column="1"
+                                Content="恢复居中"
+                                Height="28"
+                                Padding="9,0"
+                                Style="{StaticResource SecondaryButton}"
+                                Click="ResetSquareCropButton_Click" />
+                    </Grid>
+                    <Slider x:Name="CropZoomSlider"
+                            Margin="0,7,0,0"
+                            Minimum="1"
+                            Maximum="3"
+                            Value="1"
+                            SmallChange="0.02"
+                            LargeChange="0.1"
+                            ValueChanged="CropZoomSlider_ValueChanged" />
+
+                    <TextBlock Text="图片方向"
+                               Margin="0,16,0,0"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               FontSize="12"
+                               FontWeight="SemiBold" />
+                    <Grid Margin="0,7,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="RotateLeftButton"
+                                Content="向左旋转"
+                                Height="34"
+                                Margin="0,0,4,0"
+                                Style="{StaticResource SecondaryButton}"
+                                Click="RotateLeftButton_Click" />
+                        <Button x:Name="RotateRightButton"
+                                Grid.Column="1"
+                                Content="向右旋转"
+                                Height="34"
+                                Margin="4,0,0,0"
+                                Style="{StaticResource SecondaryButton}"
+                                Click="RotateRightButton_Click" />
+                    </Grid>
+
+                    <TextBlock Text="上传清晰度"
+                               Margin="0,16,0,0"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               FontSize="12"
+                               FontWeight="SemiBold" />
+                    <ComboBox x:Name="QualityComboBox"
+                              Height="36"
+                              Margin="0,7,0,0"
+                              SelectionChanged="QualityComboBox_SelectionChanged" />
+
+                    <Border Margin="0,16,0,0"
+                            Padding="11"
+                            Background="#0A1D2A"
+                            BorderBrush="#28536B"
+                            BorderThickness="1"
+                            CornerRadius="2">
+                        <StackPanel>
+                            <TextBlock Text="图片信息"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold" />
+                            <TextBlock x:Name="SourceInfoText"
+                                       Margin="0,7,0,0"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
+                            <TextBlock x:Name="OutputInfoText"
+                                       Margin="0,4,0,0"
+                                       Foreground="#50C9FF"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock x:Name="ErrorText"
+                               Margin="0,12,0,0"
+                               Foreground="#FF7F8B"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="StatusText"
+                       Text="正在准备图片…"
+                       VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="10"
+                       TextWrapping="Wrap" />
+            <Button Grid.Column="1"
+                    Content="取消"
+                    Height="34"
+                    MinWidth="76"
+                    Margin="12,0,8,0"
+                    Style="{StaticResource SecondaryButton}"
+                    Click="CancelButton_Click" />
+            <Button x:Name="ConfirmButton"
+                    Grid.Column="2"
+                    Content="确认并上传"
+                    Height="34"
+                    MinWidth="108"
+                    Style="{StaticResource PrimaryButton}"
+                    IsEnabled="False"
+                    Click="ConfirmButton_Click" />
+        </Grid>
+    </Grid>
+</UserControl>

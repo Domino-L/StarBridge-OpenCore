@@ -18,14 +18,14 @@ internal static class PersonalProfileRoleCatalog
 
     public static readonly PersonalProfileRoleCategory[] Categories =
     [
-        new("command", "指挥协同", "负责组织、沟通和行动节奏。", "#D9A23B"),
-        new("ship", "舰船操作", "承担舰船驾驶、武器与工程席位。", "#29AFFF"),
-        new("air-combat", "空中战斗", "专注舰载机与空中作战任务。", "#E08A92"),
-        new("ground-combat", "地面战斗", "承担地面、载具与登舰作战。", "#F15B65"),
-        new("recon", "探索侦察", "负责扫描、侦察和路径规划。", "#75C9D6"),
-        new("industry", "工业生产", "参与采集、生产与货物流转。", "#D6B56A"),
-        new("medical", "医疗救援", "提供医疗、搜救和伤员转运。", "#42CF7C"),
-        new("logistics", "后勤保障", "负责补给、维修和资源调度。", "#9A8FD8")
+        new("command", "指挥协同", "负责组织、沟通和行动节奏。", PersonalProfileRoleColorPalette.Command),
+        new("ship", "舰船操作", "承担舰船驾驶、武器与工程席位。", PersonalProfileRoleColorPalette.Ship),
+        new("air-combat", "空中战斗", "专注舰载机与空中作战任务。", PersonalProfileRoleColorPalette.AirCombat),
+        new("ground-combat", "地面战斗", "承担地面、载具与登舰作战。", PersonalProfileRoleColorPalette.GroundCombat),
+        new("recon", "探索侦察", "负责扫描、侦察和路径规划。", PersonalProfileRoleColorPalette.Recon),
+        new("industry", "工业生产", "参与采集、生产与货物流转。", PersonalProfileRoleColorPalette.Industry),
+        new("medical", "医疗救援", "提供医疗、搜救和伤员转运。", PersonalProfileRoleColorPalette.Medical),
+        new("logistics", "后勤保障", "负责补给、维修和资源调度。", PersonalProfileRoleColorPalette.Logistics)
     ];
 
     public static readonly PersonalProfileRoleDefinition[] Roles =

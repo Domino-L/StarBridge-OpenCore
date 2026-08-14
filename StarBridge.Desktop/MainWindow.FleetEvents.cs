@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using StarBridge.Desktop.Theming;
 using Brushes = System.Windows.Media.Brushes;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 
@@ -563,38 +564,38 @@ public partial class MainWindow
                !response.Equals("无法参与", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string GetFleetEventResponseAccent(string response)
+    private static BridgeBrushToken GetFleetEventResponseAccent(string response)
     {
         if (response.Equals("已就位", StringComparison.OrdinalIgnoreCase))
         {
-            return "#42CF7C";
+            return BridgeBrushToken.StatusOk;
         }
 
         if (response.Equals("无法参与", StringComparison.OrdinalIgnoreCase))
         {
-            return "#D9A23B";
+            return BridgeBrushToken.StatusWarn;
         }
 
         if (response.Equals("确认收到", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("已确认", StringComparison.OrdinalIgnoreCase))
         {
-            return "#29AFFF";
+            return BridgeBrushToken.StatusInfo;
         }
 
         if (response.Equals("可接取", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("可预约", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("已预约", StringComparison.OrdinalIgnoreCase))
         {
-            return "#29AFFF";
+            return BridgeBrushToken.StatusInfo;
         }
 
         if (response.Equals("过往事件", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("待命", StringComparison.OrdinalIgnoreCase))
         {
-            return "#91A5B5";
+            return BridgeBrushToken.StatusOff;
         }
 
-        return "#D9A23B";
+        return BridgeBrushToken.StatusWarn;
     }
 
     private static string GetFleetEventResponseGuidance(string response)
@@ -620,45 +621,31 @@ public partial class MainWindow
 
     private void ApplyFleetEventFocusVisual(string state)
     {
-        var accentHex = GetFleetEventResponseAccent(state);
-        var panelBackground = state.Equals("已就位", StringComparison.OrdinalIgnoreCase)
-            ? "#081D16"
-            : state.Equals("无法参与", StringComparison.OrdinalIgnoreCase)
-                ? "#1C170D"
-                : state.Equals("确认收到", StringComparison.OrdinalIgnoreCase) ||
-                  state.Equals("已确认", StringComparison.OrdinalIgnoreCase) ||
-                  state.Equals("可接取", StringComparison.OrdinalIgnoreCase) ||
-                  state.Equals("可预约", StringComparison.OrdinalIgnoreCase) ||
-                  state.Equals("已预约", StringComparison.OrdinalIgnoreCase)
-                    ? "#091A26"
-                    : "#07131D";
-        var badgeBackground = state.Equals("已就位", StringComparison.OrdinalIgnoreCase)
-            ? "#102A1D"
-            : state.Equals("无法参与", StringComparison.OrdinalIgnoreCase)
-                ? "#2A2415"
-                : "#102B3D";
+        var accent = FleetCommandBrush(GetFleetEventResponseAccent(state));
+        var panelBackground = FleetCommandBrush(BridgeBrushToken.Panel);
+        var badgeBackground = FleetCommandBrush(BridgeBrushToken.PanelRaised);
 
         if (FleetEventsFocusBanner is not null)
         {
-            FleetEventsFocusBanner.Background = CreateSolidBrush(panelBackground);
-            FleetEventsFocusBanner.BorderBrush = CreateSolidBrush(accentHex);
+            FleetEventsFocusBanner.Background = panelBackground;
+            FleetEventsFocusBanner.BorderBrush = accent;
         }
 
         if (FleetEventsTaskStateBadge is not null)
         {
-            FleetEventsTaskStateBadge.Background = CreateSolidBrush(badgeBackground);
-            FleetEventsTaskStateBadge.BorderBrush = CreateSolidBrush(accentHex);
+            FleetEventsTaskStateBadge.Background = badgeBackground;
+            FleetEventsTaskStateBadge.BorderBrush = accent;
         }
 
         if (FleetEventsTaskStateBadgeText is not null)
         {
-            FleetEventsTaskStateBadgeText.Foreground = CreateSolidBrush(accentHex);
+            FleetEventsTaskStateBadgeText.Foreground = accent;
         }
 
         if (FleetEventsFeedbackCard is not null)
         {
-            FleetEventsFeedbackCard.Background = CreateSolidBrush(panelBackground);
-            FleetEventsFeedbackCard.BorderBrush = CreateSolidBrush(accentHex);
+            FleetEventsFeedbackCard.Background = panelBackground;
+            FleetEventsFeedbackCard.BorderBrush = accent;
         }
     }
 
@@ -666,14 +653,14 @@ public partial class MainWindow
     {
         var actions = new List<FrameworkElement>
         {
-            CreateFleetEventSmallButton("查看", "#28506A", (_, _) =>
+            CreateFleetEventSmallButton("查看", (_, _) =>
             {
                 _selectedFleetEventFocusPlanId = "";
                 RefreshFleetEventCommandCenter();
             })
         };
 
-        var accentHex = GetFleetEventResponseAccent(localResponse);
+        var accent = FleetCommandBrush(GetFleetEventResponseAccent(localResponse));
         AddFleetEventRow(
             FleetEventsTodoItems,
             "当前行动",
@@ -681,7 +668,7 @@ public partial class MainWindow
             BuildCurrentTaskNotificationDetail(),
             _fleetCurrentTaskTime is null ? "发布时间待定" : _fleetCurrentTaskTime.Value.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture),
             string.IsNullOrWhiteSpace(localResponse) ? "待确认" : localResponse,
-            accentHex,
+            accent,
             actions);
     }
 
@@ -690,7 +677,7 @@ public partial class MainWindow
         var row = BuildFleetEventActionPlanRow(plan);
         var actions = new List<FrameworkElement>
         {
-            CreateFleetEventSmallButton("查看", "#28506A", (_, _) =>
+            CreateFleetEventSmallButton("查看", (_, _) =>
             {
                 _selectedFleetEventFocusPlanId = plan.Id;
                 _selectedActionPlanId = plan.Id;
@@ -700,7 +687,7 @@ public partial class MainWindow
 
         if (includePrimaryAction)
         {
-            var actionButton = CreateFleetEventSmallButton(row.ActionText, "#28506A", null);
+            var actionButton = CreateFleetEventSmallButton(row.ActionText, null);
             actionButton.IsEnabled = row.CanAct;
             actionButton.DataContext = row;
             actionButton.Click += FleetEventActionPlanJoinButton_Click;
@@ -714,7 +701,7 @@ public partial class MainWindow
             row.Summary,
             row.TimeText,
             row.StatusText,
-            GetBrushHex(row.AccentBrush, "#29AFFF"),
+            row.AccentBrush,
             actions);
     }
 
@@ -729,7 +716,7 @@ public partial class MainWindow
             safeDetail,
             log.Timestamp.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.InvariantCulture),
             log.Type,
-            GetBrushHex(log.AccentBrush, log.Type.Equals("任务", StringComparison.OrdinalIgnoreCase) ? "#29AFFF" : "#D9A23B"),
+            log.AccentBrush,
             Array.Empty<FrameworkElement>());
     }
 
@@ -740,13 +727,13 @@ public partial class MainWindow
         string detail,
         string meta,
         string status,
-        string accentHex,
+        System.Windows.Media.Brush accent,
         IReadOnlyList<FrameworkElement> actions)
     {
         var border = new Border
         {
-            Background = CreateSolidBrush("#0A1823"),
-            BorderBrush = CreateSolidBrush("#173447"),
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Margin = new Thickness(0, 0, 0, 7),
@@ -760,7 +747,7 @@ public partial class MainWindow
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        grid.Children.Add(new Border { Background = CreateSolidBrush(accentHex) });
+        grid.Children.Add(new Border { Background = accent });
 
         var textStack = new StackPanel
         {
@@ -769,14 +756,14 @@ public partial class MainWindow
         textStack.Children.Add(new TextBlock
         {
             Text = label,
-            Foreground = CreateSolidBrush("#637A89"),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
             FontSize = 10,
             FontWeight = FontWeights.SemiBold
         });
         textStack.Children.Add(new TextBlock
         {
             Text = string.IsNullOrWhiteSpace(title) ? "未命名事项" : title,
-            Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(0, 3, 0, 0)
@@ -784,7 +771,7 @@ public partial class MainWindow
         textStack.Children.Add(new TextBlock
         {
             Text = string.IsNullOrWhiteSpace(detail) ? "暂无说明" : detail,
-            Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink2),
             FontSize = 11,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(0, 3, 0, 0)
@@ -801,7 +788,7 @@ public partial class MainWindow
         metaStack.Children.Add(new TextBlock
         {
             Text = meta,
-            Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+            Foreground = FleetCommandBrush(BridgeBrushToken.Ink),
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 3, 0, 0)
         });
@@ -810,8 +797,8 @@ public partial class MainWindow
 
         var statusBorder = new Border
         {
-            Background = CreateSolidBrush("#102536"),
-            BorderBrush = CreateSolidBrush(accentHex),
+            Background = FleetCommandBrush(BridgeBrushToken.PanelRaised),
+            BorderBrush = accent,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(8, 2, 8, 2),
@@ -821,7 +808,7 @@ public partial class MainWindow
             Child = new TextBlock
             {
                 Text = status,
-                Foreground = CreateSolidBrush(accentHex),
+                Foreground = accent,
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -848,7 +835,7 @@ public partial class MainWindow
         panel.Children.Add(border);
     }
 
-    private System.Windows.Controls.Button CreateFleetEventSmallButton(string text, string borderHex, RoutedEventHandler? handler)
+    private System.Windows.Controls.Button CreateFleetEventSmallButton(string text, RoutedEventHandler? handler)
     {
         var button = new System.Windows.Controls.Button
         {
@@ -866,16 +853,6 @@ public partial class MainWindow
         }
 
         return button;
-    }
-
-    private static string GetBrushHex(System.Windows.Media.Brush brush, string fallback)
-    {
-        if (brush is SolidColorBrush solid)
-        {
-            return $"#{solid.Color.R:X2}{solid.Color.G:X2}{solid.Color.B:X2}";
-        }
-
-        return fallback;
     }
 
     private string GetLocalInstantTaskResponse()

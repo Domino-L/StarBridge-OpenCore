@@ -43,6 +43,11 @@ public static class CommunicationTimeFormatter
             return $"{(int)elapsed.TotalDays}天前";
         }
 
-        return publishedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var localPublishedAt = publishedAt.ToLocalTime();
+        var localCurrent = current.ToLocalTime();
+        var absoluteFormat = localPublishedAt.Year == localCurrent.Year
+            ? "MM-dd HH:mm"
+            : "yyyy-MM-dd HH:mm";
+        return localPublishedAt.ToString(absoluteFormat, CultureInfo.InvariantCulture);
     }
 }

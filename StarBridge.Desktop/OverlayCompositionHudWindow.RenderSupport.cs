@@ -1,10 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Vortice.Direct2D1;
 using Vortice.DirectWrite;
 using Vortice.Mathematics;
@@ -113,84 +111,6 @@ internal sealed partial class OverlayCompositionHudWindow
             FromBrush(_viewModel.CrosshairBrush, HudColor.FromRgb(235, 247, 255, 215)),
             FromBrush(_viewModel.CrosshairAlertBrush, HudColor.FromRgb(255, 240, 0, 225)),
             HudColor.FromRgb(4, 16, 28));
-    }
-
-    private IReadOnlyList<OverlayCompositionSquadRow> SnapshotSquads(ObservableCollection<OverlaySquadRow> rows)
-    {
-        return rows
-            .Select(row => new OverlayCompositionSquadRow(
-                row.Name,
-                row.Icon,
-                row.DetailLine,
-                row.SummaryLine,
-                FromBrush(row.StatusBrush, HudColor.FromRgb(83, 190, 255)),
-                row.EmblemPath,
-                SnapshotSquadEmblem(row.EmblemPath),
-                row.IsPartyRoomIcon))
-            .ToArray();
-    }
-
-    private OverlayCompositionBitmapData? SnapshotSquadEmblem(string? emblemPath)
-    {
-        if (string.IsNullOrWhiteSpace(emblemPath))
-        {
-            return null;
-        }
-
-        var cacheKey = BuildSquadEmblemCacheKey(emblemPath);
-        if (_squadEmblemSnapshots.TryGetValue(cacheKey, out var cached))
-        {
-            return cached;
-        }
-
-        OverlayCompositionBitmapData? snapshot = null;
-        try
-        {
-            var decoded = ImageDecodeCache.Load(emblemPath, 32);
-            if (decoded is not null)
-            {
-                BitmapSource source = decoded;
-                if (source.Format != PixelFormats.Pbgra32)
-                {
-                    source = new FormatConvertedBitmap(source, PixelFormats.Pbgra32, null, 0);
-                    source.Freeze();
-                }
-
-                var stride = checked(source.PixelWidth * 4);
-                var pixels = new byte[checked(stride * source.PixelHeight)];
-                source.CopyPixels(pixels, stride, 0);
-                snapshot = new OverlayCompositionBitmapData(
-                    cacheKey,
-                    source.PixelWidth,
-                    source.PixelHeight,
-                    stride,
-                    pixels);
-            }
-        }
-        catch
-        {
-            snapshot = null;
-        }
-
-        _squadEmblemSnapshots[cacheKey] = snapshot;
-        return snapshot;
-    }
-
-    private static string BuildSquadEmblemCacheKey(string emblemPath)
-    {
-        try
-        {
-            if (File.Exists(emblemPath))
-            {
-                var file = new FileInfo(emblemPath);
-                return $"{file.FullName}|{file.LastWriteTimeUtc.Ticks}|{file.Length}";
-            }
-        }
-        catch
-        {
-        }
-
-        return emblemPath;
     }
 
     private static IReadOnlyList<OverlayCompositionMemberRow> SnapshotMembers(ObservableCollection<OverlayMemberRow> rows)

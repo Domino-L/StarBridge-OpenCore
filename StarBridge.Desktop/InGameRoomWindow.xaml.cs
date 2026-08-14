@@ -42,6 +42,7 @@ public partial class InGameRoomWindow : Window
     internal InGameRoomWindow()
     {
         InitializeComponent();
+        Theming.BridgeSceneContext.ApplyFixed(this, Theming.BridgeSceneKind.Party);
         InGameToolWindowBehavior.PreventSnapMaximize(this);
         CreateCapacityBox.ItemsSource = Enumerable.Range(2, 15).ToArray();
         CreateCapacityBox.SelectedItem = 6;
@@ -94,10 +95,11 @@ public partial class InGameRoomWindow : Window
             UnavailablePanel.Visibility = snapshot.IsAvailable
                 ? Visibility.Collapsed
                 : Visibility.Visible;
+            Controls.InGameLoadingPresentation.Apply(UnavailableLoadingIndicator, false);
             RoomList.IsEnabled = snapshot.IsAvailable;
             LobbyToolbar.IsEnabled = snapshot.IsAvailable;
             ShowCreateButton.IsEnabled = snapshot.IsAvailable;
-            CreateStatusText.Text = snapshot.StatusText;
+            SetStatus(snapshot.StatusText);
 
             if (snapshot.CurrentRoom is not null)
             {
@@ -135,19 +137,43 @@ public partial class InGameRoomWindow : Window
         }
     }
 
-    internal void SetStatus(string text)
+    internal void SetStatus(string text, bool isLoading = false)
     {
-        RoomStatusText.Text = text;
-        CreateStatusText.Text = text;
-        RoomCodeStatusText.Text = text;
-        NoRoomSelectionStatusText.Text = text;
-        CurrentRoomFeedbackText.Text = text;
+        Controls.InGameLoadingPresentation.Apply(
+            RoomStatusText,
+            RoomStatusLoadingIndicator,
+            text,
+            isLoading);
+        Controls.InGameLoadingPresentation.Apply(
+            CreateStatusText,
+            CreateStatusLoadingIndicator,
+            text,
+            isLoading);
+        Controls.InGameLoadingPresentation.Apply(
+            RoomCodeStatusText,
+            RoomCodeLoadingIndicator,
+            text,
+            isLoading);
+        Controls.InGameLoadingPresentation.Apply(
+            NoRoomSelectionStatusText,
+            NoRoomSelectionLoadingIndicator,
+            text,
+            isLoading);
+        Controls.InGameLoadingPresentation.Apply(
+            CurrentRoomFeedbackText,
+            CurrentRoomFeedbackLoadingIndicator,
+            text,
+            isLoading);
     }
 
-    internal void SetInvitationStatus(string text) =>
-        InviteFriendsStatusText.Text = text;
+    internal void SetInvitationStatus(string text, bool isLoading = false) =>
+        Controls.InGameLoadingPresentation.Apply(
+            InviteFriendsStatusText,
+            InviteFriendsLoadingIndicator,
+            text,
+            isLoading);
 
-    internal void ResetAccountState(string statusText)
+    internal void ResetAccountState(string statusText, bool isLoading = false)
     {
         RoomCodeBox.Clear();
         RoomCodePasswordBox.Clear();
@@ -173,7 +199,13 @@ public partial class InGameRoomWindow : Window
             new InGameRoomChatSnapshot([], false, statusText),
             new InGameRoomInvitationSnapshot(false, [], statusText)));
         RoomUnavailableDetailText.Text = statusText;
-        SetStatus(statusText);
+        SetStatus(statusText, isLoading);
+        Controls.InGameLoadingPresentation.Apply(UnavailableLoadingIndicator, isLoading);
+        Controls.InGameLoadingPresentation.Apply(
+            RoomCountText,
+            RoomDirectoryLoadingIndicator,
+            statusText,
+            isLoading);
     }
 
     internal void HideForMenu()
@@ -221,7 +253,11 @@ public partial class InGameRoomWindow : Window
         var selectedId = _selectedRoom?.RoomId;
 
         RoomList.ItemsSource = visibleRooms;
-        RoomCountText.Text = $"{visibleRooms.Length} 个房间";
+        Controls.InGameLoadingPresentation.Apply(
+            RoomCountText,
+            RoomDirectoryLoadingIndicator,
+            $"{visibleRooms.Length} 个房间",
+            isLoading: false);
         RoomEmptyState.Visibility = visibleRooms.Length == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -257,13 +293,21 @@ public partial class InGameRoomWindow : Window
         CopyCurrentRoomCodeButton.IsEnabled =
             _showRoomCode &&
             !string.IsNullOrWhiteSpace(room.RoomCode);
-        CurrentRoomFeedbackText.Text = "";
+        Controls.InGameLoadingPresentation.Apply(
+            CurrentRoomFeedbackText,
+            CurrentRoomFeedbackLoadingIndicator,
+            "",
+            isLoading: false);
     }
 
     private void ApplyRoomChat(InGameRoomChatSnapshot chat)
     {
         CurrentRoomChatList.ItemsSource = chat.Messages;
-        CurrentRoomChatStatusText.Text = chat.StatusText;
+        Controls.InGameLoadingPresentation.Apply(
+            CurrentRoomChatStatusText,
+            CurrentRoomChatLoadingIndicator,
+            chat.StatusText,
+            chat.IsLoading);
         CurrentRoomChatInputBox.IsEnabled = chat.CanSend;
         CurrentRoomChatSendButton.IsEnabled = chat.CanSend;
         CurrentRoomChatAttachmentButton.IsEnabled = chat.CanSend;
@@ -287,7 +331,7 @@ public partial class InGameRoomWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         InviteFriendsList.ItemsSource = invitations.Friends;
-        InviteFriendsStatusText.Text = invitations.StatusText;
+        SetInvitationStatus(invitations.StatusText);
         InviteFriendsEmptyText.Visibility = invitations.Friends.Length == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -306,7 +350,11 @@ public partial class InGameRoomWindow : Window
         if (_selectedRoom is null)
         {
             RoomDetailPanel.DataContext = null;
-            NoRoomSelectionStatusText.Text = _snapshot?.StatusText ?? "";
+            Controls.InGameLoadingPresentation.Apply(
+                NoRoomSelectionStatusText,
+                NoRoomSelectionLoadingIndicator,
+                _snapshot?.StatusText ?? "",
+                isLoading: false);
             NoRoomSelectionState.Visibility = Visibility.Visible;
             RoomDetailPanel.Visibility = Visibility.Collapsed;
             return;
@@ -333,11 +381,15 @@ public partial class InGameRoomWindow : Window
         JoinRoomButton.Content = _selectedRoom.AdmissionMode == PartyLobbyAdmissionMode.HostApproval
             ? "申请加入"
             : "直接加入";
-        RoomStatusText.Text = isCurrent
+        Controls.InGameLoadingPresentation.Apply(
+            RoomStatusText,
+            RoomStatusLoadingIndicator,
+            isCurrent
             ? "你当前在这个房间中。"
             : current is not null
                 ? "你已经在另一个房间中，请先退出当前房间。"
-                : _snapshot?.StatusText ?? "";
+                : _snapshot?.StatusText ?? "",
+            isLoading: false);
     }
 
     private void RoomList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -387,7 +439,11 @@ public partial class InGameRoomWindow : Window
             return;
         }
 
-        RoomStatusText.Text = "正在加入房间…";
+        Controls.InGameLoadingPresentation.Apply(
+            RoomStatusText,
+            RoomStatusLoadingIndicator,
+            "正在加入房间",
+            isLoading: true);
         JoinRequested?.Invoke(
             this,
             new InGameRoomJoinRequestedEventArgs(
@@ -401,11 +457,19 @@ public partial class InGameRoomWindow : Window
         var code = RoomCodeBox.Text.Trim();
         if (code.Length == 0)
         {
-            RoomCodeStatusText.Text = "请输入房间码。";
+            Controls.InGameLoadingPresentation.Apply(
+                RoomCodeStatusText,
+                RoomCodeLoadingIndicator,
+                "请输入房间码。",
+                isLoading: false);
             return;
         }
 
-        RoomCodeStatusText.Text = "正在查找房间…";
+        Controls.InGameLoadingPresentation.Apply(
+            RoomCodeStatusText,
+            RoomCodeLoadingIndicator,
+            "正在查找房间",
+            isLoading: true);
         JoinRequested?.Invoke(
             this,
             new InGameRoomJoinRequestedEventArgs(
@@ -419,7 +483,11 @@ public partial class InGameRoomWindow : Window
         _isCreatingRoom = false;
         CreateRoomPanel.Visibility = Visibility.Collapsed;
         CreateTagPickerPanel.Visibility = Visibility.Collapsed;
-        RoomCodeStatusText.Text = "";
+        Controls.InGameLoadingPresentation.Apply(
+            RoomCodeStatusText,
+            RoomCodeLoadingIndicator,
+            "",
+            isLoading: false);
         RoomCodeJoinPanel.Visibility = Visibility.Visible;
         RoomCodeBox.Focus();
     }
@@ -460,7 +528,11 @@ public partial class InGameRoomWindow : Window
     {
         if (_createGameplayIds.Count is < 1 or > 3)
         {
-            CreateStatusText.Text = "请先选择 1–3 条玩法路径。";
+            Controls.InGameLoadingPresentation.Apply(
+                CreateStatusText,
+                CreateStatusLoadingIndicator,
+                "请先选择 1–3 条玩法路径。",
+                isLoading: false);
             return;
         }
 
@@ -503,7 +575,11 @@ public partial class InGameRoomWindow : Window
             int.TryParse(GetSelectedTag(CreateDisbandBox), out var disbandHours)
                 ? disbandHours
                 : 6);
-        CreateStatusText.Text = "正在创建房间…";
+        Controls.InGameLoadingPresentation.Apply(
+            CreateStatusText,
+            CreateStatusLoadingIndicator,
+            "正在创建房间",
+            isLoading: true);
         CreateRequested?.Invoke(
             this,
             new InGameRoomCreateRequestedEventArgs(draft));
@@ -571,7 +647,11 @@ public partial class InGameRoomWindow : Window
         _createContextIds.Clear();
         _createContextIds.UnionWith(_createTagDraftContextIds);
         RefreshCreateTagSummary();
-        CreateStatusText.Text = "";
+        Controls.InGameLoadingPresentation.Apply(
+            CreateStatusText,
+            CreateStatusLoadingIndicator,
+            "",
+            isLoading: false);
         CreateTagPickerPanel.Visibility = Visibility.Collapsed;
     }
 
@@ -775,14 +855,22 @@ public partial class InGameRoomWindow : Window
         var text = CurrentRoomChatInputBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            CurrentRoomChatStatusText.Text = "输入消息后再发送";
+            Controls.InGameLoadingPresentation.Apply(
+                CurrentRoomChatStatusText,
+                CurrentRoomChatLoadingIndicator,
+                "输入消息后再发送",
+                isLoading: false);
             CurrentRoomChatInputBox.Focus();
             return;
         }
 
         CurrentRoomChatSendButton.IsEnabled = false;
         CurrentRoomChatAttachmentButton.IsEnabled = false;
-        CurrentRoomChatStatusText.Text = "正在发送…";
+        Controls.InGameLoadingPresentation.Apply(
+            CurrentRoomChatStatusText,
+            CurrentRoomChatLoadingIndicator,
+            "正在发送",
+            isLoading: true);
         CurrentRoomChatInputBox.Clear();
         MessageRequested?.Invoke(this, new InGameRoomMessageRequestedEventArgs(text));
     }
@@ -812,18 +900,30 @@ public partial class InGameRoomWindow : Window
         var roomCode = _snapshot?.CurrentRoom?.RoomCode;
         if (string.IsNullOrWhiteSpace(roomCode))
         {
-            CurrentRoomFeedbackText.Text = "这个房间暂时没有可复制的房间码。";
+            Controls.InGameLoadingPresentation.Apply(
+                CurrentRoomFeedbackText,
+                CurrentRoomFeedbackLoadingIndicator,
+                "这个房间暂时没有可复制的房间码。",
+                isLoading: false);
             return;
         }
 
         try
         {
             System.Windows.Clipboard.SetText(roomCode);
-            CurrentRoomFeedbackText.Text = "房间码已复制。";
+            Controls.InGameLoadingPresentation.Apply(
+                CurrentRoomFeedbackText,
+                CurrentRoomFeedbackLoadingIndicator,
+                "房间码已复制。",
+                isLoading: false);
         }
         catch
         {
-            CurrentRoomFeedbackText.Text = "未能复制房间码，请稍后重试。";
+            Controls.InGameLoadingPresentation.Apply(
+                CurrentRoomFeedbackText,
+                CurrentRoomFeedbackLoadingIndicator,
+                "未能复制房间码，请稍后重试。",
+                isLoading: false);
         }
     }
 
@@ -831,12 +931,16 @@ public partial class InGameRoomWindow : Window
     {
         if (_snapshot?.Invitations.CanInvite != true)
         {
-            CurrentRoomFeedbackText.Text = "只有房主可以邀请好友加入房间。";
+            Controls.InGameLoadingPresentation.Apply(
+                CurrentRoomFeedbackText,
+                CurrentRoomFeedbackLoadingIndicator,
+                "只有房主可以邀请好友加入房间。",
+                isLoading: false);
             return;
         }
 
         InviteFriendsPanel.Visibility = Visibility.Visible;
-        InviteFriendsStatusText.Text = "正在同步好友与邀请状态…";
+        SetInvitationStatus("正在同步好友与邀请状态", isLoading: true);
         RefreshRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -851,7 +955,9 @@ public partial class InGameRoomWindow : Window
             return;
         }
 
-        InviteFriendsStatusText.Text = $"正在向 {row.Callsign} 发送房间邀请…";
+        SetInvitationStatus(
+            $"正在向 {row.Callsign} 发送房间邀请",
+            isLoading: true);
         InvitationActionRequested?.Invoke(
             this,
             new InGameRoomInvitationActionRequestedEventArgs(row, row.PrimaryAction));
@@ -865,7 +971,7 @@ public partial class InGameRoomWindow : Window
             return;
         }
 
-        InviteFriendsStatusText.Text = "正在撤回邀请…";
+        SetInvitationStatus("正在撤回邀请", isLoading: true);
         InvitationActionRequested?.Invoke(
             this,
             new InGameRoomInvitationActionRequestedEventArgs(row, row.SecondaryAction));
@@ -873,14 +979,22 @@ public partial class InGameRoomWindow : Window
 
     private void LeaveRoomButton_Click(object sender, RoutedEventArgs e)
     {
-        RoomStatusText.Text = "正在退出房间…";
-        CurrentRoomFeedbackText.Text = "正在退出房间…";
+        Controls.InGameLoadingPresentation.Apply(
+            RoomStatusText,
+            RoomStatusLoadingIndicator,
+            "正在退出房间",
+            isLoading: true);
+        Controls.InGameLoadingPresentation.Apply(
+            CurrentRoomFeedbackText,
+            CurrentRoomFeedbackLoadingIndicator,
+            "正在退出房间",
+            isLoading: true);
         LeaveRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        SetStatus("正在刷新房间…");
+        SetStatus("正在刷新房间", isLoading: true);
         RefreshRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -921,9 +1035,6 @@ public partial class InGameRoomWindow : Window
             DragMove();
         }
     }
-
-    private void MinimizeButton_Click(object sender, RoutedEventArgs e) =>
-        WindowState = WindowState.Minimized;
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) =>
         Close();

@@ -5,6 +5,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Button = System.Windows.Controls.Button;
 using Point = System.Windows.Point;
+using ToggleButton = System.Windows.Controls.Primitives.ToggleButton;
 
 namespace StarBridge.Desktop;
 
@@ -38,14 +39,75 @@ public static class UiMotion
         typeof(UiMotion),
         new PropertyMetadata(null));
 
+    private static readonly DependencyProperty MotionScaleProperty = DependencyProperty.RegisterAttached(
+        "MotionScale",
+        typeof(ScaleTransform),
+        typeof(UiMotion),
+        new PropertyMetadata(null));
+
     private static readonly DependencyProperty RouteTargetXProperty = DependencyProperty.RegisterAttached(
         "RouteTargetX",
         typeof(double),
         typeof(UiMotion),
         new PropertyMetadata(double.NaN));
 
+    private static readonly DependencyProperty NavigationSelectionVersionProperty = DependencyProperty.RegisterAttached(
+        "NavigationSelectionVersion",
+        typeof(int),
+        typeof(UiMotion),
+        new PropertyMetadata(0));
+
     public static bool IsEnabled =>
         SystemParameters.ClientAreaAnimation && (RenderCapability.Tier >> 16) > 0;
+
+    internal static void ApplySceneColor(
+        Animatable target,
+        DependencyProperty property,
+        System.Windows.Media.Color value)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(property);
+
+        var currentValue = (System.Windows.Media.Color)target.GetValue(property);
+        if (!IsEnabled)
+        {
+            target.BeginAnimation(property, null);
+            target.SetValue(property, value);
+            return;
+        }
+
+        // Preserve the colour already on screen when rapid navigation retargets
+        // this animation. Do not update the base value while the previous clock
+        // is active: WPF can re-evaluate that clock against the new base and
+        // create the very colour jump this handoff is meant to avoid.
+        var animation = new ColorAnimationUsingKeyFrames
+        {
+            Duration = UiMotionProfile.SceneDuration,
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        animation.KeyFrames.Add(
+            new DiscreteColorKeyFrame
+            {
+                Value = currentValue,
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.Zero)
+            });
+        animation.KeyFrames.Add(
+            new SplineColorKeyFrame
+            {
+                Value = value,
+                KeyTime = KeyTime.FromTimeSpan(UiMotionProfile.SceneDuration),
+                KeySpline = (KeySpline)EnterSpline.Clone()
+            });
+        animation.Completed += (_, _) =>
+        {
+            target.SetValue(property, value);
+            target.BeginAnimation(property, null);
+        };
+        target.BeginAnimation(
+            property,
+            animation,
+            HandoffBehavior.SnapshotAndReplace);
+    }
 
     public static void InitializeGlobalInteractions()
     {
@@ -54,7 +116,7 @@ public static class UiMotion
         // unstable, so high-frequency interactions intentionally stay fixed.
     }
 
-    public static void ShowModal(Border? overlay, FrameworkElement? card)
+    public static void ShowModal(FrameworkElement? overlay, FrameworkElement? card)
     {
         if (overlay is null)
         {
@@ -97,7 +159,7 @@ public static class UiMotion
             CreateSplineAnimation(UiMotionProfile.ModalStartOffset, 0, ModalDuration, EnterSpline));
     }
 
-    public static void HideModal(Border? overlay, FrameworkElement? card = null)
+    public static void HideModal(FrameworkElement? overlay, FrameworkElement? card = null)
     {
         if (overlay is null || overlay.Visibility != Visibility.Visible)
         {
@@ -245,6 +307,162 @@ public static class UiMotion
                 AnimateNavigationMarker(marker, movesForward);
             }
         }));
+    }
+
+    public static void ResetNavigationSelection(ToggleButton? button)
+    {
+        if (button is null)
+        {
+            return;
+        }
+
+        AdvanceNavigationSelectionVersion(button);
+        button.ApplyTemplate();
+        ResetNavigationSelectionElement(FindNavigationSelectionSurface(button));
+        ResetNavigationSelectionElement(FindNavigationSelectionEdge(button));
+    }
+
+    public static void RevealNavigationSelection(ToggleButton? button)
+    {
+        if (button is null)
+        {
+            return;
+        }
+
+        button.ApplyTemplate();
+        var surface = FindNavigationSelectionSurface(button);
+        var edge = FindNavigationSelectionEdge(button);
+        var transitionVersion = AdvanceNavigationSelectionVersion(button);
+
+        if (!IsEnabled)
+        {
+            ResetNavigationSelectionElement(surface);
+            ResetNavigationSelectionElement(edge);
+            return;
+        }
+
+        if (surface is not null)
+        {
+            surface.RenderTransformOrigin = new Point(0.5, 0.5);
+            var currentOpacity = Math.Clamp(surface.Opacity, 0, 1);
+            var startOpacity = currentOpacity < 0.999 ? currentOpacity : 0.46;
+            var surfaceScale = EnsureScale(surface);
+            var currentScaleY = Math.Clamp(surfaceScale.ScaleY, 0.9, 1);
+            var startScaleY = currentScaleY < 0.999 ? currentScaleY : 0.9;
+            HoldNavigationSelectionValue(surface, UIElement.OpacityProperty, startOpacity);
+            HoldNavigationSelectionValue(surfaceScale, ScaleTransform.ScaleYProperty, startScaleY);
+        }
+
+        if (edge is not null)
+        {
+            edge.RenderTransformOrigin = new Point(0.5, 0.5);
+            var currentEdgeOpacity = Math.Clamp(edge.Opacity, 0, 1);
+            var startEdgeOpacity = currentEdgeOpacity < 0.999 ? currentEdgeOpacity : 0.58;
+            var edgeScale = EnsureScale(edge);
+            var currentScaleX = Math.Clamp(edgeScale.ScaleX, 0, 1);
+            var startScaleX = currentScaleX < 0.999 ? currentScaleX : 0;
+            HoldNavigationSelectionValue(edge, UIElement.OpacityProperty, startEdgeOpacity);
+            HoldNavigationSelectionValue(edgeScale, ScaleTransform.ScaleXProperty, startScaleX);
+        }
+
+        button.Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+        {
+            if ((int)button.GetValue(NavigationSelectionVersionProperty) != transitionVersion ||
+                button.IsChecked != true)
+            {
+                return;
+            }
+
+            if (surface is not null)
+            {
+                var surfaceOpacity = Math.Clamp(surface.Opacity, 0, 1);
+                var surfaceScale = EnsureScale(surface);
+                var surfaceScaleY = Math.Clamp(surfaceScale.ScaleY, 0.9, 1);
+                surface.BeginAnimation(
+                    UIElement.OpacityProperty,
+                    CreateSplineAnimation(surfaceOpacity, 1, FastDuration, EnterSpline),
+                    HandoffBehavior.SnapshotAndReplace);
+                surfaceScale.BeginAnimation(
+                    ScaleTransform.ScaleYProperty,
+                    CreateSplineAnimation(surfaceScaleY, 1, FastDuration, EnterSpline),
+                    HandoffBehavior.SnapshotAndReplace);
+            }
+
+            if (edge is null)
+            {
+                return;
+            }
+
+            var edgeOpacity = Math.Clamp(edge.Opacity, 0, 1);
+            var edgeScale = EnsureScale(edge);
+            var edgeScaleX = Math.Clamp(edgeScale.ScaleX, 0, 1);
+            edge.BeginAnimation(
+                UIElement.OpacityProperty,
+                CreateSplineAnimation(edgeOpacity, 1, FastDuration, EnterSpline),
+                HandoffBehavior.SnapshotAndReplace);
+            edgeScale.BeginAnimation(
+                ScaleTransform.ScaleXProperty,
+                CreateSplineAnimation(edgeScaleX, 1, FastDuration, EnterSpline),
+                HandoffBehavior.SnapshotAndReplace);
+        }));
+    }
+
+    public static void CollapseNavigationSelection(ToggleButton? button)
+    {
+        if (button is null)
+        {
+            return;
+        }
+
+        AdvanceNavigationSelectionVersion(button);
+        button.ApplyTemplate();
+        var surface = FindNavigationSelectionSurface(button);
+        var edge = FindNavigationSelectionEdge(button);
+
+        if (!IsEnabled)
+        {
+            ResetNavigationSelectionElement(surface);
+            ResetNavigationSelectionElement(edge);
+            return;
+        }
+
+        if (surface is not null)
+        {
+            surface.RenderTransformOrigin = new Point(0.5, 0.5);
+            var currentOpacity = Math.Clamp(surface.Opacity, 0, 1);
+            var surfaceScale = EnsureScale(surface);
+            var currentScaleY = Math.Clamp(surfaceScale.ScaleY, 0.9, 1);
+            var startOpacity = Math.Min(currentOpacity, 0.94);
+            var startScaleY = Math.Min(currentScaleY, 0.98);
+            surface.BeginAnimation(
+                UIElement.OpacityProperty,
+                CreateSplineAnimation(startOpacity, 0, FastDuration, ExitSpline),
+                HandoffBehavior.SnapshotAndReplace);
+            surfaceScale.BeginAnimation(
+                ScaleTransform.ScaleYProperty,
+                CreateSplineAnimation(startScaleY, 0.9, FastDuration, ExitSpline),
+                HandoffBehavior.SnapshotAndReplace);
+        }
+
+        if (edge is null)
+        {
+            return;
+        }
+
+        edge.RenderTransformOrigin = new Point(0.5, 0.5);
+        var currentEdgeOpacity = Math.Clamp(edge.Opacity, 0, 1);
+        var edgeScale = EnsureScale(edge);
+        var currentScaleX = Math.Clamp(edgeScale.ScaleX, 0, 1);
+        var startEdgeOpacity = Math.Min(currentEdgeOpacity, 0.82);
+        var startScaleX = Math.Min(currentScaleX, 0.82);
+        edge.BeginAnimation(
+            UIElement.OpacityProperty,
+            CreateSplineAnimation(startEdgeOpacity, 0, FastDuration, ExitSpline),
+            HandoffBehavior.SnapshotAndReplace);
+        edgeScale.BeginAnimation(
+            ScaleTransform.ScaleXProperty,
+            CreateSplineAnimation(startScaleX, 0, FastDuration, ExitSpline),
+            HandoffBehavior.SnapshotAndReplace);
     }
 
     public static void MoveRouteSignal(
@@ -471,6 +689,20 @@ public static class UiMotion
         return translate;
     }
 
+    private static ScaleTransform EnsureScale(UIElement element)
+    {
+        if (element.GetValue(MotionScaleProperty) is ScaleTransform existing)
+        {
+            return existing;
+        }
+
+        var scale = new ScaleTransform(1, 1);
+        var group = EnsureMotionTransformGroup(element);
+        group.Children.Add(scale);
+        element.SetValue(MotionScaleProperty, scale);
+        return scale;
+    }
+
     private static TransformGroup EnsureMotionTransformGroup(UIElement element)
     {
         if (element.GetValue(MotionTransformGroupProperty) is TransformGroup existing)
@@ -489,9 +721,9 @@ public static class UiMotion
         return group;
     }
 
-    private static FrameworkElement? FindNavigationMarker(Button button)
+    private static FrameworkElement? FindNavigationMarker(System.Windows.Controls.Control button)
     {
-        foreach (var markerName in new[] { "ActiveLine", "Rail", "RouteLight", "TabEnergy" })
+        foreach (var markerName in new[] { "ActiveLine", "Rail", "RouteLight", "TabEnergy", "SelectedEdge" })
         {
             if (button.Template.FindName(markerName, button) is FrameworkElement marker)
             {
@@ -501,5 +733,58 @@ public static class UiMotion
 
         return null;
     }
+
+    private static FrameworkElement? FindNavigationSelectionSurface(
+        System.Windows.Controls.Control button) =>
+        FindNavigationSelectionElement(button, "SelectedLayer");
+
+    private static FrameworkElement? FindNavigationSelectionEdge(
+        System.Windows.Controls.Control button) =>
+        FindNavigationSelectionElement(button, "SelectedEdge");
+
+    private static FrameworkElement? FindNavigationSelectionElement(
+        System.Windows.Controls.Control button,
+        string markerName) =>
+        button.Template.FindName(markerName, button) as FrameworkElement;
+
+    private static void ResetNavigationSelectionElement(FrameworkElement? element)
+    {
+        if (element is null)
+        {
+            return;
+        }
+
+        element.BeginAnimation(UIElement.OpacityProperty, null);
+        var scale = EnsureScale(element);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        scale.ScaleX = 1;
+        scale.ScaleY = 1;
+    }
+
+    private static int AdvanceNavigationSelectionVersion(ToggleButton button)
+    {
+        var version = unchecked((int)button.GetValue(NavigationSelectionVersionProperty) + 1);
+        button.SetValue(NavigationSelectionVersionProperty, version);
+        return version;
+    }
+
+    private static void HoldNavigationSelectionValue(
+        UIElement target,
+        DependencyProperty property,
+        double value) =>
+        target.BeginAnimation(
+            property,
+            CreateSplineAnimation(value, value, FastDuration, EnterSpline, FillBehavior.HoldEnd),
+            HandoffBehavior.SnapshotAndReplace);
+
+    private static void HoldNavigationSelectionValue(
+        Animatable target,
+        DependencyProperty property,
+        double value) =>
+        target.BeginAnimation(
+            property,
+            CreateSplineAnimation(value, value, FastDuration, EnterSpline, FillBehavior.HoldEnd),
+            HandoffBehavior.SnapshotAndReplace);
 
 }

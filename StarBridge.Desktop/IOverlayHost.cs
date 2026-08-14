@@ -1,8 +1,9 @@
 using System.Windows;
+using StarBridge.Core.Presence;
 
 namespace StarBridge.Desktop;
 
-public interface IOverlayHost
+internal interface IOverlayHost
 {
     event EventHandler? Closed;
 
@@ -26,13 +27,14 @@ public interface IOverlayHost
     void QueueCommunicationEvent(string title, string detail);
 
     void Refresh(
-        IEnumerable<SquadRow> squads,
-        IEnumerable<PlayerRow> players,
+        OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
         OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         Rect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,

@@ -219,7 +219,10 @@ public partial class MainWindow
             Add("friends", $"{incomingFriendRequests} 个好友申请", "前往好友中心处理申请", accent);
         }
 
-        var pendingFleetApplications = CountPendingFleetApplications();
+        var startupFleetDataIsLive = _startupDataGate.Current.State == StartupDataGateState.Live;
+        var pendingFleetApplications = startupFleetDataIsLive
+            ? CountPendingFleetApplications()
+            : 0;
         if (pendingFleetApplications > 0 && CanCurrentUserManageFleetInfo())
         {
             Add("fleet-applications", $"{pendingFleetApplications} 个舰队加入申请", "直接前往审核队列", warning);
@@ -234,7 +237,8 @@ public partial class MainWindow
         }
 
         var directUnread = _friendChatConversations.Sum(row => row.Conversation.UnreadCount);
-        var totalUnread = directUnread + Math.Max(0, _fleetChatTotalUnread);
+        var totalUnread = directUnread +
+                          (startupFleetDataIsLive ? Math.Max(0, _fleetChatTotalUnread) : 0);
         if (totalUnread > 0)
         {
             Add("messages", $"{totalUnread} 条未读消息", "查看好友私聊与舰队通讯", success);
@@ -254,8 +258,34 @@ public partial class MainWindow
 
     private void RefreshHomeFleetAndCommunication()
     {
+        var startupState = _startupDataGate.Current.State;
+        if (startupState is StartupDataGateState.Loading or StartupDataGateState.Error ||
+            (startupState == StartupDataGateState.Initial && IsLoggedIn))
+        {
+            HomeFleetTitleText.Text = "舰队与通讯";
+            HomeFleetActionButton.Content = startupState == StartupDataGateState.Error
+                ? "重试同步"
+                : "正在同步";
+            HomeFleetActionButton.Tag = startupState == StartupDataGateState.Error
+                ? "startup-retry"
+                : null;
+            HomeFleetActionButton.IsEnabled = startupState == StartupDataGateState.Error;
+            HomeFleetAnnouncementTitleText.Text = startupState == StartupDataGateState.Error
+                ? "服务器数据暂不可用"
+                : "正在确认服务器数据";
+            HomeFleetAnnouncementDetailText.Text = startupState == StartupDataGateState.Error
+                ? "当前没有可用缓存，请检查网络后重试。"
+                : "舰队、权限、任务与成员状态到位前不会显示旧数据。";
+            HomeFleetCommunicationText.Text = "等待服务器数据";
+            HomeFleetUnreadText.Text = "";
+            return;
+        }
+
+        HomeFleetActionButton.IsEnabled = true;
         HomeFleetTitleText.Text = _hasFleet && !string.IsNullOrWhiteSpace(_fleetName)
-            ? _fleetName
+            ? startupState == StartupDataGateState.OfflineCache
+                ? $"{_fleetName} · 本地缓存"
+                : _fleetName
             : "舰队与通讯";
         HomeFleetActionButton.Content = _hasFleet ? "进入我的舰队" : "寻找舰队";
         HomeFleetActionButton.Tag = _hasFleet ? "fleet" : "find-fleet";
@@ -298,7 +328,7 @@ public partial class MainWindow
         }
         else
         {
-            HomeFleetCommunicationText.Text = _hasFleet ? "暂无新消息" : "加入舰队后可使用舰队与小队频道";
+            HomeFleetCommunicationText.Text = _hasFleet ? "暂无新消息" : "加入舰队后可使用舰队聊天";
         }
 
         HomeFleetUnreadText.Text = _fleetChatTotalUnread > 0
@@ -367,8 +397,14 @@ public partial class MainWindow
     private void HomeOpenPersonalProfileButton_Click(object sender, RoutedEventArgs e) =>
         PersonalNav_Click(sender, e);
 
-    private void HomeFleetActionButton_Click(object sender, RoutedEventArgs e)
+    private async void HomeFleetActionButton_Click(object sender, RoutedEventArgs e)
     {
+        if (HomeFleetActionButton.Tag as string == "startup-retry")
+        {
+            await AutoConnectNetworkAsync();
+            return;
+        }
+
         if (HomeFleetActionButton.Tag as string == "fleet")
         {
             NavigateToMyFleet();

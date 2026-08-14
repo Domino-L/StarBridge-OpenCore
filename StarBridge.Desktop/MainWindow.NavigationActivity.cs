@@ -17,14 +17,23 @@ public partial class MainWindow
             HeaderFriendRequestBadge,
             HeaderFriendRequestBadgeText,
             incomingFriendRequests + unreadDirectMessages);
+        SetNavigationActivityBadge(
+            BridgeFriendActivityBadge,
+            BridgeFriendActivityBadgeText,
+            incomingFriendRequests + unreadDirectMessages);
 
-        var pendingFleetApplications = _hasFleet && CanCurrentUserManageFleetInfo()
+        var startupFleetDataIsLive = _startupDataGate.Current.State == StartupDataGateState.Live;
+        var pendingFleetApplications = startupFleetDataIsLive && _hasFleet && CanCurrentUserManageFleetInfo()
             ? CountPendingFleetApplications()
             : 0;
         SetNavigationActivityBadge(
             MyFleetActivityBadge,
             MyFleetActivityBadgeText,
-            Math.Max(0, _fleetChatTotalUnread) + pendingFleetApplications);
+            (startupFleetDataIsLive ? Math.Max(0, _fleetChatTotalUnread) : 0) + pendingFleetApplications);
+        SetNavigationActivityBadge(
+            BridgeFleetActivityBadge,
+            BridgeFleetActivityBadgeText,
+            (startupFleetDataIsLive ? Math.Max(0, _fleetChatTotalUnread) : 0) + pendingFleetApplications);
 
         var pendingRoomApplications = _currentPartyRoom is { ViewerIsHost: true }
             ? _currentPartyRoom.PendingApplications.Length
@@ -32,6 +41,12 @@ public partial class MainWindow
         SetNavigationActivityBadge(
             PartyLobbyActivityBadge,
             PartyLobbyActivityBadgeText,
+            _receivedPartyRoomInvitations.Length +
+            pendingRoomApplications +
+            Math.Max(0, _partyRoomChatUnreadCount));
+        SetNavigationActivityBadge(
+            BridgePartyActivityBadge,
+            BridgePartyActivityBadgeText,
             _receivedPartyRoomInvitations.Length +
             pendingRoomApplications +
             Math.Max(0, _partyRoomChatUnreadCount));

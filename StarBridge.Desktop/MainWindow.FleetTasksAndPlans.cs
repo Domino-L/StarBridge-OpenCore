@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using StarBridge.Desktop.Theming;
 using Brushes = System.Windows.Media.Brushes;
 
 namespace StarBridge.Desktop;
@@ -456,7 +457,7 @@ public partial class MainWindow
                 "未指定持有者",
                 "全库目录",
                 "目录项",
-                CreateSolidBrush("#91A5B5"),
+                FleetCommandBrush(BridgeBrushToken.Ink2),
                 IsCatalogOnly: true);
         }
     }
@@ -471,9 +472,9 @@ public partial class MainWindow
             ship.ShipRoleTag,
             ship.ShipStatus,
             ship.OwnerDisplay,
-            string.IsNullOrWhiteSpace(ship.OwnerSquad) ? "舰队库" : ship.OwnerSquad,
+            "舰队库",
             isOnline ? "在线" : "离线",
-            CreateSolidBrush(isOnline ? "#42CF7C" : "#718591"),
+            FleetCommandBrush(isOnline ? BridgeBrushToken.StatusOk : BridgeBrushToken.StatusOff),
             IsCatalogOnly: false);
     }
 
@@ -512,33 +513,12 @@ public partial class MainWindow
         RefreshPublishTaskShipOptions(editCurrent ? NormalizeOptionalField(_fleetCurrentTaskShip) : null);
         PublishTaskEmailCallCheck.IsChecked = editCurrent ? _fleetCurrentTaskEmailCall : false;
 
-        PublishTaskSquadList.Items.Clear();
-        foreach (var squad in _squads)
-        {
-            PublishTaskSquadList.Items.Add(new System.Windows.Controls.CheckBox
-            {
-                Content = squad.Name,
-                Margin = new Thickness(0, 0, 16, 8)
-            });
-        }
-
-        if (editCurrent && !string.IsNullOrWhiteSpace(_fleetCurrentTaskParticipants))
-        {
-            var selectedSquads = _fleetCurrentTaskParticipants
-                .Split('、', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var checkBox in PublishTaskSquadList.Items.OfType<System.Windows.Controls.CheckBox>())
-            {
-                checkBox.IsChecked = selectedSquads.Contains(checkBox.Content?.ToString() ?? "");
-            }
-        }
-
-        PublishTaskPanel.Visibility = Visibility.Visible;
+        PublishTaskPanel.Show();
     }
 
     private void CancelPublishTaskButton_Click(object sender, RoutedEventArgs e)
     {
-        PublishTaskPanel.Visibility = Visibility.Collapsed;
+        PublishTaskPanel.Hide();
     }
 
     private async void PublishFleetTaskButton_Click(object sender, RoutedEventArgs e)
@@ -561,15 +541,7 @@ public partial class MainWindow
             return;
         }
 
-        var selectedSquads = PublishTaskSquadList.Items
-            .OfType<System.Windows.Controls.CheckBox>()
-            .Where(checkBox => checkBox.IsChecked == true)
-            .Select(checkBox => checkBox.Content?.ToString())
-            .Where(item => !string.IsNullOrWhiteSpace(item))
-            .ToArray();
-        var participants = selectedSquads.Length == 0
-            ? "全员参与"
-            : string.Join("、", selectedSquads);
+        const string participants = "全员参与";
         var brief = PublishTaskBriefBox.Text.Trim();
         var rallyEnabled = PublishTaskRallyCheck.IsChecked == true;
         var rally = PublishTaskRallyBox.Text.Trim();
@@ -612,13 +584,13 @@ public partial class MainWindow
         UpsertCurrentTaskHistory("进行中");
         AddFleetLog("任务", "任务发布", $"{objective} / {participants}");
         _selectedFleetInfoPanel = FleetInfoPanelKind.CurrentTask;
-        PublishTaskPanel.Visibility = Visibility.Collapsed;
+        PublishTaskPanel.Hide();
         RefreshFleetOperationalSurfaces();
         SaveCurrentConfig();
         if (!await PushFleetTaskAsync(silent: false))
         {
             RestoreFleetStateAfterFailedMutation(rollbackState, "任务同步失败，已恢复本地任务状态。");
-            PublishTaskPanel.Visibility = Visibility.Visible;
+            PublishTaskPanel.Show();
             PublishTaskValidationText.Text = "任务同步失败，已恢复本地状态，请稍后重试。";
             return;
         }
@@ -867,7 +839,7 @@ public partial class MainWindow
             ? "行动计划"
             : plan.Title;
         JoinActionNotifyCheck.IsChecked = _joinActionNotifyMe;
-        JoinActionPlanPanel.Visibility = Visibility.Visible;
+        JoinActionPlanPanel.Show();
     }
 
     private void FleetEventRenotifyTaskButton_Click(object sender, RoutedEventArgs e)
@@ -1015,6 +987,9 @@ public partial class MainWindow
         _fleetCurrentTaskHistoryKey = "";
         _fleetCurrentTaskNoticeRevision++;
     }
+
+    private static string NormalizeFleetTaskParticipants(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "" : "全员参与";
 
     private void UpsertCurrentTaskHistory(string status)
     {
@@ -1287,10 +1262,10 @@ public partial class MainWindow
 
     private void CancelFleetNoticeButton_Click(object sender, RoutedEventArgs e)
     {
-        FleetNoticeEditorPanel.Visibility = Visibility.Collapsed;
+        FleetNoticeEditorPanel.Hide();
         if (_returnToAnnouncementCenterAfterEdit)
         {
-            FleetAnnouncementCenterPanel.Visibility = Visibility.Visible;
+            FleetAnnouncementCenterPanel.Show();
         }
     }
 
@@ -1382,7 +1357,7 @@ public partial class MainWindow
             return;
         }
 
-        CurrentTaskDetailTitleText.Text = _fleetCurrentTaskTitle;
+        CurrentTaskDetailPanel.Title = _fleetCurrentTaskTitle;
         var taskInfo = ParseFleetTaskBriefInfo(_fleetCurrentTaskBrief);
         CurrentTaskDetailBriefText.Text = FormatTaskDetailText(taskInfo);
         CurrentTaskDetailParticipantsText.Text = $"参与范围 / {_fleetCurrentTaskParticipants}";
@@ -1395,12 +1370,12 @@ public partial class MainWindow
         CurrentTaskDetailTimeText.Text = _fleetCurrentTaskTime is null
             ? ""
             : $"发布时间 / {_fleetCurrentTaskTime:yyyy-MM-dd HH:mm}";
-        CurrentTaskDetailPanel.Visibility = Visibility.Visible;
+        CurrentTaskDetailPanel.Show();
     }
 
     private void CloseCurrentTaskDetailButton_Click(object sender, RoutedEventArgs e)
     {
-        CurrentTaskDetailPanel.Visibility = Visibility.Collapsed;
+        CurrentTaskDetailPanel.Hide();
     }
 
     private void OpenCommandDeckActionPlanDetail(FleetActionPlanRow? plan = null)
@@ -1421,7 +1396,7 @@ public partial class MainWindow
 
         var title = string.IsNullOrWhiteSpace(plan.Title) ? "未命名行动" : plan.Title;
         var participants = plan.Participants.Count.ToString(CultureInfo.InvariantCulture);
-        ActionPlanDetailTitleText.Text = title;
+        ActionPlanDetailPanel.Description = title;
         ActionPlanDetailBriefText.Text = string.IsNullOrWhiteSpace(plan.Content)
             ? "成员可在事件栏接取此预约，指挥官可在这里查看状态并进行管理操作。"
             : plan.Content.Trim();
@@ -1441,7 +1416,7 @@ public partial class MainWindow
         ActionPlanDetailEditButton.IsEnabled = canManage && plan.CanEdit;
         ActionPlanDetailCompleteButton.IsEnabled = canManage && plan.CanComplete;
         ActionPlanDetailCancelButton.IsEnabled = canManage && plan.CanCancel;
-        ActionPlanDetailPanel.Visibility = Visibility.Visible;
+        ActionPlanDetailPanel.Show();
     }
 
     private FleetActionPlanRow? GetCommandDeckDetailPlan()
@@ -1464,7 +1439,7 @@ public partial class MainWindow
 
     private void CloseActionPlanDetailButton_Click(object sender, RoutedEventArgs e)
     {
-        ActionPlanDetailPanel.Visibility = Visibility.Collapsed;
+        ActionPlanDetailPanel.Hide();
     }
 
     private void ActionPlanDetailRemindButton_Click(object sender, RoutedEventArgs e)
@@ -1482,7 +1457,7 @@ public partial class MainWindow
             return;
         }
 
-        ActionPlanDetailPanel.Visibility = Visibility.Collapsed;
+        ActionPlanDetailPanel.Hide();
         OpenActionPlanEditor(plan);
     }
 
@@ -1560,23 +1535,20 @@ public partial class MainWindow
         ActionPlanTimeBox.Text = start.ToString("HH:mm");
         ActionPlanNotifyFleetCheck.IsChecked = plan?.NotifyMembers ?? _fleetActionNotifyMembers;
         ActionPlanValidationText.Text = "";
-        if (ActionPlanEditorTitleText is not null)
-        {
-            ActionPlanEditorTitleText.Text = plan is null ? "安排稍后行动" : "编辑稍后行动";
-        }
+        ActionPlanEditorPanel.Title = plan is null ? "安排稍后行动" : "编辑稍后行动";
 
         if (PublishActionPlanButton is not null)
         {
             PublishActionPlanButton.Content = plan is null ? "发布" : "保存";
         }
 
-        ActionPlanEditorPanel.Visibility = Visibility.Visible;
+        ActionPlanEditorPanel.Show();
     }
 
     private void CancelActionPlanButton_Click(object sender, RoutedEventArgs e)
     {
         _editingActionPlanId = "";
-        ActionPlanEditorPanel.Visibility = Visibility.Collapsed;
+        ActionPlanEditorPanel.Hide();
     }
 
     private async void PublishActionPlanButton_Click(object sender, RoutedEventArgs e)
@@ -1657,14 +1629,14 @@ public partial class MainWindow
 
         SelectFeaturedActionPlan();
         _selectedFleetInfoPanel = FleetInfoPanelKind.ActionPlan;
-        ActionPlanEditorPanel.Visibility = Visibility.Collapsed;
+        ActionPlanEditorPanel.Hide();
         RefreshFleetOperationalSurfaces();
         SaveCurrentConfig();
         var pushed = await PushFleetActionPlansAsync(silent: false);
         if (!pushed)
         {
             RestoreFleetStateAfterFailedMutation(rollbackState, "行动计划同步失败，已恢复本地计划状态。");
-            ActionPlanEditorPanel.Visibility = Visibility.Visible;
+            ActionPlanEditorPanel.Show();
             ActionPlanValidationText.Text = "行动计划同步失败，已恢复本地状态，请稍后重试。";
             return;
         }
@@ -1711,8 +1683,8 @@ public partial class MainWindow
         {
             ActionPlanValidationText.Text = message;
             ActionPlanValidationText.Foreground = isError
-                ? FindBrush("StatusDangerBrush", Brushes.IndianRed)
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+                ? FleetCommandBrush(BridgeBrushToken.StatusBad)
+                : FleetCommandBrush(BridgeBrushToken.Ink2);
         }
 
         if (NetworkStatusText is not null)
@@ -1951,12 +1923,12 @@ public partial class MainWindow
             ? "行动计划"
             : _fleetActionTitle;
         JoinActionNotifyCheck.IsChecked = _joinActionNotifyMe;
-        JoinActionPlanPanel.Visibility = Visibility.Visible;
+        JoinActionPlanPanel.Show();
     }
 
     private void CancelJoinActionPlanButton_Click(object sender, RoutedEventArgs e)
     {
-        JoinActionPlanPanel.Visibility = Visibility.Collapsed;
+        JoinActionPlanPanel.Hide();
     }
 
     private async void ConfirmJoinActionPlanButton_Click(object sender, RoutedEventArgs e)
@@ -1974,7 +1946,7 @@ public partial class MainWindow
             return;
         }
 
-        JoinActionPlanPanel.Visibility = Visibility.Collapsed;
+        JoinActionPlanPanel.Hide();
         RefreshFleetOperationalSurfaces();
         AppendOutput(_joinActionNotifyMe
             ? "Action joined. Email reminder requested for 5 minutes before start."

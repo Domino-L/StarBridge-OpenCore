@@ -29,9 +29,10 @@ public partial class MainWindow
     private bool _applyingInGameBrowserPreferences;
     private FriendUserContract[] _inGameFriendSearchResults = [];
     private bool _inGameFriendSearchActive;
+    private bool _inGameFriendSearchLoading;
     private InGameFriendDirectoryState _inGameFriendDirectoryState =
         InGameFriendDirectoryState.Loading;
-    private string _inGameFriendCollectionStatus = "正在加载好友…";
+    private string _inGameFriendCollectionStatus = "正在加载好友";
     private string _inGameFriendSearchStatus = "输入呼号或游戏 ID 查找用户";
     private string _inGameDirectMessageKey = "";
     private string _inGameChannelKey = "";
@@ -44,21 +45,25 @@ public partial class MainWindow
         bool signedIn)
     {
         var status = signedIn
-            ? "正在加载舰队、好友、消息和房间…"
+            ? "正在加载舰队、好友、消息和房间"
             : "登录后即可查看舰队、好友、消息和房间。";
-        if (!_inGameMenuCoordinator.BeginAccountSession(accountSession, status))
+        if (!_inGameMenuCoordinator.BeginAccountSession(
+                accountSession,
+                status,
+                isLoading: signedIn))
         {
             return;
         }
 
         _inGameFriendSearchResults = [];
         _inGameFriendSearchActive = false;
+        _inGameFriendSearchLoading = false;
         _inGameFriendSearchStatus = "输入呼号或游戏 ID 查找用户";
         _inGameFriendDirectoryState = signedIn
             ? InGameFriendDirectoryState.Loading
             : InGameFriendDirectoryState.Unavailable;
         _inGameFriendCollectionStatus = signedIn
-            ? "正在加载好友…"
+            ? "正在加载好友"
             : "登录后即可查看好友和申请。";
         _inGameDirectMessageKey = "";
         _inGameChannelKey = "";
@@ -1232,16 +1237,8 @@ public partial class MainWindow
         if (!_hasFleet)
         {
             return InGameFleetSnapshot.Unavailable(
-                "加入舰队后，这里会显示舰队成员、小队与共享舰船。");
+                "加入舰队后，这里会显示舰队成员与共享舰船。");
         }
-
-        var currentUserSquad = _players
-            .FirstOrDefault(player => player.IsSelf)
-            ?.SquadName
-            ?.Trim();
-        var hasCurrentUserSquad =
-            !string.IsNullOrWhiteSpace(currentUserSquad) &&
-            !currentUserSquad.Equals("Unassigned", StringComparison.OrdinalIgnoreCase);
         var localServerShard = IsGameServerRegionCurrent()
             ? _gameServerShard.Trim()
             : "";
@@ -1276,12 +1273,6 @@ public partial class MainWindow
                          player.ServerShard?.Trim(),
                          localServerShard,
                          StringComparison.OrdinalIgnoreCase));
-                var isCurrentUserSquad =
-                    hasCurrentUserSquad &&
-                    string.Equals(
-                        player.SquadName?.Trim(),
-                        currentUserSquad,
-                        StringComparison.OrdinalIgnoreCase);
                 return new InGameFleetMemberRow(
                     accountId,
                     callsign,
@@ -1294,7 +1285,6 @@ public partial class MainWindow
                         player.Role,
                         "舰队成员"),
                     IsFleetCommander(player.Name, player.Callsign),
-                    player.SquadName ?? "",
                     PlayerSessionStatePresentation.ResolveShip(
                         presence,
                         hasServerSession,
@@ -1317,55 +1307,8 @@ public partial class MainWindow
                     !string.IsNullOrWhiteSpace(accountId) &&
                     relationship != FriendRelationshipStates.Blocked,
                     isSameServer,
-                    isCurrentUserSquad,
                     player.RoleBrush,
                     hasServerSession);
-            })
-            .ToArray();
-
-        var squadRows = _squads
-            .Select(squad =>
-            {
-                var currentMembers = memberRows
-                    .Where(member =>
-                        member.SquadName.Equals(
-                            squad.Name,
-                            StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                var memberCount = Math.Max(squad.Members.Count, currentMembers.Length);
-                var onlineCount = currentMembers.Length > 0
-                    ? currentMembers.Count(member => PlayerPresence.IsOnline(member.Presence))
-                    : squad.OnlineCount;
-                var memberNames = currentMembers.Length > 0
-                    ? string.Join(
-                        " · ",
-                        currentMembers
-                            .Select(member => member.Callsign)
-                            .Take(6))
-                    : string.Join(
-                        " · ",
-                        squad.Members
-                            .Select(member => FirstNonEmpty(member.Callsign, member.GameId, member.Name))
-                            .Take(6));
-                return new InGameFleetSquadRow(
-                    squad.Id,
-                    squad.Name,
-                    FirstNonEmpty(squad.Icon, GetInitials(squad.Name)),
-                    squad.EmblemPath,
-                    FirstNonEmpty(squad.Commander, "未指定"),
-                    squad.Type,
-                    squad.Description.Equals(
-                        "No squad briefing yet.",
-                        StringComparison.OrdinalIgnoreCase)
-                        ? "暂无小队简介。"
-                        : FirstNonEmpty(squad.Description, "暂无小队简介。"),
-                    memberCount,
-                    onlineCount,
-                    string.IsNullOrWhiteSpace(memberNames)
-                        ? "暂无成员"
-                        : memberNames,
-                    currentMembers,
-                    currentMembers.Any(member => member.IsSelf));
             })
             .ToArray();
 
@@ -1376,12 +1319,15 @@ public partial class MainWindow
                 ship.ShipCode,
                 ship.ShipImagePath,
                 FirstNonEmpty(ship.OwnerDisplay, ship.OwnerCallsign, ship.OwnerGameId, "舰长待同步"),
-                ship.OwnerSquad,
                 ship.ShipSpec,
                 ship.ShipRole,
                 ship.ShipStatus,
                 ship.ShipPrice,
-                IsFleetShipOwnerOnline(ship)))
+                IsFleetShipOwnerOnline(ship),
+                ship.CustomImageMediaId,
+                ship.ShipInstanceId,
+                ship.OwnerAccountId,
+                ship.CanReportCustomImage))
             .ToArray();
         var announcement = _fleetCurrentAnnouncement;
         var status = CanSynchronizeUserData
@@ -1398,7 +1344,6 @@ public partial class MainWindow
             FirstNonEmpty(announcement?.Title, _fleetNoticeTitle),
             FirstNonEmpty(announcement?.Content, _fleetNoticeContent),
             memberRows,
-            squadRows,
             shipRows,
             status);
     }
@@ -1430,7 +1375,8 @@ public partial class MainWindow
         {
             _inGameMenuCoordinator.ShowNotice(
                 "正在同步舰队通讯",
-                "频道就绪后会显示在通讯窗口的频道列表中。");
+                "频道就绪后会显示在通讯窗口的频道列表中。",
+                isLoading: true);
             return;
         }
 
@@ -1518,7 +1464,7 @@ public partial class MainWindow
         {
             if (_inGameMenuSettings.ScreenshotShowNotification)
             {
-                _inGameMenuCoordinator.ShowNotice("正在截屏…");
+                _inGameMenuCoordinator.ShowNotice("正在截屏", isLoading: true);
             }
 
             var gameHandle = StarCitizenProcessProbe.FindMainWindow();
@@ -1651,7 +1597,8 @@ public partial class MainWindow
                 ? "加入房间后即可聊天"
                 : chatMatchesCurrentRoom
                     ? PartyRoomChatStatusText.Text
-                    : "正在同步房间消息…");
+                    : "正在同步房间消息",
+            IsLoading: _currentPartyRoom is not null && !chatMatchesCurrentRoom);
         var canInviteFriends =
             CanSynchronizeUserData &&
             _currentPartyRoom is { ViewerIsHost: true };
@@ -1726,7 +1673,8 @@ public partial class MainWindow
         if (!operation.Started)
         {
             _inGameMenuCoordinator.ShowRoomInvitationStatus(
-                "已有房间操作正在进行，请稍候。");
+                "已有房间操作正在进行，请稍候。",
+                isLoading: true);
             return;
         }
 
@@ -1777,7 +1725,9 @@ public partial class MainWindow
             InGameWorkspaceRequestPolicy.DropIfRunning);
         if (!operation.Started)
         {
-            _inGameMenuCoordinator.ShowRoomStatus("已有房间操作正在进行，请稍候。");
+            _inGameMenuCoordinator.ShowRoomStatus(
+                "已有房间操作正在进行，请稍候。",
+                isLoading: true);
             return;
         }
 
@@ -1786,7 +1736,7 @@ public partial class MainWindow
             var target = e.Room;
             if (target is null)
             {
-                _inGameMenuCoordinator.ShowRoomStatus("正在查找房间…");
+                _inGameMenuCoordinator.ShowRoomStatus("正在查找房间", isLoading: true);
                 using var resolveResponse = await _relayClient.PostJsonAsync(
                      "api/party-rooms/resolve-code",
                      new PartyRoomResolveCodeRequest(e.RoomCode.Trim()));
@@ -1812,7 +1762,7 @@ public partial class MainWindow
                 target = ToPartyLobbyRoomCard(resolved.Room);
             }
 
-            _inGameMenuCoordinator.ShowRoomStatus("正在确认是否可以加入…");
+            _inGameMenuCoordinator.ShowRoomStatus("正在确认是否可以加入", isLoading: true);
             await PublishCurrentPresenceBeforePartyRoomMutationAsync();
             if (!operation.IsCurrent)
             {
@@ -1974,13 +1924,15 @@ public partial class MainWindow
             InGameWorkspaceRequestPolicy.DropIfRunning);
         if (!operation.Started)
         {
-            _inGameMenuCoordinator.ShowRoomStatus("已有房间操作正在进行，请稍候。");
+            _inGameMenuCoordinator.ShowRoomStatus(
+                "已有房间操作正在进行，请稍候。",
+                isLoading: true);
             return;
         }
 
         try
         {
-            _inGameMenuCoordinator.ShowRoomStatus("正在创建房间…");
+            _inGameMenuCoordinator.ShowRoomStatus("正在创建房间", isLoading: true);
             await PublishCurrentPresenceBeforePartyRoomMutationAsync();
             if (!operation.IsCurrent)
             {
@@ -2063,13 +2015,15 @@ public partial class MainWindow
             InGameWorkspaceRequestPolicy.DropIfRunning);
         if (!operation.Started)
         {
-            _inGameMenuCoordinator.ShowRoomStatus("已有房间操作正在进行，请稍候。");
+            _inGameMenuCoordinator.ShowRoomStatus(
+                "已有房间操作正在进行，请稍候。",
+                isLoading: true);
             return;
         }
 
         try
         {
-            _inGameMenuCoordinator.ShowRoomStatus("正在退出房间…");
+            _inGameMenuCoordinator.ShowRoomStatus("正在退出房间", isLoading: true);
             using var response = await _relayClient.PostJsonAsync(
                 "api/party-rooms/leave",
                      new PartyRoomLeaveRequest(room.RoomId));
@@ -2298,7 +2252,7 @@ public partial class MainWindow
         var accountIdentity = GetPersonalProfileAccountIdentity();
         _inGameMenuCoordinator.SetProfileSaveState(
             e.ProfileKey,
-            "正在保存个人资料…",
+            "正在保存个人资料",
             true,
             false);
         try
@@ -2529,7 +2483,11 @@ public partial class MainWindow
                 "PublicProfile",
                 ship.ImportedAt,
                 ship.ImportedAt,
-                ship.SyncedAt))
+                ship.SyncedAt,
+                CustomImageMediaId: ship.CustomImageMediaId,
+                CustomImageCropFocusX: ship.CustomImageCropFocusX,
+                CustomImageCropFocusY: ship.CustomImageCropFocusY,
+                CustomImageCropZoom: ship.CustomImageCropZoom))
             .ToArray();
         var hangarSummary = FormatInGameProfileHangarComposition(visitorOwnedShips);
         var recentVisitorShip = hangarShips
@@ -2634,7 +2592,9 @@ public partial class MainWindow
         return new InGameProfileShipRow(
             catalog?.DisplayName(_language) ?? ship.DisplayName,
             catalog?.EnglishName ?? ship.Code,
-            ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName),
+            ResolveShipDisplayImagePath(
+                ship.CustomImageMediaId,
+                ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName)),
             catalog?.PriceDisplay ?? "未公布",
             catalog?.RoleDisplay(_language),
             catalog?.Spec);
@@ -2647,7 +2607,9 @@ public partial class MainWindow
         return new InGameProfileShipRow(
             catalog?.DisplayName(_language) ?? ship.DisplayName,
             catalog?.EnglishName ?? ship.Code,
-            ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName),
+            ResolveShipDisplayImagePath(
+                ship.CustomImageMediaId,
+                ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName)),
             catalog?.PriceDisplay ?? "未公布",
             catalog?.RoleDisplay(_language),
             catalog?.Spec);
@@ -2781,7 +2743,6 @@ public partial class MainWindow
                 await SelectInGameSocialConversationAsync(e.Channel.User, request);
                 break;
             case InGameChatChannelKind.Fleet:
-            case InGameChatChannelKind.Squad:
             {
                 var selected = _fleetChatChannels.FirstOrDefault(channel =>
                     channel.ChannelId.Equals(
@@ -2807,7 +2768,6 @@ public partial class MainWindow
                     _fleetChatLatestSequence = 0;
                     _fleetChatMessages.Clear();
                     ResetFleetChatPagingState();
-                    SelectActiveFleetChatChannel();
                     RenderFleetChat();
                 }
 
@@ -2852,7 +2812,6 @@ public partial class MainWindow
         switch (channelKind)
         {
             case InGameChatChannelKind.Fleet:
-            case InGameChatChannelKind.Squad:
                 await SendFleetChatMessageAsync(e.Text, null);
                 break;
             case InGameChatChannelKind.Room:
@@ -2885,6 +2844,7 @@ public partial class MainWindow
         {
             _inGameFriendSearchResults = [];
             _inGameFriendSearchActive = false;
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = "输入呼号或游戏 ID 查找用户";
             RefreshInGameSocialSnapshot(request);
             return;
@@ -2894,6 +2854,7 @@ public partial class MainWindow
         {
             _inGameFriendSearchResults = [];
             _inGameFriendSearchActive = true;
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = "请输入至少 2 个字符";
             RefreshInGameSocialSnapshot(request);
             return;
@@ -2903,6 +2864,7 @@ public partial class MainWindow
         {
             _inGameFriendSearchResults = [];
             _inGameFriendSearchActive = true;
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = "登录后即可查找用户";
             RefreshInGameSocialSnapshot(request);
             return;
@@ -2911,7 +2873,8 @@ public partial class MainWindow
         try
         {
             _inGameFriendSearchActive = true;
-            _inGameFriendSearchStatus = "正在查找用户…";
+            _inGameFriendSearchLoading = true;
+            _inGameFriendSearchStatus = "正在查找用户";
             RefreshInGameSocialSnapshot(request);
             var includePresence = GetPresenceSharingDecision()
                 .CanReceiveRealtime.ToString().ToLowerInvariant();
@@ -2923,6 +2886,7 @@ public partial class MainWindow
             }
 
             _inGameFriendSearchResults = response?.Results ?? [];
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = _inGameFriendSearchResults.Length == 0
                 ? "没有找到匹配用户"
                 : $"找到 {_inGameFriendSearchResults.Length} 位用户";
@@ -2935,6 +2899,7 @@ public partial class MainWindow
             }
 
             _inGameFriendSearchResults = [];
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = UserFacingError.Describe(
                 exception,
                 "暂时无法查找用户，请稍后重试。");
@@ -3006,11 +2971,13 @@ public partial class MainWindow
         {
             _inGameFriendSearchResults = [];
             _inGameFriendSearchActive = false;
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = "输入呼号或游戏 ID 查找用户";
         }
         else
         {
             _inGameFriendSearchActive = true;
+            _inGameFriendSearchLoading = false;
             _inGameFriendSearchStatus = FriendCenterStatusText.Text;
         }
         RefreshInGameSocialSnapshot(operation);
@@ -3123,36 +3090,19 @@ public partial class MainWindow
     private InGameChatChannelRow BuildInGameOrganizationChannelRow(
         FleetChatChannelRow row)
     {
-        var isSquad =
-            row.Type == StarBridge.Core.FleetChat.FleetChatChannelTypes.Squad;
-        var squad = isSquad
-            ? _squads.FirstOrDefault(candidate =>
-                StarBridge.Core.FleetChat.FleetChatIdentity.NormalizeSquadId(
-                        candidate.Id,
-                        candidate.Name)
-                    .Equals(
-                        StarBridge.Core.FleetChat.FleetChatIdentity.NormalizeSquadId(
-                            row.Channel.SquadId,
-                            row.DisplayName),
-                        StringComparison.OrdinalIgnoreCase))
-            : null;
-        var avatarSource = isSquad ? squad?.EmblemPath : _fleetLogoPath;
-        var avatarFallback = isSquad
-            ? FirstNonEmpty(squad?.Icon, GetInitials(squad?.Name ?? row.DisplayName))
-            : GetInitials(FirstNonEmpty(_fleetName, _fleetCode, row.DisplayName));
         return new InGameChatChannelRow(
-            isSquad ? InGameChatChannelKind.Squad : InGameChatChannelKind.Fleet,
+            InGameChatChannelKind.Fleet,
             row.ChannelId,
             row.DisplayName,
             row.PreviewText,
-            isSquad ? "小队频道" : "舰队频道",
-            avatarSource,
-            avatarFallback,
+            "舰队频道",
+            _fleetLogoPath,
+            GetInitials(FirstNonEmpty(_fleetName, _fleetCode, row.DisplayName)),
             row.AccentBrush,
             row.Channel.LastMessageAt is { } lastMessageAt
                 ? CommunicationTimeFormatter.Format(lastMessageAt)
                 : "",
-            isSquad ? "小队" : "舰队",
+            "舰队",
             Visibility.Visible,
             row.UnreadText,
             row.UnreadVisibility);
@@ -3239,7 +3189,7 @@ public partial class MainWindow
                 : [];
         object[] channelHistory = activeChannel?.Kind switch
         {
-            InGameChatChannelKind.Fleet or InGameChatChannelKind.Squad
+            InGameChatChannelKind.Fleet
                 when _activeFleetChatChannel is not null &&
                      _activeFleetChatChannel.ChannelId.Equals(
                          activeChannel.Key,
@@ -3266,7 +3216,7 @@ public partial class MainWindow
             CanSynchronizeUserData &&
             (activeChannel?.Kind switch
             {
-                InGameChatChannelKind.Fleet or InGameChatChannelKind.Squad =>
+                InGameChatChannelKind.Fleet =>
                     _activeFleetChatChannel?.ChannelId.Equals(
                         activeChannel.Key,
                         StringComparison.OrdinalIgnoreCase) == true &&
@@ -3288,7 +3238,7 @@ public partial class MainWindow
             ? "登录后即可查看聊天频道"
             : activeChannel?.Kind switch
             {
-                InGameChatChannelKind.Fleet or InGameChatChannelKind.Squad =>
+                InGameChatChannelKind.Fleet =>
                     FleetChatStatusText.Text,
                 InGameChatChannelKind.Room => PartyRoomChatStatusText.Text,
                 _ => "选择一个频道后即可发送消息"
@@ -3316,6 +3266,7 @@ public partial class MainWindow
             _inGameFriendCollectionStatus,
             _inGameFriendSearchStatus,
             _inGameFriendSearchActive,
+            _inGameFriendSearchLoading,
             GetPersonalDisplayName(),
             !string.IsNullOrWhiteSpace(_localPlayer)
                 ? _localPlayer.Trim()

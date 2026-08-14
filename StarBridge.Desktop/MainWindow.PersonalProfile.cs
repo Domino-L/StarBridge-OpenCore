@@ -8,9 +8,15 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using StarBridge.Core.Profiles;
+using StarBridge.Desktop.Theming;
 
 public partial class MainWindow
 {
+    private sealed record PersonalProfileFavoriteShipPreviewTarget(
+        string ImagePath,
+        string ShipName,
+        ShipImageReportTarget? ReportTarget);
+
     private PersonalProfileSettings _personalProfileSettings = PersonalProfileSettings.CreateDefault();
     private PersonalProfileSettings _personalProfileSavedSettings = PersonalProfileSettings.CreateDefault();
     private bool _isPersonalProfileEditMode;
@@ -51,7 +57,17 @@ public partial class MainWindow
     private bool _isApplyingPresenceVisibilityMode;
 
     private const string PersonalProfileModuleDragFormat = "StarBridge.PersonalProfileModule";
-    private const double PersonalProfileModuleRowHeight = 140;
+    private const double PersonalProfileModuleRowHeight = 152;
+
+    private Brush PersonalProfileBrush(BridgeBrushToken token) =>
+        BridgeTokenBrushes.GetRequired(this, token);
+
+    private Brush PersonalProfileAccentBrush() =>
+        BridgeSceneContext.GetRequiredAccentBrush(this);
+
+    private Brush PersonalProfileAmbientBrush() =>
+        BridgeSceneContext.GetAmbientBrush(this) ?? throw new InvalidOperationException(
+            "Required inherited Bridge scene ambient brush is missing.");
 
     private enum PersonalProfileVisitorLoadState
     {
@@ -285,7 +301,7 @@ public partial class MainWindow
             ? new Thickness(13, 11, 13, 11)
             : new Thickness(13, 9, 13, 9);
         PersonalProfileFixedInfoPanel.Background = isEditing
-            ? new SolidColorBrush(Color.FromRgb(7, 24, 35))
+            ? PersonalProfileBrush(BridgeBrushToken.Panel)
             : Brushes.Transparent;
         PersonalProfileFixedInfoPanel.BorderThickness = isEditing
             ? new Thickness(1)
@@ -325,8 +341,8 @@ public partial class MainWindow
             ? "你有未保存的主页更改。头像、呼号与主页内容会一起保存。"
             : "编辑公开资料、在线时间与主页模块，完成后统一保存。");
         PersonalProfileEditHintText.Foreground = isWarning
-            ? FindBrush("StatusWarningBrush", Brushes.Goldenrod)
-            : FindBrush("SecondaryTextBrush", Brushes.LightSlateGray);
+            ? PersonalProfileBrush(BridgeBrushToken.StatusWarn)
+            : PersonalProfileBrush(BridgeBrushToken.Ink2);
     }
 
     private void PersonalProfileEditButton_Click(object sender, RoutedEventArgs e)
@@ -440,6 +456,8 @@ public partial class MainWindow
                     result.Document,
                     PersonalProfileSettings.CreateDefault());
                 _personalProfileSavedSettings = _personalProfileSettings.Copy();
+                await EnsureShipMediaCachedAsync(
+                    (result.Document.Hangar?.Ships ?? []).Select(ship => ship.CustomImageMediaId));
                 ApplyPersonalProfileSettingsToEditor();
                 RefreshPersonalProfileContent();
                 break;
@@ -510,6 +528,11 @@ public partial class MainWindow
 
     private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (ReferenceEquals(e.Source, MainTabs))
+        {
+            RefreshBridgeShellForSelectedTab();
+        }
+
         if (ReferenceEquals(e.Source, MainTabs) && ReferenceEquals(MainTabs.SelectedItem, HomeTab))
         {
             RefreshHomeDashboard();
@@ -577,7 +600,11 @@ public partial class MainWindow
                 ship.ImportedAt,
                 ship.ImportedAt,
                 ship.SyncedAt,
-                ship.InstanceId))
+                ship.InstanceId,
+                ship.CustomImageMediaId,
+                ship.CustomImageCropFocusX,
+                ship.CustomImageCropFocusY,
+                ship.CustomImageCropZoom))
             .ToArray();
     }
 
@@ -954,10 +981,10 @@ public partial class MainWindow
         PersonalProfileAvailabilityWindowCountText.Text = $"{_personalProfileAvailabilityWindowDraft.Count}/3";
         PersonalProfileOnlineTimeSaveStateText.Text = status ?? (_isPersonalProfileEditMode ? "随主页设置一起保存" : "更改后自动保存");
         PersonalProfileOnlineTimeSaveStateText.Foreground = isWarning
-            ? FindBrush("StatusErrorBrush", Brushes.IndianRed)
+            ? PersonalProfileBrush(BridgeBrushToken.StatusBad)
             : status == "已保存"
-                ? FindBrush("StatusSuccessBrush", Brushes.MediumSeaGreen)
-                : FindBrush("MutedTextBrush", Brushes.SlateGray);
+                ? PersonalProfileBrush(BridgeBrushToken.StatusOk)
+                : PersonalProfileBrush(BridgeBrushToken.Ink3);
     }
 
     private PersonalProfileSettings ReadPersonalProfileSettingsFromEditor()
@@ -1086,7 +1113,7 @@ public partial class MainWindow
             PersonalProfileAvailabilityWindowsPanel.Children.Add(new TextBlock
             {
                 Text = "尚未添加时间段；留空时不会对外展示可游玩时间。",
-                Foreground = FindBrush("MutedTextBrush", Brushes.SlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 10,
                 Margin = new Thickness(0, 2, 0, 2)
             });
@@ -1107,7 +1134,7 @@ public partial class MainWindow
             header.Children.Add(new TextBlock
             {
                 Text = $"时间段 {windowIndex + 1}",
-                Foreground = FindBrush("PrimaryTextBrush", Brushes.White),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center
@@ -1162,7 +1189,7 @@ public partial class MainWindow
             var startLabel = new TextBlock
             {
                 Text = "开始",
-                Foreground = FindBrush("SecondaryTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink2),
                 FontSize = 10,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -1173,7 +1200,7 @@ public partial class MainWindow
             var endLabel = new TextBlock
             {
                 Text = "结束",
-                Foreground = FindBrush("SecondaryTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink2),
                 FontSize = 10,
                 Margin = new Thickness(9, 0, 7, 0),
                 VerticalAlignment = VerticalAlignment.Center
@@ -1186,7 +1213,7 @@ public partial class MainWindow
             var nextDayText = new TextBlock
             {
                 Text = "次日结束",
-                Foreground = FindBrush("StatusWarningBrush", Brushes.Goldenrod),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.StatusWarn),
                 FontSize = 9,
                 FontWeight = FontWeights.SemiBold,
                 Margin = new Thickness(9, 0, 0, 0),
@@ -1211,8 +1238,8 @@ public partial class MainWindow
 
             PersonalProfileAvailabilityWindowsPanel.Children.Add(new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(11, 34, 48)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(23, 52, 71)),
+                Background = PersonalProfileBrush(BridgeBrushToken.PanelRaised),
+                BorderBrush = PersonalProfileBrush(BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(8, 7, 8, 7),
                 Margin = new Thickness(0, 0, 0, 6),
@@ -1557,7 +1584,7 @@ public partial class MainWindow
 
         ClearPersonalProfileDragTarget();
         _personalProfileDragTarget = target;
-        target.BorderBrush = FindBrush("AccentBrush", new SolidColorBrush(Color.FromRgb(41, 175, 255)));
+        target.BorderBrush = PersonalProfileAccentBrush();
         target.BorderThickness = new Thickness(2);
         e.Effects = DragDropEffects.Move;
         e.Handled = true;
@@ -1697,7 +1724,7 @@ public partial class MainWindow
             return;
         }
 
-        _personalProfileDragTarget.BorderBrush = FindBrush("PanelBorderBrush", new SolidColorBrush(Color.FromRgb(23, 52, 71)));
+        _personalProfileDragTarget.BorderBrush = PersonalProfileBrush(BridgeBrushToken.Hairline);
         _personalProfileDragTarget.BorderThickness = new Thickness(1);
         _personalProfileDragTarget = null;
     }
@@ -1748,12 +1775,12 @@ public partial class MainWindow
             PersonalProfileSupportCapabilitiesPanel,
             _personalProfileSettings.SupportCapabilities,
             "尚未选择支援能力",
-            "#29AFFF");
+            PersonalProfileRoleColorPalette.Ship);
         RefreshPersonalProfilePlayStyleTagDisplay(
             PersonalProfileParticipationInterestsPanel,
             _personalProfileSettings.ParticipationInterests,
             "尚未选择参与偏好",
-            "#29AFFF");
+            PersonalProfileRoleColorPalette.Ship);
         RefreshPersonalProfileFavoriteShips();
         RefreshPersonalProfileHangarSummary();
         RefreshPersonalProfileGameplayStatistics();
@@ -1775,7 +1802,7 @@ public partial class MainWindow
             panel.Children.Add(new TextBlock
             {
                 Text = emptyCopy,
-                Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 10,
                 VerticalAlignment = VerticalAlignment.Center
             });
@@ -1827,11 +1854,11 @@ public partial class MainWindow
             ? "公开主页"
             : "仅自己可见";
         PersonalProfileVisibilityText.Foreground = _personalProfileSettings.IsProfilePublic
-            ? FindBrush("StatusSuccessBrush", Brushes.MediumSeaGreen)
-            : FindBrush("MutedTextBrush", Brushes.SlateGray);
+            ? PersonalProfileBrush(BridgeBrushToken.StatusOk)
+            : PersonalProfileBrush(BridgeBrushToken.Ink3);
         PersonalProfileVisibilityDot.Fill = _personalProfileSettings.IsProfilePublic
-            ? FindBrush("StatusSuccessBrush", Brushes.MediumSeaGreen)
-            : FindBrush("MutedTextBrush", Brushes.SlateGray);
+            ? PersonalProfileBrush(BridgeBrushToken.StatusOk)
+            : PersonalProfileBrush(BridgeBrushToken.Ink3);
 
         PersonalProfileVisibilityBadge.Visibility = presentation.ShowOwnerControls
             ? Visibility.Visible
@@ -1871,7 +1898,10 @@ public partial class MainWindow
                                                                 !string.IsNullOrWhiteSpace(_personalProfileSettings.Introduction))
             ? Visibility.Visible
             : Visibility.Collapsed;
-        PersonalProfileOwnerSummaryPanel.Visibility = presentation.ShowIdentityDetails
+        PersonalProfileOwnerSummaryPanel.Visibility = presentation.ShowIdentityDetails &&
+                                                       (_startupDataGate.Current.State == StartupDataGateState.Live ||
+                                                        (_startupDataGate.Current.State == StartupDataGateState.Initial &&
+                                                         !IsLoggedIn))
             ? Visibility.Visible
             : Visibility.Collapsed;
     }
@@ -1902,7 +1932,11 @@ public partial class MainWindow
                     "PublicProfile",
                     ship.ImportedAt,
                     ship.ImportedAt,
-                    ship.SyncedAt))
+                    ship.SyncedAt,
+                    CustomImageMediaId: ship.CustomImageMediaId,
+                    CustomImageCropFocusX: ship.CustomImageCropFocusX,
+                    CustomImageCropFocusY: ship.CustomImageCropFocusY,
+                    CustomImageCropZoom: ship.CustomImageCropZoom))
                 .ToArray();
         }
 
@@ -1950,26 +1984,25 @@ public partial class MainWindow
             };
             PersonalProfilePreviewExitButton.Content = "返回上一页";
 
-            PersonalProfileVisitorRetryButton.Visibility = _personalProfileVisitorLoadState ==
-                                                             PersonalProfileVisitorLoadState.Unavailable
-                ? Visibility.Visible
-                : Visibility.Collapsed;
             switch (_personalProfileVisitorLoadState)
             {
                 case PersonalProfileVisitorLoadState.Loading:
-                    PersonalProfilePrivateStateIconText.Text = "读";
-                    PersonalProfilePrivateStateTitleText.Text = "正在读取公开资料";
-                    PersonalProfilePrivateStateDescriptionText.Text = "资料加载完成后会在这里显示。";
+                    PersonalProfilePrivateStatePresenter.State = Controls.BridgeStateKind.Loading;
+                    PersonalProfilePrivateStatePresenter.TitleOverride = "正在读取公开资料";
+                    PersonalProfilePrivateStatePresenter.DescriptionOverride = "资料加载完成后会在这里显示。";
+                    PersonalProfilePrivateStatePresenter.ActionTextOverride = string.Empty;
                     break;
                 case PersonalProfileVisitorLoadState.Unavailable:
-                    PersonalProfilePrivateStateIconText.Text = "断";
-                    PersonalProfilePrivateStateTitleText.Text = "暂时无法读取公开资料";
-                    PersonalProfilePrivateStateDescriptionText.Text = "检查网络连接后重试，或稍后再打开该成员资料。";
+                    PersonalProfilePrivateStatePresenter.State = Controls.BridgeStateKind.Error;
+                    PersonalProfilePrivateStatePresenter.TitleOverride = "暂时无法读取公开资料";
+                    PersonalProfilePrivateStatePresenter.DescriptionOverride = "检查网络连接后重试，或稍后再打开该成员资料。";
+                    PersonalProfilePrivateStatePresenter.ActionTextOverride = "重试";
                     break;
                 default:
-                    PersonalProfilePrivateStateIconText.Text = "私";
-                    PersonalProfilePrivateStateTitleText.Text = "该用户未公开个人主页";
-                    PersonalProfilePrivateStateDescriptionText.Text = "当前仅展示成员名册中已有的头像、呼号与游戏 ID。";
+                    PersonalProfilePrivateStatePresenter.State = Controls.BridgeStateKind.Empty;
+                    PersonalProfilePrivateStatePresenter.TitleOverride = "该用户未公开个人主页";
+                    PersonalProfilePrivateStatePresenter.DescriptionOverride = "当前仅展示成员名册中已有的头像、呼号与游戏 ID。";
+                    PersonalProfilePrivateStatePresenter.ActionTextOverride = string.Empty;
                     break;
             }
 
@@ -1983,10 +2016,10 @@ public partial class MainWindow
             ? "这是其他用户查看你的个人主页时看到的内容。"
             : "你的主页当前未公开，其他用户只能看到基础身份信息。";
         PersonalProfilePreviewExitButton.Content = "返回我的主页";
-        PersonalProfileVisitorRetryButton.Visibility = Visibility.Collapsed;
-        PersonalProfilePrivateStateIconText.Text = "私";
-        PersonalProfilePrivateStateTitleText.Text = "该用户未公开个人主页";
-        PersonalProfilePrivateStateDescriptionText.Text = "当前仅展示头像、呼号与游戏 ID。";
+        PersonalProfilePrivateStatePresenter.State = Controls.BridgeStateKind.Empty;
+        PersonalProfilePrivateStatePresenter.TitleOverride = "该用户未公开个人主页";
+        PersonalProfilePrivateStatePresenter.DescriptionOverride = "当前仅展示头像、呼号与游戏 ID。";
+        PersonalProfilePrivateStatePresenter.ActionTextOverride = string.Empty;
     }
 
     private void RefreshPersonalProfileHeaderIdentity()
@@ -2089,7 +2122,7 @@ public partial class MainWindow
                     new TextBlock
                     {
                         Text = "尚未选择最爱舰船",
-                        Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+                        Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
                         FontWeight = FontWeights.SemiBold
                     },
                     new TextBlock
@@ -2098,7 +2131,7 @@ public partial class MainWindow
                             ? "该用户尚未公开最爱舰船"
                             : displayShips.Count == 0 ? "读取个人机库后即可选择" : "编辑主页并选择你想展示的舰船",
                         Margin = new Thickness(0, 5, 0, 0),
-                        Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                        Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                         FontSize = 10
                     }
                 }
@@ -2152,10 +2185,18 @@ public partial class MainWindow
     private Border CreatePersonalProfileFavoriteShipDisplayCard(
         (OwnedShipRecord Ship, ShipCatalogEntry? Catalog) favorite)
     {
+        var displayName = favorite.Catalog?.DisplayName(_language);
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            displayName = string.IsNullOrWhiteSpace(favorite.Ship.DisplayName)
+                ? favorite.Ship.Code
+                : favorite.Ship.DisplayName;
+        }
+
         var card = new Border
         {
-            Background = CreateSolidBrush("#0D2130"),
-            BorderBrush = CreateSolidBrush("#24506A"),
+            Background = PersonalProfileBrush(BridgeBrushToken.PanelRaised),
+            BorderBrush = PersonalProfileBrush(BridgeBrushToken.ChipHairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Padding = new Thickness(7),
@@ -2172,35 +2213,86 @@ public partial class MainWindow
             Height = 64,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Background = CreateSolidBrush("#07131D"),
-            BorderBrush = CreateSolidBrush("#2B5F79"),
+            Background = PersonalProfileBrush(BridgeBrushToken.Ground),
+            BorderBrush = PersonalProfileBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             ClipToBounds = true
         };
-        var imageSource = TryCreateImageSource(ShipCatalog.ResolveImagePath(
-            favorite.Catalog,
-            favorite.Ship.Code,
-            favorite.Ship.DisplayName));
-        imageFrame.Child = imageSource is null
-            ? new TextBlock
+        var imagePath = ResolveShipDisplayImagePath(
+            favorite.Ship.CustomImageMediaId,
+            ShipCatalog.ResolveImagePath(
+                favorite.Catalog,
+                favorite.Ship.Code,
+                favorite.Ship.DisplayName));
+        var imageSource = TryCreateImageSource(imagePath);
+        ShipImageReportTarget? reportTarget = null;
+        if (imageSource is not null)
+        {
+            var owner = _personalProfileVisitorTarget;
+            reportTarget = _isPersonalProfileVisitorMode &&
+                           !string.IsNullOrWhiteSpace(favorite.Ship.CustomImageMediaId) &&
+                           !string.IsNullOrWhiteSpace(owner?.AccountId) &&
+                           !string.Equals(owner.AccountId, _accountId, StringComparison.OrdinalIgnoreCase)
+                ? new ShipImageReportTarget(
+                    favorite.Ship.CustomImageMediaId!,
+                    favorite.Ship.InstanceId,
+                    displayName,
+                    owner.Callsign ?? owner.Name,
+                    owner.AccountId)
+                : null;
+            imageFrame.Cursor = Cursors.Hand;
+            imageFrame.ToolTip = "查看完整图片";
+            imageFrame.Tag = new PersonalProfileFavoriteShipPreviewTarget(
+                imagePath,
+                displayName,
+                reportTarget);
+            imageFrame.MouseLeftButtonUp += PersonalProfileFavoriteShipImage_MouseLeftButtonUp;
+        }
+
+        if (imageSource is null)
+        {
+            imageFrame.Child = new TextBlock
             {
                 Text = "SHIP",
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 9,
                 FontWeight = FontWeights.SemiBold
-            }
-            : new Image { Source = imageSource, Stretch = Stretch.UniformToFill };
-        content.Children.Add(imageFrame);
-
-        var displayName = favorite.Catalog?.DisplayName(_language);
-        if (string.IsNullOrWhiteSpace(displayName))
-        {
-            displayName = string.IsNullOrWhiteSpace(favorite.Ship.DisplayName)
-                ? favorite.Ship.Code
-                : favorite.Ship.DisplayName;
+            };
         }
+        else
+        {
+            var imageContent = new Grid();
+            imageContent.Children.Add(CreateSquareShipImage(
+                imageSource,
+                favorite.Ship.CustomImageCropFrame));
+            if (reportTarget is not null)
+            {
+                var reportButton = new Button
+                {
+                    Content = "!",
+                    Width = 18,
+                    Height = 18,
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(0, 2, 2, 0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Background = PersonalProfileBrush(BridgeBrushToken.PanelRaised),
+                    BorderBrush = PersonalProfileBrush(BridgeBrushToken.StatusWarn),
+                    Foreground = PersonalProfileBrush(BridgeBrushToken.StatusWarn),
+                    FontSize = 10,
+                    FontWeight = FontWeights.Bold,
+                    ToolTip = "举报这张舰船图片",
+                    Tag = reportTarget
+                };
+                reportButton.Click += PersonalProfileFavoriteShipImageReportButton_Click;
+                imageContent.Children.Add(reportButton);
+            }
+
+            imageFrame.Child = imageContent;
+        }
+        content.Children.Add(imageFrame);
 
         var details = new StackPanel
         {
@@ -2210,7 +2302,7 @@ public partial class MainWindow
         details.Children.Add(new TextBlock
         {
             Text = displayName,
-            Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+            Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
             FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis,
             ToolTip = displayName
@@ -2223,7 +2315,7 @@ public partial class MainWindow
             {
                 Text = englishName,
                 Margin = new Thickness(0, 3, 0, 0),
-                Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 9,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 ToolTip = englishName
@@ -2237,7 +2329,7 @@ public partial class MainWindow
             {
                 Text = role,
                 Margin = new Thickness(0, 4, 0, 0),
-                Foreground = FindBrush("AccentBrush", Brushes.DeepSkyBlue),
+                Foreground = PersonalProfileAccentBrush(),
                 FontSize = 9,
                 TextTrimming = TextTrimming.CharacterEllipsis
             });
@@ -2262,7 +2354,7 @@ public partial class MainWindow
         {
             Text = "舰船价值",
             HorizontalAlignment = HorizontalAlignment.Right,
-            Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+            Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
             FontSize = 9
         });
         facts.Children.Add(new TextBlock
@@ -2270,7 +2362,7 @@ public partial class MainWindow
             Text = valueText,
             Margin = new Thickness(0, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
-            Foreground = FindBrush("AccentBrush", Brushes.DeepSkyBlue),
+            Foreground = PersonalProfileBrush(BridgeBrushToken.MetricValue),
             FontSize = 11,
             FontWeight = FontWeights.SemiBold
         });
@@ -2279,7 +2371,7 @@ public partial class MainWindow
             Text = sizeText,
             Margin = new Thickness(0, 5, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
-            Foreground = FindBrush("SecondaryTextBrush", Brushes.LightSteelBlue),
+            Foreground = PersonalProfileBrush(BridgeBrushToken.Ink2),
             FontSize = 9,
             TextTrimming = TextTrimming.CharacterEllipsis,
             ToolTip = sizeText
@@ -2288,6 +2380,33 @@ public partial class MainWindow
         content.Children.Add(facts);
         card.Child = content;
         return card;
+    }
+
+    private void PersonalProfileFavoriteShipImage_MouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement
+            {
+                Tag: PersonalProfileFavoriteShipPreviewTarget target
+            })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        ShowShipImagePreview(target.ImagePath, target.ShipName, target.ReportTarget);
+    }
+
+    private async void PersonalProfileFavoriteShipImageReportButton_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is FrameworkElement { Tag: ShipImageReportTarget target })
+        {
+            await SubmitShipImageReportAsync(target);
+        }
     }
 
     private void RefreshPersonalProfileHangarSummary()
@@ -2353,7 +2472,13 @@ public partial class MainWindow
             .FirstOrDefault();
         if (recentShip is null)
         {
+            _personalProfileRecentShipReportTarget = null;
+            PersonalProfileRecentShipImageReportButton.Visibility = Visibility.Collapsed;
             PersonalProfileHangarRecentShipImage.Source = null;
+            PersonalProfileHangarRecentShipImage.Tag = null;
+            PersonalProfileHangarRecentShipImage.FocusX = 0.5;
+            PersonalProfileHangarRecentShipImage.FocusY = 0.5;
+            PersonalProfileHangarRecentShipImage.Zoom = 1.0;
             PersonalProfileHangarRecentShipImagePlaceholder.Visibility = Visibility.Visible;
             PersonalProfileHangarRecentShipNameText.Text = "暂无舰船";
             PersonalProfileHangarRecentShipEnglishNameText.Text = "读取机库后显示";
@@ -2362,15 +2487,22 @@ public partial class MainWindow
         else
         {
             var recentCatalog = ShipCatalog.Find(recentShip.Code, recentShip.DisplayName);
-            var recentImage = TryCreateImageSource(ShipCatalog.ResolveImagePath(
-                recentCatalog,
-                recentShip.Code,
-                recentShip.DisplayName));
+            var recentImagePath = ResolveShipDisplayImagePath(
+                recentShip.CustomImageMediaId,
+                ShipCatalog.ResolveImagePath(
+                    recentCatalog,
+                    recentShip.Code,
+                    recentShip.DisplayName));
+            var recentImage = TryCreateImageSource(recentImagePath);
             var recentImportedAt = recentShip.ImportedAt == default ||
                                    recentShip.ImportedAt == DateTimeOffset.MinValue
                 ? recentShip.AddedToDatabaseAt
                 : recentShip.ImportedAt;
             PersonalProfileHangarRecentShipImage.Source = recentImage;
+            PersonalProfileHangarRecentShipImage.Tag = recentImage is null ? null : recentImagePath;
+            PersonalProfileHangarRecentShipImage.FocusX = recentShip.CustomImageCropFrame.FocusX;
+            PersonalProfileHangarRecentShipImage.FocusY = recentShip.CustomImageCropFrame.FocusY;
+            PersonalProfileHangarRecentShipImage.Zoom = recentShip.CustomImageCropFrame.Zoom;
             PersonalProfileHangarRecentShipImagePlaceholder.Visibility = recentImage is null
                 ? Visibility.Visible
                 : Visibility.Collapsed;
@@ -2382,6 +2514,20 @@ public partial class MainWindow
                                                              recentImportedAt == DateTimeOffset.MinValue
                 ? "入库时间待同步"
                 : $"入库 {recentImportedAt.ToLocalTime():yyyy-MM-dd}";
+            var canReportRecentImage = _isPersonalProfileVisitorMode &&
+                                       !string.IsNullOrWhiteSpace(recentShip.CustomImageMediaId) &&
+                                       !string.Equals(_personalProfileVisitorTarget?.AccountId, _accountId, StringComparison.OrdinalIgnoreCase);
+            _personalProfileRecentShipReportTarget = canReportRecentImage
+                ? new ShipImageReportTarget(
+                    recentShip.CustomImageMediaId!,
+                    recentShip.InstanceId,
+                    recentCatalog?.DisplayName(_language) ?? recentShip.DisplayName,
+                    _personalProfileVisitorTarget?.Callsign ?? _personalProfileVisitorTarget?.Name ?? "舰船持有人",
+                    _personalProfileVisitorTarget?.AccountId)
+                : null;
+            PersonalProfileRecentShipImageReportButton.Visibility = canReportRecentImage
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         var span = PersonalProfileModuleConstraints.NormalizeSpan(
@@ -2440,7 +2586,7 @@ public partial class MainWindow
             PersonalProfileSkilledRolesContentPanel.Children.Add(new TextBlock
             {
                 Text = _isPersonalProfileEditMode ? "尚未设置，点击“编辑”选择岗位" : "尚未设置擅长岗位",
-                Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center
@@ -2466,7 +2612,7 @@ public partial class MainWindow
     private Border CreatePersonalProfilePrimaryRoleCard(PersonalProfileRoleDefinition role, int span)
     {
         var category = PersonalProfileRoleCatalog.FindCategory(role.CategoryId);
-        var accentHex = category?.AccentHex ?? "#29AFFF";
+        var accentHex = category?.AccentHex ?? PersonalProfileRoleColorPalette.Ship;
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2482,7 +2628,7 @@ public partial class MainWindow
             Text = role.Name,
             Margin = new Thickness(9, 0, 8, 0),
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+            Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
             FontSize = span == 1 ? 12 : 13,
             FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -2528,7 +2674,7 @@ public partial class MainWindow
     private Border CreatePersonalProfileRoleChip(PersonalProfileRoleDefinition role)
     {
         var category = PersonalProfileRoleCatalog.FindCategory(role.CategoryId);
-        var accentHex = category?.AccentHex ?? "#29AFFF";
+        var accentHex = category?.AccentHex ?? PersonalProfileRoleColorPalette.Ship;
         return new Border
         {
             MinHeight = 25,
@@ -2542,7 +2688,7 @@ public partial class MainWindow
             Child = new TextBlock
             {
                 Text = role.Name,
-                Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
                 FontSize = 10,
                 VerticalAlignment = VerticalAlignment.Center
             }
@@ -2620,12 +2766,12 @@ public partial class MainWindow
                 MinHeight = 27,
                 Margin = new Thickness(0, 0, 6, 6),
                 Padding = new Thickness(8, 2, 8, 2),
-                Background = isSelected ? CreateSolidBrush("#123A52") : CreateSolidBrush("#0D1D29"),
-                BorderBrush = isSelected ? CreateSolidBrush("#29AFFF") : CreateSolidBrush("#173447"),
+                Background = isSelected ? PersonalProfileAmbientBrush() : PersonalProfileBrush(BridgeBrushToken.Panel),
+                BorderBrush = isSelected ? PersonalProfileAccentBrush() : PersonalProfileBrush(BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 Foreground = isSelected
-                    ? CreateSolidBrush("#EEF8FF")
-                    : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                    ? PersonalProfileBrush(BridgeBrushToken.Ink)
+                    : PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 10,
                 Content = isSelected ? $"{value}  ×" : value,
                 Tag = value,
@@ -2691,8 +2837,8 @@ public partial class MainWindow
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Cursor = Cursors.Hand,
                 Tag = category.Id,
-                Background = isActive ? BrushFromHex(category.AccentHex, 0.23) : CreateSolidBrush("#0B1B28"),
-                BorderBrush = isActive ? BrushFromHex(category.AccentHex, 0.90) : CreateSolidBrush("#19384B"),
+                Background = isActive ? BrushFromHex(category.AccentHex, 0.23) : PersonalProfileBrush(BridgeBrushToken.Panel),
+                BorderBrush = isActive ? BrushFromHex(category.AccentHex, 0.90) : PersonalProfileBrush(BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 ToolTip = category.Description
             };
@@ -2715,8 +2861,8 @@ public partial class MainWindow
                 Margin = new Thickness(10, 0, 6, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = isActive
-                    ? FindBrush("PrimaryTextBrush", Brushes.AliceBlue)
-                    : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                    ? PersonalProfileBrush(BridgeBrushToken.Ink)
+                    : PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontWeight = isActive ? FontWeights.SemiBold : FontWeights.Normal
             };
             Grid.SetColumn(name, 1);
@@ -2768,8 +2914,8 @@ public partial class MainWindow
                 MinHeight = 36,
                 Margin = new Thickness(0, 0, 8, 8),
                 Padding = new Thickness(10, 6, 10, 6),
-                Background = isSelected ? BrushFromHex(category.AccentHex, 0.20) : CreateSolidBrush("#0D1D29"),
-                BorderBrush = isSelected ? BrushFromHex(category.AccentHex, 0.92) : CreateSolidBrush("#24506A"),
+                Background = isSelected ? BrushFromHex(category.AccentHex, 0.20) : PersonalProfileBrush(BridgeBrushToken.Panel),
+                BorderBrush = isSelected ? BrushFromHex(category.AccentHex, 0.92) : PersonalProfileBrush(BridgeBrushToken.ChipHairline),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(2),
                 Cursor = Cursors.Hand,
@@ -2793,8 +2939,8 @@ public partial class MainWindow
             {
                 Text = role.Name,
                 Foreground = isSelected
-                    ? FindBrush("PrimaryTextBrush", Brushes.AliceBlue)
-                    : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                    ? PersonalProfileBrush(BridgeBrushToken.Ink)
+                    : PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center
@@ -2856,7 +3002,7 @@ public partial class MainWindow
             {
                 Text = "尚未选择岗位。第一个选择的岗位将成为主岗位。",
                 Margin = new Thickness(2, 8, 0, 0),
-                Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 11
             });
             return;
@@ -2871,7 +3017,7 @@ public partial class MainWindow
             }
 
             var category = PersonalProfileRoleCatalog.FindCategory(role.CategoryId);
-            var accentHex = category?.AccentHex ?? "#29AFFF";
+            var accentHex = category?.AccentHex ?? PersonalProfileRoleColorPalette.Ship;
             var row = new Grid { Height = 31, Margin = new Thickness(0, 0, 0, 5) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2903,7 +3049,7 @@ public partial class MainWindow
                 Text = role.Name,
                 Margin = new Thickness(10, 0, 6, 0),
                 VerticalAlignment = VerticalAlignment.Center,
-                Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
                 FontWeight = index == 0 ? FontWeights.SemiBold : FontWeights.Normal,
                 ToolTip = role.Description
             };
@@ -2934,7 +3080,7 @@ public partial class MainWindow
             row.Children.Add(downButton);
 
             var removeButton = CreatePersonalProfileRoleOrderButton("×", "移除");
-            removeButton.Foreground = FindBrush("StatusDangerBrush", Brushes.IndianRed);
+            removeButton.Foreground = PersonalProfileBrush(BridgeBrushToken.StatusBad);
             removeButton.Click += (_, _) => RemovePersonalProfileRole(capturedIndex);
             Grid.SetColumn(removeButton, 5);
             row.Children.Add(removeButton);
@@ -3085,8 +3231,8 @@ public partial class MainWindow
     {
         PersonalProfileRoleSelectorStatusText.Text = message;
         PersonalProfileRoleSelectorStatusText.Foreground = isWarning
-            ? FindBrush("StatusWarningBrush", Brushes.Goldenrod)
-            : FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+            ? PersonalProfileBrush(BridgeBrushToken.StatusWarn)
+            : PersonalProfileBrush(BridgeBrushToken.Ink3);
     }
 
     private void PersonalProfileFavoriteShipsEditButton_Click(object sender, RoutedEventArgs e)
@@ -3143,8 +3289,8 @@ public partial class MainWindow
                 Height = 112,
                 Margin = new Thickness(0, 0, 10, 10),
                 Padding = new Thickness(8),
-                Background = isSelected ? CreateSolidBrush("#12344A") : CreateSolidBrush("#0D1D29"),
-                BorderBrush = isSelected ? FindBrush("AccentBrush", Brushes.DeepSkyBlue) : CreateSolidBrush("#24506A"),
+                Background = isSelected ? PersonalProfileAmbientBrush() : PersonalProfileBrush(BridgeBrushToken.Panel),
+                BorderBrush = isSelected ? PersonalProfileAccentBrush() : PersonalProfileBrush(BridgeBrushToken.ChipHairline),
                 BorderThickness = new Thickness(isSelected ? 2 : 1),
                 CornerRadius = new CornerRadius(2),
                 Cursor = Cursors.Hand,
@@ -3160,25 +3306,27 @@ public partial class MainWindow
                 Width = 84,
                 Height = 84,
                 VerticalAlignment = VerticalAlignment.Center,
-                Background = CreateSolidBrush("#07131D"),
-                BorderBrush = isSelected ? FindBrush("AccentBrush", Brushes.DeepSkyBlue) : CreateSolidBrush("#2B5F79"),
+                Background = PersonalProfileBrush(BridgeBrushToken.Ground),
+                BorderBrush = isSelected ? PersonalProfileAccentBrush() : PersonalProfileBrush(BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 ClipToBounds = true
             };
-            var imageSource = TryCreateImageSource(ShipCatalog.ResolveImagePath(
-                option.Catalog,
-                option.Ship.Code,
-                option.Ship.DisplayName));
+            var imageSource = TryCreateImageSource(ResolveShipDisplayImagePath(
+                option.Ship.CustomImageMediaId,
+                ShipCatalog.ResolveImagePath(
+                    option.Catalog,
+                    option.Ship.Code,
+                    option.Ship.DisplayName)));
             imageFrame.Child = imageSource is null
                 ? new TextBlock
                 {
                     Text = "SHIP",
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                    Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                     FontSize = 9
                 }
-                : new Image { Source = imageSource, Stretch = Stretch.UniformToFill };
+                : CreateSquareShipImage(imageSource, option.Ship.CustomImageCropFrame);
             content.Children.Add(imageFrame);
 
             var displayName = option.Catalog?.DisplayName(_language);
@@ -3197,7 +3345,7 @@ public partial class MainWindow
             details.Children.Add(new TextBlock
             {
                 Text = displayName,
-                Foreground = FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink),
                 FontWeight = FontWeights.SemiBold,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 ToolTip = displayName
@@ -3206,7 +3354,7 @@ public partial class MainWindow
             {
                 Text = option.Catalog?.EnglishName ?? option.Ship.Code,
                 Margin = new Thickness(0, 4, 0, 0),
-                Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3),
                 FontSize = 10,
                 TextTrimming = TextTrimming.CharacterEllipsis
             });
@@ -3217,7 +3365,7 @@ public partial class MainWindow
                 {
                     Text = role,
                     Margin = new Thickness(0, 5, 0, 0),
-                    Foreground = FindBrush("AccentBrush", Brushes.DeepSkyBlue),
+                    Foreground = PersonalProfileAccentBrush(),
                     FontSize = 10,
                     TextTrimming = TextTrimming.CharacterEllipsis
                 });
@@ -3229,7 +3377,7 @@ public partial class MainWindow
                 {
                     Text = $"展示顺序 {selectionIndex + 1}",
                     Margin = new Thickness(0, 5, 0, 0),
-                    Foreground = FindBrush("StatusSuccessBrush", Brushes.MediumSeaGreen),
+                    Foreground = PersonalProfileBrush(BridgeBrushToken.StatusOk),
                     FontSize = 10,
                     FontWeight = FontWeights.SemiBold
                 });
@@ -3341,8 +3489,8 @@ public partial class MainWindow
     {
         PersonalProfileFavoriteShipSelectorStatusText.Text = message;
         PersonalProfileFavoriteShipSelectorStatusText.Foreground = isWarning
-            ? FindBrush("StatusWarningBrush", Brushes.Goldenrod)
-            : FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+            ? PersonalProfileBrush(BridgeBrushToken.StatusWarn)
+            : PersonalProfileBrush(BridgeBrushToken.Ink3);
     }
 
     private static string[] NormalizePersonalProfileFavoriteShipCodes(IEnumerable<string>? codes) =>
@@ -3388,8 +3536,8 @@ public partial class MainWindow
             bar.ColumnDefinitions.Add(new ColumnDefinition());
             bar.Children.Add(new Border
             {
-                Background = CreateSolidBrush("#111920"),
-                BorderBrush = CreateSolidBrush("#173447"),
+                Background = PersonalProfileBrush(BridgeBrushToken.Panel),
+                BorderBrush = PersonalProfileBrush(BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1)
             });
             return;
@@ -3521,13 +3669,13 @@ public partial class MainWindow
             card.Opacity = isDraggingCard ? 0.72 : 1;
             card.Cursor = isEditing ? Cursors.SizeAll : Cursors.Arrow;
             card.Background = isEditing
-                ? new SolidColorBrush(Color.FromRgb(12, 29, 41))
-                : new SolidColorBrush(Color.FromRgb(9, 24, 35));
+                ? PersonalProfileBrush(BridgeBrushToken.PanelRaised)
+                : PersonalProfileBrush(BridgeBrushToken.Panel);
             card.BorderBrush = isDraggingCard
-                ? FindBrush("AccentBrush", new SolidColorBrush(Color.FromRgb(41, 175, 255)))
+                ? PersonalProfileAccentBrush()
                 : isEditing
-                    ? new SolidColorBrush(Color.FromRgb(46, 106, 137))
-                    : FindBrush("PanelBorderBrush", new SolidColorBrush(Color.FromRgb(23, 52, 71)));
+                    ? PersonalProfileBrush(BridgeBrushToken.ChipHairline)
+                    : PersonalProfileBrush(BridgeBrushToken.Hairline);
             card.BorderThickness = new Thickness(isDraggingCard ? 2 : 1);
             Panel.SetZIndex(card, 1);
             card.Visibility = Visibility.Visible;
@@ -3627,18 +3775,18 @@ public partial class MainWindow
         if (_isPersonalProfileVisitorMode || _isPersonalProfilePublicPreviewMode)
         {
             PersonalProfileGameplayPrivacyText.Text = "访客可见";
-            PersonalProfileGameplayPrivacyText.Foreground = FindBrush("StatusSuccessBrush", Brushes.MediumSeaGreen);
-            PersonalProfileGameplayPrivacyBadge.Background = BrushFromHex("#0D211B");
-            PersonalProfileGameplayPrivacyBadge.BorderBrush = BrushFromHex("#276244");
+            PersonalProfileGameplayPrivacyText.Foreground = PersonalProfileBrush(BridgeBrushToken.StatusOk);
+            PersonalProfileGameplayPrivacyBadge.Background = PersonalProfileBrush(BridgeBrushToken.PanelRaised);
+            PersonalProfileGameplayPrivacyBadge.BorderBrush = PersonalProfileBrush(BridgeBrushToken.StatusOk);
             PersonalProfileGameplayPrivacyBadge.ToolTip = "该用户已允许访客查看游玩时长";
         }
         else if (!_gameplayStatisticsRecorder.IsRecordingAllowed &&
                  _gameplayStatisticsRecorder.Snapshot == GameplayStatisticsSnapshot.Empty)
         {
             PersonalProfileGameplayPrivacyText.Text = "尚未记录";
-            PersonalProfileGameplayPrivacyText.Foreground = FindBrush("MutedTextBrush", Brushes.SlateGray);
-            PersonalProfileGameplayPrivacyBadge.Background = BrushFromHex("#141A26");
-            PersonalProfileGameplayPrivacyBadge.BorderBrush = BrushFromHex("#40566B");
+            PersonalProfileGameplayPrivacyText.Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3);
+            PersonalProfileGameplayPrivacyBadge.Background = PersonalProfileBrush(BridgeBrushToken.Panel);
+            PersonalProfileGameplayPrivacyBadge.BorderBrush = PersonalProfileBrush(BridgeBrushToken.StatusOff);
             PersonalProfileGameplayPrivacyBadge.ToolTip = "允许记录后将在此显示游玩时长";
         }
         else if (_gameplayStatisticsRecorder.Consent.ShareOnProfile)
@@ -3647,20 +3795,22 @@ public partial class MainWindow
                 ? "访客可见"
                 : "主页未公开";
             PersonalProfileGameplayPrivacyText.Foreground = _personalProfileSettings.IsProfilePublic
-                ? FindBrush("StatusSuccessBrush", Brushes.MediumSeaGreen)
-                : FindBrush("StatusWarningBrush", Brushes.Goldenrod);
-            PersonalProfileGameplayPrivacyBadge.Background = BrushFromHex(
-                _personalProfileSettings.IsProfilePublic ? "#0D211B" : "#211C0F");
-            PersonalProfileGameplayPrivacyBadge.BorderBrush = BrushFromHex(
-                _personalProfileSettings.IsProfilePublic ? "#276244" : "#5B4A24");
+                ? PersonalProfileBrush(BridgeBrushToken.StatusOk)
+                : PersonalProfileBrush(BridgeBrushToken.StatusWarn);
+            PersonalProfileGameplayPrivacyBadge.Background = PersonalProfileBrush(
+                BridgeBrushToken.PanelRaised);
+            PersonalProfileGameplayPrivacyBadge.BorderBrush = PersonalProfileBrush(
+                _personalProfileSettings.IsProfilePublic
+                    ? BridgeBrushToken.StatusOk
+                    : BridgeBrushToken.StatusWarn);
             PersonalProfileGameplayPrivacyBadge.ToolTip = "可在应用设置中更改访客权限";
         }
         else
         {
             PersonalProfileGameplayPrivacyText.Text = "仅自己可见";
-            PersonalProfileGameplayPrivacyText.Foreground = FindBrush("MutedTextBrush", Brushes.SlateGray);
-            PersonalProfileGameplayPrivacyBadge.Background = BrushFromHex("#141A26");
-            PersonalProfileGameplayPrivacyBadge.BorderBrush = BrushFromHex("#40566B");
+            PersonalProfileGameplayPrivacyText.Foreground = PersonalProfileBrush(BridgeBrushToken.Ink3);
+            PersonalProfileGameplayPrivacyBadge.Background = PersonalProfileBrush(BridgeBrushToken.Panel);
+            PersonalProfileGameplayPrivacyBadge.BorderBrush = PersonalProfileBrush(BridgeBrushToken.StatusOff);
             PersonalProfileGameplayPrivacyBadge.ToolTip = "可在应用设置中更改访客权限";
         }
     }
@@ -3844,6 +3994,21 @@ public partial class MainWindow
         ["hangar-summary"] = PersonalProfilePickerHangarSummaryButton,
         ["skilled-roles"] = PersonalProfilePickerSkilledRolesButton
     };
+
+    private static ShipImageCropView CreateSquareShipImage(
+        ImageSource imageSource,
+        StarBridge.Core.ShipMedia.ShipImageCropFrame cropFrame)
+    {
+        return new ShipImageCropView
+        {
+            Source = imageSource,
+            FocusX = cropFrame.FocusX,
+            FocusY = cropFrame.FocusY,
+            Zoom = cropFrame.Zoom,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+    }
 
     private static string ParsePersonalProfileModuleActionTag(string tag, string action)
     {

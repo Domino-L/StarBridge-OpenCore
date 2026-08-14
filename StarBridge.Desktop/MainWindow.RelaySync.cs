@@ -110,11 +110,21 @@ public partial class MainWindow
 
         var local = _players.FirstOrDefault(player => player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
         var privacyProjection = GetLocalFleetPresencePrivacyProjection();
+        var dualAxisWire = DualAxisPrivacyTakeover.ToWire(_dualAxisPrivacySettings);
+        var publishedFields = dualAxisWire.UsesDualAxisWire
+            ? dualAxisWire.FleetFields | dualAxisWire.RoomFields
+            : PlayerSharedStateFields.All;
         var canPublishSharedState = privacyProjection.CanShareRealtime;
         var publishOnline = privacyProjection.Online;
         var liveStatus = privacyProjection.LiveStatus;
-        var publishShip = canPublishSharedState && _syncPrivacySettings.SyncShipStatus;
-        var publishLocation = canPublishSharedState && _syncPrivacySettings.SyncLocationStatus;
+        var publishShip = canPublishSharedState &&
+                          (dualAxisWire.UsesDualAxisWire
+                              ? publishedFields.HasFlag(PlayerSharedStateFields.Ship)
+                              : _syncPrivacySettings.SyncShipStatus);
+        var publishLocation = canPublishSharedState &&
+                              (dualAxisWire.UsesDualAxisWire
+                                  ? publishedFields.HasFlag(PlayerSharedStateFields.Location)
+                                  : _syncPrivacySettings.SyncLocationStatus);
         var rawShip = publishShip ? local?.RawShip ?? "Unknown" : "Unknown";
         var shipConfidence = publishShip ? local?.ShipConfidence ?? "None" : "None";
         var locationProjection = FleetPresencePrivacyPolicy.ProjectLocation(
@@ -125,17 +135,24 @@ public partial class MainWindow
         var rawLocation = locationProjection.Location;
         var locationConfidence = locationProjection.Confidence;
         var publishServerInfo = canPublishSharedState &&
-                                _syncPrivacySettings.SyncServerInfo &&
+                                (dualAxisWire.UsesDualAxisWire
+                                    ? publishedFields.HasFlag(PlayerSharedStateFields.Server)
+                                    : _syncPrivacySettings.SyncServerInfo) &&
                                 IsGameServerRegionCurrent();
         var serverShard = publishServerInfo ? _gameServerShard : null;
         var serverRegion = publishServerInfo ? _gameServerRegion : null;
-        if (!_syncPrivacySettings.SyncServerInfo ||
+        if (!(dualAxisWire.UsesDualAxisWire
+                ? publishedFields.HasFlag(PlayerSharedStateFields.Server)
+                : _syncPrivacySettings.SyncServerInfo) ||
             (_syncPrivacySettings.HideServerInfoBeforePu && !IsGameServerRegionCurrent()))
         {
             rawLocation = RemoveServerDetailFromLocation(rawLocation);
         }
 
-        var ownedShips = _syncPrivacySettings.SyncEnabled && _syncPrivacySettings.PersonalHangarVisible
+        var publishPersonalHangar = dualAxisWire.UsesDualAxisWire
+            ? publishedFields.HasFlag(PlayerSharedStateFields.PersonalHangar)
+            : _syncPrivacySettings.PersonalHangarVisible;
+        var ownedShips = _syncPrivacySettings.SyncEnabled && publishPersonalHangar
             ? BuildOwnedShipSnapshots()
             : [];
 
@@ -143,7 +160,6 @@ public partial class MainWindow
             _localPlayer!,
             DisplayCallsign(_callsign, _localPlayer),
             _hasFleet ? _fleetName : "No Fleet",
-            _joinedSquad?.Name ?? "Unassigned",
             publishOnline,
             rawShip,
             shipConfidence,
@@ -155,15 +171,35 @@ public partial class MainWindow
             FormatNetworkVisibilityScope(_syncPrivacySettings.SyncEnabled
                 ? _syncPrivacySettings.EffectiveVisibilityScope
                 : SyncPrivacyVisibilityScope.Private),
-            _syncPrivacySettings.SyncEnabled && _syncPrivacySettings.PersonalHangarVisible,
+            dualAxisWire.UsesDualAxisWire
+                ? _dualAxisPrivacySettings.PublicationEnabled &&
+                  dualAxisWire.FleetFields.HasFlag(PlayerSharedStateFields.PersonalHangar)
+                : _syncPrivacySettings.SyncEnabled && _syncPrivacySettings.PersonalHangarVisible,
             serverShard,
             serverRegion,
             liveStatus,
-            SharedEventTypes: _playerEventSharingSettings.ToWireValue(),
-            SharedEvents: _playerEventSharingSettings.Allows(PlayerSharedEventTypes.Life)
+            SharedEventTypes: dualAxisWire.UsesDualAxisWire &&
+                              !publishedFields.HasFlag(PlayerSharedStateFields.SharedEvents)
+                ? (int)PlayerSharedEventTypes.None
+                : _playerEventSharingSettings.ToWireValue(),
+            SharedEvents: publishedFields.HasFlag(PlayerSharedStateFields.SharedEvents) &&
+                          _playerEventSharingSettings.Allows(PlayerSharedEventTypes.Life)
                 ? _sharedLifeEvents.ToArray()
                 : [],
-            FriendsCanViewPresence: _syncPrivacySettings.FriendsCanViewPresence);
+            FriendsCanViewPresence: _syncPrivacySettings.FriendsCanViewPresence,
+            AllowedViewerAccountIds: _syncPrivacySettings.SpecifiedMemberAccountIds,
+            FleetSharedStateFields: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetFields : null,
+            RoomVisibilityScope: dualAxisWire.UsesDualAxisWire
+                ? PlayerSharedStateVisibility.PrivateScope
+                : null,
+            RoomSharedStateFields: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomFields : null,
+            FleetAdministratorsCanView: dualAxisWire.UsesDualAxisWire
+                ? dualAxisWire.FleetAdministratorsCanView
+                : null,
+            FleetMembersCanView: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetMembersCanView : null,
+            FleetVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetVisibilityGroupIds : null,
+            RoomMembersCanView: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomMembersCanView : null,
+            RoomVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomVisibilityGroupIds : null);
 
         try
         {
@@ -174,7 +210,7 @@ public partial class MainWindow
                 await PushFleetDirectoryAsync(silent: true);
             }
             NetworkStatusText.Text = $"已上传：{snapshot.Name}";
-            if (_syncPrivacySettings.SyncEnabled && _syncPrivacySettings.PersonalHangarVisible)
+            if (_syncPrivacySettings.SyncEnabled && publishPersonalHangar)
             {
                 MarkOwnedShipsSynced();
             }
@@ -295,7 +331,14 @@ public partial class MainWindow
 
     private NetworkPlayerSnapshot BuildOfflineNetworkSnapshot()
     {
-        var ownedShips = _syncPrivacySettings.SyncEnabled && _syncPrivacySettings.PersonalHangarVisible
+        var dualAxisWire = DualAxisPrivacyTakeover.ToWire(_dualAxisPrivacySettings);
+        var publishedFields = dualAxisWire.UsesDualAxisWire
+            ? dualAxisWire.FleetFields | dualAxisWire.RoomFields
+            : PlayerSharedStateFields.All;
+        var publishPersonalHangar = dualAxisWire.UsesDualAxisWire
+            ? publishedFields.HasFlag(PlayerSharedStateFields.PersonalHangar)
+            : _syncPrivacySettings.PersonalHangarVisible;
+        var ownedShips = _syncPrivacySettings.SyncEnabled && publishPersonalHangar
             ? BuildOwnedShipSnapshots()
             : [];
 
@@ -303,7 +346,6 @@ public partial class MainWindow
             _localPlayer!,
             DisplayCallsign(_callsign, _localPlayer),
             _hasFleet ? _fleetName : "No Fleet",
-            _joinedSquad?.Name ?? "Unassigned",
             false,
             "Unknown",
             "None",
@@ -313,10 +355,25 @@ public partial class MainWindow
             BuildAvatarImageData(),
             ownedShips,
             FormatNetworkVisibilityScope(_syncPrivacySettings.EffectiveVisibilityScope),
-            _syncPrivacySettings.PersonalHangarVisible,
+            dualAxisWire.UsesDualAxisWire
+                ? dualAxisWire.FleetFields.HasFlag(PlayerSharedStateFields.PersonalHangar)
+                : _syncPrivacySettings.PersonalHangarVisible,
             LiveStatus: "Offline",
             SharedEventTypes: _playerEventSharingSettings.ToWireValue(),
-            FriendsCanViewPresence: _syncPrivacySettings.FriendsCanViewPresence);
+            FriendsCanViewPresence: _syncPrivacySettings.FriendsCanViewPresence,
+            AllowedViewerAccountIds: _syncPrivacySettings.SpecifiedMemberAccountIds,
+            FleetSharedStateFields: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetFields : null,
+            RoomVisibilityScope: dualAxisWire.UsesDualAxisWire
+                ? PlayerSharedStateVisibility.PrivateScope
+                : null,
+            RoomSharedStateFields: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomFields : null,
+            FleetAdministratorsCanView: dualAxisWire.UsesDualAxisWire
+                ? dualAxisWire.FleetAdministratorsCanView
+                : null,
+            FleetMembersCanView: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetMembersCanView : null,
+            FleetVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetVisibilityGroupIds : null,
+            RoomMembersCanView: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomMembersCanView : null,
+            RoomVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomVisibilityGroupIds : null);
     }
 
     private async Task SendOfflineSnapshotAsync(
@@ -343,9 +400,16 @@ public partial class MainWindow
         response.EnsureSuccessStatusCode();
     }
 
-    private async Task<bool> PullNetworkSnapshotsAsync(bool silent = false)
+    private async Task<bool> PullNetworkSnapshotsAsync(
+        bool silent = false,
+        StartupDataGateAttempt? startupAttempt = null)
     {
         if (!CanSynchronizeUserData)
+        {
+            return false;
+        }
+
+        if (!IsStartupAttemptCurrent(startupAttempt))
         {
             return false;
         }
@@ -370,6 +434,15 @@ public partial class MainWindow
             {
                 return false;
             }
+            if (!IsStartupAttemptCurrent(startupAttempt))
+            {
+                return false;
+            }
+            var snapshotNames = BuildOverlayRosterAuthorizedIdentityKeys(snapshots);
+            // Refresh the authorization set before the fingerprint fast path. The
+            // same payload can arrive after account-scoped state was cleared, and
+            // an unchanged fingerprint must not leave the roster closed set empty.
+            ReplaceOverlayRosterAuthorizedIdentityKeys(snapshotNames);
             var fingerprint = NetworkPlayerSnapshotChangeDetector.BuildFingerprint(
                 snapshots,
                 _hasFleet ? _fleetCode : null);
@@ -380,9 +453,6 @@ public partial class MainWindow
             }
 
             _lastNetworkPlayerSnapshotFingerprint = fingerprint;
-            var snapshotNames = snapshots
-                .Select(GetNetworkSnapshotKey)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var knownFleetMemberNames = _hasFleet
                 ? _fleetMemberPermissions.Keys
                     .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -407,6 +477,10 @@ public partial class MainWindow
             if (!_hasFleet)
             {
                 _networkSnapshots.Clear();
+                ClearOverlayRosterAuthorizedIdentityKeys();
+                // This clear discards cached snapshots, not the successful response
+                // being processed. Restore that response as the current closed set.
+                ReplaceOverlayRosterAuthorizedIdentityKeys(snapshotNames);
             }
 
             if (!string.IsNullOrWhiteSpace(_localPlayer))
@@ -430,6 +504,7 @@ public partial class MainWindow
             }
 
             RenderState();
+            _ = CacheNetworkShipMediaAsync(snapshots, session);
             NetworkStatusText.Text = $"已拉取：{snapshots.Length} 名玩家";
             RefreshHeaderStatusBar();
             HideNetworkSyncIssueDialog();
@@ -619,6 +694,13 @@ public partial class MainWindow
 
     private async Task<bool> PushFleetDirectoryAsync(bool silent = false)
     {
+#if DEBUG
+        if (ShouldSuppressFleetProfileAcceptanceNetworkWrites())
+        {
+            return true;
+        }
+#endif
+
         if (!IsLoggedIn)
         {
             if (!silent)
@@ -742,6 +824,7 @@ public partial class MainWindow
         var removedFleetCode = _fleetCode;
 
         ClearFleetState();
+        ConfirmAuthoritativeNoFleetState();
         _fleetDirectorySyncPending = false;
         SaveCurrentConfig();
 
@@ -972,6 +1055,13 @@ public partial class MainWindow
         FleetInfoUpdateScope scope = FleetInfoUpdateScope.Profile,
         NetworkFleetRoleGroupSnapshot[]? roleGroupsOverride = null)
     {
+#if DEBUG
+        if (ShouldSuppressFleetProfileAcceptanceNetworkWrites())
+        {
+            return Task.FromResult(true);
+        }
+#endif
+
         var logoImageData = includeImages ? BuildFleetLogoImageData() : null;
         var logoPayloadCheck = FleetImageSyncGuard.CheckRequiredImage(
             requireLogoImage,
@@ -1069,24 +1159,22 @@ public partial class MainWindow
         return false;
     }
 
-    private Task<bool> PushFleetSquadsAsync(bool silent = true)
-    {
-        return PushFleetMutationAsync(
-            "api/fleets/squads",
-            new FleetSquadsUpdateRequest(
-                _fleetCode,
-                BuildSquadSnapshots(),
-                BuildFleetEventLogSnapshots()),
-            "小队信息已同步",
-            "小队信息同步失败",
-            silent);
-    }
-
     private async Task<bool> PullNetworkFleetsAsync(
         bool silent = false,
-        FleetDirectoryRefreshBehavior refreshBehavior = FleetDirectoryRefreshBehavior.Reorder)
+        FleetDirectoryRefreshBehavior refreshBehavior = FleetDirectoryRefreshBehavior.Reorder,
+        StartupDataGateAttempt? startupAttempt = null)
     {
+        if (IsFindFleetAcceptanceMode)
+        {
+            return false;
+        }
+
         if (!CanSynchronizeUserData)
+        {
+            return false;
+        }
+
+        if (!IsStartupAttemptCurrent(startupAttempt))
         {
             return false;
         }
@@ -1113,7 +1201,9 @@ public partial class MainWindow
         }
         try
         {
-            var applicationsTask = PullMyFleetApplicationsAsync(silent: true);
+            var applicationsTask = PullMyFleetApplicationsAsync(
+                silent: true,
+                startupAttempt: startupAttempt);
             var membershipTask = IsLoggedIn
                 ? _relayClient.GetFromJsonAsync<FleetMembershipResponse>("api/fleets/membership")
                 : Task.FromResult<FleetMembershipResponse?>(null);
@@ -1122,6 +1212,10 @@ public partial class MainWindow
             var membership = await membershipTask;
             var snapshots = await snapshotsTask ?? [];
             if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return false;
+            }
+            if (!IsStartupAttemptCurrent(startupAttempt))
             {
                 return false;
             }
@@ -1190,6 +1284,10 @@ public partial class MainWindow
                 retainedPendingFleet = true;
                 MarkFleetDirectorySyncPending();
                 await RetryPendingFleetDirectorySyncAsync(silent: true);
+                if (!IsStartupAttemptCurrent(startupAttempt))
+                {
+                    return false;
+                }
                 if (fetchedFleetCards.All(card =>
                         !IsSameFleet(card.Snapshot.Name) &&
                         !IsSameFleet(card.Snapshot.Code)))
@@ -1211,6 +1309,10 @@ public partial class MainWindow
                 }
             }
 
+            if (!IsStartupAttemptCurrent(startupAttempt))
+            {
+                return false;
+            }
             _allNetworkFleets.Clear();
             _allNetworkFleets.AddRange(fetchedFleetCards);
             _ = _fleetDirectoryCache.SaveAsync(snapshots);
@@ -1226,8 +1328,6 @@ public partial class MainWindow
                 AppendOutput($"NETWORK | pulled fleets={snapshots.Length}");
             }
             HideNetworkSyncIssueDialog();
-            _accountSessionRequiresFreshSync = false;
-
             return true;
         }
         catch (Exception ex)
@@ -1236,10 +1336,18 @@ public partial class MainWindow
             {
                 return false;
             }
+            if (!IsStartupAttemptCurrent(startupAttempt))
+            {
+                return false;
+            }
 
             if (_fleetDirectoryState.IsLatestRequest(requestVersion) && _allNetworkFleets.Count == 0)
             {
                 var cachedSnapshots = await _fleetDirectoryCache.LoadAsync();
+                if (!IsStartupAttemptCurrent(startupAttempt))
+                {
+                    return false;
+                }
                 if (_fleetDirectoryState.IsLatestRequest(requestVersion) && cachedSnapshots.Count > 0)
                 {
                     _allNetworkFleets.AddRange(cachedSnapshots.Select(snapshot => NetworkFleetCard.FromSnapshot(
@@ -1287,7 +1395,9 @@ public partial class MainWindow
         }
     }
 
-    private async Task PullMyFleetApplicationsAsync(bool silent = true)
+    private async Task PullMyFleetApplicationsAsync(
+        bool silent = true,
+        StartupDataGateAttempt? startupAttempt = null)
     {
         if (!IsLoggedIn)
         {
@@ -1301,6 +1411,10 @@ public partial class MainWindow
             var applications = await _relayClient.GetFromJsonAsync<FleetJoinApplicationStatusResponse[]>(
                 "api/fleets/applications/mine") ?? [];
             if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return;
+            }
+            if (!IsStartupAttemptCurrent(startupAttempt))
             {
                 return;
             }

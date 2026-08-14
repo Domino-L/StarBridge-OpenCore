@@ -1,14 +1,7 @@
-using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.IO;
 using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Windows.Media.Imaging;
 using Vortice.Direct2D1;
 using Vortice.DirectWrite;
-using Vortice.DXGI;
 using Vortice.Mathematics;
-using DxgiFormat = Vortice.DXGI.Format;
 using DWriteTextAlignment = Vortice.DirectWrite.TextAlignment;
 using WpfRect = System.Windows.Rect;
 
@@ -75,8 +68,6 @@ internal sealed partial class OverlayCompositionHudWindow
         var top = (float)rect.Y + (useNightShadowLayout ? 18 : 16);
         var contentWidth = (float)Math.Max(1, rect.Width - (useNightShadowLayout ? 56 : 34));
         var rowY = top + (useNightShadowLayout ? 34 : 31);
-        var clipRect = RectF((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height);
-        var itemsBottom = (float)rect.Bottom - 8;
         var squadsTitleFormat = _titleFormat;
         var primaryFormat = _textFormat;
         var standardMetricFormat = _textRightFormat;
@@ -96,11 +87,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var metricFormat = compactMetrics
             ? _mutedRightFormat
             : standardMetricFormat;
-        var statusColumns = OverlaySquadStatusRowLayout.Resolve(
-            contentWidth,
-            MeasureTextWidth(state.SquadPrimaryName, primaryFormat),
-            MeasureTextWidth(state.SquadSummary, metricFormat),
-            MeasureTextWidth(state.SquadServerSummary, metricFormat));
+        var statusColumns = OverlaySquadStatusRowLayout.Resolve(contentWidth);
         DrawText(
             target,
             state.SquadPrimaryName,
@@ -129,7 +116,7 @@ internal sealed partial class OverlayCompositionHudWindow
             rowY,
             statusColumns.Server.Width,
             18,
-            state.Palette.Alert,
+            state.Palette.Text,
             textOpacity);
         DrawText(
             target,
@@ -141,153 +128,120 @@ internal sealed partial class OverlayCompositionHudWindow
             15,
             state.Palette.Muted,
             textOpacity);
+        DrawOverviewLocations(
+            target,
+            state,
+            left,
+            rowY + 40,
+            contentWidth,
+            textOpacity);
 
-
-        var itemsTop = rowY + (state.SquadDetailed ? 44 : 50) + (state.VerdictStyle ? 2 : 0);
-        if (state.NightShadowStyle)
-        {
-            itemsTop += 4;
-        }
-        var rowHeight = state.SquadDetailed ? 34 : 32;
-        target.PushAxisAlignedClip(clipRect, AntialiasMode.PerPrimitive);
-        try
-        {
-            foreach (var squad in state.SquadRows.Take(10))
-            {
-                if (itemsTop + rowHeight > itemsBottom)
-                {
-                    break;
-                }
-
-                var statusColor = squad.StatusColor;
-                if (squad.IsPartyRoomIcon)
-                {
-                    DrawPartyRoomNodeIcon(target, left, itemsTop + 2, statusColor, textOpacity);
-                }
-                else if (squad.Emblem is not null)
-                {
-                    var shouldDrawFallback = !DrawSquadEmblem(target, squad, left, itemsTop + 2, 14, textOpacity);
-                    if (shouldDrawFallback)
-                    {
-                        FillRect(target, left, itemsTop + 2, 14, 14, statusColor, 0.92f * textOpacity);
-                        DrawText(target, squad.Icon, _tinyCenterFormat, left, itemsTop + 2, 14, 14, state.Palette.Background, textOpacity);
-                    }
-                }
-                else
-                {
-                    FillRect(target, left, itemsTop + 2, 14, 14, statusColor, 0.92f * textOpacity);
-                    DrawText(target, squad.Icon, _tinyCenterFormat, left, itemsTop + 2, 14, 14, state.Palette.Background, textOpacity);
-                }
-                DrawText(target, squad.Name, _mutedFormat, left + 22, itemsTop - 1, contentWidth - 90, 15, state.Palette.Text, textOpacity);
-                DrawText(target, squad.DetailLine, _tinyFormat, left + 22, itemsTop + 14, contentWidth - 90, 14, state.Palette.Muted, textOpacity);
-                DrawText(target, squad.SummaryLine, _mutedRightFormat, left + contentWidth - 78, itemsTop, 78, 16, statusColor, textOpacity);
-                itemsTop += rowHeight;
-            }
-        }
-        finally
-        {
-            target.PopAxisAlignedClip();
-        }
     }
 
-    private bool DrawSquadEmblem(
+    private void DrawOverviewLocations(
         ID2D1RenderTarget target,
-        OverlayCompositionSquadRow squad,
-        float x,
-        float y,
-        float size,
-        double opacity)
+        OverlayCompositionFrameState state,
+        float left,
+        float top,
+        float contentWidth,
+        double textOpacity)
     {
-        if (squad.Emblem is null || opacity <= 0)
+        if (state.OverviewTopLocations.Count == 0)
         {
-            return false;
-        }
-
-        ID2D1Bitmap? transientBitmap = null;
-        try
-        {
-            var bitmap = GetOrCreateSquadEmblemBitmap(target, squad.Emblem, out transientBitmap);
-            if (bitmap is null)
+            var metric = state.OverviewLocationPlaceholderMetric;
+            var metricWidth = string.IsNullOrWhiteSpace(metric)
+                ? 0
+                : Math.Max(18, MeasureTextWidth(metric, _mutedRightFormat) + 2);
+            DrawText(
+                target,
+                state.OverviewLocationPlaceholder,
+                _mutedFormat,
+                left,
+                top,
+                Math.Max(1, contentWidth - metricWidth - (metricWidth > 0 ? 8 : 0)),
+                15,
+                state.Palette.Text,
+                textOpacity);
+            if (metricWidth > 0)
             {
-                return false;
+                DrawText(
+                    target,
+                    metric,
+                    _mutedRightFormat,
+                    left + contentWidth - metricWidth,
+                    top,
+                    metricWidth,
+                    15,
+                    state.Palette.Muted,
+                    textOpacity);
             }
 
-            var sourceSize = Math.Min(squad.Emblem.Width, squad.Emblem.Height);
-            var sourceX = (squad.Emblem.Width - sourceSize) / 2f;
-            var sourceY = (squad.Emblem.Height - sourceSize) / 2f;
-            target.DrawBitmap(
-                bitmap,
-                RectF(x, y, size, size),
-                (float)Math.Clamp(opacity, 0, 1),
-                Vortice.Direct2D1.BitmapInterpolationMode.Linear,
-                RectF(sourceX, sourceY, sourceSize, sourceSize));
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-        finally
-        {
-            transientBitmap?.Dispose();
-        }
-    }
-
-    private ID2D1Bitmap? GetOrCreateSquadEmblemBitmap(
-        ID2D1RenderTarget target,
-        OverlayCompositionBitmapData emblem,
-        out ID2D1Bitmap? transientBitmap)
-    {
-        transientBitmap = null;
-        var canCache = ReferenceEquals(target, _d2dDeviceContext);
-        if (canCache && _squadEmblemBitmaps.TryGetValue(emblem.CacheKey, out var cached))
-        {
-            return cached;
+            return;
         }
 
-        var handle = GCHandle.Alloc(emblem.Pixels, GCHandleType.Pinned);
-        try
+        var layout = state.OverviewLocationLayout;
+        if (layout.Orientation == OverlayOverviewLocationOrientation.Horizontal)
         {
-            var properties = new BitmapProperties(
-                new Vortice.DCommon.PixelFormat(
-                    DxgiFormat.B8G8R8A8_UNorm,
-                    Vortice.DCommon.AlphaMode.Premultiplied),
-                96,
-                96);
-            var bitmap = target.CreateBitmap(
-                new SizeI(emblem.Width, emblem.Height),
-                handle.AddrOfPinnedObject(),
-                (uint)emblem.Stride,
-                properties);
-            if (canCache)
+            var segmentWidth = contentWidth / Math.Max(1, layout.VisibleItems.Count);
+            for (var index = 0; index < layout.VisibleItems.Count; index++)
             {
-                _squadEmblemBitmaps[emblem.CacheKey] = bitmap;
-            }
-            else
-            {
-                transientBitmap = bitmap;
+                var location = layout.VisibleItems[index];
+                var segmentLeft = left + index * segmentWidth;
+                var usableWidth = Math.Max(1, segmentWidth - (index + 1 < layout.VisibleItems.Count ? 10 : 0));
+                var metric = location.DisplayMetricText;
+                var metricWidth = Math.Max(18, MeasureTextWidth(metric, _mutedRightFormat) + 2);
+                DrawText(
+                    target,
+                    location.DisplayName,
+                    _mutedFormat,
+                    segmentLeft,
+                    top,
+                    Math.Max(1, usableWidth - metricWidth - 8),
+                    15,
+                    state.Palette.Text,
+                    textOpacity);
+                DrawText(
+                    target,
+                    metric,
+                    _mutedRightFormat,
+                    segmentLeft + usableWidth - metricWidth,
+                    top,
+                    metricWidth,
+                    15,
+                    state.Palette.Muted,
+                    textOpacity);
             }
 
-            return bitmap;
+            return;
         }
-        finally
-        {
-            handle.Free();
-        }
-    }
 
-    private void DrawPartyRoomNodeIcon(
-        ID2D1RenderTarget target,
-        float x,
-        float y,
-        HudColor color,
-        double opacity)
-    {
-        DrawLine(target, x + 7, y + 3, x + 3, y + 11, color, opacity * 0.58, 1.0f);
-        DrawLine(target, x + 7, y + 3, x + 11, y + 11, color, opacity * 0.58, 1.0f);
-        FillEllipse(target, x + 7, y + 3, 1.8f, 1.8f, color, opacity);
-        FillEllipse(target, x + 3, y + 11, 1.4f, 1.4f, color, opacity * 0.9);
-        FillEllipse(target, x + 11, y + 11, 1.4f, 1.4f, color, opacity * 0.9);
+        for (var index = 0; index < layout.VisibleItems.Count; index++)
+        {
+            var location = layout.VisibleItems[index];
+            var y = top + index * 18;
+            var count = location.DisplayMetricText;
+            var countWidth = Math.Max(18, MeasureTextWidth(count, _mutedRightFormat) + 2);
+            DrawText(
+                target,
+                location.DisplayName,
+                _mutedFormat,
+                left,
+                y,
+                Math.Max(1, contentWidth - countWidth - 8),
+                15,
+                state.Palette.Text,
+                textOpacity);
+            DrawText(
+                target,
+                count,
+                _mutedRightFormat,
+                left + contentWidth - countWidth,
+                y,
+                countWidth,
+                15,
+                state.Palette.Muted,
+                textOpacity);
+        }
     }
 
     private void DrawMembersPanel(ID2D1RenderTarget target, OverlayCompositionFrameState state)
@@ -323,13 +277,8 @@ internal sealed partial class OverlayCompositionHudWindow
         target.PushAxisAlignedClip(clipRect, AntialiasMode.PerPrimitive);
         try
         {
-            foreach (var member in state.MemberRows.Take(12))
+            foreach (var member in state.MemberRows)
             {
-                if (rowY + 32 > rowsBottom)
-                {
-                    break;
-                }
-
                 DrawText(
                     target,
                     member.DisplayName,

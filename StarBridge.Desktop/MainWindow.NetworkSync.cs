@@ -43,10 +43,8 @@ public partial class MainWindow
         NotifyGuidedTourAction(GuideStep.OpenIdentitySettings);
     }
 
-    private void HeaderProfileMenuItem_Click(object sender, RoutedEventArgs e)
-    {
+    private void HeaderProfileMenuItem_Click(object sender, RoutedEventArgs e) =>
         PersonalNav_Click(sender, e);
-    }
 
     private void ClearAuthenticatedLocalState()
     {
@@ -59,9 +57,11 @@ public partial class MainWindow
         {
             ResetAccountScopedState("登录后即可查看舰队通讯。");
             ResetAccountAvatarState();
-            _accountSessionRequiresFreshSync = false;
             _authToken = null;
             _accountId = null;
+            ReloadDualAxisPrivacySettings();
+            _gameIdVisibilityPreference = GameIdVisibilityPolicy.Normalize(null, _localPlayer, null);
+            ApplyGameIdVisibilityToEditor();
             _accountEntitlements.Clear();
             _temporaryEntitlements.Clear();
             _temporaryEntitlementTimer.Stop();
@@ -83,9 +83,10 @@ public partial class MainWindow
     private void ResetAccountScopedState(string fleetChatStatus)
     {
         StopNetworkSyncTimers();
-        NetworkAutoSyncCheck.IsChecked = false;
+        ResetStartupDataGate();
         _profileSyncDebounceTimer.Stop();
         EndPersonalProfileAccountSession();
+        ResetOverlayRosterSelectionAccountSession();
 
         _pendingFleetApplicationCodes.Clear();
         _findFleetJoinInProgressCodes.Clear();
@@ -95,6 +96,9 @@ public partial class MainWindow
         ClearFleetState();
         ResetFleetChat(fleetChatStatus);
         ResetFriendCenterAccountState();
+        ResetHangarManagementPage();
+        _privateVisibilityGroups.Clear();
+        DualAxisPrivacyEditor?.SetGroups(_privateVisibilityGroups);
 
         _allNetworkFleets.Clear();
         _networkFleets.Clear();
@@ -107,7 +111,6 @@ public partial class MainWindow
     private void LogoutButton_Click(object sender, RoutedEventArgs e)
     {
         _authenticationExpired = false;
-        NetworkAutoSyncCheck.IsChecked = false;
         StopNetworkSyncTimers();
         ClearAuthenticatedLocalState();
         SaveCurrentConfig(clearSavedSession: true);
@@ -137,38 +140,14 @@ public partial class MainWindow
 
     private async void NetworkPullButton_Click(object sender, RoutedEventArgs e)
     {
-        await PullNetworkFleetsAsync();
-        await PullNetworkSnapshotsAsync();
-    }
-
-    private async void NetworkAutoSyncCheck_Changed(object sender, RoutedEventArgs e)
-    {
-        if (NetworkAutoSyncCheck.IsChecked == true)
+        if (_startupDataGate.Current.State != StartupDataGateState.Live)
         {
-            if (!EnsureLoggedIn("自动同步需要先登录。"))
-            {
-                NetworkAutoSyncCheck.IsChecked = false;
-                return;
-            }
-
-            if (!await EnsureSyncConsentAsync())
-            {
-                NetworkAutoSyncCheck.IsChecked = false;
-                NetworkStatusText.Text = "自动同步未启用";
-                return;
-            }
-
-            StartNetworkSyncTimers();
-            NetworkStatusText.Text = _syncPrivacySettings.PresenceVisibilityMode == PlayerPresenceVisibilityMode.Offline
-                ? "离线模式：即时同步保持暂停"
-                : _syncPrivacySettings.PresenceVisibilityMode == PlayerPresenceVisibilityMode.Invisible
-                    ? "隐身模式：仅接收在线内容"
-                    : "自动同步已开启";
+            await AutoConnectNetworkAsync();
             return;
         }
 
-        StopNetworkSyncTimers();
-        NetworkStatusText.Text = "自动同步已关闭";
+        await PullNetworkFleetsAsync();
+        await PullNetworkSnapshotsAsync();
     }
 
     private async Task<bool> EnsureSyncConsentAsync()
@@ -228,7 +207,7 @@ public partial class MainWindow
     {
         SyncChoiceScopePrivateRadio.IsChecked = scope == SyncPrivacyVisibilityScope.Private;
         SyncChoiceScopeAdminRadio.IsChecked = scope == SyncPrivacyVisibilityScope.AdminOnly;
-        SyncChoiceScopeSquadRadio.IsChecked = scope == SyncPrivacyVisibilityScope.Squad;
+        SyncChoiceScopeSpecifiedRadio.IsChecked = scope == SyncPrivacyVisibilityScope.SpecifiedMembers;
         SyncChoiceScopeFleetRadio.IsChecked = scope == SyncPrivacyVisibilityScope.Fleet;
     }
 
@@ -239,9 +218,9 @@ public partial class MainWindow
             return SyncPrivacyVisibilityScope.Fleet;
         }
 
-        if (SyncChoiceScopeSquadRadio.IsChecked == true)
+        if (SyncChoiceScopeSpecifiedRadio.IsChecked == true)
         {
-            return SyncPrivacyVisibilityScope.Squad;
+            return SyncPrivacyVisibilityScope.SpecifiedMembers;
         }
 
         if (SyncChoiceScopeAdminRadio.IsChecked == true)
@@ -312,13 +291,10 @@ public partial class MainWindow
             SyncServerInfo = result.SyncServerInfo,
             PersonalHangarVisible = result.PersonalHangarVisible,
             VisibilityScope = scope,
-            FleetMembersVisible = scope == SyncPrivacyVisibilityScope.Fleet,
-            SquadMembersVisible = scope is SyncPrivacyVisibilityScope.Squad or SyncPrivacyVisibilityScope.Fleet,
-            AdminOnlyVisible = scope == SyncPrivacyVisibilityScope.AdminOnly,
             SyncConsentCompleted = true,
             SyncConsentVersion = CurrentSyncConsentVersion
         }).NormalizeVisibilityScope();
-        SyncPrivacySettings.Save(_syncPrivacySettings);
+        SaveSyncPrivacySettingsAndRefreshDualAxis();
         ApplySyncPrivacySettingsToControls();
         UpdateShipDatabaseSummary();
         if (wasEnabled && !result.SyncEnabled && IsLoggedIn)
@@ -328,36 +304,68 @@ public partial class MainWindow
                 pushFleetDirectory: false,
                 forcePrivacyClear: true);
         }
+
+        ApplyNetworkSyncMasterState();
+    }
+
+    private void ApplyNetworkSyncMasterState()
+    {
+        if (_syncPrivacySettings.SyncEnabled)
+        {
+            StartNetworkSyncTimers();
+        }
+        else
+        {
+            StopNetworkSyncTimers();
+        }
     }
 
     private void StartNetworkSyncTimers()
     {
-        if (!CanSynchronizeUserData || !GetPresenceSharingDecision().CanReceiveRealtime)
+        if (CanSynchronizeUserData && GetPresenceSharingDecision().CanReceiveRealtime)
         {
-            StopNetworkSyncTimers();
-            return;
+            _networkSyncTimer.Start();
+            _networkPlayerRealtimePullTimer.Start();
+        }
+        else
+        {
+            StopNetworkDataSyncTimers();
         }
 
-        _networkSyncTimer.Start();
-        _presenceHeartbeatTimer.Start();
-        _networkPlayerRealtimePullTimer.Start();
-        _ = SendPresenceHeartbeatAsync();
+        if (CanPublishPresenceHeartbeat())
+        {
+            _presenceHeartbeatTimer.Start();
+            _ = SendPresenceHeartbeatAsync();
+        }
+        else
+        {
+            _presenceHeartbeatTimer.Stop();
+        }
+
+        RefreshBridgeSceneBandStatus();
+    }
+
+    private void StopNetworkDataSyncTimers()
+    {
+        _networkSyncTimer.Stop();
+        _networkPlayerRealtimePullTimer.Stop();
+        _networkRealtimePushTimer.Stop();
+        _networkRealtimePushQueued = false;
     }
 
     private void StopNetworkSyncTimers()
     {
-        _networkSyncTimer.Stop();
+        StopNetworkDataSyncTimers();
         _presenceHeartbeatTimer.Stop();
-        _networkPlayerRealtimePullTimer.Stop();
-        _networkRealtimePushTimer.Stop();
-        _networkRealtimePushQueued = false;
         ClearPresenceHeartbeatFailure();
+        RefreshBridgeSceneBandStatus();
     }
 
     private bool CanReceiveRealtimePlayerSync()
     {
-        return NetworkAutoSyncCheck?.IsChecked == true &&
-               IsLoggedIn &&
+        // Realtime member rows are account-scoped user data and intentionally remain behind
+        // verified identity. The minimal presence heartbeat is weaker and does not inherit this gate.
+        return IsLoggedIn &&
                CanSynchronizeUserData &&
                _syncPrivacySettings.SyncEnabled &&
                GetPresenceSharingDecision().CanReceiveRealtime &&
@@ -369,12 +377,10 @@ public partial class MainWindow
 
     private bool CanPublishPresenceHeartbeat()
     {
-        return NetworkAutoSyncCheck?.IsChecked == true &&
-               IsLoggedIn &&
-               CanSynchronizeUserData &&
+        return IsLoggedIn &&
+               !_isAccountTransition &&
                _syncPrivacySettings.SyncEnabled &&
-               GetPresenceSharingDecision().CanPublishRealtime &&
-               !string.IsNullOrWhiteSpace(_localPlayer);
+               GetPresenceSharingDecision().CanPublishRealtime;
     }
 
     private async Task SendPresenceHeartbeatAsync()
@@ -386,7 +392,6 @@ public partial class MainWindow
 
         if (!CanPublishPresenceHeartbeat())
         {
-            ClearPresenceHeartbeatFailure();
             return;
         }
 
@@ -486,10 +491,10 @@ public partial class MainWindow
         try
         {
             var pulled = await PullNetworkSnapshotsAsync(silent: true);
-            if (!pulled && NetworkAutoSyncCheck?.IsChecked == true && IsLoggedIn)
+            if (!pulled && _syncPrivacySettings.SyncEnabled && IsLoggedIn)
             {
                 DeferNetworkSync();
-                ShowNetworkConnectionLostTopNotice();
+                VerifyRelayHealthAfterSynchronizationFailure();
                 RefreshHeaderStatusBar();
             }
         }
@@ -565,10 +570,10 @@ public partial class MainWindow
             {
                 _lastNetworkRealtimePushAt = DateTimeOffset.UtcNow;
             }
-            else if (NetworkAutoSyncCheck?.IsChecked == true && IsLoggedIn)
+            else if (_syncPrivacySettings.SyncEnabled && IsLoggedIn)
             {
                 DeferNetworkSync();
-                ShowNetworkConnectionLostTopNotice();
+                VerifyRelayHealthAfterSynchronizationFailure();
                 RefreshHeaderStatusBar();
             }
         }
@@ -612,7 +617,7 @@ public partial class MainWindow
 
     private async Task NetworkAutoSyncAsync()
     {
-        if (NetworkAutoSyncCheck.IsChecked != true || !CanSynchronizeUserData)
+        if (!_syncPrivacySettings.SyncEnabled || !CanSynchronizeUserData)
         {
             RefreshHeaderStatusBar();
             return;
@@ -663,14 +668,14 @@ public partial class MainWindow
             else
             {
                 DeferNetworkSync();
-                ShowNetworkConnectionLostTopNotice();
+                VerifyRelayHealthAfterSynchronizationFailure();
                 RefreshHeaderStatusBar();
             }
         }
         catch
         {
             DeferNetworkSync();
-            ShowNetworkConnectionLostTopNotice();
+            VerifyRelayHealthAfterSynchronizationFailure();
             RefreshHeaderStatusBar();
         }
         finally
@@ -798,12 +803,16 @@ public partial class MainWindow
         RenderTopStatusNotice();
     }
 
-    private void ShowNetworkConnectionLostTopNotice()
+    private void VerifyRelayHealthAfterSynchronizationFailure()
     {
-        _relayHealthConsecutiveFailures = Math.Max(
-            _relayHealthConsecutiveFailures,
-            RelayHealthPresentationPolicy.ConsecutiveFailuresBeforeNotice);
-        SetRelayServiceHealthState(RelayServiceHealthState.Unreachable);
+        var decision = RelayHealthPresentationPolicy.ObserveDataSynchronizationFailure(
+            _relayServiceHealthState,
+            _relayHealthConsecutiveFailures);
+        _relayHealthConsecutiveFailures = decision.ConsecutiveProbeFailures;
+        if (decision.ShouldRequestProbe)
+        {
+            _ = MeasureRelayLatencyAsync();
+        }
     }
 
     private void ApplyRelayHealthProbeResult(RelayHealthProbeResult result)
@@ -812,24 +821,17 @@ public partial class MainWindow
             ? Math.Max(1, result.LatencyMilliseconds)
             : -1;
 
-        if (result.State == RelayServiceHealthState.Unreachable)
-        {
-            _relayHealthConsecutiveFailures++;
-            if (RelayHealthPresentationPolicy.ShouldShowUnavailable(_relayHealthConsecutiveFailures))
-            {
-                SetRelayServiceHealthState(RelayServiceHealthState.Unreachable);
-            }
-
-            return;
-        }
-
-        _relayHealthConsecutiveFailures = 0;
+        var decision = RelayHealthPresentationPolicy.ObserveHealthProbe(
+            _relayServiceHealthState,
+            _relayHealthConsecutiveFailures,
+            result.State);
+        _relayHealthConsecutiveFailures = decision.ConsecutiveProbeFailures;
         if (result.State is RelayServiceHealthState.Healthy or RelayServiceHealthState.Degraded)
         {
             _lastSuccessfulRelayHealthAt = DateTimeOffset.UtcNow;
         }
 
-        SetRelayServiceHealthState(result.State);
+        SetRelayServiceHealthState(decision.State);
     }
 
     private void SetRelayServiceHealthState(RelayServiceHealthState state)

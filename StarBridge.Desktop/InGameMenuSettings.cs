@@ -160,7 +160,9 @@ internal sealed record InGameMenuSettings
     public int ImageDefaultOpacity { get; init; } = 100;
     public bool RememberImageAdjustments { get; init; } = true;
     public bool ImageDefaultPinned { get; init; }
-    public int ImageWindowLimit { get; init; } = 5;
+    // Retained for compatibility with settings written by multi-image builds.
+    // The current product supports one reference image and normalizes all values.
+    public int ImageWindowLimit { get; init; } = 1;
     public bool PauseHiddenAnimatedImages { get; init; } = true;
 
     public string ScreenshotDirectory { get; init; } = "";
@@ -289,7 +291,7 @@ internal sealed record InGameMenuSettings
                 InGameBrowserPreferences.NormalizeProviderKey(BrowserProviderKey),
             BrowserTabLimit = Math.Clamp(BrowserTabLimit, 1, 12),
             ImageDefaultOpacity = Math.Clamp(ImageDefaultOpacity, 20, 100),
-            ImageWindowLimit = Math.Clamp(ImageWindowLimit, 1, 5),
+            ImageWindowLimit = 1,
             ScreenshotDirectory = ScreenshotDirectory?.Trim() ?? "",
             ScreenshotJpegQuality = Math.Clamp(ScreenshotJpegQuality, 50, 100),
             SnapDistance = Math.Clamp(SnapDistance, 0, 32),

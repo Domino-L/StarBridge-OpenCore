@@ -175,7 +175,7 @@
                                                    FontSize="14"
                                                    FontWeight="SemiBold" />
                                         <TextBlock Margin="0,7,0,0"
-                                                   Text="星海舰桥是一款面向 Star Citizen 玩家与舰队的测试版协同工具。它提供舰队、小队、房间、好友、个人资料和游戏浮层等功能。"
+                                                   Text="星海舰桥是一款面向 Star Citizen 玩家与舰队的测试版协同工具。它提供舰队、房间、好友、个人资料和游戏浮层等功能。"
                                                    Foreground="#C7D6DF"
                                                    LineHeight="21"
                                                    TextWrapping="Wrap" />

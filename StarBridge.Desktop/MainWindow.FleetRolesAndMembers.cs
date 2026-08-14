@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using StarBridge.Desktop.Theming;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 using ControlsOrientation = System.Windows.Controls.Orientation;
@@ -111,7 +112,7 @@ public partial class MainWindow
 
     private void RefreshFleetRoleGroups()
     {
-        var selectedKey = _selectedFleetRoleGroup?.Key ?? "fleet_deputy_commander";
+        var selectedKey = _selectedFleetRoleGroup?.Key ?? FleetDeputyCommanderRoleGroupKey;
         EnsureDefaultFleetRoleGroupDefinitions();
         _fleetSystemRoleGroups.Clear();
         _fleetCustomRoleGroups.Clear();
@@ -123,12 +124,7 @@ public partial class MainWindow
         }
 
         var deputyCount = _fleetMemberPermissions.Values.Count(permission =>
-            NormalizeRoleGroupKey(permission.RoleGroupKey, permission.RoleTitle) == "fleet_deputy_commander");
-
-        if (selectedKey.Equals("fleet_commander", StringComparison.OrdinalIgnoreCase))
-        {
-            selectedKey = "fleet_deputy_commander";
-        }
+            NormalizeRoleGroupKey(permission.RoleGroupKey, permission.RoleTitle) == FleetDeputyCommanderRoleGroupKey);
 
         if (FleetCommanderSeatNameText is not null)
         {
@@ -141,14 +137,29 @@ public partial class MainWindow
                 : $"{commanderName} · 全部权限";
         }
 
-        var deputyDefinition = _fleetRoleGroupDefinitions.TryGetValue("fleet_deputy_commander", out var deputy)
+        var commanderDefinition = _fleetRoleGroupDefinitions.TryGetValue(FleetCommanderRoleGroupKey, out var commanderRole)
+            ? commanderRole
+            : null;
+        _fleetSystemRoleGroups.Add(CreateFleetRoleGroupRow(
+            FleetCommanderRoleGroupKey,
+            commanderDefinition?.DisplayName ?? "舰队指挥官",
+            commanderDefinition?.Description ?? "舰队的唯一指挥席位，默认拥有全部权限；可调整公开显示的身份颜色。",
+            commanderDefinition?.Color ?? FleetCommanderDefaultRoleColor,
+            0,
+            true,
+            commanderCount,
+            commanderDefinition?.Permissions,
+            commanderDefinition?.CreatedAt ?? default,
+            commanderDefinition?.UpdatedAt ?? default));
+
+        var deputyDefinition = _fleetRoleGroupDefinitions.TryGetValue(FleetDeputyCommanderRoleGroupKey, out var deputy)
             ? deputy
             : null;
         _fleetSystemRoleGroups.Add(CreateFleetRoleGroupRow(
-            "fleet_deputy_commander",
+            FleetDeputyCommanderRoleGroupKey,
             deputyDefinition?.DisplayName ?? "舰队副指挥官",
             deputyDefinition?.Description ?? "协助舰队指挥官处理日常管理与调度。",
-            deputyDefinition?.Color ?? "#29AFFF",
+            deputyDefinition?.Color ?? FleetDeputyCommanderDefaultRoleColor,
             1,
             true,
             deputyCount,
@@ -176,7 +187,8 @@ public partial class MainWindow
         var existingCustomRoleKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var definition in _fleetRoleGroupDefinitions.Values
                      .Where(role => IsPersistableFleetRoleGroupKey(role.Key) &&
-                                    !role.Key.Equals("fleet_deputy_commander", StringComparison.OrdinalIgnoreCase))
+                                    !role.Key.Equals(FleetCommanderRoleGroupKey, StringComparison.OrdinalIgnoreCase) &&
+                                    !role.Key.Equals(FleetDeputyCommanderRoleGroupKey, StringComparison.OrdinalIgnoreCase))
                      .OrderBy(role => role.SortOrder)
                      .ThenBy(role => role.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
@@ -208,7 +220,7 @@ public partial class MainWindow
                 group.Key,
                 title,
                 "自定义身份组，可按舰队需要配置权限。",
-                "#9D7CFF",
+                FleetRoleColorPalette.Purple,
                 sort++,
                 false,
                 group.Count());
@@ -219,7 +231,7 @@ public partial class MainWindow
         if (_fleetCustomRoleGroups.All(role => !role.Key.Equals(selectedKey, StringComparison.OrdinalIgnoreCase)) &&
             _fleetSystemRoleGroups.All(role => !role.Key.Equals(selectedKey, StringComparison.OrdinalIgnoreCase)))
         {
-            selectedKey = "fleet_deputy_commander";
+            selectedKey = FleetDeputyCommanderRoleGroupKey;
         }
 
         var selected = _fleetSystemRoleGroups
@@ -254,7 +266,7 @@ public partial class MainWindow
             $"custom_role_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
             $"自定义身份组 {index}",
             "按舰队需要创建的自定义身份组。",
-            "#9D7CFF",
+            FleetRoleColorPalette.Purple,
             100 + index,
             false,
             0);
@@ -292,7 +304,7 @@ public partial class MainWindow
                 Height = 11,
                 Margin = new Thickness(0, 0, 8, 0),
                 Background = StatusPalette.BrushFromHex(option.Hex, StatusPalette.InfoBrush),
-                BorderBrush = FindBrush("SecondaryTextBrush", Brushes.LightGray),
+                BorderBrush = FleetCommandBrush(BridgeBrushToken.Ink2),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(1)
             });
@@ -335,18 +347,70 @@ public partial class MainWindow
 
     private static readonly FleetRoleColorOption[] FleetRoleColorOptions =
     [
-        new("蓝色", "#29AFFF"),
-        new("青色", "#36CFE3"),
-        new("绿色", "#42CF7C"),
-        new("黄色", "#D9A23B"),
-        new("橙色", "#E9873F"),
-        new("红色", "#F15B65"),
-        new("紫色", "#9D7CFF"),
-        new("粉色", "#D77CA8"),
-        new("灰色", "#91A5B5")
+        new("蓝色", FleetRoleColorPalette.Blue),
+        new("青色", FleetRoleColorPalette.Cyan),
+        new("绿色", FleetRoleColorPalette.Green),
+        new("黄色", FleetRoleColorPalette.Yellow),
+        new("橙色", FleetRoleColorPalette.Orange),
+        new("红色", FleetRoleColorPalette.Red),
+        new("紫色", FleetRoleColorPalette.Purple),
+        new("粉色", FleetRoleColorPalette.Pink),
+        new("灰色", FleetRoleColorPalette.Gray),
+        new("金色", FleetCommanderDefaultRoleColor)
     ];
 
-    private sealed record FleetRoleColorOption(string Name, string Hex);
+    private sealed record FleetRoleColorOption
+    {
+        private const string FleetRoleColorContrastSurface = FleetRoleColorPalette.ContrastSurface;
+        private const double MinimumContrastRatio = 4.5;
+
+        public FleetRoleColorOption(string name, string hex)
+        {
+            Name = name;
+            Hex = hex;
+            var contrast = CalculateContrastRatio(hex, FleetRoleColorContrastSurface);
+            if (contrast < MinimumContrastRatio)
+            {
+                throw new InvalidOperationException(
+                    $"身份组颜色 {name} ({hex}) 与 BridgePanel 的对比度仅为 {contrast:F2}:1，低于 {MinimumContrastRatio:F1}:1。");
+            }
+        }
+
+        public string Name { get; }
+        public string Hex { get; }
+
+        private static double CalculateContrastRatio(string foregroundHex, string backgroundHex)
+        {
+            var foreground = CalculateRelativeLuminance(foregroundHex);
+            var background = CalculateRelativeLuminance(backgroundHex);
+            return (Math.Max(foreground, background) + 0.05) /
+                   (Math.Min(foreground, background) + 0.05);
+        }
+
+        private static double CalculateRelativeLuminance(string hex)
+        {
+            var normalized = hex.Trim().TrimStart('#');
+            if (normalized.Length != 6 ||
+                !byte.TryParse(normalized[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var red) ||
+                !byte.TryParse(normalized[2..4], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var green) ||
+                !byte.TryParse(normalized[4..6], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var blue))
+            {
+                throw new InvalidOperationException($"身份组颜色 {hex} 不是有效的 #RRGGBB 颜色。");
+            }
+
+            static double Linearize(byte channel)
+            {
+                var value = channel / 255d;
+                return value <= 0.04045
+                    ? value / 12.92
+                    : Math.Pow((value + 0.055) / 1.055, 2.4);
+            }
+
+            return (0.2126 * Linearize(red)) +
+                   (0.7152 * Linearize(green)) +
+                   (0.0722 * Linearize(blue));
+        }
+    }
 
     private void FleetRoleGroupNameBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
@@ -378,7 +442,7 @@ public partial class MainWindow
 
     private void BeginFleetRoleGroupNameEdit()
     {
-        if (FleetRoleGroupNameBox is null)
+        if (FleetRoleGroupNameBox is null || _selectedFleetRoleGroup?.CanRenameRole != true)
         {
             return;
         }
@@ -575,6 +639,7 @@ public partial class MainWindow
 
             ClearFleetRoleGroupsDirty();
             FleetMemberManagementStatusText.Text = successMessage;
+            RenderState();
             return;
         }
 
@@ -591,6 +656,7 @@ public partial class MainWindow
                 SaveCurrentConfig();
                 ClearFleetRoleGroupsDirty();
                 FleetMemberManagementStatusText.Text = successMessage;
+                RenderState();
                 return;
             }
         }
@@ -845,7 +911,6 @@ public partial class MainWindow
 
         foreach (var player in _players
                      .OrderByDescending(player => IsFleetCommander(player.Name, player.Callsign))
-                     .ThenBy(player => player.SquadName)
                      .ThenBy(player => DisplayCallsign(player.Callsign, player.Name)))
         {
             var isCommander = IsFleetCommander(player.Name, player.Callsign);
@@ -860,7 +925,6 @@ public partial class MainWindow
                 Initials = player.Initials,
                 AvatarPath = player.AvatarPath,
                 AccountId = player.AccountId,
-                SquadName = string.IsNullOrWhiteSpace(player.SquadName) ? "Unassigned" : player.SquadName,
                 OnlineStatus = player.SharedOnlineStatusValue,
                 LiveStatus = player.SharedLiveStatusValue,
                 RoleTitle = isCommander
@@ -905,7 +969,6 @@ public partial class MainWindow
                 DisplayName = displayName,
                 Initials = GetInitials(DisplayCallsign(permission.Callsign, permission.GameName)),
                 AvatarPath = "",
-                SquadName = "Unassigned",
                 OnlineStatus = "Offline",
                 RoleTitle = isCommander
                     ? "舰队指挥官"
@@ -1110,8 +1173,8 @@ public partial class MainWindow
         {
             var activeCount = _fleetInviteRows.Count(row => row.CanRevoke);
             ManageInviteStatusText.Foreground = activeCount > 0
-                ? FindBrush("StatusSuccessBrush", Brushes.SpringGreen)
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray);
+                ? FleetCommandBrush(BridgeBrushToken.StatusOk)
+                : FleetCommandBrush(BridgeBrushToken.Ink2);
             ManageInviteStatusText.Text = activeCount > 0 ? $"{activeCount} 个有效邀请码" : "";
         }
     }
@@ -1134,10 +1197,10 @@ public partial class MainWindow
         };
         var statusBrush = statusText switch
         {
-            "有效" => FindBrush("StatusSuccessBrush", Brushes.SpringGreen),
-            "已过期" or "已用完" => FindBrush("StatusWarningBrush", Brushes.Orange),
-            "已撤回" => FindBrush("StatusDangerBrush", Brushes.IndianRed),
-            _ => FindBrush("MutedTextBrush", Brushes.LightSlateGray)
+            "有效" => FleetCommandBrush(BridgeBrushToken.StatusOk),
+            "已过期" or "已用完" => FleetCommandBrush(BridgeBrushToken.StatusWarn),
+            "已撤回" => FleetCommandBrush(BridgeBrushToken.StatusBad),
+            _ => FleetCommandBrush(BridgeBrushToken.Ink2)
         };
         var maxUsesText = invite.MaxUses <= 0 ? "不限" : invite.MaxUses.ToString(CultureInfo.InvariantCulture);
         var creatorName = string.IsNullOrWhiteSpace(invite.CreatedBy) ? "未知" : invite.CreatedBy;
@@ -1300,7 +1363,7 @@ public partial class MainWindow
         if (FleetInviteDialogStatusText is not null)
         {
             FleetInviteDialogStatusText.Text = "选择规则后点击生成。新邀请码会让你上一个有效邀请码失效。";
-            FleetInviteDialogStatusText.Foreground = FindBrush("StatusWarningBrush", Brushes.Orange);
+            FleetInviteDialogStatusText.Foreground = FleetCommandBrush(BridgeBrushToken.StatusWarn);
         }
 
         if (ConfirmGenerateFleetInviteButton is not null)
@@ -1308,32 +1371,17 @@ public partial class MainWindow
             ConfirmGenerateFleetInviteButton.IsEnabled = true;
         }
 
-        UiMotion.ShowModal(FleetInviteDialogOverlay, FleetInviteDialogCard);
+        FleetInviteDialogOverlay.Show();
     }
 
     private void CloseFleetInviteDialog()
     {
-        UiMotion.HideModal(FleetInviteDialogOverlay, FleetInviteDialogCard);
+        FleetInviteDialogOverlay.Hide();
     }
 
     private void FleetInviteDialogCloseButton_Click(object sender, RoutedEventArgs e)
     {
         CloseFleetInviteDialog();
-    }
-
-    private void FleetInviteDialogOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (FleetInviteDialogCard?.IsMouseOver == true)
-        {
-            return;
-        }
-
-        CloseFleetInviteDialog();
-    }
-
-    private void FleetInviteDialogCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        e.Handled = true;
     }
 
     private void ShowCurrentFleetInviteDialog()
@@ -1365,36 +1413,21 @@ public partial class MainWindow
         if (FleetInviteViewStatusText is not null)
         {
             FleetInviteViewStatusText.Text = "同一账号只能保留一个有效邀请码，生成新的会使旧邀请码失效。";
-            FleetInviteViewStatusText.Foreground = FindBrush("StatusWarningBrush", Brushes.Orange);
+            FleetInviteViewStatusText.Foreground = FleetCommandBrush(BridgeBrushToken.StatusWarn);
         }
 
-        UiMotion.ShowModal(FleetInviteViewDialogOverlay, FleetInviteViewDialogCard);
+        FleetInviteViewDialogOverlay.Show();
     }
 
     private void CloseFleetInviteViewDialog()
     {
         _currentFleetInviteDialogInvite = null;
-        UiMotion.HideModal(FleetInviteViewDialogOverlay, FleetInviteViewDialogCard);
+        FleetInviteViewDialogOverlay.Hide();
     }
 
     private void FleetInviteViewDialogCloseButton_Click(object sender, RoutedEventArgs e)
     {
         CloseFleetInviteViewDialog();
-    }
-
-    private void FleetInviteViewDialogOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (FleetInviteViewDialogCard?.IsMouseOver == true)
-        {
-            return;
-        }
-
-        CloseFleetInviteViewDialog();
-    }
-
-    private void FleetInviteViewDialogCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        e.Handled = true;
     }
 
     private void CopyCurrentFleetInviteButton_Click(object sender, RoutedEventArgs e)
@@ -1405,7 +1438,7 @@ public partial class MainWindow
             if (FleetInviteViewStatusText is not null)
             {
                 FleetInviteViewStatusText.Text = "当前没有可复制的邀请码。";
-                FleetInviteViewStatusText.Foreground = FindBrush("StatusDangerBrush", Brushes.IndianRed);
+                FleetInviteViewStatusText.Foreground = FleetCommandBrush(BridgeBrushToken.StatusBad);
             }
             return;
         }
@@ -1416,7 +1449,7 @@ public partial class MainWindow
             if (FleetInviteViewStatusText is not null)
             {
                 FleetInviteViewStatusText.Text = "邀请码已复制。";
-                FleetInviteViewStatusText.Foreground = FindBrush("StatusSuccessBrush", Brushes.SpringGreen);
+                FleetInviteViewStatusText.Foreground = FleetCommandBrush(BridgeBrushToken.StatusOk);
             }
         }
         catch (Exception ex)
@@ -1424,7 +1457,7 @@ public partial class MainWindow
             if (FleetInviteViewStatusText is not null)
             {
                 FleetInviteViewStatusText.Text = UserFacingError.Describe(ex, "邀请码未能复制，请稍后重试。");
-                FleetInviteViewStatusText.Foreground = FindBrush("StatusDangerBrush", Brushes.IndianRed);
+                FleetInviteViewStatusText.Foreground = FleetCommandBrush(BridgeBrushToken.StatusBad);
             }
         }
     }
@@ -1602,10 +1635,10 @@ public partial class MainWindow
 
         var brush = tone switch
         {
-            FleetInviteStatusTone.Success => FindBrush("StatusSuccessBrush", Brushes.SpringGreen),
-            FleetInviteStatusTone.Warning => FindBrush("StatusWarningBrush", Brushes.Orange),
-            FleetInviteStatusTone.Error => FindBrush("StatusDangerBrush", Brushes.IndianRed),
-            _ => FindBrush("MutedTextBrush", Brushes.LightSlateGray)
+            FleetInviteStatusTone.Success => FleetCommandBrush(BridgeBrushToken.StatusOk),
+            FleetInviteStatusTone.Warning => FleetCommandBrush(BridgeBrushToken.StatusWarn),
+            FleetInviteStatusTone.Error => FleetCommandBrush(BridgeBrushToken.StatusBad),
+            _ => FleetCommandBrush(BridgeBrushToken.Ink2)
         };
 
         if (ManageInviteStatusText is not null)
@@ -1938,8 +1971,8 @@ public partial class MainWindow
         var canRemove = CanCurrentUserRemoveFleetMember(row.Name, row.Callsign, isTargetCommander);
         var menu = new ContextMenu
         {
-            Background = FindBrush("PanelBackgroundBrush", new SolidColorBrush(Color.FromRgb(7, 19, 29))),
-            BorderBrush = FindBrush("AccentBorderBrush", new SolidColorBrush(Color.FromRgb(23, 52, 71))),
+            Background = FleetCommandBrush(BridgeBrushToken.Panel),
+            BorderBrush = FleetCommandBrush(BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             PlacementTarget = button,
             Style = (Style)FindResource("StarBridgeContextMenu")
@@ -1950,8 +1983,8 @@ public partial class MainWindow
             Header = "更改身份组",
             IsEnabled = canChangeRole,
             Foreground = canChangeRole
-                ? FindBrush("PrimaryTextBrush", Brushes.White)
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                ? FleetCommandBrush(BridgeBrushToken.Ink)
+                : FleetCommandBrush(BridgeBrushToken.Ink2),
             Background = Brushes.Transparent,
             Style = (Style)FindResource("StarBridgeContextMenuItem")
         };
@@ -1964,8 +1997,8 @@ public partial class MainWindow
             Tag = row,
             IsEnabled = canTransferCommand,
             Foreground = canTransferCommand
-                ? FindBrush("WarningTextBrush", new SolidColorBrush(Color.FromRgb(217, 162, 59)))
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                ? FleetCommandBrush(BridgeBrushToken.StatusWarn)
+                : FleetCommandBrush(BridgeBrushToken.Ink2),
             Background = Brushes.Transparent,
             Style = (Style)FindResource("StarBridgeContextMenuItem")
         };
@@ -1982,8 +2015,8 @@ public partial class MainWindow
             Tag = row,
             IsEnabled = canRemove,
             Foreground = canRemove
-                ? FindBrush("DangerButtonHoverBorderBrush", new SolidColorBrush(Color.FromRgb(214, 93, 104)))
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                ? FleetCommandBrush(BridgeBrushToken.StatusBad)
+                : FleetCommandBrush(BridgeBrushToken.Ink2),
             Background = Brushes.Transparent,
             Style = (Style)FindResource("StarBridgeContextMenuItem")
         };

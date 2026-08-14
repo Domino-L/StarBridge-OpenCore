@@ -65,6 +65,7 @@ public partial class MainWindow
 
     private void ReevaluateIdentityBinding(bool showPrompt)
     {
+        var couldSynchronize = CanSynchronizeUserData;
         _identityBindingAssessment = IsLoggedIn && _identityBindingSupported
             ? IdentityBindingPolicy.Evaluate(
                 _boundGameName,
@@ -74,10 +75,19 @@ public partial class MainWindow
 
         if (!CanSynchronizeUserData)
         {
-            StopNetworkSyncTimers();
+            StopNetworkDataSyncTimers();
             _profileSyncDebounceTimer.Stop();
             _friendOverlayNotificationTracker.Reset();
             ResetFleetOverlayChatProjection();
+
+            if (_syncPrivacySettings.SyncEnabled && !_presenceHeartbeatTimer.IsEnabled)
+            {
+                StartNetworkSyncTimers();
+            }
+        }
+        else if (!couldSynchronize && _syncPrivacySettings.SyncEnabled)
+        {
+            StartNetworkSyncTimers();
         }
 
         RefreshIdentityVerificationPresentation();

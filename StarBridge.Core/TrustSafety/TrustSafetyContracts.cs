@@ -59,9 +59,10 @@ public static class ReportTargetTypes
     public const string Message = "message";
     public const string Fleet = "fleet";
     public const string Room = "room";
+    public const string ShipImage = "ship_image";
 
     public static bool IsSupported(string? value) => value?.Trim().ToLowerInvariant() is
-        User or Message or Fleet or Room;
+        User or Message or Fleet or Room or ShipImage;
 }
 
 public static class TrustSafetyEntitlements
@@ -114,7 +115,8 @@ public sealed record ReportTargetSnapshotContract(
     string DisplayName,
     string? Callsign,
     string? GameName,
-    DateTimeOffset CapturedAt);
+    DateTimeOffset CapturedAt,
+    string? SubjectAccountId = null);
 
 public static class ReportEvidenceCategories
 {
@@ -123,6 +125,7 @@ public static class ReportEvidenceCategories
     public const string FleetChat = "fleet_chat";
     public const string RoomChat = "room_chat";
     public const string RoomContent = "room_content";
+    public const string ShipImage = "ship_image";
 }
 
 public sealed record ReportEvidenceItemContract(
@@ -145,7 +148,23 @@ public sealed record ReportAuditEntryContract(
     string ToStatus,
     string InternalNote,
     DateTimeOffset CreatedAt,
-    string? ClientRequestId = null);
+    string? ClientRequestId = null,
+    string? ContentAction = null);
+
+public static class ReportContentActions
+{
+    public const string None = "none";
+    public const string QuarantineShipImage = "quarantine_ship_image";
+
+    public static bool IsSupported(string? value) => value?.Trim().ToLowerInvariant() is
+        None or QuarantineShipImage;
+
+    public static string Normalize(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        QuarantineShipImage => QuarantineShipImage,
+        _ => None
+    };
+}
 
 public static class AccountSanctionTypes
 {
@@ -155,13 +174,14 @@ public static class AccountSanctionTypes
     public const string RoomCreationRestriction = "room_creation_restriction";
     public const string RoomParticipationRestriction = "room_participation_restriction";
     public const string FleetParticipationRestriction = "fleet_participation_restriction";
+    public const string ShipMediaUploadRestriction = "ship_media_upload_restriction";
     public const string SocialRestriction = "social_restriction";
     public const string AccountRestriction = "account_restriction";
 
     public static bool IsSupported(string? value) => value?.Trim().ToLowerInvariant() is
         Warning or ChatMute or ProfileRestriction or RoomCreationRestriction or
         RoomParticipationRestriction or FleetParticipationRestriction or
-        SocialRestriction or AccountRestriction;
+        ShipMediaUploadRestriction or SocialRestriction or AccountRestriction;
 
     public static string Normalize(string value) => value.Trim().ToLowerInvariant();
 }
@@ -184,7 +204,8 @@ public sealed record TrustSafetyAccountStatusContract(
     bool ProfileRestricted = false,
     bool RoomCreationRestricted = false,
     bool RoomParticipationRestricted = false,
-    bool FleetParticipationRestricted = false);
+    bool FleetParticipationRestricted = false,
+    bool ShipMediaUploadRestricted = false);
 
 public sealed record CreateReportRequestContract(
     string TargetType,
@@ -239,7 +260,8 @@ public sealed record ReviewReportRequestContract(
     string? OutcomeSummary,
     string? SanctionType = null,
     int? SanctionDurationHours = null,
-    string? ClientRequestId = null);
+    string? ClientRequestId = null,
+    string? ContentAction = null);
 
 public static class SanctionAppealStatuses
 {
@@ -369,6 +391,20 @@ public static class ReportReviewValidation
             if (request.SanctionDurationHours is < 1 or > 87_600)
             {
                 return "处置持续时间应在 1 小时到 10 年之间。";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ContentAction))
+        {
+            if (!ReportContentActions.IsSupported(request.ContentAction))
+            {
+                return "请选择有效的内容处理方式。";
+            }
+
+            if (ReportContentActions.Normalize(request.ContentAction) != ReportContentActions.None &&
+                normalizedStatus != ReportStatuses.Actioned)
+            {
+                return "只有确认违规后才能下架相关内容。";
             }
         }
 

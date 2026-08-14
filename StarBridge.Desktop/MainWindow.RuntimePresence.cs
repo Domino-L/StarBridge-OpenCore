@@ -256,7 +256,7 @@ public partial class MainWindow
             status.Contains("已完成", StringComparison.OrdinalIgnoreCase) ||
             status.Contains("已上传", StringComparison.OrdinalIgnoreCase) ||
             status.Contains("已拉取", StringComparison.OrdinalIgnoreCase) ||
-            NetworkAutoSyncCheck.IsChecked == true)
+            _syncPrivacySettings.SyncEnabled)
         {
             return "连接正常";
         }
@@ -353,6 +353,7 @@ public partial class MainWindow
 
         RefreshHeaderAvatarPresenceDot();
         RefreshPersonalProfileHeaderIdentity();
+        RefreshBridgeSceneBandStatus();
     }
 
     private async Task ApplyPresenceVisibilityModeAsync(PlayerPresenceVisibilityMode mode)
@@ -365,7 +366,7 @@ public partial class MainWindow
         _networkRealtimePushTimer.Stop();
         _networkRealtimePushQueued = false;
         _syncPrivacySettings = _syncPrivacySettings with { PresenceVisibilityMode = mode };
-        SyncPrivacySettings.Save(_syncPrivacySettings);
+        SaveSyncPrivacySettingsAndRefreshDualAxis();
         ApplySyncPrivacySettingsToControls();
 
         if (mode != PlayerPresenceVisibilityMode.Online)
@@ -399,7 +400,7 @@ public partial class MainWindow
             {
                 _appStatsTimer.Stop();
             }
-            if (NetworkAutoSyncCheck?.IsChecked == true)
+            if (_syncPrivacySettings.SyncEnabled)
             {
                 StartNetworkSyncTimers();
             }
@@ -429,6 +430,9 @@ public partial class MainWindow
             var now = DateTimeOffset.UtcNow;
             var wasRunning = _isGameProcessRunning;
             _isGameProcessRunning = StarCitizenProcessProbe.TryGetStart(out var gameProcessStartedAtUtc);
+            _bridgeGameProcessStartedAtUtc = _isGameProcessRunning
+                ? gameProcessStartedAtUtc ?? _bridgeGameProcessStartedAtUtc ?? now
+                : null;
             if (wasRunning != _isGameProcessRunning)
             {
                 RecordLocalGameProcessEvent(_isGameProcessRunning, now);
@@ -458,6 +462,8 @@ public partial class MainWindow
                 RefreshHeaderStatusBar();
                 RefreshGameplayStatisticsPresentation();
             }
+
+            RefreshBridgeSceneBandStatus();
 
             if (presenceChanged)
             {
@@ -510,7 +516,6 @@ public partial class MainWindow
 
     private void OpenOverlayWindowFromAutomation(OverlayDisplaySettings settings, bool isGameForeground)
     {
-        RenderSquads();
         OpenOverlayWindow(settings);
         if (settings.AutoFocusGameWindowOnOpen && !isGameForeground)
         {

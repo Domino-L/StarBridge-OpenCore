@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using StarBridge.Desktop.Theming;
 using Brushes = System.Windows.Media.Brushes;
 
 namespace StarBridge.Desktop;
@@ -82,7 +83,11 @@ public partial class MainWindow
             _ownedShips.Add(normalizedShip with
             {
                 AddedToDatabaseAt = addedToDatabaseAt,
-                SyncedAt = syncedAt
+                SyncedAt = syncedAt,
+                CustomImageMediaId = hasExisting ? existing!.CustomImageMediaId : normalizedShip.CustomImageMediaId,
+                CustomImageCropFocusX = hasExisting ? existing!.CustomImageCropFocusX : normalizedShip.CustomImageCropFocusX,
+                CustomImageCropFocusY = hasExisting ? existing!.CustomImageCropFocusY : normalizedShip.CustomImageCropFocusY,
+                CustomImageCropZoom = hasExisting ? existing!.CustomImageCropZoom : normalizedShip.CustomImageCropZoom
             });
         }
     }
@@ -571,6 +576,44 @@ public partial class MainWindow
         return EnumerateIdentityAliases(identity, null).Any(aliases.Contains);
     }
 
+    private NetworkPlayerSnapshot? ResolveFleetShipOwnerSnapshot(NetworkFleetShipSnapshot ship)
+    {
+        if (!string.IsNullOrWhiteSpace(ship.OwnerAccountId))
+        {
+            var accountMatch = _networkSnapshots.Values.FirstOrDefault(snapshot =>
+                string.Equals(snapshot.AccountId, ship.OwnerAccountId, StringComparison.OrdinalIgnoreCase));
+            if (accountMatch is not null)
+            {
+                return accountMatch;
+            }
+        }
+
+        var ownerAliases = EnumerateIdentityAliases(ship.OwnerGameName, ship.OwnerCallsign)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return _networkSnapshots.Values.FirstOrDefault(snapshot =>
+            IdentityMatchesAnyAlias(snapshot.Name, ownerAliases) ||
+            IdentityMatchesAnyAlias(snapshot.Callsign, ownerAliases));
+    }
+
+    private PlayerRow? ResolveFleetShipOwnerRosterMember(NetworkFleetShipSnapshot ship)
+    {
+        if (!string.IsNullOrWhiteSpace(ship.OwnerAccountId))
+        {
+            var accountMatch = _players.FirstOrDefault(player =>
+                string.Equals(player.AccountId, ship.OwnerAccountId, StringComparison.OrdinalIgnoreCase));
+            if (accountMatch is not null)
+            {
+                return accountMatch;
+            }
+        }
+
+        var ownerAliases = EnumerateIdentityAliases(ship.OwnerGameName, ship.OwnerCallsign)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return _players.FirstOrDefault(player =>
+            IdentityMatchesAnyAlias(player.Name, ownerAliases) ||
+            IdentityMatchesAnyAlias(player.Callsign, ownerAliases));
+    }
+
     private static string BuildFleetShipKey(string? ownerGameName, string? shipCode, string? instanceId = null)
     {
         var shipIdentity = string.IsNullOrWhiteSpace(instanceId)
@@ -592,7 +635,7 @@ public partial class MainWindow
         return string.IsNullOrWhiteSpace(value) ? "unknown" : value.Trim();
     }
 
-    private void RefreshFleetShipInventory(bool suppressRemovalActivities = false)
+    private void RefreshFleetShipInventory()
     {
         if (FleetShipInventoryCountText is null)
         {
@@ -601,7 +644,6 @@ public partial class MainWindow
 
         var ownerName = string.IsNullOrWhiteSpace(_localPlayer) ? "Unknown" : _localPlayer;
         var ownerCallsign = string.IsNullOrWhiteSpace(_callsign) ? ownerName : _callsign!;
-        var ownerSquad = _joinedSquad?.Name ?? "未加入小队";
         var ownerAvatarImageData = BuildAvatarImageData();
         IEnumerable<NetworkFleetShipSnapshot> localShips = _syncPrivacySettings.PersonalHangarVisible
             ? _ownedShips.Select(ship => new NetworkFleetShipSnapshot(
@@ -609,13 +651,16 @@ public partial class MainWindow
                 ship.DisplayName,
                 ownerName,
                 ownerCallsign,
-                ownerSquad,
                 ownerAvatarImageData,
                 GetFleetShipSharedAt(ship, ownerName),
                 ship.ImportedAt,
                 ship.InstanceId,
                 GetOwnedShipRoleCategory(ship).ToString(),
-                _accountId))
+                _accountId,
+                ship.CustomImageMediaId,
+                ship.CustomImageCropFrame.FocusX,
+                ship.CustomImageCropFrame.FocusY,
+                ship.CustomImageCropFrame.Zoom))
             : [];
         var rows = new Dictionary<string, NetworkFleetShipSnapshot>(StringComparer.OrdinalIgnoreCase);
         foreach (var ship in _remoteFleetShips.Values.Concat(localShips))
@@ -642,6 +687,9 @@ public partial class MainWindow
             var shipStatus = string.IsNullOrWhiteSpace(catalog?.Status) ? "概念" : catalog!.Status;
             var shipPrice = catalog?.PriceDisplay ?? "未公布";
             var ownerDisplay = FormatFleetShipOwnerDisplay(ship.OwnerCallsign, ship.OwnerGameName);
+            var ownerRosterMember = ResolveFleetShipOwnerRosterMember(ship);
+            var ownerSnapshot = ResolveFleetShipOwnerSnapshot(ship);
+            var ownerPresence = FleetShipOwnerPresenceProjection.Resolve(ownerRosterMember, ownerSnapshot);
             var hangarImportedAt = NormalizeShipTimestamp(ship.HangarImportedAt, ship.ImportedAt);
             var row = new FleetShipInventoryRow(
                 0,
@@ -650,7 +698,6 @@ public partial class MainWindow
                 ownerDisplay,
                 string.IsNullOrWhiteSpace(ship.OwnerCallsign) ? ship.OwnerGameName : ship.OwnerCallsign!,
                 ship.OwnerGameName,
-                string.IsNullOrWhiteSpace(ship.OwnerSquad) ? "未加入小队" : ship.OwnerSquad!,
                 ship.OwnerAvatarImageData,
                 GetInitials(ship.OwnerCallsign ?? ship.OwnerGameName),
                 hangarImportedAt.ToLocalTime().ToString("yyyy-MM-dd"),
@@ -659,11 +706,20 @@ public partial class MainWindow
                 shipRole,
                 shipStatus,
                 shipPrice,
-                ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName),
-                GetSquadEmblemPath(ship.OwnerSquad),
+                ResolveShipDisplayImagePath(
+                    ship.CustomImageMediaId,
+                    ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName)),
                 ship.InstanceId,
                 shipRoleVisual.ColorHex,
-                ship.OwnerAccountId);
+                ship.OwnerAccountId,
+                ship.CustomImageMediaId,
+                !string.IsNullOrWhiteSpace(ship.CustomImageMediaId) &&
+                !string.Equals(ship.OwnerAccountId, _accountId, StringComparison.OrdinalIgnoreCase),
+                ship.CustomImageCropFocusX,
+                ship.CustomImageCropFocusY,
+                ship.CustomImageCropZoom,
+                ownerPresence.OnlineStatus,
+                ownerPresence.LiveStatus);
 
             shipRows.Add(row with { LoanerRows = BuildFleetShipLoanerRows(row, catalog) });
         }
@@ -673,7 +729,6 @@ public partial class MainWindow
             .ToArray();
         if (!FleetShipInventoryRowChangeDetector.AreEquivalent(_fleetShipInventory, sortedRows))
         {
-            SyncFleetShipActivities(sortedRows, suppressRemovalActivities);
             _fleetShipInventory.Clear();
             foreach (var row in sortedRows)
             {
@@ -693,6 +748,12 @@ public partial class MainWindow
         FleetShipDatabaseCountText.Text = _fleetShipInventory.Count.ToString();
         RefreshFleetShipDatabaseSpecDistribution();
         RefreshFleetShipDatabaseRoleDistribution();
+        var preferredDispatch = ResolvePreferredFleetShipDispatch();
+        FleetShipDatabasePreferredDispatchText.Text = preferredDispatch is null
+            ? _fleetShipInventory.Count == 0
+                ? "暂无已同步舰船"
+                : "暂无在线可飞舰船"
+            : $"{preferredDispatch.ShipName} · {preferredDispatch.OwnerDisplay} · {preferredDispatch.ShipSpec} · {preferredDispatch.ShipRoleTag}";
         var pricedShips = _fleetShipInventory
             .Where(ship => ship.ShipPriceValue.HasValue)
             .ToArray();
@@ -722,17 +783,20 @@ public partial class MainWindow
         }
 
         var segments = FleetShipSpecVisuals
-            .Select(visual => (
+            .Select((visual, order) => (
                 visual.DisplayName,
                 Count: CountFleetShipSpec(visual.Spec),
-                visual.ColorHex))
+                AvailableCount: (int?)null,
+                visual.ColorHex,
+                Order: order))
             .Where(item => item.Count > 0)
             .ToArray();
 
         RenderFleetShipDistributionBar(
             FleetShipDatabaseSpecDistributionBar,
             segments,
-            "暂无舰船规格数据");
+            "暂无舰船规格数据",
+            FleetShipDistributionColorMode.OrdinalTonal);
     }
 
     private void RefreshFleetShipDatabaseRoleDistribution()
@@ -742,24 +806,37 @@ public partial class MainWindow
             return;
         }
 
+        var deployableAssets = _fleetShipInventory
+            .Where(IsFleetShipDispatchableAsset)
+            .ToArray();
         var segments = FleetShipRoleVisuals
-            .Select(visual => (
+            .Select((visual, order) => (
                 visual.DisplayName,
                 Count: CountFleetShipRoleCategory(visual.Category),
-                visual.ColorHex))
+                AvailableCount: (int?)CountFleetShipsByRoleCategory(deployableAssets, visual.Category),
+                visual.ColorHex,
+                Order: order))
             .Where(item => item.Count > 0)
             .ToArray();
 
         RenderFleetShipDistributionBar(
             FleetShipDatabaseRoleDistributionBar,
             segments,
-            "暂无已同步舰船");
+            "暂无已同步舰船",
+            FleetShipDistributionColorMode.CategoricalOutline);
     }
 
-    private static void RenderFleetShipDistributionBar(
+    private enum FleetShipDistributionColorMode
+    {
+        OrdinalTonal,
+        CategoricalOutline
+    }
+
+    private void RenderFleetShipDistributionBar(
         Grid target,
-        IReadOnlyList<(string DisplayName, int Count, string ColorHex)> segments,
-        string emptyText)
+        IReadOnlyList<(string DisplayName, int Count, int? AvailableCount, string ColorHex, int Order)> segments,
+        string emptyText,
+        FleetShipDistributionColorMode colorMode)
     {
         target.Children.Clear();
         target.ColumnDefinitions.Clear();
@@ -769,14 +846,14 @@ public partial class MainWindow
             target.ColumnDefinitions.Add(new ColumnDefinition());
             target.Children.Add(new Border
             {
-                Background = CreateSolidBrush("#111920"),
-                BorderBrush = CreateSolidBrush("#173447"),
+                Background = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Panel),
+                BorderBrush = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(2),
                 Child = new TextBlock
                 {
                     Text = emptyText,
-                    Foreground = CreateSolidBrush("#637A89"),
+                    Foreground = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink3),
                     FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
                     FontSize = 10.5,
                     HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
@@ -789,34 +866,41 @@ public partial class MainWindow
         for (var index = 0; index < segments.Count; index++)
         {
             var segment = segments[index];
+            var brushes = ResolveFleetShipDistributionBrushes(segment, colorMode);
+            var labelText = segment.AvailableCount.HasValue
+                ? $"{segment.DisplayName} {segment.AvailableCount.Value} / {segment.Count}"
+                : $"{segment.DisplayName} {segment.Count}";
             target.ColumnDefinitions.Add(new ColumnDefinition
             {
                 Width = new GridLength(segment.Count, GridUnitType.Star),
                 MinWidth = CalculateFleetShipDistributionSegmentMinWidth(
                     segment.DisplayName,
-                    segment.Count)
+                    segment.Count,
+                    segment.AvailableCount)
             });
 
             var label = new TextBlock
             {
-                Text = $"{segment.DisplayName} {segment.Count}",
-                Foreground = CreateSolidBrush(segment.ColorHex),
+                Text = labelText,
+                Foreground = brushes.Foreground,
                 FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
-                FontSize = 10.5,
+                FontSize = 10,
                 FontWeight = FontWeights.SemiBold,
                 TextTrimming = TextTrimming.None,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(5, 0, 5, 0),
-                ToolTip = $"{segment.DisplayName} · {segment.Count} 艘"
+                Margin = new Thickness(4, 0, 4, 0),
+                ToolTip = segment.AvailableCount.HasValue
+                    ? $"{segment.DisplayName} · 可调度 {segment.AvailableCount.Value} / 全部 {segment.Count} 艘"
+                    : $"{segment.DisplayName} · {segment.Count} 艘"
             };
             var block = new Border
             {
-                Background = BrushFromHex(segment.ColorHex, 0.16),
-                BorderBrush = CreateSolidBrush(segment.ColorHex),
+                Background = brushes.Background,
+                BorderBrush = brushes.Border,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(2),
-                Margin = index == 0 ? new Thickness(0) : new Thickness(4, 0, 0, 0),
+                Margin = index == 0 ? new Thickness(0) : new Thickness(2, 0, 0, 0),
                 Child = label,
                 ToolTip = label.ToolTip
             };
@@ -825,17 +909,42 @@ public partial class MainWindow
         }
     }
 
+    private static (System.Windows.Media.Brush Foreground,
+        System.Windows.Media.Brush Background,
+        System.Windows.Media.Brush Border)
+        ResolveFleetShipDistributionBrushes(
+            (string DisplayName, int Count, int? AvailableCount, string ColorHex, int Order) segment,
+            FleetShipDistributionColorMode colorMode)
+    {
+        if (colorMode == FleetShipDistributionColorMode.OrdinalTonal)
+        {
+            return (
+                BrushFromHex(segment.ColorHex, 0.86),
+                BrushFromHex(segment.ColorHex, 0.055),
+                BrushFromHex(segment.ColorHex, 0.52));
+        }
+
+        return (
+            BrushFromHex(segment.ColorHex, 0.82),
+            BrushFromHex(segment.ColorHex, 0.06),
+            BrushFromHex(segment.ColorHex, 0.38));
+    }
+
     private static double CalculateFleetShipDistributionSegmentMinWidth(
         string displayName,
-        int count)
+        int count,
+        int? availableCount)
     {
         const double chineseCharacterWidth = 13;
         const double numericCharacterWidth = 8;
         const double horizontalPadding = 22;
+        var numericText = availableCount.HasValue
+            ? $"{availableCount.Value}/{count}"
+            : count.ToString(CultureInfo.InvariantCulture);
         return Math.Max(
             58,
             (displayName.Length * chineseCharacterWidth) +
-            (count.ToString(CultureInfo.InvariantCulture).Length * numericCharacterWidth) +
+            (numericText.Length * numericCharacterWidth) +
             horizontalPadding);
     }
 
@@ -874,7 +983,6 @@ public partial class MainWindow
                 sourceRow.OwnerDisplay,
                 sourceRow.OwnerCallsign,
                 sourceRow.OwnerGameId,
-                sourceRow.OwnerSquad,
                 sourceRow.OwnerAvatarPath,
                 sourceRow.OwnerInitials,
                 sourceRow.ImportedAtText,
@@ -884,10 +992,11 @@ public partial class MainWindow
                 shipStatus,
                 shipPrice,
                 ShipCatalog.ResolveImagePath(catalog, shipCode, loaner.LoanerEnglishName),
-                sourceRow.OwnerSquadEmblemPath,
                 $"loaner:{sourceRow.ShipInstanceId ?? sourceRow.ShipCode}:{shipCode}",
                 shipRoleVisual.ColorHex,
-                sourceRow.OwnerAccountId));
+                sourceRow.OwnerAccountId,
+                OwnerOnlineStatus: sourceRow.OwnerOnlineStatus,
+                OwnerLiveStatus: sourceRow.OwnerLiveStatus));
         }
 
         return rows;
@@ -978,38 +1087,18 @@ public partial class MainWindow
             return;
         }
 
+        OpenFleetShipDetails(ship);
+    }
+
+    private void OpenFleetShipDetails(FleetShipInventoryRow ship)
+    {
         FleetShipDetailsOverlay.DataContext = ship;
-        FleetShipDetailsOverlay.Visibility = Visibility.Visible;
+        FleetShipDetailsOverlay.Show();
     }
 
     private void FleetShipDetailsCloseButton_Click(object sender, RoutedEventArgs e)
     {
         CloseFleetShipDetailsOverlay();
-    }
-
-    private void FleetShipDetailsOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (FleetShipDetailsCard is null ||
-            FleetShipDetailsCard.ActualWidth <= 0 ||
-            FleetShipDetailsCard.ActualHeight <= 0)
-        {
-            CloseFleetShipDetailsOverlay();
-            e.Handled = true;
-            return;
-        }
-
-        var position = e.GetPosition(FleetShipDetailsCard);
-        var isInsideCard = position.X >= 0 &&
-                           position.Y >= 0 &&
-                           position.X <= FleetShipDetailsCard.ActualWidth &&
-                           position.Y <= FleetShipDetailsCard.ActualHeight;
-        if (isInsideCard)
-        {
-            return;
-        }
-
-        CloseFleetShipDetailsOverlay();
-        e.Handled = true;
     }
 
     private void CloseFleetShipDetailsOverlay()
@@ -1019,7 +1108,7 @@ public partial class MainWindow
             return;
         }
 
-        FleetShipDetailsOverlay.Visibility = Visibility.Collapsed;
+        FleetShipDetailsOverlay.Hide();
         FleetShipDetailsOverlay.DataContext = null;
     }
 
@@ -1036,7 +1125,6 @@ public partial class MainWindow
                ContainsFleetShipSearchText(ship.OwnerDisplay, query) ||
                ContainsFleetShipSearchText(ship.OwnerCallsign, query) ||
                ContainsFleetShipSearchText(ship.OwnerGameId, query) ||
-               ContainsFleetShipSearchText(ship.OwnerSquad, query) ||
                ContainsFleetShipSearchText(ship.ShipSpec, query) ||
                ContainsFleetShipSearchText(ship.ShipRole, query) ||
                ContainsFleetShipSearchText(ship.ShipStatus, query) ||
@@ -1085,7 +1173,6 @@ public partial class MainWindow
                 : rows.OrderBy(ship => ship.ShipPriceValue ?? decimal.MaxValue),
             FleetShipSortColumn.Role => OrderFleetShipRowsByText(rows, ship => ship.ShipRole, _fleetShipSortDescending),
             FleetShipSortColumn.Owner => OrderFleetShipRowsByText(rows, ship => ship.OwnerDisplay, _fleetShipSortDescending),
-            FleetShipSortColumn.Squad => OrderFleetShipRowsByText(rows, ship => ship.OwnerSquad, _fleetShipSortDescending),
             _ => rows.OrderBy(ship => GetFleetShipSpecSortRank(ship.ShipSpec, largeFirst: _fleetShipSortDescending))
         };
 
@@ -1186,6 +1273,18 @@ public partial class MainWindow
         button.ContextMenu.IsOpen = true;
     }
 
+    private void FleetShipDatabaseScopeInfo_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button ||
+            button.ContextMenu is null)
+        {
+            return;
+        }
+
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.IsOpen = true;
+    }
+
     private void FleetShipSearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         _fleetShipDatabaseSearch = FleetShipSearchBox?.Text ?? "";
@@ -1237,7 +1336,6 @@ public partial class MainWindow
             "price" => FleetShipSortColumn.Price,
             "role" => FleetShipSortColumn.Role,
             "owner" => FleetShipSortColumn.Owner,
-            "squad" => FleetShipSortColumn.Squad,
             _ => FleetShipSortColumn.Spec
         };
 
@@ -1257,7 +1355,6 @@ public partial class MainWindow
         SetFleetShipSortArrow(FleetShipSortPriceArrow, FleetShipSortColumn.Price);
         SetFleetShipSortArrow(FleetShipSortRoleArrow, FleetShipSortColumn.Role);
         SetFleetShipSortArrow(FleetShipSortOwnerArrow, FleetShipSortColumn.Owner);
-        SetFleetShipSortArrow(FleetShipSortSquadArrow, FleetShipSortColumn.Squad);
         if (FleetShipSortMenuText is not null)
         {
             FleetShipSortMenuText.Text = $"{GetFleetShipSortColumnLabel(_fleetShipSortColumn)} {(_fleetShipSortDescending ? "↓" : "↑")}";
@@ -1278,7 +1375,6 @@ public partial class MainWindow
             FleetShipSortColumn.Name => "名称",
             FleetShipSortColumn.Price => "价格",
             FleetShipSortColumn.Owner => "持有者",
-            FleetShipSortColumn.Squad => "小队",
             FleetShipSortColumn.Status => "状态",
             FleetShipSortColumn.Role => "定位",
             _ => "规格"

@@ -12,18 +12,16 @@ internal enum PlayerSharedEventTypes
     Server = 1 << 1,
     Ship = 1 << 2,
     Location = 1 << 3,
-    Squad = 1 << 4,
+    // Bit 4 was the retired fleet-squad event. It remains reserved so the
+    // Life bit and existing wire values never shift.
+    RetiredSquad = 1 << 4,
     Life = 1 << 5,
-    All = Presence | Server | Ship | Location | Squad | Life
+    All = Presence | Server | Ship | Location | Life
 }
 
 internal sealed record PlayerEventSharingSettings(
     bool Enabled = true,
-    PlayerSharedEventTypes EventTypes = PlayerSharedEventTypes.Presence |
-                                        PlayerSharedEventTypes.Server |
-                                        PlayerSharedEventTypes.Ship |
-                                        PlayerSharedEventTypes.Location |
-                                        PlayerSharedEventTypes.Squad)
+    PlayerSharedEventTypes EventTypes = PlayerSharedEventTypes.All)
 {
     public static PlayerEventSharingSettings Default { get; } = new();
 

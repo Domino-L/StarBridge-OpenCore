@@ -45,16 +45,10 @@ public sealed record OverlaySceneContext(
 }
 
 public sealed record OverlaySceneSnapshot(
-    IReadOnlyList<SquadRow> Squads,
     IReadOnlyList<PlayerRow> Players,
     bool HasContent,
     OverlaySceneContext Context)
 {
-    public OverlayDisplaySettings ApplySceneSettings(OverlayDisplaySettings settings) =>
-        Context.Kind == OverlaySceneKind.PartyRoom
-            ? settings with { MemberScopeMode = OverlayMemberScopeMode.AllFleet }
-            : settings;
-
     public OverlayCommandState ApplySceneCommandState(OverlayCommandState commandState, bool zh)
     {
         if (Context.Kind != OverlaySceneKind.PartyRoom)
@@ -78,7 +72,6 @@ public static class OverlaySceneResolver
 {
     public static OverlaySceneSnapshot Resolve(
         OverlayScenePreference preference,
-        IEnumerable<SquadRow> fleetSquads,
         IEnumerable<PlayerRow> fleetPlayers,
         bool hasFleet,
         PartyLobbyRoomCard? currentRoom,
@@ -90,31 +83,16 @@ public static class OverlaySceneResolver
         if (!usePartyRoom || currentRoom is null)
         {
             return new OverlaySceneSnapshot(
-                fleetSquads.ToArray(),
                 fleetPlayers.ToArray(),
                 hasFleet,
                 OverlaySceneContext.Fleet(preference, preference == OverlayScenePreference.PartyRoom));
         }
 
         var roomPlayers = currentRoom.Members
-            .Select(member => CreateRoomPlayer(member, currentRoom, localPlayer, localCallsign))
-            .OrderByDescending(player => player.Status.Equals("Online", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(player => player.Role.Equals("房主", StringComparison.OrdinalIgnoreCase))
-            .ThenBy(player => player.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(member => CreateRoomPlayer(member, localPlayer, localCallsign))
             .ToArray();
-        var roomSquad = new SquadRow
-        {
-            Name = currentRoom.Title,
-            Commander = currentRoom.HostDisplay,
-            Mission = currentRoom.Activity,
-            Description = currentRoom.Goal,
-            Type = "PartyRoom",
-            IsJoinedByCurrentUser = true,
-            UpdatedAt = currentRoom.UpdatedAt
-        };
 
         return new OverlaySceneSnapshot(
-            [roomSquad],
             roomPlayers,
             true,
             new OverlaySceneContext(
@@ -133,13 +111,14 @@ public static class OverlaySceneResolver
 
     private static PlayerRow CreateRoomPlayer(
         PartyLobbyMemberPreview member,
-        PartyLobbyRoomCard room,
         string? localPlayer,
         string? localCallsign)
     {
         var name = FirstNonEmpty(member.GameId, member.Callsign, "未知成员");
         var callsign = FirstNonEmpty(member.Callsign, member.GameId, name);
-        var online = IsInGame(member.PresenceText);
+        var presence = ResolveRoomPresence(member.PresenceText);
+        var online = PlayerPresence.IsOnline(presence);
+        var liveStatus = PlayerPresence.ToWireValue(presence);
         var rawLocation = NormalizeRoomValue(member.LocationText, "等待位置同步");
         var location = FormatRoomLocation(rawLocation);
         var ship = NormalizeRoomValue(member.ShipText, "等待舰船同步");
@@ -156,7 +135,6 @@ public static class OverlaySceneResolver
             Callsign: callsign,
             AvatarPath: member.AvatarImageData,
             Initials: BuildInitials(callsign),
-            SquadName: room.Title,
             Role: member.IsHost ? "房主" : "成员",
             RawShip: ship,
             ShipConfidence: "PartyRoom",
@@ -165,7 +143,12 @@ public static class OverlaySceneResolver
             IsSelf: isSelf,
             ShowMemberActions: false,
             ServerRegion: ResolveRoomRegion(member.ShardText),
-            LiveStatus: member.PresenceText);
+            LiveStatus: liveStatus,
+            AccountId: member.AccountId,
+            SharedOnlineStatus: online ? "Online" : "Offline",
+            SharedLiveStatus: liveStatus,
+            SharedShip: ship,
+            SharedLocation: rawLocation);
     }
 
     private static string FormatRoomLocation(string location)
@@ -182,10 +165,10 @@ public static class OverlaySceneResolver
         return $"地点：{location}";
     }
 
-    private static bool IsInGame(string? value)
-    {
-        return PlayerPresencePresentation.Resolve(value, value) == PlayerPresenceKind.InGame;
-    }
+    private static PlayerPresenceKind ResolveRoomPresence(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? PlayerPresenceKind.Offline
+            : PlayerPresencePresentation.ResolveShared(value, "Online");
 
     private static bool MatchesIdentity(string? candidate, params string?[] identities) =>
         !string.IsNullOrWhiteSpace(candidate) &&

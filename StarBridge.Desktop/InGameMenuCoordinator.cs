@@ -39,12 +39,10 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
     private InGameMenuWindow? _window;
     private InGameBrowserWindow? _browserWindow;
-    private readonly List<InGameImageWindow> _imageWindows = [];
-    private readonly HashSet<InGameImageWindow> _requestedImageWindows = [];
+    private InGameImageWindow? _imageWindow;
     private readonly HashSet<Window> _movingToolWindows = [];
     private readonly InGameToolSessionStore _toolSessionStore =
         InGameToolSessionStore.CreateDefault();
-    private InGameImageWindow? _activeImageWindow;
     private InGameFleetWindow? _fleetWindow;
     private InGameFriendsWindow? _friendsWindow;
     private readonly Dictionary<string, InGameProfileWindow> _profileWindows =
@@ -62,6 +60,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     private bool _menuSessionOpen;
     private bool _focusCheckPending;
     private bool _browserRequestedVisible;
+    private bool _imageRequestedVisible;
     private bool _fleetRequestedVisible;
     private bool _friendsRequestedVisible;
     private bool _socialRequestedVisible;
@@ -75,6 +74,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     private readonly bool _previousSessionEndedUnexpectedly;
     private bool _restoredCrossRestartSession;
     private string _informationOverlayHotkey = "";
+    private string _imageLanguage = "zh";
 
     internal InGameMenuCoordinator()
     {
@@ -88,6 +88,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     internal event EventHandler? FleetRefreshRequested;
     internal event EventHandler? FleetCommunicationRequested;
     internal event EventHandler<InGameFleetMemberActionRequestedEventArgs>? FleetMemberActionRequested;
+    internal event EventHandler<InGameFleetShipImageReportRequestedEventArgs>? FleetShipImageReportRequested;
     internal event EventHandler? SocialRefreshRequested;
     internal event EventHandler<InGameSocialConversationRequestedEventArgs>? SocialConversationRequested;
     internal event EventHandler<InGameSocialChannelRequestedEventArgs>? SocialChannelRequested;
@@ -113,7 +114,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
     internal bool BeginAccountSession(
         AccountSessionLease accountSession,
-        string statusText)
+        string statusText,
+        bool isLoading)
     {
         if (!_requestGate.BeginAccountSession(accountSession))
         {
@@ -121,10 +123,10 @@ internal sealed class InGameMenuCoordinator : IDisposable
         }
 
         CloseProfileWindowsForAccountChange();
-        _fleetWindow?.ResetAccountState(statusText);
-        _friendsWindow?.ResetAccountState(statusText);
-        _socialWindow?.ResetAccountState(statusText);
-        _roomWindow?.ResetAccountState(statusText);
+        _fleetWindow?.ResetAccountState(statusText, isLoading);
+        _friendsWindow?.ResetAccountState(statusText, isLoading);
+        _socialWindow?.ResetAccountState(statusText, isLoading);
+        _roomWindow?.ResetAccountState(statusText, isLoading);
         return true;
     }
 
@@ -137,11 +139,11 @@ internal sealed class InGameMenuCoordinator : IDisposable
         if (_requestGate.BeginAccountSession(accountSession))
         {
             CloseProfileWindowsForAccountChange();
-            const string status = "正在加载当前账号的数据…";
-            _fleetWindow?.ResetAccountState(status);
-            _friendsWindow?.ResetAccountState(status);
-            _socialWindow?.ResetAccountState(status);
-            _roomWindow?.ResetAccountState(status);
+            const string status = "正在加载当前账号的数据";
+            _fleetWindow?.ResetAccountState(status, isLoading: true);
+            _friendsWindow?.ResetAccountState(status, isLoading: true);
+            _socialWindow?.ResetAccountState(status, isLoading: true);
+            _roomWindow?.ResetAccountState(status, isLoading: true);
         }
 
         return _requestGate.Begin(accountSession, lane, targetKey, policy);
@@ -164,14 +166,20 @@ internal sealed class InGameMenuCoordinator : IDisposable
                 : RenderMode.Default;
         _window?.ApplySettings(_settings);
         _browserWindow?.ApplySettings(_settings);
-        foreach (var image in _imageWindows)
-        {
-            image.ApplySettings(_settings);
-        }
+        _imageWindow?.ApplySettings(_settings);
 
         _friendsWindow?.ApplySettings(_settings);
         _roomWindow?.ApplySettings(_settings);
-        UpdateImageWindowPositions();
+    }
+
+    internal void SetImageLanguage(string? language)
+    {
+        _imageLanguage = language?.Trim().StartsWith(
+            "zh",
+            StringComparison.OrdinalIgnoreCase) == true
+            ? "zh"
+            : "en";
+        _imageWindow?.ApplyLanguage(_imageLanguage);
     }
 
     internal async Task<bool> ClearBrowserDataAsync()
@@ -296,8 +304,11 @@ internal sealed class InGameMenuCoordinator : IDisposable
         _window.ApplySnapshot(snapshot);
     }
 
-    internal void ShowNotice(string text, string? detail = null) =>
-        _window?.ShowNotice(text, detail);
+    internal void ShowNotice(
+        string text,
+        string? detail = null,
+        bool isLoading = false) =>
+        _window?.ShowNotice(text, detail, isLoading);
 
     internal void OpenBrowser()
     {
@@ -335,15 +346,10 @@ internal sealed class InGameMenuCoordinator : IDisposable
         }
 
         _lastActiveTool = ToolKind.Image;
-        var image = _activeImageWindow is { HasImage: true }
-            ? _activeImageWindow
-            : _imageWindows.LastOrDefault(candidate => candidate.HasImage)
-              ?? _activeImageWindow
-              ?? _imageWindows.LastOrDefault();
+        var image = _imageWindow;
         if (image is not null)
         {
-            _activeImageWindow = image;
-            _requestedImageWindows.Add(image);
+            _imageRequestedVisible = true;
             AttachToolToMenu(image);
             image.ShowForMenu();
             return;
@@ -352,39 +358,58 @@ internal sealed class InGameMenuCoordinator : IDisposable
         CreateImageWindow();
     }
 
-    private void CreateImageWindow()
+    private void OpenImagePath(string path)
     {
-        if (_imageWindows.Count >= _settings.ImageWindowLimit)
+        if (_window is null || string.IsNullOrWhiteSpace(path))
         {
-            (_activeImageWindow ?? _imageWindows.LastOrDefault())
-                ?.ShowCapacityNotice(_settings.ImageWindowLimit);
             return;
         }
 
-        var image = new InGameImageWindow();
-        image.ApplySettings(_settings);
-        _imageWindows.Add(image);
-        _requestedImageWindows.Add(image);
-        _activeImageWindow = image;
-        image.Activated += Tool_Activated;
-        image.MenuCloseRequested += Tool_MenuCloseRequested;
-        image.NewImageRequested += ImageWindow_NewImageRequested;
-        image.ToolDeactivated += Tool_Deactivated;
-        image.ToolHidden += ImageWindow_Hidden;
-        image.Closed += ImageWindow_Closed;
-        UpdateImageWindowPositions();
+        _lastActiveTool = ToolKind.Image;
+        var image = _imageWindow ?? CreateImageWindow(showImmediately: false);
+
+        if (image is null)
+        {
+            return;
+        }
+
+        _imageRequestedVisible = true;
         AttachToolToMenu(image);
+        image.LoadImage(path);
         image.ShowForMenu();
     }
 
-    private void UpdateImageWindowPositions()
+    private InGameImageWindow? CreateImageWindow(bool showImmediately = true)
     {
-        for (var index = 0; index < _imageWindows.Count; index++)
+        if (_imageWindow is not null)
         {
-            _imageWindows[index].UpdateCollectionPosition(
-                index + 1,
-                _settings.ImageWindowLimit);
+            if (showImmediately)
+            {
+                _imageRequestedVisible = true;
+                AttachToolToMenu(_imageWindow);
+                _imageWindow.ShowForMenu();
+            }
+
+            return _imageWindow;
         }
+
+        var image = new InGameImageWindow();
+        image.ApplyLanguage(_imageLanguage);
+        image.ApplySettings(_settings);
+        _imageWindow = image;
+        _imageRequestedVisible = true;
+        image.Activated += Tool_Activated;
+        image.MenuCloseRequested += Tool_MenuCloseRequested;
+        image.ToolDeactivated += Tool_Deactivated;
+        image.ToolHidden += ImageWindow_Hidden;
+        image.Closed += ImageWindow_Closed;
+        AttachToolToMenu(image);
+        if (showImmediately)
+        {
+            image.ShowForMenu();
+        }
+
+        return image;
     }
 
     internal void OpenFleet()
@@ -406,7 +431,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
         var fleet = new InGameFleetWindow();
         _fleetWindow = fleet;
-        fleet.ResetAccountState("正在读取舰队详情与当前信息…");
+        fleet.ResetAccountState("正在读取舰队详情与当前信息", isLoading: true);
         fleet.Activated += Tool_Activated;
         fleet.MenuCloseRequested += Tool_MenuCloseRequested;
         fleet.ToolDeactivated += Tool_Deactivated;
@@ -414,6 +439,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
         fleet.RefreshRequested += FleetWindow_RefreshRequested;
         fleet.CommunicationRequested += FleetWindow_CommunicationRequested;
         fleet.MemberActionRequested += FleetWindow_MemberActionRequested;
+        fleet.ShipImageReportRequested += FleetWindow_ShipImageReportRequested;
+        fleet.ShipImagePreviewRequested += FleetWindow_ShipImagePreviewRequested;
         fleet.Closed += FleetWindow_Closed;
         AttachToolToMenu(fleet);
         fleet.ShowForMenu();
@@ -613,11 +640,11 @@ internal sealed class InGameMenuCoordinator : IDisposable
         }
     }
 
-    internal void ShowRoomStatus(string text) =>
-        _roomWindow?.SetStatus(text);
+    internal void ShowRoomStatus(string text, bool isLoading = false) =>
+        _roomWindow?.SetStatus(text, isLoading);
 
-    internal void ShowRoomInvitationStatus(string text) =>
-        _roomWindow?.SetInvitationStatus(text);
+    internal void ShowRoomInvitationStatus(string text, bool isLoading = false) =>
+        _roomWindow?.SetInvitationStatus(text, isLoading);
 
     // Compatibility shims for profile requests created before the profile
     // surface was unified. The live application page now owns these updates.
@@ -702,34 +729,16 @@ internal sealed class InGameMenuCoordinator : IDisposable
             throw new InvalidOperationException("截屏正在处理中。");
         }
 
-        var windows = SessionWindows()
-            .Where(window => window.IsVisible)
-            .Select(window => (Window: window, window.Opacity))
-            .ToArray();
         _captureInProgress = true;
         try
         {
-            foreach (var (window, _) in windows)
-            {
-                window.Opacity = 0;
-            }
-
-            await _window.Dispatcher.InvokeAsync(
-                static () => { },
-                DispatcherPriority.Render);
-            await Task.Delay(120);
-            return await action();
+            return await InGameScreenshotCaptureSession.RunAsync(
+                SessionWindows(),
+                _window.Dispatcher,
+                action);
         }
         finally
         {
-            foreach (var (window, opacity) in windows)
-            {
-                if (window.IsLoaded)
-                {
-                    window.Opacity = opacity;
-                }
-            }
-
             _captureInProgress = false;
             ActivateSessionWindow();
         }
@@ -794,9 +803,9 @@ internal sealed class InGameMenuCoordinator : IDisposable
             yield return _browserWindow;
         }
 
-        foreach (var image in _imageWindows)
+        if (_imageWindow is not null)
         {
-            yield return image;
+            yield return _imageWindow;
         }
 
         if (_fleetWindow is not null)
@@ -842,9 +851,9 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
         if (_settings.RestoreLastFocusedTool &&
             _lastActiveTool == ToolKind.Image &&
-            _activeImageWindow is { IsVisible: true })
+            _imageWindow is { IsVisible: true })
         {
-            RestoreAndActivate(_activeImageWindow);
+            RestoreAndActivate(_imageWindow);
             return;
         }
 
@@ -894,10 +903,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
             return;
         }
 
-        var visibleImage = _imageWindows.LastOrDefault(image => image.IsVisible);
-        if (visibleImage is not null)
+        if (_imageWindow is { IsVisible: true } visibleImage)
         {
-            _activeImageWindow = visibleImage;
             RestoreAndActivate(visibleImage);
             return;
         }
@@ -967,7 +974,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
             _focusCheckPending = false;
             if (_closingSession ||
                 _captureInProgress ||
-                _imageWindows.Any(image => image.IsChoosingImage) ||
+                _imageWindow is { IsChoosingImage: true } ||
                 SessionWindows().Any(window => window.IsActive) ||
                  ForegroundWindowBelongsToSession())
             {
@@ -1030,8 +1037,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
             case InGameBrowserWindow:
                 _lastActiveTool = ToolKind.Browser;
                 break;
-            case InGameImageWindow image:
-                _activeImageWindow = image;
+            case InGameImageWindow:
                 _lastActiveTool = ToolKind.Image;
                 break;
             case InGameFleetWindow:
@@ -1061,35 +1067,12 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
     private void ImageWindow_Hidden(object? sender, EventArgs e)
     {
-        if (ReferenceEquals(_activeImageWindow, sender))
+        if (ReferenceEquals(_imageWindow, sender))
         {
-            _activeImageWindow = _imageWindows.LastOrDefault(image => image.IsVisible);
-        }
-
-        if (sender is InGameImageWindow image)
-        {
-            _requestedImageWindows.Remove(image);
+            _imageRequestedVisible = false;
         }
 
         ActivateSessionWindow();
-    }
-
-    private void ImageWindow_NewImageRequested(object? sender, EventArgs e)
-    {
-        if (_window is null)
-        {
-            return;
-        }
-
-        _lastActiveTool = ToolKind.Image;
-        if (_imageWindows.Count >= _settings.ImageWindowLimit)
-        {
-            (sender as InGameImageWindow ?? _activeImageWindow)
-                ?.ShowCapacityNotice(_settings.ImageWindowLimit);
-            return;
-        }
-
-        CreateImageWindow();
     }
 
     private void FleetWindow_Hidden(object? sender, EventArgs e)
@@ -1135,6 +1118,21 @@ internal sealed class InGameMenuCoordinator : IDisposable
             member.PresenceBrush);
         OpenProfileWindow(target);
         ProfileRequested?.Invoke(this, new InGameProfileRequestedEventArgs(target));
+    }
+
+    private void FleetWindow_ShipImageReportRequested(
+        object? sender,
+        InGameFleetShipImageReportRequestedEventArgs e) =>
+        FleetShipImageReportRequested?.Invoke(this, e);
+
+    private void FleetWindow_ShipImagePreviewRequested(
+        object? sender,
+        InGameFleetShipImagePreviewRequestedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(e.Ship.ImageSource))
+        {
+            OpenImagePath(e.Ship.ImageSource);
+        }
     }
 
     private void FriendsWindow_Hidden(object? sender, EventArgs e)
@@ -1306,20 +1304,17 @@ internal sealed class InGameMenuCoordinator : IDisposable
         {
             image.Activated -= Tool_Activated;
             image.MenuCloseRequested -= Tool_MenuCloseRequested;
-            image.NewImageRequested -= ImageWindow_NewImageRequested;
             image.ToolDeactivated -= Tool_Deactivated;
             image.ToolHidden -= ImageWindow_Hidden;
             image.Closed -= ImageWindow_Closed;
-            _imageWindows.Remove(image);
-            _requestedImageWindows.Remove(image);
         }
 
-        if (ReferenceEquals(_activeImageWindow, sender))
+        if (ReferenceEquals(_imageWindow, sender))
         {
-            _activeImageWindow = _imageWindows.LastOrDefault();
+            _imageWindow = null;
+            _imageRequestedVisible = false;
         }
 
-        UpdateImageWindowPositions();
         ActivateSessionWindow();
     }
 
@@ -1334,6 +1329,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
             fleet.RefreshRequested -= FleetWindow_RefreshRequested;
             fleet.CommunicationRequested -= FleetWindow_CommunicationRequested;
             fleet.MemberActionRequested -= FleetWindow_MemberActionRequested;
+            fleet.ShipImageReportRequested -= FleetWindow_ShipImageReportRequested;
+            fleet.ShipImagePreviewRequested -= FleetWindow_ShipImagePreviewRequested;
             fleet.Closed -= FleetWindow_Closed;
         }
 
@@ -1512,9 +1509,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
             _browserWindow.ShowForMenu();
         }
 
-        foreach (var image in _requestedImageWindows
-                     .Where(image => image.HasImage)
-                     .ToArray())
+        if (_imageRequestedVisible &&
+            _imageWindow is { HasImage: true } image)
         {
             AttachToolToMenu(image);
             image.ShowForMenu();
@@ -1777,9 +1773,8 @@ internal sealed class InGameMenuCoordinator : IDisposable
             case InGameProfileWindow profile:
                 key = $"profile:{profile.ProfileKey}";
                 return true;
-            case InGameImageWindow image:
-                var imageIndex = _imageWindows.IndexOf(image);
-                key = $"image:{Math.Max(0, imageIndex)}";
+            case InGameImageWindow:
+                key = "image";
                 return true;
             default:
                 key = "";
@@ -1791,10 +1786,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     {
         DetachPersistentToolOwners();
         _browserWindow?.HideForMenu();
-        foreach (var image in _imageWindows)
-        {
-            image.HideForMenu();
-        }
+        _imageWindow?.HideForMenu();
 
         _fleetWindow?.HideForMenu();
         _friendsWindow?.HideForMenu();
@@ -1810,16 +1802,15 @@ internal sealed class InGameMenuCoordinator : IDisposable
     {
         DetachPersistentToolOwners();
         var browser = _browserWindow;
-        var images = _imageWindows.ToArray();
+        var image = _imageWindow;
         var fleet = _fleetWindow;
         var friends = _friendsWindow;
         var profiles = _profileWindows.Values.ToArray();
         var social = _socialWindow;
         var rooms = _roomWindow;
         _browserWindow = null;
-        _imageWindows.Clear();
-        _requestedImageWindows.Clear();
-        _activeImageWindow = null;
+        _imageWindow = null;
+        _imageRequestedVisible = false;
         _fleetWindow = null;
         _friendsWindow = null;
         _profileWindows.Clear();
@@ -1833,10 +1824,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
         _socialRequestedVisible = false;
         _roomsRequestedVisible = false;
         TryCloseForApplication(browser);
-        foreach (var image in images)
-        {
-            TryCloseForApplication(image);
-        }
+        TryCloseForApplication(image);
 
         TryCloseForApplication(fleet);
         TryCloseForApplication(friends);
@@ -1885,9 +1873,9 @@ internal sealed class InGameMenuCoordinator : IDisposable
             InGameToolWindowBehavior.SetTransientOwner(_browserWindow, null);
         }
 
-        foreach (var image in _imageWindows)
+        if (_imageWindow is not null)
         {
-            InGameToolWindowBehavior.SetTransientOwner(image, null);
+            InGameToolWindowBehavior.SetTransientOwner(_imageWindow, null);
         }
 
         if (_fleetWindow is not null)

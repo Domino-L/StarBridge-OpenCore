@@ -18,14 +18,12 @@ public sealed record PlayerRow(
     string? Callsign = null,
     string? AvatarPath = null,
     string Initials = "?",
-    string SquadName = "Unassigned",
     string Role = "Member",
     MediaBrush? NameBrush = null,
     string RawShip = "Unknown",
     string ShipConfidence = "None",
     string LocationConfidence = "None",
     string RawLocation = "Unknown",
-    string? SquadEmblemPath = null,
     bool IsSelf = false,
     bool ShowMemberActions = true,
     string? ServerShard = null,
@@ -37,8 +35,16 @@ public sealed record PlayerRow(
     string? SharedLiveStatus = null,
     string? SharedShip = null,
     string? SharedLocation = null,
-    int SharedEventTypes = (int)PlayerSharedEventTypes.All)
+    int SharedEventTypes = (int)PlayerSharedEventTypes.All,
+    bool? SharedHasServerSession = null,
+    bool IsFleetCommander = false,
+    MediaBrush? RoleColorBrush = null,
+    bool HasFleetPosition = false)
 {
+    // Callsign 在无呼号时回落为游戏 ID（DisplayCallsign），此时两行会重复，故留空。
+    public string GameId => string.Equals(Name, Callsign, StringComparison.OrdinalIgnoreCase)
+        ? ""
+        : Name;
     public PlayerPresenceKind Presence => PlayerPresencePresentation.Resolve(LiveStatus, Status);
     public string PresenceText => PlayerPresencePresentation.Format(Presence);
     public MediaBrush StatusBrush => PlayerPresencePresentation.Brush(Presence);
@@ -49,35 +55,88 @@ public sealed record PlayerRow(
     public MediaBrush SharedStatusBrush => PlayerPresencePresentation.Brush(SharedPresence);
     public string SharedShipText => SharedShip ?? Ship;
     public string SharedLocationText => SharedLocation ?? Location;
+    public string SharedShipDisplayText => PlayerSessionStatePresentation.ResolveShip(
+        SharedPresence,
+        ResolveSharedServerSession(),
+        SharedShipText);
+    public string SharedLocationDisplayText => PlayerSessionStatePresentation.ResolveLocation(
+        SharedPresence,
+        ResolveSharedServerSession(),
+        SharedLocationText);
+    internal FleetServerRelationshipKind? ResolvedServerRelationship { get; init; }
+    public string ServerRelationshipText => FleetServerRelationship.Format(
+        ResolvedServerRelationship ??
+        (SharedPresence == PlayerPresenceKind.InGame
+            ? FleetServerRelationshipKind.InGame
+            : FleetServerRelationshipKind.NotInGame),
+        zh: true);
+    public string ServerShardDisplayText =>
+        SharedPresence == PlayerPresenceKind.InGame &&
+        PlayerSessionStatePresentation.HasRecognizedValue(ServerShard)
+            ? ServerShard!.Trim()
+            : "未进入游戏";
+    internal bool MatchesFleetSearch(string? searchText) =>
+        FleetRosterSearchPolicy.Matches(
+            searchText,
+            Name,
+            Callsign,
+            Role,
+            ServerRelationshipText,
+            SharedPresenceText,
+            SharedShipDisplayText,
+            SharedLocationDisplayText);
     internal bool AllowsSharedEvent(PlayerSharedEventTypes eventType) =>
         PlayerEventSharingSettings.FromWireValue(SharedEventTypes).HasFlag(eventType);
     public Visibility MemberActionVisibility => ShowMemberActions && !IsSelf ? Visibility.Visible : Visibility.Collapsed;
+
+    private bool? ResolveSharedServerSession()
+    {
+        if (SharedPresence != PlayerPresenceKind.InGame)
+        {
+            return false;
+        }
+
+        if (SharedHasServerSession.HasValue)
+        {
+            return SharedHasServerSession.Value;
+        }
+
+        return PlayerSessionStatePresentation.HasRecognizedValue(ServerShard) ||
+               PlayerSessionStatePresentation.HasRecognizedValue(ServerRegion)
+            ? true
+            : null;
+    }
 }
 
-public sealed record SquadMemberStatusRow(
-    string Avatar,
-    string? AvatarPath,
-    string Role,
-    string Callsign,
-    string GameId,
-    string OnlineStatus,
-    string ShipStatus,
-    string Location,
-    MediaBrush? NameBrush = null,
-    bool CanRemoveFromSquad = false,
-    string SquadName = "",
-    bool CanTransferSquadCommand = false,
-    string? AccountId = null,
-    bool IsSelf = false,
-    string? LiveStatus = null)
+public sealed class SpecifiedVisibilityMemberRow : INotifyPropertyChanged
 {
-    public PlayerPresenceKind Presence => PlayerPresencePresentation.ResolveShared(LiveStatus, OnlineStatus);
-    public string PresenceText => PlayerPresencePresentation.Format(Presence);
-    public MediaBrush OnlineStatusBrush => PlayerPresencePresentation.Brush(Presence);
-    public Visibility RemoveButtonVisibility => CanRemoveFromSquad ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility MemberActionVisibility => CanRemoveFromSquad || CanTransferSquadCommand
-        ? Visibility.Visible
-        : Visibility.Collapsed;
+    private bool _isSelected;
+
+    public required string AccountId { get; init; }
+    public required string Callsign { get; init; }
+    public required string GameId { get; init; }
+    public string? AvatarPath { get; init; }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value)
+            {
+                return;
+            }
+
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+    }
+
+    public string IdentityLine => string.Equals(Callsign, GameId, StringComparison.OrdinalIgnoreCase)
+        ? Callsign
+        : $"{Callsign} · {GameId}";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }
 
 public sealed record ManageFleetSystemOptionRow(
@@ -121,11 +180,11 @@ public sealed class FleetExternalContactRow
 
 internal static class StatusPalette
 {
-    public static MediaBrush InfoBrush { get; } = Brush(88, 190, 255);
-    public static MediaBrush SuccessBrush { get; } = Brush(98, 246, 164);
-    public static MediaBrush WarningBrush { get; } = Brush(255, 196, 90);
-    public static MediaBrush DangerBrush { get; } = Brush(255, 107, 115);
-    public static MediaBrush DisabledBrush { get; } = Brush(120, 149, 184);
+    public static MediaBrush InfoBrush { get; } = Brush(0x52, 0xB7, 0xF5);
+    public static MediaBrush SuccessBrush { get; } = Brush(0x43, 0xD8, 0x7A);
+    public static MediaBrush WarningBrush { get; } = Brush(0xD9, 0xA4, 0x41);
+    public static MediaBrush DangerBrush { get; } = Brush(0xD2, 0x68, 0x5E);
+    public static MediaBrush DisabledBrush { get; } = Brush(0x46, 0x54, 0x5D);
 
     public static MediaBrush ForOnlineState(string? status)
     {
@@ -189,11 +248,11 @@ internal static class StatusPalette
         return InfoBrush;
     }
 
-    public static MediaBrush BrushFromHex(string? hex, MediaBrush fallback)
+    public static MediaBrush? TryBrushFromHex(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex))
         {
-            return fallback;
+            return null;
         }
 
         try
@@ -205,9 +264,12 @@ internal static class StatusPalette
         }
         catch
         {
-            return fallback;
+            return null;
         }
     }
+
+    public static MediaBrush BrushFromHex(string? hex, MediaBrush fallback) =>
+        TryBrushFromHex(hex) ?? fallback;
 
     private static MediaBrush Brush(byte red, byte green, byte blue)
     {
@@ -243,7 +305,6 @@ public sealed record FleetShipInventoryRow(
     string OwnerDisplay,
     string OwnerCallsign,
     string OwnerGameId,
-    string OwnerSquad,
     string? OwnerAvatarPath,
     string OwnerInitials,
     string ImportedAtText,
@@ -253,18 +314,28 @@ public sealed record FleetShipInventoryRow(
     string ShipStatus,
     string ShipPrice,
     string ShipImagePath = "",
-    string? OwnerSquadEmblemPath = null,
     string? ShipInstanceId = null,
     string ShipRoleColorHex = "#9DAAB3",
-    string? OwnerAccountId = null)
+    string? OwnerAccountId = null,
+    string? CustomImageMediaId = null,
+    bool CanReportCustomImage = false,
+    double CustomImageCropFocusX = 0.5,
+    double CustomImageCropFocusY = 0.5,
+    double CustomImageCropZoom = 1.0,
+    string OwnerOnlineStatus = "Offline",
+    string? OwnerLiveStatus = null)
 {
     private BadgePalette RoleBadgePalette { get; } = CreateSoftBadgePalette(ShipRoleColorHex);
 
     public IReadOnlyList<FleetShipInventoryRow> LoanerRows { get; init; } = [];
     public bool HasLoaners => LoanerRows.Count > 0;
+    public bool HasCustomImage => !string.IsNullOrWhiteSpace(CustomImageMediaId);
+    public Visibility ShipImageReportVisibility => CanReportCustomImage ? Visibility.Visible : Visibility.Collapsed;
+    public PlayerPresenceKind OwnerPresence => PlayerPresencePresentation.ResolveShared(OwnerLiveStatus, OwnerOnlineStatus);
+    public string OwnerPresenceText => PlayerPresencePresentation.Format(OwnerPresence);
+    public MediaBrush OwnerPresenceBrush => PlayerPresencePresentation.Brush(OwnerPresence);
     public string ShipDetailImagePath => BuildShipDetailImagePath(ShipImagePath);
     public string ShipMetaLine => $"{ShipSpec} / {ShipStatus} / {ShipPrice}";
-    public string ShipRoleLine => string.IsNullOrWhiteSpace(ShipRole) ? "定位待补充" : $"定位 / {ShipRole}";
     public string ShipRoleTag => string.IsNullOrWhiteSpace(ShipRole) ? "待补充" : ShipRole;
     public string ShipPriceTag => string.IsNullOrWhiteSpace(ShipPrice) ? "未公布" : ShipPrice;
     public string ImportedAtCompactText => FormatImportedAtCompactText(ImportedAtText);
@@ -617,6 +688,7 @@ public sealed class FleetRoleGroupRow : INotifyPropertyChanged
         : "权限只控制管理、编辑、审核和导出操作。成员基础查看能力默认开放，不在这里配置。";
     public bool CanCopyRole => !IsCommanderSeat;
     public bool CanAssignMembers => !IsCommanderSeat;
+    public bool CanRenameRole => !IsCommanderSeat;
     public bool CanDeleteRole => !IsSystem;
     public MediaBrush AccentBrush => StatusPalette.BrushFromHex(Color, StatusPalette.InfoBrush);
     public MediaBrush CardBackgroundBrush => IsSelected
@@ -848,12 +920,12 @@ public sealed class FleetMemberManagementRow : INotifyPropertyChanged
     private bool _canManageFleetInfo;
 
     public string GameName { get; init; } = "";
+    public string GameId => GameName;
     public string Callsign { get; init; } = "";
     public string DisplayName { get; init; } = "";
     public string Initials { get; init; } = "?";
     public string? AvatarPath { get; init; }
     public string? AccountId { get; init; }
-    public string SquadName { get; init; } = "Unassigned";
     public string OnlineStatus { get; init; } = "Offline";
     public string? LiveStatus { get; init; }
     public bool IsSelf { get; init; }
@@ -865,7 +937,7 @@ public sealed class FleetMemberManagementRow : INotifyPropertyChanged
     public PlayerPresenceKind Presence => PlayerPresencePresentation.ResolveShared(LiveStatus, OnlineStatus);
     public string PresenceText => PlayerPresencePresentation.Format(Presence);
     public MediaBrush OnlineStatusBrush => PlayerPresencePresentation.Brush(Presence);
-    public string HeaderLine => $"{SquadName} / {PresenceText}";
+    public string HeaderLine => PresenceText;
     public bool CanEditPermissions => CanCurrentUserEditPermissions && !IsCommander;
     public bool ShowPermissionControls => IsCommander || PermissionEnabled;
     public bool ShowRoleEditor => CanEditPermissions;
@@ -1325,7 +1397,6 @@ public sealed record NetworkFleetCard(
     string CommanderLine,
     string JoinPolicyLine,
     string RecruitingLine,
-    Visibility RecruitingVisibility,
     string ApplicationStatusLine,
     Visibility ApplicationStatusVisibility,
     string Description,
@@ -1386,15 +1457,27 @@ public sealed record NetworkFleetCard(
     public string PublicDescriptionLine => string.IsNullOrWhiteSpace(Description)
         ? "简介 / 暂无公开介绍"
         : $"简介 / {Description.Trim()}";
-    public string PublicDescriptionText => string.IsNullOrWhiteSpace(Description)
-        ? "暂无公开介绍"
-        : Description.Trim();
+    public string PublicDescriptionText => !Snapshot.PublicShowDescription
+        ? "舰队介绍未公开"
+        : string.IsNullOrWhiteSpace(Snapshot.Description)
+            ? "未提供舰队介绍"
+            : Snapshot.Description.Trim();
     public string PublicShipScaleLine => BuildPublicShipScaleLine(Snapshot);
     public string ActiveTimeValueText => ExtractDirectoryValue(ActiveTimeLine);
-    public string LocalActiveTimeLine => BuildLocalActivityTimeLine(Snapshot, ActiveTimeLine);
+    public string LocalActiveTimeLine => BuildLocalActivityTimeLine(
+        Snapshot,
+        !Snapshot.PublicShowActivityTime
+            ? $"活动时间 / {FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.HiddenByPublisher)}"
+            : string.IsNullOrWhiteSpace(Snapshot.ActiveTime)
+                ? $"活动时间 / {FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.MissingInput)}"
+                : ActiveTimeLine);
     public string LocalActiveTimeValueText => ExtractDirectoryValue(LocalActiveTimeLine);
-    public string FleetDefaultTimeText => BuildFleetDefaultTimeText(Snapshot.TimeZoneId);
-    public string FleetTimeZoneText => BuildFleetTimeZoneSummaryText(Snapshot.TimeZoneId);
+    public string FleetDefaultTimeText => BuildFleetDefaultTimeText(
+        Snapshot.TimeZoneId,
+        Snapshot.PublicShowActivityTime);
+    public string FleetTimeZoneText => BuildFleetTimeZoneSummaryText(
+        Snapshot.TimeZoneId,
+        Snapshot.PublicShowActivityTime);
     public string PublicShipScaleValueText => ExtractDirectoryValue(PublicShipScaleLine);
     public string PublicShipTotalValueText
     {
@@ -1402,11 +1485,13 @@ public sealed record NetworkFleetCard(
         {
             if (string.Equals(Snapshot.PublicShipScaleMode, "Hidden", StringComparison.OrdinalIgnoreCase))
             {
-                return "未公开";
+                return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.HiddenByPublisher);
             }
 
             var count = Math.Max(Snapshot.PublicShipCount, Snapshot.Ships?.Length ?? 0);
-            return count > 0 ? $"{count} 艘" : "暂无数据";
+            return count > 0
+                ? $"{count} 艘"
+                : FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.EmptyStatistic);
         }
     }
     public string PublicShipDetailText => BuildPublicShipDetailText(Snapshot);
@@ -1439,7 +1524,8 @@ public sealed record NetworkFleetCard(
 
     private static string BuildLocalActivityTimeLine(NetworkFleetSnapshot snapshot, string fallbackLine)
     {
-        if (fallbackLine.EndsWith("未公开", StringComparison.Ordinal) ||
+        if (!snapshot.PublicShowActivityTime ||
+            string.IsNullOrWhiteSpace(snapshot.ActiveTime) ||
             snapshot.ActivityWindows is not { Length: > 0 } ||
             string.IsNullOrWhiteSpace(snapshot.TimeZoneId))
         {
@@ -1598,11 +1684,16 @@ public sealed record NetworkFleetCard(
             out clock) && clock >= TimeSpan.Zero && clock < TimeSpan.FromDays(1);
     }
 
-    private static string BuildFleetDefaultTimeText(string? timeZoneId)
+    private static string BuildFleetDefaultTimeText(string? timeZoneId, bool isPublic)
     {
+        if (!isPublic)
+        {
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.HiddenByPublisher);
+        }
+
         if (string.IsNullOrWhiteSpace(timeZoneId))
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.MissingInput);
         }
 
         try
@@ -1616,19 +1707,24 @@ public sealed record NetworkFleetCard(
         }
         catch (TimeZoneNotFoundException)
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.UnrecognizedInput);
         }
         catch (InvalidTimeZoneException)
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.UnrecognizedInput);
         }
     }
 
-    private static string BuildFleetTimeZoneSummaryText(string? timeZoneId)
+    private static string BuildFleetTimeZoneSummaryText(string? timeZoneId, bool isPublic)
     {
+        if (!isPublic)
+        {
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.HiddenByPublisher);
+        }
+
         if (string.IsNullOrWhiteSpace(timeZoneId))
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.MissingInput);
         }
 
         try
@@ -1641,11 +1737,11 @@ public sealed record NetworkFleetCard(
         }
         catch (TimeZoneNotFoundException)
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.UnrecognizedInput);
         }
         catch (InvalidTimeZoneException)
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.UnrecognizedInput);
         }
     }
 
@@ -1740,7 +1836,6 @@ public sealed record NetworkFleetCard(
                 ? "加入 / 需要申请"
                 : "加入 / 无门槛",
             recruitingLine,
-            snapshot.RecruitingEnabled ? Visibility.Visible : Visibility.Collapsed,
             hasPendingApplication ? "申请状态 / 待审核" : "",
             hasPendingApplication ? Visibility.Visible : Visibility.Collapsed,
             description!,
@@ -1779,7 +1874,12 @@ public sealed record NetworkFleetCard(
     {
         if (string.Equals(snapshot.PublicMemberScaleMode, "Hidden", StringComparison.OrdinalIgnoreCase))
         {
-            return "未公开";
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.HiddenByPublisher);
+        }
+
+        if (snapshot.TotalMembers <= 0)
+        {
+            return FleetDirectoryValueText.Format(FleetDirectoryMissingValueKind.EmptyStatistic);
         }
 
         if (string.Equals(snapshot.PublicMemberScaleMode, "Approx", StringComparison.OrdinalIgnoreCase))
@@ -1792,14 +1892,8 @@ public sealed record NetworkFleetCard(
 
     private static string BuildMemberScaleBucket(int totalMembers)
     {
-        return totalMembers switch
-        {
-            <= 5 => "1-5 人",
-            <= 20 => "6-20 人",
-            <= 50 => "21-50 人",
-            <= 100 => "51-100 人",
-            _ => "100+ 人"
-        };
+        return FleetDirectoryMemberScale.Format(
+            FleetDirectoryMemberScale.Classify(totalMembers));
     }
 
     private static bool IsInviteOnlyJoinPolicy(string? joinPolicy)

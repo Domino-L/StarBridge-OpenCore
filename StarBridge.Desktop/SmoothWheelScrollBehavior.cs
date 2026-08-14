@@ -14,9 +14,9 @@ namespace StarBridge.Desktop;
 /// </summary>
 public static class SmoothWheelScrollBehavior
 {
-    private const double WheelDistance = 52;
-    private const double ScrollResponse = 18;
-    private const double CompletionTolerance = 0.3;
+    internal const double WheelDistance = 52;
+    internal const double ScrollResponse = 18;
+    internal const double CompletionTolerance = 0.3;
     private static readonly ConditionalWeakTable<ScrollViewer, ScrollState> States = new();
     private static readonly ConditionalWeakTable<WpfComboBox, DropDownBackgroundGuard> DropDownGuards = new();
 
@@ -31,6 +31,12 @@ public static class SmoothWheelScrollBehavior
         typeof(bool),
         typeof(SmoothWheelScrollBehavior),
         new PropertyMetadata(false));
+
+    public static readonly DependencyProperty ScrollsHorizontallyProperty = DependencyProperty.RegisterAttached(
+        "ScrollsHorizontally",
+        typeof(bool),
+        typeof(SmoothWheelScrollBehavior),
+        new PropertyMetadata(false, OnScrollsHorizontallyChanged));
 
     public static readonly DependencyProperty GuardsBackgroundWhileDropDownOpenProperty = DependencyProperty.RegisterAttached(
         "GuardsBackgroundWhileDropDownOpen",
@@ -49,6 +55,12 @@ public static class SmoothWheelScrollBehavior
 
     public static void SetStopsWheelPropagation(DependencyObject element, bool value) =>
         element.SetValue(StopsWheelPropagationProperty, value);
+
+    public static bool GetScrollsHorizontally(DependencyObject element) =>
+        (bool)element.GetValue(ScrollsHorizontallyProperty);
+
+    public static void SetScrollsHorizontally(DependencyObject element, bool value) =>
+        element.SetValue(ScrollsHorizontallyProperty, value);
 
     public static bool GetGuardsBackgroundWhileDropDownOpen(DependencyObject element) =>
         (bool)element.GetValue(GuardsBackgroundWhileDropDownOpenProperty);
@@ -125,6 +137,40 @@ public static class SmoothWheelScrollBehavior
         }
     }
 
+    private static void OnScrollsHorizontallyChanged(
+        DependencyObject dependencyObject,
+        DependencyPropertyChangedEventArgs e)
+    {
+        if (dependencyObject is ScrollViewer viewer &&
+            States.TryGetValue(viewer, out var state))
+        {
+            state.CancelPendingMotion();
+        }
+    }
+
+    internal static void NormalizeScrollUnitToPixels(ScrollViewer viewer)
+    {
+        ArgumentNullException.ThrowIfNull(viewer);
+        if (!viewer.CanContentScroll)
+        {
+            return;
+        }
+
+        var current = GetParent(viewer);
+        while (current is not null && current is not ItemsControl)
+        {
+            current = GetParent(current);
+        }
+
+        if (current is ItemsControl itemsControl &&
+            VirtualizingPanel.GetScrollUnit(itemsControl) != ScrollUnit.Pixel)
+        {
+            VirtualizingPanel.SetScrollUnit(itemsControl, ScrollUnit.Pixel);
+            itemsControl.InvalidateMeasure();
+            viewer.InvalidateScrollInfo();
+        }
+    }
+
     private sealed class ScrollState(ScrollViewer viewer)
     {
         private readonly WheelDirectionBounceGuard _directionGuard = new();
@@ -143,10 +189,12 @@ public static class SmoothWheelScrollBehavior
             }
 
             _isAttached = true;
-            _targetOffset = viewer.VerticalOffset;
+            NormalizeScrollUnitToPixels(viewer);
+            _targetOffset = CurrentOffset;
             viewer.PreviewMouseWheel += OnPreviewMouseWheel;
             viewer.PreviewMouseDown += OnPreviewMouseDown;
             viewer.PreviewKeyDown += OnPreviewKeyDown;
+            viewer.Loaded += OnLoaded;
             viewer.Unloaded += OnUnloaded;
         }
 
@@ -161,6 +209,7 @@ public static class SmoothWheelScrollBehavior
             viewer.PreviewMouseWheel -= OnPreviewMouseWheel;
             viewer.PreviewMouseDown -= OnPreviewMouseDown;
             viewer.PreviewKeyDown -= OnPreviewKeyDown;
+            viewer.Loaded -= OnLoaded;
             viewer.Unloaded -= OnUnloaded;
             _isAttached = false;
         }
@@ -172,7 +221,7 @@ public static class SmoothWheelScrollBehavior
             _minimumOffset = minimum;
             _maximumOffset = maximum;
             StopRendering(resetTarget: false);
-            _targetOffset = ClampToVerticalBounds(viewer.VerticalOffset);
+            _targetOffset = ClampToBounds(CurrentOffset);
         }
 
         public void ClearVerticalBounds()
@@ -180,7 +229,7 @@ public static class SmoothWheelScrollBehavior
             _minimumOffset = 0;
             _maximumOffset = double.PositiveInfinity;
             StopRendering(resetTarget: false);
-            _targetOffset = viewer.VerticalOffset;
+            _targetOffset = CurrentOffset;
         }
 
         public void CancelPendingMotion() =>
@@ -193,6 +242,7 @@ public static class SmoothWheelScrollBehavior
                 return;
             }
 
+            NormalizeScrollUnitToPixels(viewer);
             var route = FindScrollRoute(e.OriginalSource as DependencyObject, e.Delta);
             if (route.IsBlocked)
             {
@@ -215,7 +265,7 @@ public static class SmoothWheelScrollBehavior
                 e.Delta,
                 Environment.TickCount64,
                 _isRendering,
-                IsAtVerticalBoundary(viewer));
+                IsAtScrollBoundary(viewer));
             if (inputDisposition == WheelInputDisposition.Brake)
             {
                 e.Handled = true;
@@ -225,10 +275,10 @@ public static class SmoothWheelScrollBehavior
 
             if (!_isRendering)
             {
-                _targetOffset = viewer.VerticalOffset;
+                _targetOffset = CurrentOffset;
             }
 
-            var currentOffset = viewer.VerticalOffset;
+            var currentOffset = CurrentOffset;
             var inputDistance = -wheelSteps * ResolveWheelDistance(viewer);
             var pendingDistance = _targetOffset - currentOffset;
             if (Math.Abs(pendingDistance) > CompletionTolerance &&
@@ -237,16 +287,16 @@ public static class SmoothWheelScrollBehavior
                 _targetOffset = currentOffset;
             }
 
-            var maximumPendingDistance = Math.Clamp(viewer.ViewportHeight * 0.55, 120, 300);
-            _targetOffset = ClampToVerticalBounds(Math.Clamp(
+            var maximumPendingDistance = ResolveMaximumPendingDistance(ViewportDistance);
+            _targetOffset = ClampToBounds(Math.Clamp(
                 _targetOffset + inputDistance,
                 currentOffset - maximumPendingDistance,
                 currentOffset + maximumPendingDistance));
             e.Handled = true;
 
-            if (!SystemParameters.ClientAreaAnimation)
+            if (!UiMotion.IsEnabled)
             {
-                viewer.ScrollToVerticalOffset(_targetOffset);
+                ScrollToOffset(_targetOffset);
                 StopRendering(resetTarget: true);
                 return;
             }
@@ -259,6 +309,12 @@ public static class SmoothWheelScrollBehavior
 
         private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e) =>
             CancelInteraction();
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            NormalizeScrollUnitToPixels(viewer);
+            _targetOffset = CurrentOffset;
+        }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) =>
             CancelInteraction();
@@ -297,17 +353,17 @@ public static class SmoothWheelScrollBehavior
                 : Math.Min(0.04, (renderingTime - _lastRenderingTime).TotalSeconds);
             _lastRenderingTime = renderingTime;
 
-            _targetOffset = ClampToVerticalBounds(_targetOffset);
-            var remaining = _targetOffset - viewer.VerticalOffset;
+            _targetOffset = ClampToBounds(_targetOffset);
+            var remaining = _targetOffset - CurrentOffset;
             if (Math.Abs(remaining) <= CompletionTolerance)
             {
-                viewer.ScrollToVerticalOffset(_targetOffset);
+                ScrollToOffset(_targetOffset);
                 StopRendering(resetTarget: true);
                 return;
             }
 
             var interpolation = 1 - Math.Exp(-ScrollResponse * elapsedSeconds);
-            viewer.ScrollToVerticalOffset(viewer.VerticalOffset + remaining * interpolation);
+            ScrollToOffset(CurrentOffset + remaining * interpolation);
         }
 
         private void StopRendering(bool resetTarget)
@@ -321,15 +377,37 @@ public static class SmoothWheelScrollBehavior
 
             if (resetTarget)
             {
-                _targetOffset = viewer.VerticalOffset;
+                _targetOffset = CurrentOffset;
             }
         }
 
-        private double ClampToVerticalBounds(double offset)
+        private double ClampToBounds(double offset)
         {
-            var minimum = Math.Clamp(_minimumOffset, 0, viewer.ScrollableHeight);
-            var maximum = Math.Clamp(_maximumOffset, minimum, viewer.ScrollableHeight);
+            var minimum = Math.Clamp(_minimumOffset, 0, ScrollableDistance);
+            var maximum = Math.Clamp(_maximumOffset, minimum, ScrollableDistance);
             return Math.Clamp(offset, minimum, maximum);
+        }
+
+        private bool ScrollsHorizontally => GetScrollsHorizontally(viewer);
+
+        private double CurrentOffset =>
+            ScrollsHorizontally ? viewer.HorizontalOffset : viewer.VerticalOffset;
+
+        private double ScrollableDistance =>
+            ScrollsHorizontally ? viewer.ScrollableWidth : viewer.ScrollableHeight;
+
+        private double ViewportDistance =>
+            ScrollsHorizontally ? viewer.ViewportWidth : viewer.ViewportHeight;
+
+        private void ScrollToOffset(double offset)
+        {
+            if (ScrollsHorizontally)
+            {
+                viewer.ScrollToHorizontalOffset(offset);
+                return;
+            }
+
+            viewer.ScrollToVerticalOffset(offset);
         }
     }
 
@@ -424,16 +502,14 @@ public static class SmoothWheelScrollBehavior
         }
     }
 
-    private static double ResolveWheelDistance(ScrollViewer viewer)
+    internal static double ResolveWheelDistance(ScrollViewer viewer)
     {
-        var configuredLines = SystemParameters.WheelScrollLines;
-        if (configuredLines < 0)
-        {
-            return Math.Max(WheelDistance, viewer.ViewportHeight * 0.82);
-        }
-
-        return WheelDistance * Math.Max(1d, configuredLines / 3d);
+        ArgumentNullException.ThrowIfNull(viewer);
+        return WheelDistance;
     }
+
+    internal static double ResolveMaximumPendingDistance(double viewportDistance) =>
+        Math.Clamp(viewportDistance * 0.55, 120, 300);
 
     private static WheelRoute FindScrollRoute(DependencyObject? source, int delta)
     {
@@ -442,7 +518,7 @@ public static class SmoothWheelScrollBehavior
             if (source is ScrollViewer viewer)
             {
                 var canScroll =
-                    viewer.ScrollableHeight > CompletionTolerance &&
+                    GetScrollableDistance(viewer) > CompletionTolerance &&
                     CanScrollInDirection(viewer, delta);
                 switch (ResolveViewerWheelDisposition(
                             canScroll,
@@ -505,14 +581,28 @@ public static class SmoothWheelScrollBehavior
         return false;
     }
 
-    private static bool CanScrollInDirection(ScrollViewer viewer, int delta) =>
-        delta > 0
-            ? viewer.VerticalOffset > CompletionTolerance
-            : viewer.VerticalOffset < viewer.ScrollableHeight - CompletionTolerance;
+    private static bool CanScrollInDirection(ScrollViewer viewer, int delta)
+    {
+        var offset = GetCurrentOffset(viewer);
+        var scrollableDistance = GetScrollableDistance(viewer);
+        return delta > 0
+            ? offset > CompletionTolerance
+            : offset < scrollableDistance - CompletionTolerance;
+    }
 
-    private static bool IsAtVerticalBoundary(ScrollViewer viewer) =>
-        viewer.VerticalOffset <= CompletionTolerance ||
-        viewer.VerticalOffset >= viewer.ScrollableHeight - CompletionTolerance;
+    private static bool IsAtScrollBoundary(ScrollViewer viewer)
+    {
+        var offset = GetCurrentOffset(viewer);
+        var scrollableDistance = GetScrollableDistance(viewer);
+        return offset <= CompletionTolerance ||
+               offset >= scrollableDistance - CompletionTolerance;
+    }
+
+    private static double GetCurrentOffset(ScrollViewer viewer) =>
+        GetScrollsHorizontally(viewer) ? viewer.HorizontalOffset : viewer.VerticalOffset;
+
+    private static double GetScrollableDistance(ScrollViewer viewer) =>
+        GetScrollsHorizontally(viewer) ? viewer.ScrollableWidth : viewer.ScrollableHeight;
 
     private static DependencyObject? GetParent(DependencyObject source)
     {

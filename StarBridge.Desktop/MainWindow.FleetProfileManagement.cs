@@ -16,6 +16,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using StarBridge.Desktop.Theming;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 using Cursors = System.Windows.Input.Cursors;
@@ -218,7 +219,7 @@ public partial class MainWindow
             ? "尚未发布"
             : $"已发布 · {_fleetNoticeTitle}";
         ManageOverviewApplicationText.Text = $"{pendingApplicationCount.ToString(CultureInfo.InvariantCulture)} 个";
-        ManageOverviewMemberText.Text = $"{_players.Count.ToString(CultureInfo.InvariantCulture)} 名成员 / {_squads.Count.ToString(CultureInfo.InvariantCulture)} 个小队";
+        ManageOverviewMemberText.Text = $"{_players.Count.ToString(CultureInfo.InvariantCulture)} 名成员";
         ManageOverviewResourceText.Text = _fleetShipInventory.Count > 0
             ? $"{_fleetShipInventory.Count.ToString(CultureInfo.InvariantCulture)} 艘舰船"
             : "等待成员共享";
@@ -233,9 +234,8 @@ public partial class MainWindow
             CanCurrentUserViewFleetLogs());
         ManageOverviewPriorityTitleText.Text = priority.Title;
         ManageOverviewPriorityDescriptionText.Text = priority.Description;
-        ManageOverviewPriorityTitleText.Foreground = priority.RequiresAttention
-            ? (System.Windows.Media.Brush)FindResource("StatusWarningBrush")
-            : (System.Windows.Media.Brush)FindResource("StatusSuccessBrush");
+        ManageOverviewPriorityTitleText.Foreground = FleetCommandBrush(
+            priority.RequiresAttention ? BridgeBrushToken.StatusWarn : BridgeBrushToken.StatusOk);
         ManageOverviewPriorityButton.Content = priority.ActionText;
         ManageOverviewPriorityButton.Tag = priority.Target.ToString();
         ManageOverviewPriorityButton.Visibility = priority.Target == FleetManagementOverviewTarget.None
@@ -384,7 +384,6 @@ public partial class MainWindow
         ManagePublicTagsCheck.IsChecked = _fleetPublicShowTags;
         ManagePublicSystemsCheck.IsChecked = _fleetPublicShowActiveSystems;
         ManagePublicActivityCheck.IsChecked = _fleetPublicShowActivityTime;
-        ManagePublicContactsCheck.IsChecked = _fleetPublicShowExternalContacts;
         SelectComboBoxItemByTag(ManagePublicMemberScaleBox, _fleetPublicMemberScaleMode);
         SelectComboBoxItemByTag(ManagePublicShipScaleBox, _fleetPublicShipScaleMode);
         RefreshManageFleetPublicVisibilitySummary();
@@ -604,8 +603,6 @@ public partial class MainWindow
         SetCheckBoxEditableState(ManagePublicTagsCheck, canEditProfile);
         SetCheckBoxEditableState(ManagePublicSystemsCheck, canEditProfile);
         SetCheckBoxEditableState(ManagePublicActivityCheck, canEditProfile);
-        SetCheckBoxEditableState(ManagePublicContactsCheck, canEditProfile);
-
         if (ManageProfileSystemOptionsList is not null)
         {
             ManageProfileSystemOptionsList.IsEnabled = canEditProfile && _manageFleetSystemOptions.Any(option => option.IsImageAvailable);
@@ -1719,6 +1716,15 @@ public partial class MainWindow
         RefreshFleetExternalContactsEditor();
     }
 
+    private void ApplyLoadedExternalContactPublicationState(bool isCurrentlyPublished)
+    {
+        _fleetExternalContactPublicationMode = FleetExternalContactPublication.ResolveLoadedMode(
+            isCurrentlyPublished,
+            _fleetExternalContacts);
+        _legacyExternalContactPublicationConfirmed = false;
+        RefreshFleetExternalContactsEditor();
+    }
+
     private void RefreshFleetExternalContactsEditor()
     {
         if (ManageExternalContactCountText is not null)
@@ -1739,6 +1745,49 @@ public partial class MainWindow
             ManageAddExternalContactButton.IsEnabled = _isManageProfileEditMode && _fleetExternalContacts.Count < 5;
             ManageAddExternalContactButton.Opacity = ManageAddExternalContactButton.IsEnabled ? 1 : 0.62;
         }
+
+        var requiresLegacyDecision =
+            _fleetExternalContactPublicationMode == FleetExternalContactPublicationMode.LegacyPrivate &&
+            FleetExternalContactPublication.ShouldPublish(_fleetExternalContacts);
+        if (ManageLegacyPrivateExternalContactsWarning is not null)
+        {
+            ManageLegacyPrivateExternalContactsWarning.Visibility = requiresLegacyDecision
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (ManageLegacyPrivateExternalContactsText is not null)
+        {
+            ManageLegacyPrivateExternalContactsText.Text = _legacyExternalContactPublicationConfirmed
+                ? "已确认：保存后，这些联系方式将在寻找舰队中公开。"
+                : "这些旧版联系方式目前未公开。保存其他设置不会公开它们；请清空不希望公开的内容，或确认公开后再保存。";
+        }
+
+        if (ConfirmLegacyPrivateExternalContactsButton is not null)
+        {
+            ConfirmLegacyPrivateExternalContactsButton.Content = _legacyExternalContactPublicationConfirmed
+                ? "已确认公开"
+                : "确认公开";
+            ConfirmLegacyPrivateExternalContactsButton.IsEnabled =
+                _isManageProfileEditMode &&
+                requiresLegacyDecision &&
+                !_legacyExternalContactPublicationConfirmed;
+        }
+    }
+
+    private void ConfirmLegacyPrivateExternalContactsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_fleetExternalContactPublicationMode != FleetExternalContactPublicationMode.LegacyPrivate ||
+            !FleetExternalContactPublication.ShouldPublish(_fleetExternalContacts))
+        {
+            return;
+        }
+
+        EnsureManageProfileDraftBaseline();
+        _legacyExternalContactPublicationConfirmed = true;
+        RefreshFleetExternalContactsEditor();
+        SetFleetDescriptionStatus("已确认公开旧版联系方式；保存更改后生效。", ManageProfileStatusTone.Info);
+        HandleManageProfileDraftChanged();
     }
 
     private void ManageFleetTimeZoneChanged(object sender, SelectionChangedEventArgs e)
@@ -1891,8 +1940,9 @@ public partial class MainWindow
         {
             ManageTagUnsavedPrompt.Visibility = Visibility.Collapsed;
         }
+        ManageTagSelectorFooter.Visibility = Visibility.Visible;
 
-        UiMotion.ShowModal(ManageTagSelectorOverlay, ManageTagSelectorCard);
+        ManageTagSelectorOverlay.Show();
 
         RenderManageTagSelector();
     }
@@ -1926,8 +1976,8 @@ public partial class MainWindow
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Cursor = Cursors.Hand,
                 Tag = category.Id,
-                Background = isActive ? BrushFromHex(category.AccentHex, 0.24) : CreateSolidBrush("#0B1B28"),
-                BorderBrush = isActive ? BrushFromHex(category.AccentHex, 0.92) : CreateSolidBrush("#19384B"),
+                Background = isActive ? BrushFromHex(category.AccentHex, 0.24) : FleetCommandBrush(BridgeBrushToken.Rail),
+                BorderBrush = isActive ? BrushFromHex(category.AccentHex, 0.92) : FleetCommandBrush(BridgeBrushToken.Hairline),
                 BorderThickness = new Thickness(1),
                 ToolTip = category.Description
             };
@@ -1950,7 +2000,7 @@ public partial class MainWindow
                 Text = category.Name,
                 Margin = new Thickness(10, 0, 6, 0),
                 VerticalAlignment = VerticalAlignment.Center,
-                Foreground = isActive ? FindBrush("PrimaryTextBrush", Brushes.AliceBlue) : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = FleetCommandBrush(isActive ? BridgeBrushToken.Ink : BridgeBrushToken.Ink2),
                 FontWeight = isActive ? FontWeights.SemiBold : FontWeights.Normal,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
@@ -1985,6 +2035,7 @@ public partial class MainWindow
         {
             ManageTagUnsavedPrompt.Visibility = Visibility.Collapsed;
         }
+        ManageTagSelectorFooter.Visibility = Visibility.Visible;
 
         RenderManageTagSelector();
     }
@@ -2020,8 +2071,8 @@ public partial class MainWindow
                 MinHeight = 32,
                 Margin = new Thickness(0, 0, 8, 8),
                 Padding = new Thickness(10, 6, 10, 6),
-                Background = isSelected ? tag.BackgroundBrush : CreateSolidBrush("#0D1D29"),
-                BorderBrush = isSelected ? tag.AccentBrush : CreateSolidBrush("#24506A"),
+                Background = isSelected ? tag.BackgroundBrush : FleetCommandBrush(BridgeBrushToken.Panel),
+                BorderBrush = isSelected ? tag.AccentBrush : FleetCommandBrush(BridgeBrushToken.ChipHairline),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(2),
                 Cursor = Cursors.Hand,
@@ -2044,9 +2095,7 @@ public partial class MainWindow
             content.Children.Add(new TextBlock
             {
                 Text = tag.Name,
-                Foreground = isSelected
-                    ? FindBrush("PrimaryTextBrush", Brushes.AliceBlue)
-                    : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+                Foreground = FleetCommandBrush(isSelected ? BridgeBrushToken.Ink : BridgeBrushToken.Ink2),
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center
@@ -2095,6 +2144,7 @@ public partial class MainWindow
         {
             ManageTagUnsavedPrompt.Visibility = Visibility.Collapsed;
         }
+        ManageTagSelectorFooter.Visibility = Visibility.Visible;
 
         RenderManageTagSelector();
     }
@@ -2126,20 +2176,8 @@ public partial class MainWindow
 
     private void ManageTagSelectorCloseButton_Click(object sender, RoutedEventArgs e)
     {
-        TryCloseManageTagSelector();
-    }
-
-    private void ManageTagSelectorOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (ReferenceEquals(e.OriginalSource, ManageTagSelectorOverlay))
-        {
-            TryCloseManageTagSelector();
-        }
-    }
-
-    private void ManageTagSelectorCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
         e.Handled = true;
+        TryCloseManageTagSelector();
     }
 
     private void TryCloseManageTagSelector()
@@ -2156,6 +2194,7 @@ public partial class MainWindow
 
     private void ShowManageTagUnsavedPrompt()
     {
+        ManageTagSelectorFooter.Visibility = Visibility.Collapsed;
         UiMotion.ShowStatus(ManageTagUnsavedPrompt);
 
         SetManageTagStatus("标签选择尚未保存。");
@@ -2164,6 +2203,7 @@ public partial class MainWindow
     private void ManageTagUnsavedContinueButton_Click(object sender, RoutedEventArgs e)
     {
         UiMotion.HideStatus(ManageTagUnsavedPrompt);
+        ManageTagSelectorFooter.Visibility = Visibility.Visible;
 
         SetManageTagStatus("继续编辑标签。");
     }
@@ -2219,9 +2259,10 @@ public partial class MainWindow
 
     private void CloseManageTagSelector()
     {
-        UiMotion.HideModal(ManageTagSelectorOverlay, ManageTagSelectorCard);
+        ManageTagSelectorOverlay.Hide();
 
         UiMotion.HideStatus(ManageTagUnsavedPrompt);
+        ManageTagSelectorFooter.Visibility = Visibility.Visible;
 
         SetManageTagStatus("点击标签选择或取消选择。");
         _isCreateFleetTagSelectorMode = false;
@@ -2522,7 +2563,7 @@ public partial class MainWindow
         foreach (var ship in _fleetShipInventory)
         {
             snapshot
-                .Append(BuildFleetShipActivityKey(ship)).Append('|')
+                .Append(BuildFleetShipInventoryKey(ship)).Append('|')
                 .Append(ship.ShipName).Append('|')
                 .Append(ship.OwnerDisplay).Append('|')
                 .Append(ship.OwnerGameId).Append('|')
@@ -2536,7 +2577,7 @@ public partial class MainWindow
             foreach (var loaner in ship.LoanerRows)
             {
                 snapshot
-                    .Append("L:").Append(BuildFleetShipActivityKey(loaner)).Append('|')
+                    .Append("L:").Append(BuildFleetShipInventoryKey(loaner)).Append('|')
                     .Append(loaner.ShipName).Append('|')
                     .Append(loaner.ShipSpec).Append('|')
                     .Append(loaner.ShipRole).Append('|')
@@ -2555,30 +2596,18 @@ public partial class MainWindow
                 .Append(player.Status).Append(';');
         }
 
-        snapshot.Append("#A#");
-        foreach (var activity in _fleetShipActivities)
-        {
-            snapshot
-                .Append(activity.Action).Append('|')
-                .Append(activity.ShipName).Append('|')
-                .Append(activity.OwnerDisplay).Append('|')
-                .Append(activity.Timestamp.UtcTicks.ToString(CultureInfo.InvariantCulture)).Append('|')
-                .Append(activity.IsRemoval ? '1' : '0').Append('|')
-                .Append(activity.IsFlyable ? '1' : '0').Append(';');
-        }
-
         return snapshot.ToString();
     }
 
-    private static System.Windows.Media.Brush GetManageProfileStatusBrush(ManageProfileStatusTone tone)
+    private System.Windows.Media.Brush GetManageProfileStatusBrush(ManageProfileStatusTone tone)
     {
         return tone switch
         {
-            ManageProfileStatusTone.Success => FindBrush("ManageProfileStatusSuccessBrush", Brushes.MediumSpringGreen),
-            ManageProfileStatusTone.Warning => FindBrush("ManageProfileStatusWarningBrush", Brushes.Goldenrod),
-            ManageProfileStatusTone.Danger => FindBrush("ManageProfileStatusDangerBrush", Brushes.IndianRed),
-            ManageProfileStatusTone.Locked => FindBrush("ManageProfileStatusLockedBrush", Brushes.LightSlateGray),
-            _ => FindBrush("ManageProfileStatusInfoBrush", Brushes.DeepSkyBlue)
+            ManageProfileStatusTone.Success => FleetCommandBrush(BridgeBrushToken.StatusOk),
+            ManageProfileStatusTone.Warning => FleetCommandBrush(BridgeBrushToken.StatusWarn),
+            ManageProfileStatusTone.Danger => FleetCommandBrush(BridgeBrushToken.StatusBad),
+            ManageProfileStatusTone.Locked => FleetCommandBrush(BridgeBrushToken.StatusOff),
+            _ => FleetCommandBrush(BridgeBrushToken.StatusInfo)
         };
     }
 
@@ -2626,6 +2655,13 @@ public partial class MainWindow
 
     private void ResetFleetProfileDraftButton_Click(object sender, RoutedEventArgs e)
     {
+#if DEBUG
+        if (TryHandleFleetProfileAcceptanceReset())
+        {
+            return;
+        }
+#endif
+
         _isManageProfileDiscardingDraft = true;
         var baselineState = _manageProfileDraftBaselineStateJson;
         ClearManageProfileDraftBaseline();
@@ -2660,6 +2696,13 @@ public partial class MainWindow
 
     private async void SaveFleetProfileDraftButton_Click(object sender, RoutedEventArgs e)
     {
+#if DEBUG
+        if (TryHandleFleetProfileAcceptanceSave())
+        {
+            return;
+        }
+#endif
+
         if (_manageProfileSaveState == ManageProfileSaveState.Saving)
         {
             return;
@@ -2725,7 +2768,6 @@ public partial class MainWindow
         _fleetPublicShowTags = ManagePublicTagsCheck?.IsChecked ?? _fleetPublicShowTags;
         _fleetPublicShowActiveSystems = ManagePublicSystemsCheck?.IsChecked ?? _fleetPublicShowActiveSystems;
         _fleetPublicShowActivityTime = ManagePublicActivityCheck?.IsChecked ?? _fleetPublicShowActivityTime;
-        _fleetPublicShowExternalContacts = ManagePublicContactsCheck?.IsChecked ?? _fleetPublicShowExternalContacts;
         _fleetLanguage = "zh-CN";
         _fleetTimeZoneId = ManageFleetTimeZoneBox?.SelectedValue as string ?? _fleetTimeZoneId;
         SyncFleetActivityWindowsFromEditor();
@@ -2734,6 +2776,10 @@ public partial class MainWindow
             "休闲");
         _fleetWebsiteUrl = NormalizeOptionalField(ManageFleetWebsiteBox?.Text);
         NormalizeFleetExternalContactsFromRows();
+        _fleetPublicShowExternalContacts = FleetExternalContactPublication.ResolveOnSave(
+            _fleetExternalContactPublicationMode,
+            _legacyExternalContactPublicationConfirmed,
+            _fleetExternalContacts);
 
         AddFleetLog("舰队", "基础资料更新", "公开展示与活动信息已更新");
         RefreshFleetHeader();
@@ -2783,6 +2829,7 @@ public partial class MainWindow
 
         SetFleetDescriptionStatus("基础资料已保存并同步。", ManageProfileStatusTone.Success);
         SetManageProfileSaveState(ManageProfileSaveState.Success, "基础资料已保存并同步");
+        ApplyLoadedExternalContactPublicationState(_fleetPublicShowExternalContacts);
         RefreshManageFleetOverview();
         RefreshManageFleetBasicProfile();
         RefreshManageSettingsPreview();

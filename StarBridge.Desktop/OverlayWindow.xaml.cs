@@ -44,14 +44,15 @@ public partial class OverlayWindow : Window, IOverlayHost
     private bool _pendingStartupEventNotificationReveal;
 
     public OverlayWindow(
-        IEnumerable<SquadRow> squads,
-        IEnumerable<PlayerRow> players,
+        OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
         IEnumerable<OverlayLayoutItem> layout,
         OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         Rect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,
@@ -62,7 +63,17 @@ public partial class OverlayWindow : Window, IOverlayHost
         _layout = layout;
         _settings = settings;
         _startupTransitionContext = startupTransitionContext;
-        _viewModel = new OverlayViewModel(squads, players, settings, language, hasFleet, commandState, localShard, sceneContext, chatMessages);
+        _viewModel = new OverlayViewModel(
+            roster,
+            settings,
+            rosterSelectionSettings,
+            language,
+            hasFleet,
+            commandState,
+            localPresence,
+            localShard,
+            sceneContext,
+            chatMessages);
         _lastEventNotificationPulse = _viewModel.EventNotificationPulse;
         _viewModel.PropertyChanged += OverlayViewModel_PropertyChanged;
         DataContext = _viewModel;
@@ -123,13 +134,14 @@ public partial class OverlayWindow : Window, IOverlayHost
     }
 
     public void Refresh(
-        IEnumerable<SquadRow> squads,
-        IEnumerable<PlayerRow> players,
+        OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
         OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         Rect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,
@@ -138,7 +150,17 @@ public partial class OverlayWindow : Window, IOverlayHost
         ApplySurfaceBounds(surfaceBounds);
         _settings = settings;
         _startupTransitionContext = startupTransitionContext;
-        _viewModel.Refresh(squads, players, settings, language, hasFleet, commandState, localShard, sceneContext, chatMessages);
+        _viewModel.Refresh(
+            roster,
+            settings,
+            rosterSelectionSettings,
+            language,
+            hasFleet,
+            commandState,
+            localPresence,
+            localShard,
+            sceneContext,
+            chatMessages);
         StartupTransitionLayer.ApplySettings(settings, startupTransitionContext);
         ApplyLayout();
         if (_viewModel.EventNotificationPulse != _lastEventNotificationPulse)
@@ -784,7 +806,10 @@ public partial class OverlayWindow : Window, IOverlayHost
         Canvas.SetTop(panel, rect.Top);
         if (key.Equals("Squads", StringComparison.OrdinalIgnoreCase))
         {
-            _viewModel.ApplySquadStatusDisplayMode(_settings.SquadStatusDisplayMode, panel.Width, panel.Height);
+            _viewModel.ApplyOverviewPanelLayout(
+                _settings.SquadStatusDisplayMode,
+                panel.Width,
+                panel.Height);
         }
     }
 
@@ -884,13 +909,12 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private static readonly TimeSpan LocationEventMergeWindow = TimeSpan.FromSeconds(15);
 
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _rosterRotationTimer = new();
     private readonly DispatcherTimer _eventNotificationTimer = new(DispatcherPriority.Render) { Interval = EventNotificationIdleInterval };
     private readonly Queue<PendingOverlayEventNotification> _pendingEventNotifications = new();
     private readonly Queue<PendingCommunicationEvent> _pendingCommunicationEvents = new();
     private readonly Queue<OverlayChatMessage> _pendingChatMessages = new();
     private readonly Dictionary<string, OverlayGameEventPlayerState> _gameEventPlayerStates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, OverlayGameEventCommanderState> _gameEventCommanderStates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, OverlayGameEventSquadCountState> _gameEventSquadCountStates = new(StringComparer.OrdinalIgnoreCase);
     private int _noticeSecondsRemaining;
     private int _communicationEventDurationSeconds = 5;
     private string _lastCommandNoticeSignature = "";
@@ -922,6 +946,13 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private OverlaySceneKind? _gameEventSnapshotSceneKind;
     private string _lastGameEventLocalShard = "";
     private OverlayGameEventFleetState _gameEventFleetState = OverlayGameEventFleetState.Empty;
+    private OverlayAuthorizedRoster _authorizedRoster = new([]);
+    private OverlayRosterSelectionSettings _rosterSelectionSettings = OverlayRosterSelectionSettings.Default;
+    private OverlayDisplaySettings _rosterDisplaySettings = OverlayDisplaySettings.Default;
+    private string _rosterLanguage = "zh";
+    private string _rosterLocalShard = "";
+    private double _memberPanelHeight = 440;
+    private int _rosterRotationPage;
     private string _fleetNoticeTitle = "";
     private string _squadsTitle = "";
     private string _membersTitle = "";
@@ -931,6 +962,19 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private Visibility _membersVisibility = Visibility.Visible;
     private Visibility _squadStatusCompactVisibility = Visibility.Visible;
     private Visibility _squadStatusDetailVisibility = Visibility.Collapsed;
+    private Visibility _fleetOverviewVisibility = Visibility.Visible;
+    private Visibility _fleetOverviewFocusVisibility = Visibility.Collapsed;
+    private Visibility _partyOverviewVisibility = Visibility.Collapsed;
+    private Visibility _overviewLocationPlaceholderVisibility = Visibility.Collapsed;
+    private Visibility _overviewLocationsHorizontalVisibility = Visibility.Collapsed;
+    private Visibility _overviewLocationsVerticalVisibility = Visibility.Collapsed;
+    private IReadOnlyList<OverlayOverviewLocationCount> _overviewTopLocations = [];
+    private IReadOnlyList<OverlayOverviewLocationCount> _overviewVisibleLocations = [];
+    private string _overviewLocationPlaceholder = "";
+    private string _overviewLocationPlaceholderMetric = "";
+    private OverlaySceneKind _overviewSceneKind = OverlaySceneKind.Fleet;
+    private double _overviewPanelWidth = OverlayOverviewLocationLayout.HorizontalThreshold;
+    private double _overviewPanelHeight = 200;
     private Visibility _memberStatusVisibility = Visibility.Visible;
     private int _memberLocationColumn = 2;
     private int _memberLocationColumnSpan = 1;
@@ -981,19 +1025,40 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private double _techCrosshairCenterMarkSize = 12;
     private string _techCrosshairCenterMarkData = "M54,71 L66,71 M76,71 L88,71 M71,54 L71,66 M71,76 L71,88";
 
-    public OverlayViewModel(
-        IEnumerable<SquadRow> squads,
-        IEnumerable<PlayerRow> players,
+    internal OverlayViewModel(
+        OverlayAuthorizedRoster roster,
         OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         OverlaySceneContext? sceneContext = null,
         IEnumerable<OverlayChatMessage>? chatMessages = null)
     {
-        Refresh(squads, players, settings, language, hasFleet, commandState, localShard, sceneContext, chatMessages);
+        Refresh(
+            roster,
+            settings,
+            rosterSelectionSettings,
+            language,
+            hasFleet,
+            commandState,
+            localPresence,
+            localShard,
+            sceneContext,
+            chatMessages);
 
+        InitializeTimers();
+    }
+
+    private void InitializeTimers()
+    {
+        _rosterRotationTimer.Tick += (_, _) =>
+        {
+            _rosterRotationPage++;
+            RefreshMembersFromAuthorizedRoster();
+        };
         _timer.Tick += (_, _) =>
         {
             if (_noticeSecondsRemaining > 0)
@@ -1080,6 +1145,66 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     {
         get => _squadStatusDetailVisibility;
         private set => SetProperty(ref _squadStatusDetailVisibility, value);
+    }
+
+    public Visibility FleetOverviewVisibility
+    {
+        get => _fleetOverviewVisibility;
+        private set => SetProperty(ref _fleetOverviewVisibility, value);
+    }
+
+    public Visibility PartyOverviewVisibility
+    {
+        get => _partyOverviewVisibility;
+        private set => SetProperty(ref _partyOverviewVisibility, value);
+    }
+
+    public Visibility FleetOverviewFocusVisibility
+    {
+        get => _fleetOverviewFocusVisibility;
+        private set => SetProperty(ref _fleetOverviewFocusVisibility, value);
+    }
+
+    public Visibility OverviewLocationPlaceholderVisibility
+    {
+        get => _overviewLocationPlaceholderVisibility;
+        private set => SetProperty(ref _overviewLocationPlaceholderVisibility, value);
+    }
+
+    public Visibility OverviewLocationsHorizontalVisibility
+    {
+        get => _overviewLocationsHorizontalVisibility;
+        private set => SetProperty(ref _overviewLocationsHorizontalVisibility, value);
+    }
+
+    public Visibility OverviewLocationsVerticalVisibility
+    {
+        get => _overviewLocationsVerticalVisibility;
+        private set => SetProperty(ref _overviewLocationsVerticalVisibility, value);
+    }
+
+    public IReadOnlyList<OverlayOverviewLocationCount> OverviewTopLocations
+    {
+        get => _overviewTopLocations;
+        private set => SetProperty(ref _overviewTopLocations, value);
+    }
+
+    public IReadOnlyList<OverlayOverviewLocationCount> OverviewVisibleLocations
+    {
+        get => _overviewVisibleLocations;
+        private set => SetProperty(ref _overviewVisibleLocations, value);
+    }
+
+    public string OverviewLocationPlaceholder
+    {
+        get => _overviewLocationPlaceholder;
+        private set => SetProperty(ref _overviewLocationPlaceholder, value);
+    }
+
+    public string OverviewLocationPlaceholderMetric
+    {
+        get => _overviewLocationPlaceholderMetric;
+        private set => SetProperty(ref _overviewLocationPlaceholderMetric, value);
     }
 
     public string SquadStatusPrimaryName
@@ -1489,13 +1614,58 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         RefreshEventNotificationTimer();
     }
 
-    public void Refresh(
-        IEnumerable<SquadRow> squads,
+    internal void Refresh(
+        OverlayAuthorizedRoster roster,
+        OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
+        string language,
+        bool hasFleet,
+        OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
+        string localShard,
+        OverlaySceneContext? sceneContext = null,
+        IEnumerable<OverlayChatMessage>? chatMessages = null)
+    {
+        ArgumentNullException.ThrowIfNull(roster);
+        _authorizedRoster = roster;
+        _rosterSelectionSettings = rosterSelectionSettings.Normalize();
+        _rosterDisplaySettings = settings;
+        _rosterLanguage = language;
+        _rosterLocalShard = localShard;
+        _rosterRotationPage = 0;
+
+        RefreshCore(
+            roster.Members,
+            settings,
+            language,
+            hasFleet,
+            commandState,
+            localPresence,
+            localShard,
+            sceneContext,
+            chatMessages);
+        RefreshMembersFromAuthorizedRoster();
+    }
+
+    public void ApplyMemberViewport(double panelHeight)
+    {
+        var normalized = double.IsFinite(panelHeight) ? Math.Max(0, panelHeight) : 0;
+        if (Math.Abs(_memberPanelHeight - normalized) < 0.5)
+        {
+            return;
+        }
+
+        _memberPanelHeight = normalized;
+        RefreshMembersFromAuthorizedRoster();
+    }
+
+    private void RefreshCore(
         IEnumerable<PlayerRow> players,
         OverlayDisplaySettings settings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
+        PlayerPresenceKind localPresence,
         string localShard,
         OverlaySceneContext? sceneContext = null,
         IEnumerable<OverlayChatMessage>? chatMessages = null)
@@ -1503,7 +1673,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         sceneContext ??= OverlaySceneContext.Fleet(settings.ScenePreference);
         var zh = language.Equals("zh", StringComparison.OrdinalIgnoreCase);
         var playerArray = players.ToArray();
-        var squadArray = hasFleet ? squads.ToArray() : [];
         _showNotice = settings.ShowNotice;
         _communicationEventDurationSeconds = (int)Math.Ceiling(
             OverlayDisplaySettings.NormalizeCommunicationEventDuration(settings.CommunicationEventDurationSeconds));
@@ -1536,10 +1705,15 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         MemberStatusColumnWidth = hideMemberStatus ? new GridLength(0) : new GridLength(OverlayDisplaySettings.MemberStatusColumnPixelWidth);
         MemberLocationColumnWidth = new GridLength(1 - memberNameRatio, GridUnitType.Star);
 
-        var primarySquad = ResolveCurrentSquad(squadArray, playerArray);
-        RefreshSquads(squadArray, playerArray, settings, zh, hasFleet, localShard, sceneContext);
-        RefreshMembers(playerArray, settings, zh, hasFleet, primarySquad);
-        RefreshGameEventNotifications(squadArray, playerArray, settings, zh, hasFleet, primarySquad, localShard, sceneContext);
+        RefreshSquads(
+            playerArray,
+            settings,
+            zh,
+            hasFleet,
+            localPresence,
+            localShard,
+            sceneContext);
+        RefreshGameEventNotifications(playerArray, settings, zh, hasFleet, localShard, sceneContext);
         RefreshChatMessages(chatMessages ?? [], settings, zh, sceneContext);
 
         var nextNoticeTitle = string.IsNullOrWhiteSpace(commandState.NoticeTitle)
@@ -1560,12 +1734,81 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         SquadsTitle = sceneContext.Kind == OverlaySceneKind.PartyRoom
             ? zh ? "房间概况" : "PARTY OVERVIEW"
-            : zh ? "小队态势" : "SQUAD STATUS";
+            : zh ? "舰队总览" : "FLEET OVERVIEW";
         MembersTitle = sceneContext.Kind == OverlaySceneKind.PartyRoom
             ? zh ? "房间成员" : "PARTY MEMBERS"
-            : zh ? "成员状态" : "SQUAD MEMBERS";
+            : zh ? "成员状态" : "FLEET MEMBERS";
         HotkeyToggleLabel = zh ? "热键切换" : "HOTKEY TOGGLE";
         OnChanged(nameof(NotificationVisibility));
+    }
+
+    private void RefreshMembersFromAuthorizedRoster()
+    {
+        Members.Clear();
+        var zh = _rosterLanguage.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        var source = _rosterDisplaySettings.HideSelfMember
+            ? new OverlayAuthorizedRoster(_authorizedRoster.Members.Where(player => !player.IsSelf))
+            : _authorizedRoster;
+        var projection = OverlayRosterPlanner.Project(
+            source,
+            _rosterSelectionSettings,
+            new OverlayRosterViewport(
+                _memberPanelHeight,
+                _rosterLocalShard,
+                null,
+                _rosterRotationPage));
+        var shouldRotate =
+            _rosterSelectionSettings.OverflowMode == OverlayRosterOverflowMode.Rotate &&
+            projection.HiddenOnlineCount + projection.HiddenOfflineCount > 0;
+        _rosterRotationTimer.Interval = TimeSpan.FromSeconds(
+            _rosterSelectionSettings.RotationIntervalSeconds);
+        if (shouldRotate)
+        {
+            _rosterRotationTimer.Start();
+        }
+        else
+        {
+            _rosterRotationTimer.Stop();
+        }
+
+        foreach (var player in source.Resolve(projection))
+        {
+            var online = PlayerPresence.IsOnline(player.SharedPresence);
+            Members.Add(new OverlayMemberRow(
+                FormatMemberName(player, _rosterDisplaySettings.MemberNameMode),
+                player.SharedPresenceText,
+                player.SharedShipDisplayText,
+                player.SharedLocationDisplayText,
+                online ? StatusPalette.SuccessBrush : StatusPalette.DisabledBrush));
+        }
+
+        if (projection.ShowOverflowSummary)
+        {
+            var hiddenTotal = projection.HiddenOnlineCount + projection.HiddenOfflineCount;
+            var summary = projection.HiddenOfflineCount > 0
+                ? zh
+                    ? $"另有 {hiddenTotal} 人（{projection.HiddenOnlineCount} 在线 / {projection.HiddenOfflineCount} 离线）"
+                    : $"{hiddenTotal} more ({projection.HiddenOnlineCount} online / {projection.HiddenOfflineCount} offline)"
+                : zh
+                    ? $"另有 {projection.HiddenOnlineCount} 人在线"
+                    : $"{projection.HiddenOnlineCount} more online";
+            Members.Add(new OverlayMemberRow(summary, "", "", "", MutedBrush));
+        }
+
+        if (Members.Count == 0)
+        {
+            Members.Add(new OverlayMemberRow(
+                zh ? "暂无可显示成员" : "No visible members",
+                "",
+                "",
+                "",
+                MutedBrush));
+        }
+
+        // DirectComposition observes the view model rather than the collection.
+        // Notify once after the closed-set projection is rebuilt so viewport changes
+        // and rotation ticks both publish a new render frame.
+        OnChanged(nameof(Members));
     }
 
     public void QueueCommunicationEvent(string title, string detail)
@@ -1883,13 +2126,46 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         RefreshEventNotificationTimer();
     }
 
-    public void ApplySquadStatusDisplayMode(OverlaySquadStatusDisplayMode mode, double panelWidth, double panelHeight)
+    public void ApplyOverviewPanelLayout(
+        OverlaySquadStatusDisplayMode legacyPartyMode,
+        double panelWidth,
+        double panelHeight)
     {
-        var useDetailed = mode switch
+        _overviewPanelWidth = double.IsFinite(panelWidth) ? Math.Max(0, panelWidth) : 0;
+        _overviewPanelHeight = double.IsFinite(panelHeight) ? Math.Max(0, panelHeight) : 0;
+
+        if (_overviewSceneKind != OverlaySceneKind.PartyRoom)
+        {
+            // D67 fleet layout is fully dimension-driven. The legacy serialized
+            // SquadStatusDisplayMode remains readable for compatibility, but it
+            // cannot override the fleet overview's automatic geometry.
+            SquadStatusCompactVisibility = Visibility.Collapsed;
+            SquadStatusDetailVisibility = Visibility.Collapsed;
+            var layout = OverlayOverviewLocationLayout.Resolve(
+                _overviewPanelWidth,
+                _overviewPanelHeight,
+                OverviewTopLocations);
+            OverviewVisibleLocations = layout.VisibleItems;
+            var hasLocations = layout.VisibleItems.Count > 0;
+            OverviewLocationsHorizontalVisibility = hasLocations &&
+                                                    layout.Orientation == OverlayOverviewLocationOrientation.Horizontal
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            OverviewLocationsVerticalVisibility = hasLocations &&
+                                                  layout.Orientation == OverlayOverviewLocationOrientation.Vertical
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            return;
+        }
+
+        OverviewVisibleLocations = [];
+        OverviewLocationsHorizontalVisibility = Visibility.Collapsed;
+        OverviewLocationsVerticalVisibility = Visibility.Collapsed;
+        var useDetailed = legacyPartyMode switch
         {
             OverlaySquadStatusDisplayMode.Compact => false,
             OverlaySquadStatusDisplayMode.Detailed => true,
-            _ => panelWidth >= 220 && panelHeight >= 168
+            _ => _overviewPanelWidth >= 220 && _overviewPanelHeight >= 168
         };
 
         SquadStatusCompactVisibility = useDetailed ? Visibility.Collapsed : Visibility.Visible;
@@ -1897,12 +2173,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     }
 
     private void RefreshGameEventNotifications(
-        IReadOnlyCollection<SquadRow> squads,
         IReadOnlyCollection<PlayerRow> players,
         OverlayDisplaySettings settings,
         bool zh,
         bool hasFleet,
-        SquadRow? primarySquad,
         string localShard,
         OverlaySceneContext sceneContext)
     {
@@ -1917,8 +2191,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         CompleteEventNotificationMotionWhenDisabled(DateTimeOffset.Now);
         PromotePendingEventNotifications(DateTimeOffset.Now);
         var nextPlayerStates = BuildGameEventPlayerStates(players, settings.MemberNameMode, localShard);
-        var nextCommanderStates = BuildGameEventCommanderStates(squads, players, settings.MemberNameMode, localShard);
-        var nextSquadCountStates = BuildGameEventSquadCountStates(squads, players);
         var nextFleetState = BuildGameEventFleetState(players, localShard);
         var sceneKind = sceneContext.Kind;
         var sceneChanged = _gameEventSnapshotSceneKind.HasValue &&
@@ -1927,7 +2199,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         if (sceneChanged)
         {
-            ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
+            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
             _gameEventSnapshotInitialized = true;
             if (!settings.ShowEventNotifications)
             {
@@ -1938,7 +2210,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         if (!settings.ShowEventNotifications)
         {
-            ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
+            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
             _gameEventSnapshotInitialized = true;
             ClearEventNotifications();
             return;
@@ -1951,7 +2223,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         if (!_gameEventSnapshotInitialized)
         {
-            ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
+            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
             _gameEventSnapshotInitialized = true;
             return;
         }
@@ -1960,7 +2232,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         if (eventTypes == OverlayEventNotificationTypes.None ||
             !hasFleet && !sceneContext.IsLocalOnly)
         {
-            ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
+            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
             return;
         }
 
@@ -1972,48 +2244,29 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 if (nextPlayerStates.TryGetValue(key, out var nextState) &&
                     _gameEventPlayerStates.TryGetValue(key, out var previousState))
                 {
-                    QueuePlayerGameEvents(previousState, nextState, false, eventTypes, zh);
+                    QueuePlayerGameEvents(previousState, nextState, eventTypes, zh);
                 }
             }
 
-            ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
+            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
             return;
         }
 
         QueueLocalServerSummaryIfNeeded(players, localShard, eventTypes, zh);
         QueueFleetSummaryEvents(_gameEventFleetState, nextFleetState, eventTypes, zh);
-        QueueSquadCountEvents(_gameEventSquadCountStates, nextSquadCountStates, settings.MemberScopeMode, primarySquad, eventTypes, zh);
-
-        var commanderKeys = nextCommanderStates.Values
-            .Where(state => !string.IsNullOrWhiteSpace(state.CommanderPlayerKey))
-            .Select(state => state.CommanderPlayerKey!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var player in players)
         {
             var key = ResolvePlayerEventKey(player);
             if (!nextPlayerStates.TryGetValue(key, out var nextState) ||
-                !_gameEventPlayerStates.TryGetValue(key, out var previousState) ||
-                !ShouldNotifyPlayerEvent(nextState, settings.MemberScopeMode, primarySquad))
+                !_gameEventPlayerStates.TryGetValue(key, out var previousState))
             {
                 continue;
             }
 
-            var isCommander = commanderKeys.Contains(key);
-            QueuePlayerGameEvents(previousState, nextState, isCommander, eventTypes, zh);
+            QueuePlayerGameEvents(previousState, nextState, eventTypes, zh);
         }
 
-        foreach (var (squadName, nextState) in nextCommanderStates)
-        {
-            if (!_gameEventCommanderStates.TryGetValue(squadName, out var previousState) ||
-                !ShouldNotifySquadEvent(squadName, settings.MemberScopeMode, primarySquad))
-            {
-                continue;
-            }
-
-            QueueCommanderGameEvents(previousState, nextState, eventTypes, zh);
-        }
-
-        ReplaceGameEventSnapshot(nextPlayerStates, nextCommanderStates, nextSquadCountStates, nextFleetState, localShard);
+        ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
     }
 
     private Dictionary<string, OverlayGameEventPlayerState> BuildGameEventPlayerStates(
@@ -2029,7 +2282,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             states[key] = new OverlayGameEventPlayerState(
                 key,
                 FormatMemberName(player, memberNameMode),
-                player.SquadName,
                 IsGamePresence(player),
                 TryGetOverlayPlayerServerRegion(player, localShard),
                 hasLocalShard && IsPlayerOnLocalServer(player, localShard),
@@ -2039,54 +2291,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 NormalizeGameEventLocation(player),
                 IsUnconfirmedLocation(player.LocationConfidence),
                 player.SharedEventTypes);
-        }
-
-        return states;
-    }
-
-    private Dictionary<string, OverlayGameEventCommanderState> BuildGameEventCommanderStates(
-        IReadOnlyCollection<SquadRow> squads,
-        IReadOnlyCollection<PlayerRow> players,
-        OverlayMemberNameMode memberNameMode,
-        string localShard)
-    {
-        var hasLocalShard = !string.IsNullOrWhiteSpace(localShard);
-        var states = new Dictionary<string, OverlayGameEventCommanderState>(StringComparer.OrdinalIgnoreCase);
-        foreach (var squad in squads)
-        {
-            var commander = ResolveSquadCommander(squad, players);
-            var commanderName = commander is null
-                ? string.IsNullOrWhiteSpace(squad.Commander) ? squad.Name : squad.Commander
-                : FormatMemberName(commander, memberNameMode);
-            var commanderOnline = commander is not null && IsGamePresence(commander);
-            var commanderSyncPaused = commander is not null && IsSyncPausedLiveStatus(commander.LiveStatus);
-            states[squad.Name] = new OverlayGameEventCommanderState(
-                squad.Name,
-                commander is null ? null : ResolvePlayerEventKey(commander),
-                squad.Commander?.Trim() ?? "",
-                commanderName,
-                commanderOnline,
-                commanderSyncPaused,
-                commander is not null &&
-                hasLocalShard &&
-                IsPlayerOnLocalServer(commander, localShard),
-                commander?.SharedEventTypes ?? (int)PlayerSharedEventTypes.All);
-        }
-
-        return states;
-    }
-
-    private static Dictionary<string, OverlayGameEventSquadCountState> BuildGameEventSquadCountStates(
-        IReadOnlyCollection<SquadRow> squads,
-        IReadOnlyCollection<PlayerRow> players)
-    {
-        var states = new Dictionary<string, OverlayGameEventSquadCountState>(StringComparer.OrdinalIgnoreCase);
-        foreach (var squad in squads)
-        {
-            states[squad.Name] = new OverlayGameEventSquadCountState(
-                squad.Name,
-                players.Count(player => IsSameSquad(player.SquadName, squad.Name) && IsGamePresence(player)),
-                squad.MemberCount);
         }
 
         return states;
@@ -2104,8 +2308,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void ReplaceGameEventSnapshot(
         Dictionary<string, OverlayGameEventPlayerState> playerStates,
-        Dictionary<string, OverlayGameEventCommanderState> commanderStates,
-        Dictionary<string, OverlayGameEventSquadCountState> squadCountStates,
         OverlayGameEventFleetState fleetState,
         string localShard)
     {
@@ -2113,18 +2315,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         foreach (var (key, state) in playerStates)
         {
             _gameEventPlayerStates[key] = state;
-        }
-
-        _gameEventCommanderStates.Clear();
-        foreach (var (key, state) in commanderStates)
-        {
-            _gameEventCommanderStates[key] = state;
-        }
-
-        _gameEventSquadCountStates.Clear();
-        foreach (var (key, state) in squadCountStates)
-        {
-            _gameEventSquadCountStates[key] = state;
         }
 
         _gameEventFleetState = fleetState;
@@ -2166,12 +2356,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private void QueuePlayerGameEvents(
         OverlayGameEventPlayerState previous,
         OverlayGameEventPlayerState next,
-        bool isCommander,
         OverlayEventNotificationTypes eventTypes,
         bool zh)
     {
         if (previous.SyncPaused != next.SyncPaused &&
-            !isCommander &&
             AllowsSharedEvent(next, PlayerSharedEventTypes.Presence) &&
             ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.MemberPresence))
         {
@@ -2185,7 +2373,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         }
 
         if (previous.Online != next.Online &&
-            !isCommander &&
             !previous.SyncPaused &&
             !next.SyncPaused &&
             AllowsSharedEvent(next, PlayerSharedEventTypes.Presence) &&
@@ -2314,16 +2501,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             }
         }
 
-        if (!previous.SquadName.Equals(next.SquadName, StringComparison.OrdinalIgnoreCase) &&
-            AllowsSharedEvent(next, PlayerSharedEventTypes.Squad) &&
-            ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.SquadChange))
-        {
-            QueueEventNotification(
-                OverlayEventNotificationTypes.SquadChange,
-                zh ? "小队变动" : "Squad update",
-                FormatSquadChangeDetail(previous, next, zh),
-                TitleBrush);
-        }
     }
 
     private static (string Title, string Detail) FormatMemberPresenceNotification(
@@ -2339,104 +2516,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             : zh
                 ? ("成员离线", $"{displayName} 已下线")
                 : ("Member offline", $"{displayName} is offline");
-    }
-
-    private void QueueCommanderGameEvents(
-        OverlayGameEventCommanderState previous,
-        OverlayGameEventCommanderState next,
-        OverlayEventNotificationTypes eventTypes,
-        bool zh)
-    {
-        if (!ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.CommanderChange))
-        {
-            return;
-        }
-
-        if (!IsSameCommanderIdentity(previous, next))
-        {
-            QueueEventNotification(
-                OverlayEventNotificationTypes.CommanderChange,
-                zh ? "小队指挥官变更" : "Squad lead changed",
-                zh
-                    ? $"{next.SquadName} 指挥官变更为 {next.CommanderName}"
-                    : $"{next.SquadName} lead changed to {next.CommanderName}",
-                AlertBrush,
-                important: true);
-        }
-
-        if (!PlayerEventSharingSettings.FromWireValue(next.SharedEventTypes)
-                .HasFlag(PlayerSharedEventTypes.Presence))
-        {
-            return;
-        }
-
-        if (previous.CommanderSyncPaused != next.CommanderSyncPaused)
-        {
-            var notice = FormatCommanderPresenceNotification(next.SquadName, next.CommanderName, next.CommanderOnline, next.CommanderSyncPaused, next.CommanderSameServer, zh);
-            QueueEventNotification(
-                OverlayEventNotificationTypes.CommanderChange,
-                notice.Title,
-                notice.Detail,
-                next.CommanderSyncPaused ? MutedBrush : AlertBrush,
-                important: true);
-            return;
-        }
-
-        if (previous.CommanderOnline == next.CommanderOnline)
-        {
-            return;
-        }
-
-        var commanderNotice = FormatCommanderPresenceNotification(
-            next.SquadName,
-            next.CommanderName,
-            next.CommanderOnline,
-            next.CommanderSyncPaused,
-            next.CommanderSameServer,
-            zh);
-        QueueEventNotification(
-            OverlayEventNotificationTypes.CommanderChange,
-            commanderNotice.Title,
-            commanderNotice.Detail,
-            next.CommanderOnline ? AlertBrush : MutedBrush,
-            important: true);
-    }
-
-    private static bool IsSameCommanderIdentity(
-        OverlayGameEventCommanderState previous,
-        OverlayGameEventCommanderState next)
-    {
-        if (!string.IsNullOrWhiteSpace(previous.CommanderPlayerKey) &&
-            !string.IsNullOrWhiteSpace(next.CommanderPlayerKey))
-        {
-            return previous.CommanderPlayerKey.Equals(
-                next.CommanderPlayerKey,
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        return previous.DeclaredCommanderIdentity.Equals(
-            next.DeclaredCommanderIdentity,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static (string Title, string Detail) FormatCommanderPresenceNotification(
-        string squadName,
-        string commanderName,
-        bool nextOnline,
-        bool nextSyncPaused,
-        bool sameServer,
-        bool zh)
-    {
-        var sameServerText = sameServer
-            ? zh ? "，与你在同服务器" : ", same server"
-            : "";
-        return nextOnline
-            ? zh
-                ? ("小队指挥官上线", $"{squadName} 指挥官 {commanderName} 已上线{sameServerText}")
-                : ("Squad lead online", $"{squadName} lead {commanderName} is online{sameServerText}")
-            : zh
-                ? ("小队指挥官下线", $"{squadName} 指挥官 {commanderName} 已下线")
-                : ("Squad lead offline", $"{squadName} lead {commanderName} is offline");
     }
 
     private void QueueFleetSummaryEvents(
@@ -2470,61 +2549,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 AlertBrush,
                 important: true);
         }
-    }
-
-    private void QueueSquadCountEvents(
-        IReadOnlyDictionary<string, OverlayGameEventSquadCountState> previousStates,
-        IReadOnlyDictionary<string, OverlayGameEventSquadCountState> nextStates,
-        OverlayMemberScopeMode scopeMode,
-        SquadRow? primarySquad,
-        OverlayEventNotificationTypes eventTypes,
-        bool zh)
-    {
-        if (!ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.OnlineSummary))
-        {
-            return;
-        }
-
-        foreach (var (squadName, next) in nextStates)
-        {
-            if (!previousStates.TryGetValue(squadName, out var previous) ||
-                previous.OnlineCount == next.OnlineCount ||
-                !ShouldNotifySquadEvent(squadName, scopeMode, primarySquad))
-            {
-                continue;
-            }
-
-            QueueEventNotification(
-                OverlayEventNotificationTypes.OnlineSummary,
-                zh ? "小队在线" : "Squad online",
-                zh
-                    ? $"{next.SquadName} 在线 {next.OnlineCount.ToString(CultureInfo.InvariantCulture)} / {next.MemberCount.ToString(CultureInfo.InvariantCulture)}"
-                    : $"{next.SquadName} online {next.OnlineCount.ToString(CultureInfo.InvariantCulture)} / {next.MemberCount.ToString(CultureInfo.InvariantCulture)}",
-                next.OnlineCount >= previous.OnlineCount ? OnlineBrush : MutedBrush,
-                important: true);
-        }
-    }
-
-    private static string FormatSquadChangeDetail(
-        OverlayGameEventPlayerState previous,
-        OverlayGameEventPlayerState next,
-        bool zh)
-    {
-        var previousUnassigned = IsUnassignedSquadName(previous.SquadName);
-        var nextUnassigned = IsUnassignedSquadName(next.SquadName);
-        if (previousUnassigned && !nextUnassigned)
-        {
-            return zh ? $"{next.DisplayName} 加入 {next.SquadName}" : $"{next.DisplayName} joined {next.SquadName}";
-        }
-
-        if (!previousUnassigned && nextUnassigned)
-        {
-            return zh ? $"{next.DisplayName} 离开 {previous.SquadName}" : $"{next.DisplayName} left {previous.SquadName}";
-        }
-
-        return zh
-            ? $"{next.DisplayName} 从 {previous.SquadName} 调整至 {next.SquadName}"
-            : $"{next.DisplayName} moved from {previous.SquadName} to {next.SquadName}";
     }
 
     private static string? NormalizeGameEventShip(PlayerRow player)
@@ -2609,39 +2633,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         OverlayGameEventPlayerState player,
         PlayerSharedEventTypes eventType) =>
         PlayerEventSharingSettings.FromWireValue(player.SharedEventTypes).HasFlag(eventType);
-
-    private static bool ShouldNotifyPlayerEvent(
-        OverlayGameEventPlayerState player,
-        OverlayMemberScopeMode scopeMode,
-        SquadRow? primarySquad)
-    {
-        var primarySquadName = primarySquad?.Name;
-        return scopeMode switch
-        {
-            OverlayMemberScopeMode.AllFleet => true,
-            OverlayMemberScopeMode.OtherSquads => string.IsNullOrWhiteSpace(primarySquadName)
-                ? !IsUnassignedSquadName(player.SquadName)
-                : !IsSameSquad(player.SquadName, primarySquadName) && !IsUnassignedSquadName(player.SquadName),
-            _ => string.IsNullOrWhiteSpace(primarySquadName) ||
-                 IsSameSquad(player.SquadName, primarySquadName)
-        };
-    }
-
-    private static bool ShouldNotifySquadEvent(
-        string squadName,
-        OverlayMemberScopeMode scopeMode,
-        SquadRow? primarySquad)
-    {
-        var primarySquadName = primarySquad?.Name;
-        return scopeMode switch
-        {
-            OverlayMemberScopeMode.AllFleet => true,
-            OverlayMemberScopeMode.OtherSquads => string.IsNullOrWhiteSpace(primarySquadName) ||
-                                                 !IsSameSquad(squadName, primarySquadName),
-            _ => string.IsNullOrWhiteSpace(primarySquadName) ||
-                 IsSameSquad(squadName, primarySquadName)
-        };
-    }
 
     private static string ResolvePlayerEventKey(PlayerRow player)
     {
@@ -2879,7 +2870,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private sealed record OverlayGameEventPlayerState(
         string Key,
         string DisplayName,
-        string SquadName,
         bool Online,
         string? ServerRegion,
         bool SameServer,
@@ -2889,21 +2879,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         string? Location,
         bool LocationUnconfirmed,
         int SharedEventTypes);
-
-    private sealed record OverlayGameEventCommanderState(
-        string SquadName,
-        string? CommanderPlayerKey,
-        string DeclaredCommanderIdentity,
-        string CommanderName,
-        bool CommanderOnline,
-        bool CommanderSyncPaused,
-        bool CommanderSameServer,
-        int SharedEventTypes);
-
-    private sealed record OverlayGameEventSquadCountState(
-        string SquadName,
-        int OnlineCount,
-        int MemberCount);
 
     private sealed record OverlayGameEventFleetState(
         int OnlineCount,
@@ -3461,155 +3436,54 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     }
 
     private void RefreshSquads(
-        IEnumerable<SquadRow> squads,
         IEnumerable<PlayerRow> players,
         OverlayDisplaySettings settings,
         bool zh,
         bool hasFleet,
+        PlayerPresenceKind localPresence,
         string localShard,
         OverlaySceneContext sceneContext)
     {
         Squads.Clear();
         CompactSquads.Clear();
         var playerRows = players.ToArray();
-        if (sceneContext.Kind == OverlaySceneKind.PartyRoom)
-        {
-            RefreshPartyRoomOverview(squads, playerRows, settings, zh, localShard, sceneContext);
-            return;
-        }
-
-        if (!hasFleet)
-        {
-            SquadStatusPrimaryName = zh ? "无舰队" : "No Fleet";
-            SquadStatusSummary = FormatFleetOnlineSummary(playerRows, zh);
-            SquadStatusServerSummary = zh ? "服务器待确认" : "Server pending";
-            SquadStatusFocusLine = zh ? "请先加入或创建舰队" : "Join or create a fleet first";
-            SquadStatusSecondaryLine = "";
-            SquadStatusBrush = MutedBrush;
-            CompactSquads.Add(new OverlaySquadRow(
-                zh ? "无舰队" : "No Fleet",
-                "!",
-                zh ? "等待舰队同步" : "Waiting for fleet sync",
-                FormatSquadOnlineSummary(null, playerRows, zh),
-                MutedBrush,
-                null,
-                settings.HideSquadIcons ? Visibility.Collapsed : Visibility.Visible,
-                Visibility.Visible));
-            return;
-        }
-
-        var squadRows = squads.ToArray();
-        var primarySquad = ResolveCurrentSquad(squadRows, playerRows);
-        SquadStatusPrimaryName = zh ? "舰队总览" : "Fleet Overview";
-        SquadStatusSummary = FormatFleetOnlineSummary(playerRows, zh);
-        SquadStatusServerSummary = ResolveDominantServerSummary(playerRows, localShard, zh);
-        SquadStatusFocusLine = FormatSameServerLine(playerRows, localShard, zh);
-        SquadStatusSecondaryLine = "";
-        SquadStatusBrush = ResolveFleetStatusBrush(playerRows);
-        if (primarySquad is null)
-        {
-            CompactSquads.Add(new OverlaySquadRow(
-                zh ? "未分配小队" : "Unassigned",
-                "-",
-                zh ? "等待小队分配" : "Waiting for squad assignment",
-                FormatSquadOnlineSummary(null, playerRows, zh),
-                MutedBrush,
-                null,
-                settings.HideSquadIcons ? Visibility.Collapsed : Visibility.Visible,
-                Visibility.Visible));
-            return;
-        }
-
-        var primaryHasEmblem = !string.IsNullOrWhiteSpace(primarySquad.EmblemPath);
-        CompactSquads.Add(new OverlaySquadRow(
-            primarySquad.Name,
-            primarySquad.Icon,
-            zh ? "当前小队" : "Current squad",
-            FormatSquadOnlineSummary(primarySquad, playerRows, zh),
-            ResolveSquadStatusBrush(primarySquad, playerRows),
-            primarySquad.EmblemPath,
-            settings.HideSquadIcons ? Visibility.Collapsed : Visibility.Visible,
-            primaryHasEmblem ? Visibility.Collapsed : Visibility.Visible));
-
-        foreach (var squad in squadRows
-                     .OrderByDescending(squad => ReferenceEquals(squad, primarySquad))
-                     .ThenBy(squad => squad.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            var hasEmblem = !string.IsNullOrWhiteSpace(squad.EmblemPath);
-            Squads.Add(new OverlaySquadRow(
-                squad.Name,
-                squad.Icon,
-                FormatSquadDetailLine(squad, playerRows, localShard, zh),
-                FormatSquadOnlineSummary(squad, playerRows, zh),
-                ResolveSquadStatusBrush(squad, playerRows),
-                squad.EmblemPath,
-                settings.HideSquadIcons ? Visibility.Collapsed : Visibility.Visible,
-                hasEmblem ? Visibility.Collapsed : Visibility.Visible));
-        }
-    }
-
-    private void RefreshPartyRoomOverview(
-        IEnumerable<SquadRow> squads,
-        IReadOnlyCollection<PlayerRow> players,
-        OverlayDisplaySettings settings,
-        bool zh,
-        string localShard,
-        OverlaySceneContext sceneContext)
-    {
-        var capacity = sceneContext.RoomCapacity > 0 ? sceneContext.RoomCapacity : players.Count;
-        var online = players.Count(IsGamePresence);
-        var host = players.FirstOrDefault(player => player.Role.Equals("房主", StringComparison.OrdinalIgnoreCase));
-        var hostOnline = host is not null && IsGamePresence(host);
-        var roomName = string.IsNullOrWhiteSpace(sceneContext.RoomTitle)
-            ? zh ? "当前房间" : "Current party"
-            : sceneContext.RoomTitle!;
-
-        SquadStatusPrimaryName = roomName;
-        SquadStatusSummary = zh ? $"游戏中 {online}/{capacity}" : $"In game {online}/{capacity}";
-        SquadStatusServerSummary = zh
-            ? hostOnline ? "房主游戏中" : "房主未在游戏"
-            : hostOnline ? "Host in game" : "Host not in game";
-        SquadStatusFocusLine = FormatSameServerLine(players, localShard, zh);
-        SquadStatusSecondaryLine = string.IsNullOrWhiteSpace(sceneContext.RoomActivity)
-            ? sceneContext.RoomGoal ?? ""
-            : sceneContext.RoomActivity!;
-        SquadStatusBrush = ResolveFleetStatusBrush(players);
-
-        var iconVisibility = settings.HideSquadIcons ? Visibility.Collapsed : Visibility.Visible;
-        var detail = string.IsNullOrWhiteSpace(sceneContext.RoomGoal)
-            ? zh ? "房间目标待补充" : "Party goal pending"
-            : sceneContext.RoomGoal!;
-        var summary = zh ? $"成员 {players.Count}/{capacity}" : $"Members {players.Count}/{capacity}";
-        var row = new OverlaySquadRow(
-            roomName,
-            "",
-            detail,
-            summary,
-            SquadStatusBrush,
-            null,
-            iconVisibility,
-            Visibility.Collapsed,
-            IsPartyRoomIcon: true);
-        CompactSquads.Add(row);
-        Squads.Add(row);
-    }
-
-    private static SquadRow? ResolveCurrentSquad(IReadOnlyCollection<SquadRow> squads, IReadOnlyCollection<PlayerRow> players)
-    {
-        var self = players.FirstOrDefault(player => player.IsSelf);
-        var squadName = self?.SquadName;
-        if (!string.IsNullOrWhiteSpace(squadName) &&
-            !squadName.Equals("Unassigned", StringComparison.OrdinalIgnoreCase))
-        {
-            var matchedSquad = squads.FirstOrDefault(squad =>
-                squad.Name.Equals(squadName, StringComparison.OrdinalIgnoreCase));
-            if (matchedSquad is not null)
-            {
-                return matchedSquad;
-            }
-        }
-
-        return squads.FirstOrDefault();
+        var overview = OverlayOverviewProjection.Project(
+            playerRows,
+            sceneContext,
+            hasFleet,
+            localPresence,
+            localShard,
+            zh ? "zh" : "en");
+        SquadsTitle = overview.Title;
+        SquadStatusPrimaryName = overview.Primary;
+        SquadStatusSummary = overview.Summary;
+        SquadStatusServerSummary = overview.ServerSummary;
+        SquadStatusFocusLine = overview.Focus;
+        SquadStatusSecondaryLine = overview.Secondary;
+        OverviewLocationPlaceholder = overview.LocationPlaceholder;
+        OverviewLocationPlaceholderMetric = overview.LocationPlaceholderMetric;
+        SquadStatusBrush = overview.StatusBrush;
+        _overviewSceneKind = sceneContext.Kind;
+        FleetOverviewVisibility = sceneContext.Kind == OverlaySceneKind.Fleet
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        FleetOverviewFocusVisibility = sceneContext.Kind == OverlaySceneKind.Fleet &&
+                                       !string.IsNullOrWhiteSpace(overview.Focus)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        OverviewLocationPlaceholderVisibility = sceneContext.Kind == OverlaySceneKind.Fleet &&
+                                                overview.TopLocations.Count == 0 &&
+                                                !string.IsNullOrWhiteSpace(overview.LocationPlaceholder)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PartyOverviewVisibility = sceneContext.Kind == OverlaySceneKind.PartyRoom
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        OverviewTopLocations = overview.TopLocations;
+        ApplyOverviewPanelLayout(
+            settings.SquadStatusDisplayMode,
+            _overviewPanelWidth,
+            _overviewPanelHeight);
     }
 
     private static string FormatFleetOnlineSummary(IReadOnlyCollection<PlayerRow> players, bool zh)
@@ -3677,7 +3551,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     {
         if (string.IsNullOrWhiteSpace(localShard))
         {
-            return zh ? "与你同服务器分线 未进入服务器" : "Same server unavailable";
+            return zh ? "与你同服务器 未进入服务器" : "Same server unavailable";
         }
 
         var sameServerCount = players.Count(player =>
@@ -3685,7 +3559,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             IsGamePresence(player) &&
             IsPlayerOnLocalServer(player, localShard));
         return zh
-            ? $"与你同服务器分线 {sameServerCount.ToString(CultureInfo.InvariantCulture)} 人"
+            ? $"与你同服务器 {sameServerCount.ToString(CultureInfo.InvariantCulture)} 人"
             : $"Same server {sameServerCount.ToString(CultureInfo.InvariantCulture)}";
     }
 
@@ -3849,207 +3723,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         }
 
         return "未知";
-    }
-
-    private static Brush ResolveFleetStatusBrush(IReadOnlyCollection<PlayerRow> players)
-    {
-        var online = players.Count(IsGamePresence);
-        if (players.Count == 0 || online == 0)
-        {
-            return StatusPalette.DisabledBrush;
-        }
-
-        return online == players.Count
-            ? StatusPalette.SuccessBrush
-            : StatusPalette.InfoBrush;
-    }
-
-    private static string FormatSquadOnlineSummary(
-        SquadRow? squad,
-        IReadOnlyCollection<PlayerRow> players,
-        bool zh)
-    {
-        if (squad is null)
-        {
-            return zh ? "游戏中 0 / 0" : "In game 0 / 0";
-        }
-
-        var online = players.Count(player => IsSameSquad(player.SquadName, squad.Name) && IsGamePresence(player));
-        return zh
-            ? $"游戏中 {online.ToString(CultureInfo.InvariantCulture)} / {squad.MemberCount.ToString(CultureInfo.InvariantCulture)}"
-            : $"In game {online.ToString(CultureInfo.InvariantCulture)} / {squad.MemberCount.ToString(CultureInfo.InvariantCulture)}";
-    }
-
-    private static Brush ResolveSquadStatusBrush(
-        SquadRow squad,
-        IReadOnlyCollection<PlayerRow> players)
-    {
-        var members = players.Where(player => IsSameSquad(player.SquadName, squad.Name)).ToArray();
-        var inGame = members.Count(IsGamePresence);
-        if (inGame == 0)
-        {
-            return StatusPalette.DisabledBrush;
-        }
-
-        return inGame == members.Length
-            ? StatusPalette.SuccessBrush
-            : StatusPalette.InfoBrush;
-    }
-
-    private static PlayerRow? ResolveSquadCommander(SquadRow squad, IEnumerable<PlayerRow> players)
-    {
-        return players
-                   .Where(player => IsSameSquad(player.SquadName, squad.Name))
-                   .FirstOrDefault(player => IsSquadCommander(player, squad)) ??
-               players.FirstOrDefault(player =>
-                   !string.IsNullOrWhiteSpace(squad.Commander) &&
-                   (squad.Commander.Equals(player.Name, StringComparison.OrdinalIgnoreCase) ||
-                    (!string.IsNullOrWhiteSpace(player.Callsign) &&
-                     squad.Commander.Equals(player.Callsign, StringComparison.OrdinalIgnoreCase))));
-    }
-
-    private static string FormatSquadDetailLine(SquadRow squad, IReadOnlyCollection<PlayerRow> players, string? localShard, bool zh)
-    {
-        var commander = ResolveSquadCommander(squad, players);
-        var commanderName = commander is null
-            ? string.IsNullOrWhiteSpace(squad.Commander)
-                ? zh ? "未指定" : "Unassigned"
-                : squad.Commander
-            : FormatMemberName(commander, OverlayMemberNameMode.CallsignOnly);
-        var commanderOnline = commander is not null && IsGamePresence(commander);
-        var sameServer = commanderOnline &&
-                         !string.IsNullOrWhiteSpace(localShard) &&
-                         commander is not null &&
-                         IsPlayerOnLocalServer(commander, localShard);
-        var statusText = commanderOnline
-            ? zh ? "在线" : "online"
-            : zh ? "离线" : "offline";
-        var sameServerText = sameServer
-            ? zh ? " · 与你在同服务器" : " · same server"
-            : "";
-
-        return zh
-            ? $"指挥官 {commanderName} · {statusText}{sameServerText}"
-            : $"Lead {commanderName} · {statusText}{sameServerText}";
-    }
-
-    private void RefreshMembers(
-        IEnumerable<PlayerRow> players,
-        OverlayDisplaySettings settings,
-        bool zh,
-        bool hasFleet,
-        SquadRow? primarySquad)
-    {
-        Members.Clear();
-        if (hasFleet)
-        {
-            var playerRows = ApplyMemberScope(players, settings.MemberScopeMode, primarySquad)
-                .Where(player => !settings.HideSelfMember || !player.IsSelf)
-                .Where(player => !settings.HideOfflineMembers || IsGamePresence(player))
-                .OrderByDescending(IsGamePresence)
-                .ThenByDescending(player => ResolveMemberPriorityScore(player, settings.MemberPriorityMode, primarySquad))
-                .ThenBy(player => FormatMemberName(player, settings.MemberNameMode), StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            foreach (var player in playerRows)
-            {
-                Members.Add(new OverlayMemberRow(
-                    FormatMemberName(player, settings.MemberNameMode),
-                    IsGamePresence(player) ? (zh ? "游戏中" : "In game") : (zh ? "离线" : "Offline"),
-                    player.ShipInfo,
-                    player.Location,
-                    IsGamePresence(player) ? StatusPalette.SuccessBrush : StatusPalette.DisabledBrush));
-            }
-        }
-
-        if (Members.Count > 0)
-        {
-            return;
-        }
-
-        Members.Add(new OverlayMemberRow(
-            hasFleet ? FormatEmptyMemberScopeText(settings.MemberScopeMode, zh) : zh ? "无舰队" : "No Fleet",
-            hasFleet ? zh ? "离线" : "Offline" : "-",
-            hasFleet ? zh ? "未知" : "Unknown" : "-",
-            hasFleet ? zh ? "未知" : "Unknown" : "-",
-            hasFleet ? OfflineBrush : MutedBrush));
-    }
-
-    private static IEnumerable<PlayerRow> ApplyMemberScope(
-        IEnumerable<PlayerRow> players,
-        OverlayMemberScopeMode mode,
-        SquadRow? primarySquad)
-    {
-        var primarySquadName = primarySquad?.Name;
-        return mode switch
-        {
-            OverlayMemberScopeMode.AllFleet => players,
-            OverlayMemberScopeMode.OtherSquads => string.IsNullOrWhiteSpace(primarySquadName)
-                ? players.Where(player => !IsUnassignedSquadName(player.SquadName))
-                : players.Where(player =>
-                    !IsSameSquad(player.SquadName, primarySquadName) &&
-                    !IsUnassignedSquadName(player.SquadName)),
-            _ => string.IsNullOrWhiteSpace(primarySquadName)
-                ? players
-                : players.Where(player => IsSameSquad(player.SquadName, primarySquadName))
-        };
-    }
-
-    private static bool IsSameSquad(string? left, string? right)
-    {
-        return !string.IsNullOrWhiteSpace(left) &&
-               !string.IsNullOrWhiteSpace(right) &&
-               left.Equals(right, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsUnassignedSquadName(string? squadName)
-    {
-        return string.IsNullOrWhiteSpace(squadName) ||
-               squadName.Equals("Unassigned", StringComparison.OrdinalIgnoreCase) ||
-               squadName.Equals("未分配", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string FormatEmptyMemberScopeText(OverlayMemberScopeMode mode, bool zh)
-    {
-        return mode switch
-        {
-            OverlayMemberScopeMode.AllFleet => zh ? "无舰队成员" : "No fleet members",
-            OverlayMemberScopeMode.OtherSquads => zh ? "无其他小队" : "No other squads",
-            _ => zh ? "当前小队为空" : "Current squad empty"
-        };
-    }
-
-    private static int ResolveMemberPriorityScore(
-        PlayerRow player,
-        OverlayMemberPriorityMode mode,
-        SquadRow? primarySquad)
-    {
-        return mode switch
-        {
-            OverlayMemberPriorityMode.Self => player.IsSelf ? 1 : 0,
-            OverlayMemberPriorityMode.SquadCommander => IsSquadCommander(player, primarySquad) ? 1 : 0,
-            _ => 0
-        };
-    }
-
-    private static bool IsSquadCommander(PlayerRow player, SquadRow? primarySquad)
-    {
-        if (player.Role.Contains("Commander", StringComparison.OrdinalIgnoreCase) ||
-            player.Role.Contains("Leader", StringComparison.OrdinalIgnoreCase) ||
-            player.Role.Contains("指挥", StringComparison.OrdinalIgnoreCase) ||
-            player.Role.Contains("队长", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (primarySquad is null || string.IsNullOrWhiteSpace(primarySquad.Commander))
-        {
-            return false;
-        }
-
-        return primarySquad.Commander.Equals(player.Name, StringComparison.OrdinalIgnoreCase) ||
-               (!string.IsNullOrWhiteSpace(player.Callsign) &&
-                primarySquad.Commander.Equals(player.Callsign, StringComparison.OrdinalIgnoreCase));
     }
 
     private void OnChanged(string propertyName)

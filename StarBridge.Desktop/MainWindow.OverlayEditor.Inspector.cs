@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using StarBridge.Core.Events;
 using StarBridge.Core.State;
+using StarBridge.Desktop.Theming;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -12,11 +13,9 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Brushes = System.Windows.Media.Brushes;
-using Color = System.Windows.Media.Color;
 using Cursors = System.Windows.Input.Cursors;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
@@ -288,23 +287,16 @@ public partial class MainWindow
         bool selected,
         bool locked)
     {
+        var sceneAccent = BridgeSceneContext.GetRequiredAccentBrush(this);
+        var primaryText = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
+        var secondaryText = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink2);
+        var tertiaryText = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink3);
         var routeLight = new Border
         {
             Width = 3,
             Margin = new Thickness(0, 4, 0, 4),
-            Background = selected
-                ? FindBrush("OverlaySettingsNavigationRouteLightBrush", accent)
-                : Brushes.Transparent,
-            CornerRadius = new CornerRadius(2),
-            Effect = selected
-                ? new DropShadowEffect
-                {
-                    Color = Color.FromRgb(105, 204, 255),
-                    BlurRadius = 8,
-                    ShadowDepth = 0,
-                    Opacity = 0.45
-                }
-                : null
+            Background = selected ? sceneAccent : Brushes.Transparent,
+            CornerRadius = new CornerRadius(2)
         };
 
         var accentSwatch = new Border
@@ -314,7 +306,7 @@ public partial class MainWindow
             Margin = new Thickness(9, 0, 8, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Background = accent,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(120, 225, 246, 255)),
+            BorderBrush = secondaryText,
             BorderThickness = new Thickness(1)
         };
 
@@ -322,9 +314,7 @@ public partial class MainWindow
         {
             Text = title,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = selected
-                ? FindBrush("TextPrimaryBrush", Brushes.AliceBlue)
-                : FindBrush("TextSecondaryBrush", Brushes.LightSteelBlue),
+            Foreground = selected ? primaryText : secondaryText,
             FontSize = 11.5,
             FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -339,9 +329,7 @@ public partial class MainWindow
                     : "",
             Margin = new Thickness(6, 0, 8, 0),
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = selected
-                ? FindBrush("AccentBrush", Brushes.DeepSkyBlue)
-                : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+            Foreground = selected ? sceneAccent : tertiaryText,
             FontSize = 9.5,
             FontWeight = FontWeights.SemiBold
         };
@@ -364,12 +352,12 @@ public partial class MainWindow
             Tag = key,
             Height = 40,
             Margin = new Thickness(0, 0, 6, 6),
-            Background = new SolidColorBrush(selected
-                ? Color.FromArgb(220, 17, 47, 66)
-                : Color.FromArgb(150, 6, 22, 32)),
-            BorderBrush = new SolidColorBrush(selected
-                ? Color.FromArgb(235, 78, 175, 224)
-                : Color.FromArgb(115, 54, 86, 109)),
+            Background = BridgeTokenBrushes.GetRequired(
+                this,
+                selected ? BridgeBrushToken.RowSelected : BridgeBrushToken.PanelRaised),
+            BorderBrush = selected
+                ? sceneAccent
+                : BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(3),
             Cursor = Cursors.Hand,
@@ -850,43 +838,12 @@ public partial class MainWindow
 
     private void SyncOverlayFullScreenSquadControls()
     {
-        var enabled = _overlaySettings.ShowSquads;
-        if (OverlayFullScreenSquadStatusModeBox is not null)
-        {
-            OverlayFullScreenSquadStatusModeBox.SelectedIndex = _overlaySettings.SquadStatusDisplayMode switch
-            {
-                OverlaySquadStatusDisplayMode.Compact => 1,
-                OverlaySquadStatusDisplayMode.Detailed => 2,
-                _ => 0
-            };
-            SetOverlayInspectorModuleControlEnabled(OverlayFullScreenSquadStatusModeBox, enabled);
-        }
-
-        if (OverlayFullScreenHideSquadIconsCheck is not null)
-        {
-            OverlayFullScreenHideSquadIconsCheck.IsChecked = _overlaySettings.HideSquadIcons;
-            SetOverlayInspectorModuleControlEnabled(OverlayFullScreenHideSquadIconsCheck, enabled);
-        }
+        // Retired controls remain declared for localization/generated-field compatibility only.
     }
 
     private void SyncOverlayFullScreenMemberControls()
     {
         var membersEnabled = _overlaySettings.ShowMembers;
-        var roomScene = ResolveCurrentOverlayScene().Context.Kind == OverlaySceneKind.PartyRoom;
-        if (OverlayFullScreenMemberScopeBox is not null)
-        {
-            OverlayFullScreenMemberScopeBox.SelectedIndex = _overlaySettings.MemberScopeMode switch
-            {
-                OverlayMemberScopeMode.AllFleet => 1,
-                OverlayMemberScopeMode.OtherSquads => 2,
-                _ => 0
-            };
-            SetOverlayInspectorModuleControlEnabled(OverlayFullScreenMemberScopeBox, membersEnabled && !roomScene);
-            OverlayFullScreenMemberScopeBox.ToolTip = roomScene
-                ? "房间场景固定显示当前房间成员"
-                : null;
-        }
-
         if (OverlayFullScreenHideOfflineMembersCheck is not null)
         {
             OverlayFullScreenHideOfflineMembersCheck.IsChecked = _overlaySettings.HideOfflineMembers;
@@ -905,17 +862,6 @@ public partial class MainWindow
         {
             OverlayFullScreenHideSelfMemberCheck.IsChecked = _overlaySettings.HideSelfMember;
             SetOverlayInspectorModuleControlEnabled(OverlayFullScreenHideSelfMemberCheck, membersEnabled);
-        }
-
-        if (OverlayFullScreenMemberPriorityBox is not null)
-        {
-            OverlayFullScreenMemberPriorityBox.SelectedIndex = _overlaySettings.MemberPriorityMode switch
-            {
-                OverlayMemberPriorityMode.Self => 1,
-                OverlayMemberPriorityMode.SquadCommander => 2,
-                _ => 0
-            };
-            SetOverlayInspectorModuleControlEnabled(OverlayFullScreenMemberPriorityBox, membersEnabled);
         }
 
         if (OverlayFullScreenMemberNameModeBox is not null)
@@ -980,7 +926,7 @@ public partial class MainWindow
         var zhModuleText = item.Key switch
         {
             "Notice" => "通讯提醒模块",
-            "Squads" => "队伍概况模块",
+            "Squads" => "舰队总览模块",
             "Members" => "成员信息模块",
             "Chat" => "场景通讯模块",
             _ => item.Title
@@ -1269,7 +1215,7 @@ public partial class MainWindow
 
         if (!_overlaySettings.ShowSquads)
         {
-            yield return ("Squads", zh ? "队伍概况" : "Team overview");
+            yield return ("Squads", zh ? "舰队总览" : "Fleet overview");
         }
 
         if (!_overlaySettings.ShowMembers)
@@ -1445,44 +1391,12 @@ public partial class MainWindow
 
     private void SyncOverlayInspectorSquadControls()
     {
-        if (OverlayInspectorSquadStatusModeBox is not null)
-        {
-            OverlayInspectorSquadStatusModeBox.SelectedIndex = _overlaySettings.SquadStatusDisplayMode switch
-            {
-                OverlaySquadStatusDisplayMode.Compact => 1,
-                OverlaySquadStatusDisplayMode.Detailed => 2,
-                _ => 0
-            };
-            OverlayInspectorSquadStatusModeBox.IsEnabled = _overlaySettings.ShowSquads;
-            OverlayInspectorSquadStatusModeBox.Opacity = _overlaySettings.ShowSquads ? 1.0 : 0.52;
-        }
-
-        if (OverlayInspectorHideSquadIconsCheck is not null)
-        {
-            OverlayInspectorHideSquadIconsCheck.IsChecked = _overlaySettings.HideSquadIcons;
-            OverlayInspectorHideSquadIconsCheck.IsEnabled = _overlaySettings.ShowSquads;
-            OverlayInspectorHideSquadIconsCheck.Opacity = _overlaySettings.ShowSquads ? 1.0 : 0.52;
-        }
+        // Retired controls remain declared for localization/generated-field compatibility only.
     }
 
     private void SyncOverlayInspectorMemberControls()
     {
         var membersEnabled = _overlaySettings.ShowMembers;
-        var roomScene = ResolveCurrentOverlayScene().Context.Kind == OverlaySceneKind.PartyRoom;
-        if (OverlayInspectorMemberScopeBox is not null)
-        {
-            OverlayInspectorMemberScopeBox.SelectedIndex = _overlaySettings.MemberScopeMode switch
-            {
-                OverlayMemberScopeMode.AllFleet => 1,
-                OverlayMemberScopeMode.OtherSquads => 2,
-                _ => 0
-            };
-            SetOverlayInspectorModuleControlEnabled(OverlayInspectorMemberScopeBox, membersEnabled && !roomScene);
-            OverlayInspectorMemberScopeBox.ToolTip = roomScene
-                ? "房间场景固定显示当前房间成员"
-                : null;
-        }
-
         if (OverlayInspectorHideOfflineMembersCheck is not null)
         {
             OverlayInspectorHideOfflineMembersCheck.IsChecked = _overlaySettings.HideOfflineMembers;
@@ -1501,17 +1415,6 @@ public partial class MainWindow
         {
             OverlayInspectorHideSelfMemberCheck.IsChecked = _overlaySettings.HideSelfMember;
             SetOverlayInspectorModuleControlEnabled(OverlayInspectorHideSelfMemberCheck, membersEnabled);
-        }
-
-        if (OverlayInspectorMemberPriorityBox is not null)
-        {
-            OverlayInspectorMemberPriorityBox.SelectedIndex = _overlaySettings.MemberPriorityMode switch
-            {
-                OverlayMemberPriorityMode.Self => 1,
-                OverlayMemberPriorityMode.SquadCommander => 2,
-                _ => 0
-            };
-            SetOverlayInspectorModuleControlEnabled(OverlayInspectorMemberPriorityBox, membersEnabled);
         }
 
         if (OverlayInspectorMemberNameModeBox is not null)
@@ -1649,18 +1552,15 @@ public partial class MainWindow
         FrameworkElement? scopeRow,
         System.Windows.Controls.ComboBox? scopeBox)
     {
-        var fleetScene = ResolveCurrentOverlayScene().Context.Kind == OverlaySceneKind.Fleet;
         if (scopeRow is not null)
         {
-            scopeRow.Visibility = fleetScene ? Visibility.Visible : Visibility.Collapsed;
+            scopeRow.Visibility = Visibility.Collapsed;
         }
 
         if (scopeBox is not null)
         {
-            SetComboBoxSelectedTag(
-                scopeBox,
-                OverlayDisplaySettings.NormalizeFleetChatScope(_overlaySettings.FleetChatScope).ToString());
-            SetOverlayInspectorModuleControlEnabled(scopeBox, fleetScene && _overlaySettings.ShowChat);
+            SetComboBoxSelectedTag(scopeBox, OverlayFleetChatScope.Fleet.ToString());
+            SetOverlayInspectorModuleControlEnabled(scopeBox, false);
         }
     }
 
@@ -2089,12 +1989,17 @@ public partial class MainWindow
     private Border CreateOverlayLayerRow(OverlayEditorLayerRow row)
     {
         var accent = row.Brush;
+        var primaryText = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
         var border = new Border
         {
             Tag = row.Key,
-            BorderBrush = row.IsSelected ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromArgb(120, 79, 159, 194)),
+            BorderBrush = row.IsSelected
+                ? primaryText
+                : BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Hairline),
             BorderThickness = new Thickness(row.IsSelected ? 2 : 1),
-            Background = new SolidColorBrush(row.IsSelected ? Color.FromArgb(156, 8, 34, 50) : Color.FromArgb(92, 5, 18, 28)),
+            Background = BridgeTokenBrushes.GetRequired(
+                this,
+                row.IsSelected ? BridgeBrushToken.RowSelected : BridgeBrushToken.PanelRaised),
             Padding = new Thickness(8),
             Margin = new Thickness(0, 0, 0, 8),
             Cursor = Cursors.Hand
@@ -2112,14 +2017,14 @@ public partial class MainWindow
             Width = 8,
             Height = 8,
             Background = accent,
-            BorderBrush = Brushes.WhiteSmoke,
+            BorderBrush = primaryText,
             BorderThickness = new Thickness(row.IsSelected ? 1 : 0),
             Margin = new Thickness(0, 4, 8, 0)
         });
         var title = new TextBlock
         {
             Text = row.Title,
-            Foreground = row.IsSelected ? Brushes.WhiteSmoke : FindBrush("PrimaryTextBrush", Brushes.AliceBlue),
+            Foreground = primaryText,
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -2133,7 +2038,9 @@ public partial class MainWindow
                 : row.IsLocked
                     ? (_language.Equals("zh", StringComparison.OrdinalIgnoreCase) ? "锁定" : "Locked")
                     : "",
-            Foreground = row.IsEventRail ? FindBrush("StatusWarningBrush", Brushes.Gold) : FindBrush("MutedTextBrush", Brushes.LightSlateGray),
+            Foreground = BridgeTokenBrushes.GetRequired(
+                this,
+                row.IsEventRail ? BridgeBrushToken.StatusWarn : BridgeBrushToken.Ink3),
             FontSize = 10,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(8, 0, 0, 0)
@@ -2802,23 +2709,10 @@ public partial class MainWindow
             }
             case "Squads":
             {
-                var modeBox = useFullScreenControls ? OverlayFullScreenSquadStatusModeBox : OverlayInspectorSquadStatusModeBox;
-                var hideIconsCheck = useFullScreenControls ? OverlayFullScreenHideSquadIconsCheck : OverlayInspectorHideSquadIconsCheck;
-                return _overlaySettings with
-                {
-                    SquadStatusDisplayMode = modeBox?.SelectedIndex switch
-                    {
-                        1 => OverlaySquadStatusDisplayMode.Compact,
-                        2 => OverlaySquadStatusDisplayMode.Detailed,
-                        _ => OverlaySquadStatusDisplayMode.Auto
-                    },
-                    HideSquadIcons = hideIconsCheck?.IsChecked == true
-                };
+                return _overlaySettings;
             }
             case "Members":
             {
-                var scopeBox = useFullScreenControls ? OverlayFullScreenMemberScopeBox : OverlayInspectorMemberScopeBox;
-                var priorityBox = useFullScreenControls ? OverlayFullScreenMemberPriorityBox : OverlayInspectorMemberPriorityBox;
                 var nameModeBox = useFullScreenControls ? OverlayFullScreenMemberNameModeBox : OverlayInspectorMemberNameModeBox;
                 var memberNameColumnRatio = !useFullScreenControls && OverlayInspectorMemberColumnRatioSlider is not null
                     ? OverlayDisplaySettings.NormalizeMemberNameColumnRatio(OverlayInspectorMemberColumnRatioSlider.Value / 100)
@@ -2829,18 +2723,6 @@ public partial class MainWindow
                 var hideOffline = hideOfflineCheck?.IsChecked == true;
                 return _overlaySettings with
                 {
-                    MemberScopeMode = scopeBox?.SelectedIndex switch
-                    {
-                        1 => OverlayMemberScopeMode.AllFleet,
-                        2 => OverlayMemberScopeMode.OtherSquads,
-                        _ => OverlayMemberScopeMode.CurrentSquad
-                    },
-                    MemberPriorityMode = priorityBox?.SelectedIndex switch
-                    {
-                        1 => OverlayMemberPriorityMode.Self,
-                        2 => OverlayMemberPriorityMode.SquadCommander,
-                        _ => OverlayMemberPriorityMode.Default
-                    },
                     MemberNameMode = nameModeBox?.SelectedIndex switch
                     {
                         1 => OverlayMemberNameMode.CallsignOnly,
@@ -2856,7 +2738,6 @@ public partial class MainWindow
             case "Chat":
             {
                 var modeBox = useFullScreenControls ? OverlayFullScreenChatModeBox : OverlayInspectorChatModeBox;
-                var fleetScopeBox = useFullScreenControls ? OverlayFullScreenFleetChatScopeBox : OverlayInspectorFleetChatScopeBox;
                 var durationBox = useFullScreenControls ? OverlayFullScreenChatDurationBox : OverlayInspectorChatDurationBox;
                 var fontSizeBox = useFullScreenControls ? OverlayFullScreenChatFontSizeBox : OverlayInspectorChatFontSizeBox;
                 var regionBox = useFullScreenControls ? OverlayFullScreenChatRegionBox : OverlayInspectorChatRegionBox;
@@ -2883,7 +2764,6 @@ public partial class MainWindow
                 var region = GetComboBoxTagEnum(regionBox, _overlaySettings.ChatBarrageRegion);
                 var density = GetComboBoxTagEnum(densityBox, _overlaySettings.ChatBarrageDensity);
                 var edgeStrength = GetComboBoxTagEnum(edgeStrengthBox, _overlaySettings.ChatTextEdgeStrength);
-                var fleetChatScope = GetComboBoxTagEnum(fleetScopeBox, _overlaySettings.FleetChatScope);
                 return _overlaySettings with
                 {
                     ChatDisplayMode = nextDisplayMode,
@@ -2899,7 +2779,7 @@ public partial class MainWindow
                     ChatBarrageDensity = OverlayDisplaySettings.NormalizeChatBarrageDensity(density),
                     ChatBarrageAvoidCenter = avoidCenterCheck?.IsChecked == true,
                     ChatTextEdgeStrength = OverlayDisplaySettings.NormalizeChatTextEdgeStrength(edgeStrength),
-                    FleetChatScope = OverlayDisplaySettings.NormalizeFleetChatScope(fleetChatScope)
+                    FleetChatScope = OverlayFleetChatScope.Fleet
                 };
             }
         }

@@ -22,7 +22,6 @@ public static class OverlayAccessPolicy
                 .Where(player => player.IsSelf)
                 .Select(player => player with
                 {
-                    SquadName = "Unassigned",
                     Role = "成员",
                     RoleBrush = null,
                     ShowMemberActions = false
@@ -31,7 +30,6 @@ public static class OverlayAccessPolicy
             return new OverlayAccessProjection(
                 scene with
                 {
-                    Squads = [],
                     Players = localPlayers,
                     HasContent = false,
                     Context = OverlaySceneContext.Local(scene.Context.Preference)

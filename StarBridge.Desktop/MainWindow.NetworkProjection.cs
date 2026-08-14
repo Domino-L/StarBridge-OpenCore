@@ -149,7 +149,7 @@ public partial class MainWindow
     {
         if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
         {
-            return "上传内容过大。请使用更小的舰队 Logo、队标或头像后重试。";
+            return "上传内容超过了当前通道的容量限制，请稍后重试或选择更小的文件。";
         }
 
         try
@@ -225,7 +225,6 @@ public partial class MainWindow
         bool includeDirectoryImages = true,
         bool includeRepeatedImages = false)
     {
-        var squads = BuildSquadSnapshots(includeDirectoryImages);
         var actionPlans = BuildActionPlanSnapshots(includeRepeatedImages);
 
         return new NetworkFleetSnapshot(
@@ -238,7 +237,6 @@ public partial class MainWindow
             _fleetJoinPolicy,
             string.IsNullOrWhiteSpace(_fleetCode) ? "LOGO" : _fleetCode,
             includeDirectoryImages ? BuildFleetLogoImageData() : null,
-            squads,
             _players.Count(player => IsOnlineStatus(player.SharedOnlineStatusValue)),
             Math.Max(1, _players.Count),
             _fleetNoticeTitle,
@@ -304,24 +302,6 @@ public partial class MainWindow
                 NormalizeFleetActivityClockText(window.StartTime, DefaultFleetActivityStartTime),
                 NormalizeFleetActivityClockText(window.EndTime, DefaultFleetActivityEndTime),
                 ShouldFleetActivityEndNextDay(window.StartTime, window.EndTime, window.EndsNextDay)))
-            .ToArray();
-    }
-
-    private NetworkSquadSnapshot[] BuildSquadSnapshots(bool includeImages = true)
-    {
-        RepairLocalSquadLifecycle();
-
-        return _squads
-            .Select(squad => new NetworkSquadSnapshot(
-                squad.Name,
-                squad.Commander,
-                squad.Type,
-                squad.Description,
-                squad.Mission,
-                squad.RallyPoint,
-                includeImages ? BuildImageDataFromPath(squad.EmblemPath, FleetSyncImageMaxBytes) : null,
-                squad.UpdatedAt,
-                FleetChatIdentity.NormalizeSquadId(squad.Id, squad.Name)))
             .ToArray();
     }
 
@@ -480,7 +460,6 @@ public partial class MainWindow
                 _localPlayer.Trim(),
                 string.IsNullOrWhiteSpace(_callsign) ? local?.Callsign : _callsign,
                 role,
-                _joinedSquad?.Name ?? local?.SquadName ?? "Unassigned",
                 privacyProjection.Online,
                 publishShip
                     ? string.IsNullOrWhiteSpace(local?.RawShip) ? local?.Ship ?? "Unknown" : local.RawShip
@@ -540,7 +519,11 @@ public partial class MainWindow
                 ship.ImportedAt,
                 NormalizeShipTimestamp(ship.SyncedAt, ship.ImportedAt),
                 ship.InstanceId,
-                GetOwnedShipRoleCategory(ship).ToString()))
+                GetOwnedShipRoleCategory(ship).ToString(),
+                ship.CustomImageMediaId,
+                ship.CustomImageCropFrame.FocusX,
+                ship.CustomImageCropFrame.FocusY,
+                ship.CustomImageCropFrame.Zoom))
             .ToArray();
     }
 
@@ -554,7 +537,6 @@ public partial class MainWindow
         var ownerName = string.IsNullOrWhiteSpace(_localPlayer)
             ? _accountName ?? "Unknown"
             : _localPlayer;
-        var ownerSquad = _joinedSquad?.Name ?? "未加入小队";
         var avatarImageData = includeOwnerAvatarImage ? BuildAvatarImageData() : null;
 
         return _ownedShips
@@ -563,13 +545,16 @@ public partial class MainWindow
                 ship.DisplayName,
                 ownerName,
                 _callsign,
-                ownerSquad,
                 avatarImageData,
                 GetFleetShipSharedAt(ship, ownerName),
                 ship.ImportedAt,
                 ship.InstanceId,
                 GetOwnedShipRoleCategory(ship).ToString(),
-                _accountId))
+                _accountId,
+                ship.CustomImageMediaId,
+                ship.CustomImageCropFrame.FocusX,
+                ship.CustomImageCropFrame.FocusY,
+                ship.CustomImageCropFrame.Zoom))
             .ToArray();
     }
 
@@ -616,13 +601,16 @@ public partial class MainWindow
                 ship.DisplayName,
                 snapshot.Name,
                 snapshot.Callsign,
-                snapshot.Squad,
                 snapshot.AvatarImageData,
                 NormalizeShipTimestamp(ship.SyncedAt, ship.ImportedAt),
                 ship.ImportedAt,
                 ship.InstanceId,
                 ship.RoleCategory,
-                snapshot.AccountId))
+                snapshot.AccountId,
+                ship.CustomImageMediaId,
+                ship.CustomImageCropFocusX,
+                ship.CustomImageCropFocusY,
+                ship.CustomImageCropZoom))
             .ToArray();
     }
 
@@ -788,29 +776,6 @@ public partial class MainWindow
         }
     }
 
-    private string? SaveNetworkSquadEmblem(NetworkFleetSnapshot fleetSnapshot, NetworkSquadSnapshot squadSnapshot)
-    {
-        var prefix = BuildNetworkSquadEmblemPrefix(fleetSnapshot.Code, squadSnapshot.Name);
-        if (!TryDecodeImageData(squadSnapshot.EmblemImageData, 512 * 1024, out var bytes))
-        {
-            CleanupImageVariants(prefix, null);
-            return null;
-        }
-
-        try
-        {
-            var hash = Convert.ToHexString(SHA256.HashData(bytes))[..12].ToLowerInvariant();
-            var path = BuildImagePath(prefix, hash);
-            WriteImageFileIfChanged(path, bytes);
-            CleanupImageVariants(prefix, path);
-            return path;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static bool TryDecodeImageData(string? imageData, int maxBytes, out byte[] bytes)
     {
         bytes = [];
@@ -846,11 +811,6 @@ public partial class MainWindow
     private static string BuildNetworkFleetBannerPrefix(string? fleetCode)
     {
         return $"fleet-{BuildSafeImageToken(fleetCode, "fleet")}-banner";
-    }
-
-    private static string BuildNetworkSquadEmblemPrefix(string? fleetCode, string? squadName)
-    {
-        return $"squad-{BuildSafeImageToken(fleetCode, "fleet")}-{BuildSafeImageToken(squadName, "squad")}-emblem";
     }
 
     private static string BuildSafeImageToken(string? value, string fallback)

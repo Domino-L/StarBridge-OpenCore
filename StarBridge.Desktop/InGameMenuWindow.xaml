@@ -1,6 +1,8 @@
 <Window x:Class="StarBridge.Desktop.InGameMenuWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
+        xmlns:theming="clr-namespace:StarBridge.Desktop.Theming"
         Title="星海舰桥 · 游戏时菜单"
         WindowStyle="None"
         ResizeMode="NoResize"
@@ -17,133 +19,16 @@
         PreviewKeyDown="Window_PreviewKeyDown"
         Deactivated="Window_Deactivated">
     <Window.Resources>
-        <SolidColorBrush x:Key="MenuSurfaceBrush" Color="#E30A1A25" />
-        <SolidColorBrush x:Key="MenuSurfaceRaisedBrush" Color="#F20C2230" />
-        <SolidColorBrush x:Key="MenuBorderBrush" Color="#5A3D718A" />
-        <SolidColorBrush x:Key="MenuBorderStrongBrush" Color="#C24DBFEF" />
-        <SolidColorBrush x:Key="MenuAccentBrush" Color="#55C9F6" />
-        <SolidColorBrush x:Key="MenuPrimaryTextBrush" Color="#EAF7FF" />
-        <SolidColorBrush x:Key="MenuSecondaryTextBrush" Color="#9DB5C4" />
-        <SolidColorBrush x:Key="MenuMutedTextBrush" Color="#708A99" />
-        <SolidColorBrush x:Key="MenuSuccessBrush" Color="#55E5A1" />
-
-        <Style x:Key="MenuTopActionButton" TargetType="Button">
-            <Setter Property="Height" Value="42" />
-            <Setter Property="Padding" Value="15,0" />
-            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
-            <Setter Property="Background" Value="#C90A1B26" />
-            <Setter Property="BorderBrush" Value="{StaticResource MenuBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Surface"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="3">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"
-                                              Margin="{TemplateBinding Padding}" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Surface" Property="Background" Value="#E3153548" />
-                                <Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource MenuAccentBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Surface" Property="Background" Value="#F21A435B" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="MenuCloseButton"
-               TargetType="Button"
-               BasedOn="{StaticResource MenuTopActionButton}">
-            <Setter Property="Width" Value="44" />
-            <Setter Property="Height" Value="44" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="FontSize" Value="24" />
-            <Setter Property="FontWeight" Value="Normal" />
-        </Style>
-
-        <Style x:Key="MenuDockButton" TargetType="Button">
-            <Setter Property="Width" Value="82" />
-            <Setter Property="Height" Value="76" />
-            <Setter Property="Margin" Value="4,0" />
-            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
-            <Setter Property="Background" Value="#E00A1B26" />
-            <Setter Property="BorderBrush" Value="{StaticResource MenuBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="DockSurface"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="3">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="DockSurface" Property="Background" Value="#F2143548" />
-                                <Setter TargetName="DockSurface" Property="BorderBrush" Value="{StaticResource MenuAccentBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="DockSurface" Property="Background" Value="#F21A435B" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="DockSurface" Property="Opacity" Value="0.42" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="MenuDockGlyph" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
-            <Setter Property="FontSize" Value="24" />
-            <Setter Property="HorizontalAlignment" Value="Center" />
-        </Style>
-
-        <Style x:Key="MenuDockLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MenuSecondaryTextBrush}" />
-            <Setter Property="FontSize" Value="10" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="HorizontalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="0,8,0,0" />
-        </Style>
-
-        <Style x:Key="MenuContextLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MenuMutedTextBrush}" />
-            <Setter Property="FontSize" Value="9" />
-        </Style>
-
-        <Style x:Key="MenuContextValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MenuPrimaryTextBrush}" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            <Setter Property="Margin" Value="0,3,0,0" />
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Bridge/InGameMenu.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid x:Name="RootGrid">
         <Rectangle x:Name="BackgroundDimLayer"
-                   Fill="#A600060B"
+                   Fill="{DynamicResource BridgeScrim}"
                    IsHitTestVisible="False"/>
 
         <Border x:Name="TimeInformationPanel"
@@ -152,8 +37,8 @@
                 Padding="17,12,18,14"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Top"
-                Background="#B5081822"
-                BorderBrush="{StaticResource MenuBorderBrush}"
+                Background="{DynamicResource BridgePanel}"
+                BorderBrush="{DynamicResource BridgeHairline}"
                 BorderThickness="2,0,0,0">
             <Grid>
                 <Grid.RowDefinitions>
@@ -163,14 +48,14 @@
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="LocalTimeText"
                            Text="20:23"
-                           Foreground="{StaticResource MenuPrimaryTextBrush}"
+                           Foreground="{DynamicResource BridgeInk}"
                            FontFamily="Segoe UI Semibold"
                            FontSize="28"
                            FontWeight="SemiBold" />
                 <TextBlock x:Name="LocalDateText"
                            Grid.Row="1"
                            Text="2026年7月27日 星期一"
-                           Foreground="{StaticResource MenuSecondaryTextBrush}"
+                           Foreground="{DynamicResource BridgeInk2}"
                            FontSize="11"
                            MinHeight="16"
                            LineHeight="16"
@@ -182,12 +67,12 @@
                             Margin="1,10,0,0">
                     <Ellipse Width="7"
                              Height="7"
-                             Fill="{StaticResource MenuSuccessBrush}"
+                             Fill="{DynamicResource BridgeStatusOk}"
                              VerticalAlignment="Center"
                              Margin="0,0,7,0" />
                     <TextBlock x:Name="PresenceText"
                                Text="应用在线"
-                               Foreground="{StaticResource MenuSuccessBrush}"
+                               Foreground="{DynamicResource BridgeStatusOk}"
                                FontSize="10"
                                FontWeight="SemiBold"
                                MinHeight="14"
@@ -212,7 +97,7 @@
                 <Viewbox Width="17" Height="17">
                     <Path Data="M12,3 L13.4,3.4 L14.1,5.1 L16,5.6 L17.2,4.8 L19.2,6.8 L18.4,8 L18.9,9.9 L20.6,10.6 L21,12 L20.6,13.4 L18.9,14.1 L18.4,16 L19.2,17.2 L17.2,19.2 L16,18.4 L14.1,18.9 L13.4,20.6 L12,21 L10.6,20.6 L9.9,18.9 L8,18.4 L6.8,19.2 L4.8,17.2 L5.6,16 L5.1,14.1 L3.4,13.4 L3,12 L3.4,10.6 L5.1,9.9 L5.6,8 L4.8,6.8 L6.8,4.8 L8,5.6 L9.9,5.1 L10.6,3.4 Z M12,8.5 A3.5,3.5 0 1 1 11.9,8.5"
                           Fill="Transparent"
-                          Stroke="{StaticResource MenuPrimaryTextBrush}"
+                          Stroke="{DynamicResource BridgeInk}"
                           StrokeThickness="1.6"
                           StrokeLineJoin="Round" />
                 </Viewbox>
@@ -224,18 +109,18 @@
             <Border Height="42"
                     Margin="8,0,8,0"
                     Padding="13,0"
-                    Background="#A807151E"
-                    BorderBrush="{StaticResource MenuBorderBrush}"
+                    Background="{DynamicResource BridgeRail}"
+                    BorderBrush="{DynamicResource BridgeHairline}"
                     BorderThickness="1">
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="返回游戏"
-                               Foreground="{StaticResource MenuPrimaryTextBrush}"
+                               Foreground="{DynamicResource BridgeInk}"
                                FontSize="11"
                                FontWeight="SemiBold"
                                HorizontalAlignment="Center" />
                     <TextBlock x:Name="MenuReturnHotkeyText"
                                Text="-- / ESC"
-                               Foreground="{StaticResource MenuMutedTextBrush}"
+                               Foreground="{DynamicResource BridgeInk3}"
                                FontSize="8"
                                HorizontalAlignment="Center"
                                Margin="0,2,0,0" />
@@ -252,8 +137,8 @@
                 Padding="7"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Stretch"
-                Background="#F0081721"
-                BorderBrush="{StaticResource MenuBorderStrongBrush}"
+                Background="{DynamicResource BridgePanelRaised}"
+                BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                 BorderThickness="1"
                 CornerRadius="4"
                 Visibility="Collapsed">
@@ -340,7 +225,7 @@
                 <Border Width="48"
                         Height="1"
                         Margin="10,7"
-                        Background="{StaticResource MenuBorderBrush}" />
+                        Background="{DynamicResource BridgeHairline}" />
                 <Button Width="68"
                         Height="54"
                         Margin="0,3"
@@ -406,8 +291,8 @@
                     Margin="0,0,0,9"
                     Padding="14,8"
                     HorizontalAlignment="Stretch"
-                    Background="#C6081822"
-                    BorderBrush="{StaticResource MenuBorderBrush}"
+                    Background="{DynamicResource BridgePanel}"
+                    BorderBrush="{DynamicResource BridgeHairline}"
                     BorderThickness="1">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -454,8 +339,8 @@
                     Grid.Row="1"
                     Padding="8"
                     HorizontalAlignment="Center"
-                    Background="#F0081721"
-                    BorderBrush="{StaticResource MenuBorderStrongBrush}"
+                    Background="{DynamicResource BridgePanelRaised}"
+                    BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                     BorderThickness="1"
                     CornerRadius="4">
                 <StackPanel x:Name="PrimaryDockPanel"
@@ -496,8 +381,8 @@
                                     Margin="0,-8,-14,0"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Top"
-                                    Background="#E93C8CC2"
-                                    BorderBrush="#FF7AD8FF"
+                                    Background="{Binding Path=(theming:BridgeSceneContext.AmbientBrush), RelativeSource={RelativeSource Self}}"
+                                    BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                                     BorderThickness="1"
                                     CornerRadius="10"
                                     Visibility="Collapsed">
@@ -526,8 +411,8 @@
                                     Margin="0,-8,-14,0"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Top"
-                                    Background="#E93C8CC2"
-                                    BorderBrush="#FF7AD8FF"
+                                    Background="{Binding Path=(theming:BridgeSceneContext.AmbientBrush), RelativeSource={RelativeSource Self}}"
+                                    BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                                     BorderThickness="1"
                                     CornerRadius="10"
                                     Visibility="Collapsed">
@@ -556,8 +441,8 @@
                                     Margin="0,-8,-14,0"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Top"
-                                    Background="#E9B56E2D"
-                                    BorderBrush="#FFFFC96B"
+                                    Background="{DynamicResource BridgePanelRaised}"
+                                    BorderBrush="{DynamicResource BridgeStatusWarn}"
                                     BorderThickness="1"
                                     CornerRadius="10"
                                     Visibility="Collapsed">
@@ -574,7 +459,7 @@
                             Width="1"
                             Height="50"
                             Margin="8,13"
-                            Background="{StaticResource MenuBorderBrush}" />
+                            Background="{DynamicResource BridgeHairline}" />
 
                     <Button x:Name="ScreenshotDockButton"
                             Style="{StaticResource MenuDockButton}"
@@ -609,14 +494,26 @@
             <Grid x:Name="MenuBottomFooterPanel"
                   Grid.Row="2"
                   Margin="2,8,2,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <controls:BridgeLoadingIndicator x:Name="NoticeLoadingIndicator"
+                                                 Margin="0,0,7,0"
+                                                 VerticalAlignment="Center"
+                                                 IsActive="False"
+                                                 Visibility="Collapsed" />
                 <TextBlock x:Name="NoticeText"
+                           Grid.Column="1"
                            Text="菜单浮层已就绪"
-                           Foreground="{StaticResource MenuAccentBrush}"
+                           Foreground="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                            FontSize="9"
                            HorizontalAlignment="Left" />
                 <TextBlock x:Name="MenuFooterHotkeyText"
+                           Grid.Column="2"
                            Text="按 Esc 返回游戏 · 工具窗口会随菜单自动隐藏"
-                           Foreground="{StaticResource MenuMutedTextBrush}"
+                           Foreground="{DynamicResource BridgeInk3}"
                            FontSize="9"
                            HorizontalAlignment="Right" />
             </Grid>
@@ -629,20 +526,32 @@
                 Padding="16,12"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
-                Background="#FA0C2230"
-                BorderBrush="{StaticResource MenuBorderStrongBrush}"
+                Background="{DynamicResource BridgePanelRaised}"
+                BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                 BorderThickness="2,1,1,1"
                 CornerRadius="3"
                 Panel.ZIndex="100"
                 Visibility="Collapsed">
             <StackPanel>
-                <TextBlock x:Name="NoticePopupTitle"
-                           Foreground="{StaticResource MenuPrimaryTextBrush}"
-                           FontSize="13"
-                           FontWeight="SemiBold" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <controls:BridgeLoadingIndicator x:Name="NoticePopupLoadingIndicator"
+                                                     Margin="0,0,8,0"
+                                                     VerticalAlignment="Center"
+                                                     IsActive="False"
+                                                     Visibility="Collapsed" />
+                    <TextBlock x:Name="NoticePopupTitle"
+                               Grid.Column="1"
+                               Foreground="{DynamicResource BridgeInk}"
+                               FontSize="13"
+                               FontWeight="SemiBold" />
+                </Grid>
                 <TextBlock x:Name="NoticePopupDetail"
                            Margin="0,5,0,0"
-                           Foreground="{StaticResource MenuSecondaryTextBrush}"
+                           Foreground="{DynamicResource BridgeInk2}"
                            FontSize="10"
                            TextWrapping="Wrap"
                            Visibility="Collapsed" />

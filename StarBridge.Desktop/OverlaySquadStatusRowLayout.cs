@@ -6,9 +6,9 @@ internal readonly record struct OverlaySquadStatusColumn(float Left, float Width
 }
 
 /// <summary>
-/// Allocates the three squad-status fields without allowing their draw boxes
-/// to overlap. The renderer supplies measured text widths; this module owns
-/// compact-format selection and column compression.
+/// Allocates the three overview funnel fields without allowing their draw boxes
+/// to overlap. Module width is the only input: changing counts, copy, or language
+/// cannot move a column boundary while the user leaves the module size unchanged.
 /// </summary>
 internal readonly record struct OverlaySquadStatusRowLayout(
     OverlaySquadStatusColumn Primary,
@@ -18,39 +18,21 @@ internal readonly record struct OverlaySquadStatusRowLayout(
 {
     public const float CompactThreshold = 280;
 
-    public static OverlaySquadStatusRowLayout Resolve(
-        float contentWidth,
-        float primaryTextWidth,
-        float summaryTextWidth,
-        float serverTextWidth)
+    public static OverlaySquadStatusRowLayout Resolve(float contentWidth)
     {
         var width = Math.Max(1, contentWidth);
         var compact = width < CompactThreshold;
-        var gap = compact ? 4f : 8f;
-        var available = Math.Max(1, width - gap * 2);
-        var desired = new[]
-        {
-            Math.Max(1, primaryTextWidth + 2),
-            Math.Max(1, summaryTextWidth + 2),
-            Math.Max(1, serverTextWidth + 2)
-        };
-        var desiredTotal = desired.Sum();
-        if (desiredTotal > available)
-        {
-            var scale = available / desiredTotal;
-            for (var index = 0; index < desired.Length; index++)
-            {
-                desired[index] = Math.Max(1, desired[index] * scale);
-            }
-        }
-
-        var primary = new OverlaySquadStatusColumn(0, desired[0]);
+        // Keep the boundaries identical to the WPF */*/* grid and to the
+        // editor's Star columns. Renderers may add padding inside a column,
+        // but copy and renderer-specific gaps must never move the funnel.
+        var columnWidth = width / 3f;
+        var primary = new OverlaySquadStatusColumn(0, columnWidth);
         var summary = new OverlaySquadStatusColumn(
-            primary.Right + gap,
-            desired[1]);
+            primary.Right,
+            columnWidth);
         var server = new OverlaySquadStatusColumn(
-            summary.Right + gap,
-            Math.Max(1, width - (summary.Right + gap)));
+            summary.Right,
+            Math.Max(0, width - summary.Right));
         return new OverlaySquadStatusRowLayout(
             primary,
             summary,
