@@ -8,14 +8,16 @@ public enum StartupDataGateState
     Loading,
     Live,
     OfflineCache,
-    Error
+    Error,
+    IdentityRequired
 }
 
 public enum StartupSyncOutcome
 {
     Succeeded,
     Failed,
-    TimedOut
+    TimedOut,
+    IdentityRequired
 }
 
 public readonly record struct StartupDataGateAttempt(
@@ -79,11 +81,17 @@ public static class StartupDataGate
         bool hasCachedState,
         bool syncSucceeded,
         bool syncFailed,
-        bool timedOut)
+        bool timedOut,
+        bool identityRequired = false)
     {
         if (syncSucceeded)
         {
             return StartupDataGateState.Live;
+        }
+
+        if (identityRequired)
+        {
+            return StartupDataGateState.IdentityRequired;
         }
 
         if (syncFailed || timedOut)
@@ -105,7 +113,9 @@ public static class StartupDataVisibilityPolicy
         return new StartupDataVisibility(
             ServerDataVisible: serverDataVisible,
             OnlineCountVisible: state == StartupDataGateState.Live,
-            BlockingStateVisible: state is StartupDataGateState.Loading or StartupDataGateState.Error,
+            BlockingStateVisible: state is StartupDataGateState.Loading or
+                StartupDataGateState.Error or
+                StartupDataGateState.IdentityRequired,
             OfflineCacheNoticeVisible: state == StartupDataGateState.OfflineCache,
             LocalPreferencesVisible: true,
             PersonalProfileVisible: true);
@@ -163,7 +173,8 @@ public sealed class StartupDataGateController
                 attempt.HasCachedState,
                 syncSucceeded: outcome == StartupSyncOutcome.Succeeded,
                 syncFailed: outcome == StartupSyncOutcome.Failed,
-                timedOut: outcome == StartupSyncOutcome.TimedOut),
+                timedOut: outcome == StartupSyncOutcome.TimedOut,
+                identityRequired: outcome == StartupSyncOutcome.IdentityRequired),
             attempt.CacheWrittenAtUtc);
         return true;
     }

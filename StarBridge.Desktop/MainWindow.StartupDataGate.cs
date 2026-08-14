@@ -176,6 +176,19 @@ public partial class MainWindow
         BridgeStatePresenter presenter,
         StartupDataGateState state)
     {
+        if (state == StartupDataGateState.IdentityRequired)
+        {
+            presenter.State = BridgeStateKind.AccessDenied;
+            presenter.TitleOverride = _language == "zh"
+                ? "等待游戏身份"
+                : "Waiting for game identity";
+            presenter.DescriptionOverride = _language == "zh"
+                ? "进入游戏后将从 Game.log 识别游戏 ID；完成绑定前不会同步用户数据。"
+                : "Start the game so Game.log can identify your player. User data sync stays paused until identity binding is complete.";
+            presenter.ActionTextOverride = string.Empty;
+            return;
+        }
+
         if (state == StartupDataGateState.Error)
         {
             presenter.State = BridgeStateKind.Error;

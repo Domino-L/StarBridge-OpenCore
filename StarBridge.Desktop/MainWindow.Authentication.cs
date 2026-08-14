@@ -387,6 +387,23 @@ public partial class MainWindow
             return;
         }
 
+        if (IsLoggedIn &&
+            _identityBindingSupported &&
+            !_identityBindingAssessment.CanSynchronize)
+        {
+            // A fresh local-data directory has no Game.log identity yet. This
+            // is an intentional privacy gate, not a relay failure.
+            ReevaluateIdentityBinding(showPrompt: true);
+            CompleteStartupDataGate(
+                attempt,
+                StartupSyncOutcome.IdentityRequired,
+                Stopwatch.StartNew());
+            NetworkStatusText.Text = "等待游戏身份 · 多人同步未启动";
+            RefreshHeaderStatusBar();
+            HideSyncStatusOverlay();
+            return;
+        }
+
         ShowSyncStatusOverlay(
             "正在同步服务器数据",
             "正在同步账号、舰队、任务和玩家状态...",

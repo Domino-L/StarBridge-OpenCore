@@ -2,14 +2,14 @@
 
 GitHub Releases 中的安装器用于向用户分发完整的星海舰桥桌面应用。
 
-0.6.0 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
+0.6.1 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
 签名和时间戳。用户应只从官方网页或本仓库不可变 Release 下载，并核对
 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。
 
 仓库内明确发布的桌面客户端与核心代码采用 Apache License 2.0。Release 安装包还可能包含
 未在本仓库公开的商业授权实现和可选商业外观，因此安装包整体不因存放在本仓库而全部转为 Apache-2.0。
 
-0.6.0 官方载荷不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+0.6.1 官方载荷不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
 正式载荷必须随附 `THIRD-PARTY-MEDIA-AUDIT.json`；对无媒体载荷，该报告应记录
 `rightsStatus: not-included`、零文件和零字节。
 

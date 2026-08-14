@@ -137,7 +137,9 @@ internal static class OverlayOverviewProjection
 
         return new OverlayOverviewProjectionResult(
             zh ? "舰队总览" : "FLEET OVERVIEW",
-            zh ? $"在线 {Number(online)}" : $"Online {Number(online)}",
+            zh
+                ? $"在线 {Number(online)} / {Number(players.Count)}"
+                : $"Online {Number(online)} / {Number(players.Count)}",
             zh
                 ? $"游戏中 {Number(inGame)} / {Number(online)}"
                 : $"In game {Number(inGame)} / {Number(online)}",
@@ -178,15 +180,21 @@ internal static class OverlayOverviewProjection
             ? ""
             : sceneContext.RoomGoal.Trim();
         var online = players.Count(player => PlayerPresence.IsOnline(player.SharedPresence));
+        var capacitySummary = zh
+            ? $"成员 {Number(memberCount)} / {Number(capacity)}"
+            : $"Members {Number(memberCount)} / {Number(capacity)}";
+        var roomDetail = string.IsNullOrWhiteSpace(goal)
+            ? capacitySummary
+            : $"{capacitySummary} · {goal}";
 
         return new OverlayOverviewProjectionResult(
             zh ? "房间概况" : "PARTY OVERVIEW",
             roomName,
             zh
-                ? $"成员 {Number(memberCount)} / {Number(capacity)}"
-                : $"Members {Number(memberCount)} / {Number(capacity)}",
+                ? $"在线 {Number(online)} / {Number(memberCount)}"
+                : $"Online {Number(online)} / {Number(memberCount)}",
             activity,
-            goal,
+            roomDetail,
             "",
             "",
             "",
@@ -206,9 +214,9 @@ internal static class OverlayOverviewProjection
     {
         var locations = players
             .Where(player =>
-                !player.IsSelf &&
                 player.SharedPresence == PlayerPresenceKind.InGame &&
                 (!hasComparableLocalServer ||
+                 player.IsSelf ||
                  FleetServerRelationship.Resolve(
                      player.SharedPresence,
                      player.IsSelf,
