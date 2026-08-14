@@ -73,6 +73,13 @@ try {
         $text = [IO.File]::ReadAllText($fullPath)
         $isSafetyScanner =
             $gitPath.Equals("scripts/Test Repository Safety.ps1", [StringComparison]::OrdinalIgnoreCase)
+        # Verbatim upstream LICENSE/NOTICE files may contain attribution email addresses.
+        # Exempt only that signal; all credential, server-address, local-path, and file-type
+        # checks below continue to apply to the legal material.
+        $isThirdPartyLegalAttributionFile =
+            [regex]::IsMatch(
+                $gitPath,
+                '(?i)^(?:open-core/)?licenses/[^/]*(?:license|notice)[^/]*\.txt$')
         if ($clientPackagingFiles -contains $gitPath -and
             [regex]::IsMatch($text, $serverPayloadPattern)) {
             $findings.Add("$relativePath [server content referenced by client packaging]")
@@ -85,12 +92,14 @@ try {
             }
         }
 
-        foreach ($match in [regex]::Matches($text, $emailPattern)) {
-            $email = $match.Value.ToLowerInvariant()
-            if ($email -notmatch '@example\.(?:com|org|net)$' -and
-                $email -notmatch '@example\.invalid$') {
-                $findings.Add("$relativePath [non-example email]")
-                break
+        if (-not $isThirdPartyLegalAttributionFile) {
+            foreach ($match in [regex]::Matches($text, $emailPattern)) {
+                $email = $match.Value.ToLowerInvariant()
+                if ($email -notmatch '@example\.(?:com|org|net)$' -and
+                    $email -notmatch '@example\.invalid$') {
+                    $findings.Add("$relativePath [non-example email]")
+                    break
+                }
             }
         }
 

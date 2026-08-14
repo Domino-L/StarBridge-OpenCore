@@ -14,6 +14,9 @@ declared license file.
 | Microsoft.Web.WebView2 | 1.0.2592.51 | BSD-3-Clause-style package license | `licenses/Microsoft.Web.WebView2-1.0.2592.51.txt` |
 | SharpGen.Runtime | 2.4.2-beta | MIT | `licenses/SharpGen.Runtime-2.4.2-beta.txt` |
 | SharpGen.Runtime.COM | 2.4.2-beta | MIT | `licenses/SharpGen.Runtime.COM-2.4.2-beta.txt` |
+| SkiaSharp | 3.119.4 | MIT | `licenses/SkiaSharp-3.119.4.txt` |
+| SkiaSharp.NativeAssets.Win32 | 3.119.4 | MIT plus upstream native notices | `licenses/SkiaSharp-3.119.4.txt` |
+| SkiaSharp.NativeAssets.macOS | 3.119.4 | MIT plus upstream native notices | `licenses/SkiaSharp-3.119.4.txt` |
 | System.IO.Pipelines | 9.0.1 | MIT | `licenses/System.IO.Pipelines-9.0.1.txt` |
 | System.Text.Encodings.Web | 9.0.1 | MIT | `licenses/System.Text.Encodings.Web-9.0.1.txt` |
 | System.Text.Json | 9.0.1 | MIT | `licenses/System.Text.Json-9.0.1.txt` |
@@ -26,6 +29,10 @@ declared license file.
 
 Microsoft.Web.WebView2 also ships an upstream third-party notice:
 `licenses/Microsoft.Web.WebView2-1.0.2592.51-NOTICE.txt`.
+
+The SkiaSharp native-asset packages also ship their upstream third-party
+notices as `licenses/SkiaSharp.NativeAssets.Win32-3.119.4-NOTICE.txt` and
+`licenses/SkiaSharp.NativeAssets.macOS-3.119.4-NOTICE.txt`.
 
 Official self-contained Windows packages also include the .NET host license and
 third-party notice copied from the .NET installation used to build that exact

@@ -20,6 +20,27 @@
       "licenseFile": "licenses/SharpGen.Runtime.COM-2.4.2-beta.txt"
     },
     {
+      "id": "SkiaSharp",
+      "version": "3.119.4",
+      "licenseFile": "licenses/SkiaSharp-3.119.4.txt"
+    },
+    {
+      "id": "SkiaSharp.NativeAssets.Win32",
+      "version": "3.119.4",
+      "licenseFile": "licenses/SkiaSharp-3.119.4.txt",
+      "noticeFiles": [
+        "licenses/SkiaSharp.NativeAssets.Win32-3.119.4-NOTICE.txt"
+      ]
+    },
+    {
+      "id": "SkiaSharp.NativeAssets.macOS",
+      "version": "3.119.4",
+      "licenseFile": "licenses/SkiaSharp-3.119.4.txt",
+      "noticeFiles": [
+        "licenses/SkiaSharp.NativeAssets.macOS-3.119.4-NOTICE.txt"
+      ]
+    },
+    {
       "id": "System.IO.Pipelines",
       "version": "9.0.1",
       "licenseFile": "licenses/System.IO.Pipelines-9.0.1.txt"
