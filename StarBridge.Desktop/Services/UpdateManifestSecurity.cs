@@ -8,12 +8,21 @@ public static class UpdateManifestSecurity
 {
     public const string PayloadVersion = "starbridge-update-manifest-v1";
     public const string TrustedKeyId = "73bfc5146228b248";
+    public const string NextTrustedKeyId = "facbafaec567677a";
 
     private const string TrustedPublicKeyXml = "<RSAKeyValue><Modulus>3skt8qG3F//HJ1K25byWanhMjVCWP0m/CZYyc5pLoL+aF/HxiK/R/3ZEHn48aWePMLhiwWwBRE19hTYIvPLmjoBSSo1Yt+/gjIJgSrPH21hI0kZ0ogDGGfGYF2XcNoY9eahR/QeIZ8mb3lIkZL5U5a44ykWUWdqUk7i/rVbdAxtOMqVg4tDVJniUbbsDGQNBnVGMW639YdUFepDUqguRQ8bvBMR+L4c9F8i7rFv20ubGxlsxtPSGwhqi5iXgpbYovn9t5qRV9UUblyP+DmgJMd/B8FaWhwR/dipD2oBUaCfP+dbHxYXcrpy4u0vhK4UntTE0iqM7tq5+5R28onn00+5Ump+WocoKKCzflTYTAeCC+XspbjW3cmjuN+AXR/LeUbJaIS4pUj64Njv9F9XjT1tAwU5gwsVCtiNxxz6qvfYipzZFehuGMtzgtbCV1/CrQFzbdeuHkVH45jBBIOanYfpClbNPh6Cm7HvZmgc3hGBtQ3aVMk+R4L4tQ6f3fiTF</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+    private const string NextTrustedPublicKeyXml = "<RSAKeyValue><Modulus>rPTgW4a3x1AJZLCcNf6LiW2UIVDW8nL7zaFw14d44bxGLUHtvmUXpPU/K29/qdoK47sszQ0wluzJgIYPvwcT19Q4RoSw5R5m5ceN+qEIO6ZlEaOwzZ17P/ElrWlIVd78T/492/GGiki4jqiYeuG3SZNsMcHyD/NDg/LnLveorVjunV7tuU4/oul/0/VJrzwZ+EHnHRhyqHHTLxn+f5U6zIwNzLNOnsWu7FG6TiTdF3fl0EATP+NCHXgwMQz4ROTU7/5METHFE8ANjP1FYVkM2wnsCi6HZJGURoprfrQ5MN+cNROCYjyoP7MQ6NeOtnYXB+stcoMnrpZT8+YWu9F1kJ5V9PGQIFpTpxmv9bTdGhED8/6V/dTrSisTYe3LKmVZBQVckP5viUgnPtP2qCbqpD6KjZy22s6usuUYEYiBzP+kdB7kq/0mJ7BTnqxxvhr/TNx4LHSOV9u3rdatPJWhd2u2+9p4WlngWHe3SB+0ukVhsGCZL1Lf2q7tmb3t1ASl</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
 
     public static void ValidateAndVerify(UpdateManifest manifest)
     {
-        ValidateAndVerify(manifest, TrustedPublicKeyXml, TrustedKeyId);
+        var publicKeyXml = manifest.SignatureKeyId switch
+        {
+            TrustedKeyId => TrustedPublicKeyXml,
+            NextTrustedKeyId => NextTrustedPublicKeyXml,
+            _ => throw new InvalidOperationException("更新清单使用了不受信任的签名密钥，已停止更新。")
+        };
+
+        ValidateAndVerify(manifest, publicKeyXml, manifest.SignatureKeyId!);
     }
 
     public static void ValidateAndVerify(UpdateManifest manifest, string publicKeyXml, string expectedKeyId)
