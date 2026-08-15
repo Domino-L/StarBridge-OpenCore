@@ -114,13 +114,13 @@
                 <StackPanel>
                     <Grid>
                         <StackPanel>
-                            <TextBlock Text="舰队成员"
+                            <TextBlock Text="组织成员"
                                        Foreground="{DynamicResource BridgeStatusInfo}"
                                        FontSize="13"
                                        FontWeight="SemiBold" />
                             <TextBlock x:Name="FleetAudienceSummaryText"
                                        Margin="0,3,12,0"
-                                       Text="不向舰队成员共享状态"
+                                       Text="不向组织成员共享状态"
                                        Foreground="{DynamicResource BridgeInk2}"
                                        FontSize="10"
                                        TextWrapping="Wrap" />
@@ -139,12 +139,12 @@
                                            FontWeight="SemiBold" />
                                 <WrapPanel>
                                     <CheckBox x:Name="FleetAdministratorsCheck"
-                                              Content="舰队管理员"
+                                              Content="组织管理者"
                                               Style="{StaticResource PrivacyAudienceCheckStyle}"
                                               Checked="FleetAudienceChoice_Changed"
                                               Unchecked="FleetAudienceChoice_Changed" />
                                     <CheckBox x:Name="FleetAllMembersCheck"
-                                              Content="所有舰队成员"
+                                              Content="所有组织成员"
                                               Style="{StaticResource PrivacyAudienceCheckStyle}"
                                               Checked="FleetAudienceChoice_Changed"
                                               Unchecked="FleetAudienceChoice_Changed" />
@@ -355,7 +355,7 @@
                            Grid.Column="1"
                            VerticalAlignment="Center">
                     <CheckBox x:Name="GameIdFleetCheck"
-                              Content="舰队"
+                              Content="组织"
                               Style="{StaticResource PrivacyAudienceCheckStyle}"
                               Checked="GameIdVisibility_Changed"
                               Unchecked="GameIdVisibility_Changed" />
@@ -411,7 +411,7 @@
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
                     <TextBlock Margin="0,0,8,0"
-                               Text="提醒舰队成员"
+                               Text="提醒组织成员"
                                Foreground="{DynamicResource BridgeInk}" />
                     <CheckBox x:Name="FleetEventsCheck"
                               Style="{StaticResource PrivacySwitchStyle}"

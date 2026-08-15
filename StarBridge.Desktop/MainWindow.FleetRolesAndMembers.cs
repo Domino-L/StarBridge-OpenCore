@@ -142,8 +142,8 @@ public partial class MainWindow
             : null;
         _fleetSystemRoleGroups.Add(CreateFleetRoleGroupRow(
             FleetCommanderRoleGroupKey,
-            commanderDefinition?.DisplayName ?? "舰队指挥官",
-            commanderDefinition?.Description ?? "舰队的唯一指挥席位，默认拥有全部权限；可调整公开显示的身份颜色。",
+            commanderDefinition?.DisplayName ?? "组织负责人",
+            commanderDefinition?.Description ?? "组织的唯一负责人席位，默认拥有全部权限；可调整公开显示的身份颜色。",
             commanderDefinition?.Color ?? FleetCommanderDefaultRoleColor,
             0,
             true,
@@ -157,8 +157,8 @@ public partial class MainWindow
             : null;
         _fleetSystemRoleGroups.Add(CreateFleetRoleGroupRow(
             FleetDeputyCommanderRoleGroupKey,
-            deputyDefinition?.DisplayName ?? "舰队副指挥官",
-            deputyDefinition?.Description ?? "协助舰队指挥官处理日常管理与调度。",
+            deputyDefinition?.DisplayName ?? "组织副负责人",
+            deputyDefinition?.Description ?? "协助组织负责人处理日常管理与调度。",
             deputyDefinition?.Color ?? FleetDeputyCommanderDefaultRoleColor,
             1,
             true,
@@ -219,7 +219,7 @@ public partial class MainWindow
             var row = CreateFleetRoleGroupRow(
                 group.Key,
                 title,
-                "自定义身份组，可按舰队需要配置权限。",
+                "自定义身份组，可按组织需要配置权限。",
                 FleetRoleColorPalette.Purple,
                 sort++,
                 false,
@@ -265,7 +265,7 @@ public partial class MainWindow
         var row = CreateFleetRoleGroupRow(
             $"custom_role_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
             $"自定义身份组 {index}",
-            "按舰队需要创建的自定义身份组。",
+            "按组织需要创建的自定义身份组。",
             FleetRoleColorPalette.Purple,
             100 + index,
             false,
@@ -510,7 +510,7 @@ public partial class MainWindow
 
         if (_selectedFleetRoleGroup.IsCommanderSeat)
         {
-            FleetMemberManagementStatusText.Text = "舰队指挥官席位不可复制，请新建自定义身份组。";
+            FleetMemberManagementStatusText.Text = "组织负责人席位不可复制，请新建自定义身份组。";
             return;
         }
 
@@ -535,7 +535,7 @@ public partial class MainWindow
     {
         if (_selectedFleetRoleGroup?.IsCommanderSeat == true)
         {
-            FleetMemberManagementStatusText.Text = "舰队指挥官是唯一席位，请在成员页转移指挥官。";
+            FleetMemberManagementStatusText.Text = "组织负责人是唯一席位，请在成员页转移管理权。";
             return;
         }
 
@@ -552,7 +552,7 @@ public partial class MainWindow
         if (_selectedFleetRoleGroup.IsSystem)
         {
             FleetMemberManagementStatusText.Text = _selectedFleetRoleGroup.IsCommanderSeat
-                ? "舰队指挥官席位不可删除。"
+                ? "组织负责人席位不可删除。"
                 : "系统默认身份组不可删除，但可以重命名和调整权限。";
             return;
         }
@@ -592,7 +592,7 @@ public partial class MainWindow
                 permission.IsAllowed = true;
             }
 
-            FleetMemberManagementStatusText.Text = "舰队指挥官默认拥有全部权限，无法在此关闭。";
+            FleetMemberManagementStatusText.Text = "组织负责人默认拥有全部权限，无法在此关闭。";
             return;
         }
 
@@ -601,7 +601,7 @@ public partial class MainWindow
             if (StarBridgeMessageBox.Show(
                     this,
                     $"确认为“{_selectedFleetRoleGroup.DisplayName}”开启危险权限“{item.Title}”？此操作会写入审计日志。",
-                    "舰队任务发布",
+                    "组织任务发布",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes)
             {
@@ -819,20 +819,20 @@ public partial class MainWindow
 
         return
         [
-            new("舰队资料", "管理舰队公开资料与展示资源。",
+            new("组织资料", "管理组织公开资料与展示资源。",
                 [
-                    Item(FleetPermissionPolicy.EditFleetProfile, "编辑舰队资料", "维护简介、活跃区域、活动时间和标签。", "资料", deputy),
-                    Item(FleetPermissionPolicy.ManageAnnouncements, "维护舰队公告", "发布、修订和撤下舰队公告，并查看历史记录。", "公告", deputy),
-                    Item("fleet.avatar.edit", "更换舰队标志", "更新舰队标志和头像资源。", "展示", commander)
+                    Item(FleetPermissionPolicy.EditFleetProfile, "编辑组织资料", "维护简介、活跃区域、活动时间和标签。", "资料", deputy),
+                    Item(FleetPermissionPolicy.ManageAnnouncements, "维护组织公告", "发布、修订和撤下组织公告，并查看历史记录。", "公告", deputy),
+                    Item("fleet.avatar.edit", "更换组织标志", "更新组织标志和头像资源。", "展示", commander)
                 ]),
             new("成员加入与管理", "处理加入申请和成员移除。",
                 [
                     Item("members.review", "审核申请", "处理玩家加入申请。", "成员", deputy),
-                    Item("members.remove", "移除成员", "从舰队中移除成员。", "成员", deputy)
+                    Item("members.remove", "移除成员", "从组织中移除成员。", "成员", deputy)
                 ]),
-            new("数据与日志", "查看和整理舰队管理日志。",
+            new("数据与日志", "查看和整理组织管理日志。",
                 [
-                    Item("audit.view", "查看舰队完整日志", "查看舰队资料、成员和权限变更记录。", "日志", deputy),
+                    Item("audit.view", "查看组织完整日志", "查看组织资料、成员和权限变更记录。", "日志", deputy),
                     Item("audit.delete", "删除日志记录", "删除不需要保留的单条日志。", "日志", commander)
                 ])
         ];
@@ -928,7 +928,7 @@ public partial class MainWindow
                 OnlineStatus = player.SharedOnlineStatusValue,
                 LiveStatus = player.SharedLiveStatusValue,
                 RoleTitle = isCommander
-                    ? "舰队指挥官"
+                    ? "组织负责人"
                     : hasInvalidCommanderRole
                         ? "权限无效"
                         : NormalizeRoleDisplayTitle(permission?.RoleTitle, permission?.RoleGroupKey),
@@ -971,7 +971,7 @@ public partial class MainWindow
                 AvatarPath = "",
                 OnlineStatus = "Offline",
                 RoleTitle = isCommander
-                    ? "舰队指挥官"
+                    ? "组织负责人"
                     : hasInvalidCommanderRole
                         ? "权限无效"
                         : NormalizeRoleDisplayTitle(permission.RoleTitle, permission.RoleGroupKey),
@@ -1806,13 +1806,13 @@ public partial class MainWindow
 
         if (row.IsCommander)
         {
-            FleetMemberManagementStatusText.Text = "舰队指挥官默认拥有所有权限。";
+            FleetMemberManagementStatusText.Text = "组织负责人默认拥有所有权限。";
             return;
         }
 
         if (!row.CanEditPermissions)
         {
-            FleetMemberManagementStatusText.Text = "只有舰队指挥官可以分配权限。";
+            FleetMemberManagementStatusText.Text = "只有组织负责人可以分配权限。";
             return;
         }
 
@@ -1822,7 +1822,7 @@ public partial class MainWindow
                            row.RoleTitle.Equals("普通成员", StringComparison.OrdinalIgnoreCase);
         if (IsFleetCommanderRole(null, row.RoleTitle))
         {
-            FleetMemberManagementStatusText.Text = "舰队指挥官为唯一特殊身份，请通过转移指挥官处理。";
+            FleetMemberManagementStatusText.Text = "组织负责人为唯一特殊身份，请通过转移管理权处理。";
             return;
         }
 
@@ -1830,7 +1830,7 @@ public partial class MainWindow
         var roleGroupKey = isBaseMember ? "" : ResolveRoleGroupKeyFromDisplayName(role);
         if (roleGroupKey.Equals("fleet_commander", StringComparison.OrdinalIgnoreCase))
         {
-            FleetMemberManagementStatusText.Text = "舰队指挥官为唯一特殊身份，请通过转移指挥官处理。";
+            FleetMemberManagementStatusText.Text = "组织负责人为唯一特殊身份，请通过转移管理权处理。";
             return;
         }
 
@@ -1993,7 +1993,7 @@ public partial class MainWindow
 
         var transferItem = new MenuItem
         {
-            Header = "转移舰队指挥官",
+            Header = "转移组织管理权",
             Tag = row,
             IsEnabled = canTransferCommand,
             Foreground = canTransferCommand
@@ -2100,11 +2100,11 @@ public partial class MainWindow
         var confirmed = await ShowAppConfirmationAsync(
             "更改身份组",
             $"将 {displayName} 的身份组更改为“{action.RoleTitle}”？",
-            "保存后，新身份组的管理权限会立即同步。舰队指挥官是唯一特殊身份，不能通过此菜单授予。",
+            "保存后，新身份组的管理权限会立即同步。组织负责人是唯一特殊身份，不能通过此菜单授予。",
             "确认更改",
             "取消",
             danger: false,
-            footerText: "身份组变更会写入舰队日志。");
+            footerText: "身份组变更会写入组织日志。");
         if (!confirmed)
         {
             return;
@@ -2199,14 +2199,14 @@ public partial class MainWindow
             await ShowAppNoticeAsync(
                 "无法移除成员",
                 "当前账号没有移除此成员的权限。",
-                "舰队指挥官不能从成员菜单移除自己，也不能通过成员移除流程处理舰队指挥官。");
+                "组织负责人不能从成员菜单移除自己，也不能通过成员移除流程处理组织负责人。");
             return;
         }
 
         var confirmed = await ShowAppConfirmationAsync(
             "移除成员",
-            $"确认将 {displayName} 移出舰队？",
-            "该成员会立即失去舰队同步、舰队成员信息和内部舰队数据访问。此操作会写入舰队日志。",
+            $"确认将 {displayName} 移出组织？",
+            "该成员会立即失去组织同步、组织成员信息和内部组织数据访问。此操作会写入组织日志。",
             "移除成员",
             "取消");
         if (!confirmed)
@@ -2232,7 +2232,7 @@ public partial class MainWindow
             }
 
             _fleetMemberPermissions.Remove(gameName);
-            AddFleetLog("成员", "移除成员", $"{displayName} 被移出舰队");
+            AddFleetLog("成员", "移除成员", $"{displayName} 被移出组织");
             await PullNetworkSnapshotsAsync(silent: true);
             await PullNetworkFleetsAsync(silent: true);
             RefreshFleetMemberManagement();
@@ -2253,7 +2253,7 @@ public partial class MainWindow
 
         if (!row.CanTransferCommander)
         {
-            FleetMemberManagementStatusText.Text = "只有舰队指挥官可以转移指挥权。";
+            FleetMemberManagementStatusText.Text = "只有组织负责人可以转移管理权。";
             return;
         }
 
@@ -2275,18 +2275,18 @@ public partial class MainWindow
             IsLocalPlayer(callsign ?? "") ||
             IsFleetCommander(gameName, callsign))
         {
-            setStatus("只有当前舰队指挥官可以把指挥权转移给其他成员。");
+            setStatus("只有当前组织负责人可以把管理权转移给其他成员。");
             return;
         }
 
         var confirmed = await ShowAppConfirmationAsync(
-            "转移舰队指挥官",
-            $"确认将舰队指挥权转移给 {displayName}？",
-            "转移后，对方将成为唯一舰队指挥官并拥有全部权限。你将自动变更为舰队副指挥官；此操作会立即同步且不能在本机撤销。",
+            "转移组织管理权",
+            $"确认将组织管理权转移给 {displayName}？",
+            "转移后，对方将成为唯一组织负责人并拥有全部权限。你将自动变更为组织副负责人；此操作会立即同步且不能在本机撤销。",
             "确认转移",
             "取消",
             danger: true,
-            footerText: "为避免舰队失去管理者，服务器会原子完成指挥权交接。");
+            footerText: "为避免组织失去管理者，服务器会原子完成管理权交接。");
         if (!confirmed)
         {
             return;
@@ -2295,12 +2295,12 @@ public partial class MainWindow
         var synced = await PushFleetMutationAsync(
             "api/fleets/transfer-commander",
             new FleetCommanderTransferRequest(_fleetCode, gameName),
-            $"舰队指挥权已转移给 {displayName}",
-            "转移舰队指挥官失败",
+            $"组织管理权已转移给 {displayName}",
+            "转移组织管理权失败",
             silent: false);
         if (!synced)
         {
-            setStatus("转移舰队指挥官失败，当前指挥权未改变。");
+            setStatus("转移组织管理权失败，当前管理权未改变。");
             return;
         }
 
@@ -2308,7 +2308,7 @@ public partial class MainWindow
         await PullNetworkSnapshotsAsync(silent: true);
         await PullNetworkFleetsAsync(silent: true);
         RefreshFleetMemberManagement();
-        setStatus($"舰队指挥权已转移给 {displayName}。");
+        setStatus($"组织管理权已转移给 {displayName}。");
     }
 
     private sealed record FleetMemberRoleMenuAction(

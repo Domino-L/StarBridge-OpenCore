@@ -55,20 +55,24 @@ public sealed record PlayerRow(
     public MediaBrush SharedStatusBrush => PlayerPresencePresentation.Brush(SharedPresence);
     public string SharedShipText => SharedShip ?? Ship;
     public string SharedLocationText => SharedLocation ?? Location;
-    public string SharedShipDisplayText => PlayerSessionStatePresentation.ResolveShip(
-        SharedPresence,
-        ResolveSharedServerSession(),
-        SharedShipText);
+    public string SharedShipDisplayText => ShipDisplayNamePresentation.ResolveChinese(
+        PlayerSessionStatePresentation.ResolveShip(
+            SharedPresence,
+            ResolveSharedServerSession(),
+            SharedShipText),
+        ShipDisplayNamePresentation.UnknownShip);
     public string SharedLocationDisplayText => PlayerSessionStatePresentation.ResolveLocation(
         SharedPresence,
         ResolveSharedServerSession(),
         SharedLocationText);
     internal FleetServerRelationshipKind? ResolvedServerRelationship { get; init; }
-    public string ServerRelationshipText => FleetServerRelationship.Format(
-        ResolvedServerRelationship ??
-        (SharedPresence == PlayerPresenceKind.InGame
-            ? FleetServerRelationshipKind.InGame
-            : FleetServerRelationshipKind.NotInGame),
+    // The legacy property name is retained for XAML compatibility. The member
+    // table now presents a localized region, never a relationship label or a
+    // concrete shard identifier.
+    public string ServerRelationshipText => GameServerRegionPresentation.Resolve(
+        SharedPresence,
+        ServerRegion,
+        ServerShard,
         zh: true);
     public string ServerShardDisplayText =>
         SharedPresence == PlayerPresenceKind.InGame &&
@@ -679,12 +683,12 @@ public sealed class FleetRoleGroupRow : INotifyPropertyChanged
     public HashSet<string> HiddenPermissionIds { get; } = new(StringComparer.OrdinalIgnoreCase);
     public bool IsCommanderSeat => Key.Equals("fleet_commander", StringComparison.OrdinalIgnoreCase);
     public string InternalTypeText => IsCommanderSeat ? "特殊身份" : IsSystem ? "系统默认" : "自定义身份组";
-    public string DeleteHint => IsCommanderSeat ? "舰队指挥官是唯一席位，不能删除或复制" : IsSystem ? "系统默认身份组不可删除" : "自定义身份组可删除";
+    public string DeleteHint => IsCommanderSeat ? "组织负责人是唯一席位，不能删除或复制" : IsSystem ? "系统默认身份组不可删除" : "自定义身份组可删除";
     public string MemberCountText => $"{MemberCount} 人";
     public string UpdatedText => UpdatedAt == default ? "尚未修改" : UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm");
     public string PermissionSummary => BuildPermissionSummary();
     public string PermissionEditorHint => IsCommanderSeat
-        ? "舰队指挥官不是普通身份组，而是唯一特殊身份。该席位默认拥有全部权限，权限矩阵不可调整；需要更换时请使用成员列表中的“转移指挥权”。"
+        ? "组织负责人不是普通身份组，而是唯一特殊身份。该席位默认拥有全部权限，权限矩阵不可调整；需要更换时请使用成员列表中的“转移管理权”。"
         : "权限只控制管理、编辑、审核和导出操作。成员基础查看能力默认开放，不在这里配置。";
     public bool CanCopyRole => !IsCommanderSeat;
     public bool CanAssignMembers => !IsCommanderSeat;
@@ -1068,7 +1072,7 @@ public sealed class FleetMemberManagementRow : INotifyPropertyChanged
         var allowed = new List<string>();
         if (CanManageFleetInfo)
         {
-            allowed.Add("舰队资料");
+            allowed.Add("组织资料");
         }
 
         if (CanRemoveMembers)

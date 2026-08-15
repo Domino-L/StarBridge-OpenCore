@@ -22,10 +22,10 @@ internal static class FleetDirectoryMemberScale
     internal static string Format(FleetDirectoryMemberScaleKind kind) =>
         kind switch
         {
-            FleetDirectoryMemberScaleKind.Small => "小型舰队",
-            FleetDirectoryMemberScaleKind.Medium => "中型舰队",
-            FleetDirectoryMemberScaleKind.Large => "大型舰队",
-            FleetDirectoryMemberScaleKind.VeryLarge => "超大型舰队",
+            FleetDirectoryMemberScaleKind.Small => "小型组织",
+            FleetDirectoryMemberScaleKind.Medium => "中型组织",
+            FleetDirectoryMemberScaleKind.Large => "大型组织",
+            FleetDirectoryMemberScaleKind.VeryLarge => "超大型组织",
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported fleet directory member scale.")
         };
 }

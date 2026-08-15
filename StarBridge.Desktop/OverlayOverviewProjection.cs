@@ -55,7 +55,7 @@ internal static class OverlayOverviewProjection
         var players = closedPlayers as PlayerRow[] ?? closedPlayers.ToArray();
         var zh = language?.Equals("zh", StringComparison.OrdinalIgnoreCase) == true;
         return sceneContext.Kind == OverlaySceneKind.PartyRoom
-            ? ProjectPartyRoom(players, sceneContext, zh)
+            ? ProjectPartyRoom(players, sceneContext, localPresence, localShard, language, zh)
             : ProjectFleet(players, hasFleet, localPresence, localShard, language, zh);
     }
 
@@ -108,7 +108,7 @@ internal static class OverlayOverviewProjection
                 zh ? "无舰队" : "No fleet",
                 zh ? $"在线 {Number(online)}" : $"Online {Number(online)}",
                 busiestServerSummary,
-                zh ? "请先加入或创建舰队" : "Join or create a fleet first",
+                zh ? "请先加入或创建组织" : "Join or create an organization first",
                 "",
                 "",
                 "",
@@ -162,44 +162,69 @@ internal static class OverlayOverviewProjection
     private static OverlayOverviewProjectionResult ProjectPartyRoom(
         IReadOnlyCollection<PlayerRow> players,
         OverlaySceneContext sceneContext,
+        PlayerPresenceKind localPresence,
+        string? localShard,
+        string? language,
         bool zh)
     {
         var memberCount = sceneContext.RoomMemberCount > 0
             ? sceneContext.RoomMemberCount
             : players.Count;
-        var capacity = Math.Max(memberCount, sceneContext.RoomCapacity);
-        var roomName = FirstNonEmpty(
-            sceneContext.RoomTitle,
-            zh ? "当前房间" : "Current party");
-        var activity = FirstNonEmpty(
-            sceneContext.RoomActivity,
-            sceneContext.RoomGoal,
-            zh ? "活动待定" : "Activity pending");
-        var goal = string.IsNullOrWhiteSpace(sceneContext.RoomGoal) ||
-                   sceneContext.RoomGoal.Equals(activity, StringComparison.Ordinal)
-            ? ""
-            : sceneContext.RoomGoal.Trim();
-        var online = players.Count(player => PlayerPresence.IsOnline(player.SharedPresence));
-        var capacitySummary = zh
-            ? $"成员 {Number(memberCount)} / {Number(capacity)}"
-            : $"Members {Number(memberCount)} / {Number(capacity)}";
-        var roomDetail = string.IsNullOrWhiteSpace(goal)
-            ? capacitySummary
-            : $"{capacitySummary} · {goal}";
+        var online = players.Count(player =>
+            PlayerPresence.IsOnline(ResolveFleetPresence(player, localPresence)));
+        var inGame = players.Count(player =>
+            ResolveFleetPresence(player, localPresence) == PlayerPresenceKind.InGame);
+        var hasComparableLocalServer =
+            localPresence == PlayerPresenceKind.InGame &&
+            FleetServerRelationship.IsRecognizedShard(localShard);
+        var sameServer = !hasComparableLocalServer
+            ? 0
+            : players.Count(player =>
+                FleetServerRelationship.Resolve(
+                    player.SharedPresence,
+                    player.IsSelf,
+                    player.ServerShard,
+                    localPresence,
+                    localShard) == FleetServerRelationshipKind.SameServer);
+        var sameShardSummary = hasComparableLocalServer
+            ? zh ? $"与你同分线 {Number(sameServer)} 人" : $"Same shard as you {Number(sameServer)}"
+            : zh ? "你尚未进入服务器" : "You are not in a server";
+        var busiestServerSummary = ProjectBusiestServerSummary(
+            players,
+            localPresence,
+            localShard,
+            inGame,
+            zh);
+        var topLocations = ProjectTopLocations(
+            players,
+            localPresence,
+            localShard,
+            hasComparableLocalServer,
+            language,
+            online,
+            zh);
 
         return new OverlayOverviewProjectionResult(
             zh ? "房间概况" : "PARTY OVERVIEW",
-            roomName,
             zh
                 ? $"在线 {Number(online)} / {Number(memberCount)}"
                 : $"Online {Number(online)} / {Number(memberCount)}",
-            activity,
-            roomDetail,
-            "",
-            "",
-            "",
+            zh
+                ? $"游戏中 {Number(inGame)} / {Number(online)}"
+                : $"In game {Number(inGame)} / {Number(online)}",
+            busiestServerSummary,
+            sameShardSummary,
+            FormatLocation(topLocations.ElementAtOrDefault(1)),
+            topLocations.Count == 0
+                ? zh ? "暂无可显示地点" : "No visible locations"
+                : "",
+            topLocations.Count == 0
+                ? zh
+                    ? $"该地点 - / {Number(online)}"
+                    : $"At location - / {Number(online)}"
+                : "",
             ResolveStatusBrush(players, online),
-            [],
+            topLocations,
             ShowsPlaceholder: false);
     }
 
@@ -380,9 +405,6 @@ internal static class OverlayOverviewProjection
         player.IsSelf
             ? localPresence
             : player.SharedPresence;
-
-    private static string FirstNonEmpty(params string?[] values) =>
-        values.First(value => !string.IsNullOrWhiteSpace(value))!.Trim();
 
     private static string FormatLocation(OverlayOverviewLocationCount? location) =>
         location is null

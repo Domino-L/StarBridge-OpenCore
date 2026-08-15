@@ -88,11 +88,11 @@ public partial class MainWindow
 
         if (!_hasFleet)
         {
-            FleetNotificationCenterSummaryText.Text = "加入或创建舰队后显示任务、计划和舰队动态。";
+            FleetNotificationCenterSummaryText.Text = "加入或创建组织后显示任务、计划和组织动态。";
             _fleetNotificationCenterItems.Add(new FleetNotificationCenterItemRow(
                 "入门",
-                "尚未加入舰队",
-                "寻找已有舰队，或创建自己的舰队。",
+                "尚未加入组织",
+                "寻找已有组织，或创建自己的组织。",
                 "",
                 "前往",
                 "find-fleet",
@@ -132,7 +132,7 @@ public partial class MainWindow
             AddItem(
                 "待处理",
                 $"{pendingApplications} 个加入申请",
-                "前往管理舰队审核新成员。",
+                "前往管理组织审核新成员。",
                 "",
                 "处理",
                 "applications",
@@ -155,7 +155,7 @@ public partial class MainWindow
             AddItem(
                 "当前任务",
                 "暂无当前任务",
-                "前往管理舰队发布任务或集结点。",
+                "前往管理组织发布任务或集结点。",
                 "",
                 "发布",
                 "task-manage",
@@ -185,7 +185,7 @@ public partial class MainWindow
             AddItem(
                 "行动计划",
                 "未来 7 天暂无计划",
-                "前往管理舰队创建行动计划。",
+                "前往管理组织创建行动计划。",
                 "",
                 "创建",
                 "plan-manage",
@@ -195,7 +195,7 @@ public partial class MainWindow
         if (!string.IsNullOrWhiteSpace(_fleetNoticeTitle))
         {
             AddItem(
-                "舰队公告",
+                "组织公告",
                 _fleetNoticeTitle,
                 string.IsNullOrWhiteSpace(_fleetNoticeContent) ? "点击查看公告。" : _fleetNoticeContent,
                 "",
@@ -206,9 +206,9 @@ public partial class MainWindow
         else if (CanCurrentUserManageAnnouncements())
         {
             AddItem(
-                "舰队公告",
-                "暂无舰队公告",
-                "发布公告后会同步给舰队成员，并保留在公告历史中。",
+                "组织公告",
+                "暂无组织公告",
+                "发布公告后会同步给组织成员，并保留在公告历史中。",
                 "",
                 "发布",
                 "notice-edit",
@@ -234,8 +234,8 @@ public partial class MainWindow
         if (_fleetNotificationCenterItems.Count == 0)
         {
             AddItem(
-                "舰队状态",
-                "暂无新的舰队动态",
+                "组织状态",
+                "暂无新的组织动态",
                 "任务、公告、计划、申请和日志会在这里聚合。",
                 "",
                 "",
@@ -246,7 +246,7 @@ public partial class MainWindow
         var activeCount = _fleetNotificationCenterItems.Count;
         FleetNotificationCenterSummaryText.Text = activeCount == 0
             ? "暂无待处理事项。"
-            : $"{activeCount} 条舰队动态，点击卡片可跳转处理。";
+            : $"{activeCount} 条组织动态，点击卡片可跳转处理。";
     }
 
     private void RefreshFleetRightContextSidebar()
@@ -622,7 +622,7 @@ public partial class MainWindow
             AddRightSidebarActivity(FleetRightModuleThreeItems, SanitizeFleetEventText(log.Title), log.Timestamp.ToLocalTime().ToString("MM-dd HH:mm"), log.AccentBrush);
         }
 
-        AddRightSidebarEmptyStateIfNeeded(FleetRightModuleThreeItems, "暂无舰队动态。");
+        AddRightSidebarEmptyStateIfNeeded(FleetRightModuleThreeItems, "暂无组织动态。");
     }
 
     private void RenderRightSidebarPendingApplications(IReadOnlyCollection<FleetApplicationRow> applications)
@@ -736,7 +736,7 @@ public partial class MainWindow
         });
         identity.Children.Add(new TextBlock
         {
-            Text = "申请加入舰队",
+            Text = "申请加入组织",
             Foreground = FleetCommandBrush(BridgeBrushToken.Ink3),
             FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
             FontSize = 10.5,
@@ -977,7 +977,7 @@ public partial class MainWindow
         {
             _fleetMemberTimelineItems.Add(new FleetNotificationCenterItemRow(
                 "资料",
-                _fleetMemberSidebarChatPreviewLoaded ? "暂无舰队动态" : "正在获取最新通讯",
+                _fleetMemberSidebarChatPreviewLoaded ? "暂无组织动态" : "正在获取最新通讯",
                 "新通讯和成员可见事件会按时间合并显示。",
                 "",
                 "",
@@ -1460,7 +1460,7 @@ public partial class MainWindow
     {
         if (IsCurrentUserFleetCommander())
         {
-            return "舰队指挥官";
+            return "组织负责人";
         }
 
         var permission = GetCurrentUserFleetPermission();

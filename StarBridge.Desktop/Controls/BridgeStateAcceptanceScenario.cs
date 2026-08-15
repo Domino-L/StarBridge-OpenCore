@@ -39,7 +39,7 @@ internal static class BridgeStateAcceptanceCatalog
         "no-permission" => new(
             BridgeStateKind.AccessDenied,
             "当前账号没有查看权限",
-            "联系舰队管理者确认账号权限。",
+            "联系组织管理者确认账号权限。",
             string.Empty,
             null),
         "cached-offline" => new(

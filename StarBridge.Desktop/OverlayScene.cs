@@ -121,7 +121,9 @@ public static class OverlaySceneResolver
         var liveStatus = PlayerPresence.ToWireValue(presence);
         var rawLocation = NormalizeRoomValue(member.LocationText, "等待位置同步");
         var location = FormatRoomLocation(rawLocation);
-        var ship = NormalizeRoomValue(member.ShipText, "等待舰船同步");
+        var ship = ShipDisplayNamePresentation.ResolveChinese(
+            member.ShipText,
+            "等待舰船同步");
         var isSelf = MatchesIdentity(member.GameId, localPlayer, localCallsign) ||
                      MatchesIdentity(member.Callsign, localPlayer, localCallsign);
         return new PlayerRow(
@@ -142,6 +144,7 @@ public static class OverlaySceneResolver
             RawLocation: rawLocation,
             IsSelf: isSelf,
             ShowMemberActions: false,
+            ServerShard: member.ShardText,
             ServerRegion: ResolveRoomRegion(member.ShardText),
             LiveStatus: liveStatus,
             AccountId: member.AccountId,

@@ -40,10 +40,10 @@ public partial class MainWindow
         RefreshFleetManagementPermissions();
 
         ManageFleetNoticeTitleText.Text = string.IsNullOrWhiteSpace(_fleetNoticeTitle)
-            ? "暂无舰队公告"
+            ? "暂无组织公告"
             : _fleetNoticeTitle;
         ManageFleetNoticeSummaryText.Text = string.IsNullOrWhiteSpace(_fleetNoticeContent)
-            ? "舰队公告会显示在我的舰队信息栏。"
+            ? "组织公告会显示在我的组织信息栏。"
             : _fleetNoticeContent;
         RefreshManageFleetBasicProfile();
 

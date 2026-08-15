@@ -431,7 +431,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
 
         var fleet = new InGameFleetWindow();
         _fleetWindow = fleet;
-        fleet.ResetAccountState("正在读取舰队详情与当前信息", isLoading: true);
+        fleet.ResetAccountState("正在读取组织详情与当前信息", isLoading: true);
         fleet.Activated += Tool_Activated;
         fleet.MenuCloseRequested += Tool_MenuCloseRequested;
         fleet.ToolDeactivated += Tool_Deactivated;

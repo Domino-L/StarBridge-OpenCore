@@ -24,7 +24,7 @@ public static class FleetActivityHeaderPresentation
         {
             return new FleetActivityHeaderSummary(
                 useChinese ? "未设置" : "Not configured",
-                useChinese ? "尚未设置舰队活动时间。" : "Fleet activity hours are not configured.");
+                useChinese ? "尚未设置组织活动时间。" : "Organization activity hours are not configured.");
         }
 
         var fullText = string.Join(

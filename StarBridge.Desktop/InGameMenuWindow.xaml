@@ -167,12 +167,12 @@
                         Margin="0,3"
                         Style="{StaticResource MenuDockButton}"
                         Click="OpenFleet_Click"
-                        ToolTip="查看舰队详情与当前信息">
+                        ToolTip="查看组织详情与当前信息">
                     <StackPanel>
                         <TextBlock Text="&#xE902;"
                                    Style="{StaticResource MenuDockGlyph}"
                                    FontSize="20" />
-                        <TextBlock Text="舰队"
+                        <TextBlock Text="组织"
                                    Style="{StaticResource MenuDockLabel}"
                                    Margin="0,5,0,0" />
                     </StackPanel>
@@ -197,7 +197,7 @@
                         Margin="0,3"
                         Style="{StaticResource MenuDockButton}"
                         Click="OpenChat_Click"
-                        ToolTip="打开私信、舰队与房间通讯">
+                        ToolTip="打开私信、组织与房间通讯">
                     <StackPanel>
                         <TextBlock Text="&#xE8BD;"
                                    Style="{StaticResource MenuDockGlyph}"
@@ -305,7 +305,7 @@
                     <StackPanel>
                         <TextBlock Text="当前协作" Style="{StaticResource MenuContextLabel}" />
                         <TextBlock x:Name="SceneTitleText"
-                                   Text="当前舰队"
+                                   Text="当前组织"
                                    Style="{StaticResource MenuContextValue}" />
                     </StackPanel>
                     <StackPanel x:Name="MemberContextPanel" Grid.Column="1">
@@ -359,10 +359,10 @@
                     <Button x:Name="FleetDockButton"
                             Style="{StaticResource MenuDockButton}"
                             Click="OpenFleet_Click"
-                            ToolTip="查看舰队详情与当前信息">
+                            ToolTip="查看组织详情与当前信息">
                         <StackPanel>
                             <TextBlock Text="&#xE902;" Style="{StaticResource MenuDockGlyph}" />
-                            <TextBlock x:Name="FleetDockLabel" Text="舰队" Style="{StaticResource MenuDockLabel}" />
+                            <TextBlock x:Name="FleetDockLabel" Text="组织" Style="{StaticResource MenuDockLabel}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="FriendsDockButton"
@@ -398,7 +398,7 @@
                     <Button x:Name="ChatDockButton"
                             Style="{StaticResource MenuDockButton}"
                             Click="OpenChat_Click"
-                            ToolTip="打开私信、舰队与房间通讯">
+                            ToolTip="打开私信、组织与房间通讯">
                         <Grid>
                             <StackPanel>
                                 <TextBlock Text="&#xE8BD;" Style="{StaticResource MenuDockGlyph}" />

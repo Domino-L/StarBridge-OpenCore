@@ -472,7 +472,7 @@ public partial class MainWindow
             ship.ShipRoleTag,
             ship.ShipStatus,
             ship.OwnerDisplay,
-            "舰队库",
+            "组织舰船库",
             isOnline ? "在线" : "离线",
             FleetCommandBrush(isOnline ? BridgeBrushToken.StatusOk : BridgeBrushToken.StatusOff),
             IsCatalogOnly: false);
@@ -598,9 +598,9 @@ public partial class MainWindow
         if (emailCall)
         {
             _ = SendFleetEmailNotificationAsync(
-                $"StarBridge 舰队任务：{objective}",
+                $"StarBridge 组织任务：{objective}",
                 BuildFleetEmailBody(
-                    "舰队任务发布",
+                    "组织任务发布",
                     ("任务目标", objective),
                     ("任务简述", FormatTaskDetailText(ParseFleetTaskBriefInfo(_fleetCurrentTaskBrief))),
                     ("参与范围", participants),
@@ -739,9 +739,9 @@ public partial class MainWindow
         }
 
         _ = SendFleetEmailNotificationAsync(
-            $"StarBridge 舰队任务提醒：{_fleetCurrentTaskTitle}",
+            $"StarBridge 组织任务提醒：{_fleetCurrentTaskTitle}",
             BuildFleetEmailBody(
-                "舰队任务再次通知",
+                "组织任务再次通知",
                 ("任务目标", _fleetCurrentTaskTitle),
                 ("任务简述", FormatTaskDetailText(ParseFleetTaskBriefInfo(_fleetCurrentTaskBrief))),
                 ("参与范围", _fleetCurrentTaskParticipants),
@@ -1271,14 +1271,14 @@ public partial class MainWindow
 
     private async void PublishFleetNoticeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("发布舰队公告需要先登录。"))
+        if (!EnsureLoggedIn("发布组织公告需要先登录。"))
         {
             return;
         }
 
         if (!CanCurrentUserManageAnnouncements())
         {
-            FleetNoticeValidationText.Text = "当前账号没有发布舰队公告的权限。";
+            FleetNoticeValidationText.Text = "当前账号没有发布组织公告的权限。";
             return;
         }
 
@@ -1287,43 +1287,43 @@ public partial class MainWindow
 
     private async void SaveFleetDescriptionButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("修改舰队介绍需要先登录。"))
+        if (!EnsureLoggedIn("修改组织介绍需要先登录。"))
         {
             return;
         }
 
         if (!CanCurrentUserManageFleetInfo())
         {
-            SetFleetDescriptionStatus("当前账号没有修改舰队介绍的权限。", ManageProfileStatusTone.Locked);
+            SetFleetDescriptionStatus("当前账号没有修改组织介绍的权限。", ManageProfileStatusTone.Locked);
             return;
         }
 
         var rollbackState = CaptureFleetStateForRollback();
         _fleetDescription = NormalizeFleetDescription(FleetDescriptionEditBox.Text);
-        AddFleetLog("舰队", "舰队介绍更新", _fleetDescription);
+        AddFleetLog("组织", "组织介绍更新", _fleetDescription);
         RefreshFleetHeader();
         RefreshTaskManagementPanel();
         SaveCurrentConfig();
         if (!await PushFleetInfoAsync(silent: false, scope: FleetInfoUpdateScope.Description))
         {
-            RestoreFleetStateAfterFailedMutation(rollbackState, "舰队介绍同步失败，已恢复本地资料状态。");
-            SetFleetDescriptionStatus("舰队介绍同步失败，已恢复本地状态。", ManageProfileStatusTone.Danger);
+            RestoreFleetStateAfterFailedMutation(rollbackState, "组织介绍同步失败，已恢复本地资料状态。");
+            SetFleetDescriptionStatus("组织介绍同步失败，已恢复本地状态。", ManageProfileStatusTone.Danger);
             return;
         }
 
-        SetFleetDescriptionStatus("舰队介绍已保存并同步。", ManageProfileStatusTone.Success);
+        SetFleetDescriptionStatus("组织介绍已保存并同步。", ManageProfileStatusTone.Success);
     }
 
     private async void SaveFleetNotificationSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("修改舰队邮件通知需要先登录。"))
+        if (!EnsureLoggedIn("修改组织邮件通知需要先登录。"))
         {
             return;
         }
 
         if (!CanCurrentUserManageFleetInfo())
         {
-            FleetEmailNotificationsStatusText.Text = "当前账号没有修改舰队邮件通知的权限。";
+            FleetEmailNotificationsStatusText.Text = "当前账号没有修改组织邮件通知的权限。";
             return;
         }
 
@@ -1331,7 +1331,7 @@ public partial class MainWindow
         var rollbackState = CaptureFleetStateForRollback();
         if (_fleetEmailNotificationsEnabled != enabled)
         {
-            AddFleetLog("舰队", enabled ? "启用基础邮件通知" : "关闭基础邮件通知", "舰队级基础邮件通知设置已更新");
+            AddFleetLog("组织", enabled ? "启用基础邮件通知" : "关闭基础邮件通知", "组织级基础邮件通知设置已更新");
         }
 
         _fleetEmailNotificationsEnabled = enabled;
@@ -1339,9 +1339,9 @@ public partial class MainWindow
         SaveCurrentConfig();
         if (!await PushFleetInfoAsync(silent: false, scope: FleetInfoUpdateScope.EmailNotifications))
         {
-            RestoreFleetStateAfterFailedMutation(rollbackState, "舰队邮件通知设置同步失败，已恢复本地设置。");
+            RestoreFleetStateAfterFailedMutation(rollbackState, "组织邮件通知设置同步失败，已恢复本地设置。");
             FleetEmailNotificationsEnabledCheck.IsChecked = _fleetEmailNotificationsEnabled;
-            FleetEmailNotificationsStatusText.Text = "舰队邮件通知设置同步失败，已恢复本地状态。";
+            FleetEmailNotificationsStatusText.Text = "组织邮件通知设置同步失败，已恢复本地状态。";
             return;
         }
 
@@ -1403,7 +1403,7 @@ public partial class MainWindow
         ActionPlanDetailTimeText.Text = $"开始时间 / {plan.StartTime:yyyy-MM-dd HH:mm}";
         ActionPlanDetailParticipantsText.Text = $"接取情况 / {participants} / 不限";
         ActionPlanDetailCommanderText.Text = $"指挥官 / {FormatCommanderName(_callsign, _localPlayer, _fleetChiefCommander)}";
-        ActionPlanDetailScopeText.Text = "参与范围 / 全舰队";
+        ActionPlanDetailScopeText.Text = "参与范围 / 全组织";
         ActionPlanDetailStatusText.Text = $"当前状态 / {FormatActionPlanStatusForCommandDeck(plan)}";
         ActionPlanDetailNotifyText.Text = plan.NotifyMembers ? "提醒 / 已启用" : "提醒 / 未启用";
         ActionPlanDetailMembersText.Text = plan.Participants.Count == 0
@@ -1523,7 +1523,7 @@ public partial class MainWindow
 
         if (plan is null && CountOpenActionPlans() >= 3)
         {
-            ActionPlanValidationText.Text = "同一舰队最多同时存在 3 个未结束行动计划。";
+            ActionPlanValidationText.Text = "同一组织最多同时存在 3 个未结束行动计划。";
             return;
         }
 
@@ -1608,7 +1608,7 @@ public partial class MainWindow
         {
             if (CountOpenActionPlans() >= 3)
             {
-                ActionPlanValidationText.Text = "同一舰队最多同时存在 3 个未结束行动计划。";
+                ActionPlanValidationText.Text = "同一组织最多同时存在 3 个未结束行动计划。";
                 return;
             }
 
@@ -1733,7 +1733,7 @@ public partial class MainWindow
             return;
         }
 
-        var reason = "由舰队管理取消";
+        var reason = "由组织管理取消";
         var title = plan.Title;
         var content = plan.Content;
         var startTime = plan.StartTime;

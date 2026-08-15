@@ -229,7 +229,7 @@ public sealed record PartyLobbyRoomCard(
     public string EligibilityText => Eligibility switch
     {
         PartyRoomEligibility.HostFriends => "仅房主好友",
-        PartyRoomEligibility.SameFleet => "仅同舰队成员",
+        PartyRoomEligibility.SameFleet => "仅同组织成员",
         PartyRoomEligibility.InviteOnly => "仅受邀玩家",
         _ => "所有玩家"
     };

@@ -38,8 +38,8 @@ internal static class FleetManagementOverviewPresentation
         if (!hasDescription && canEditProfile)
         {
             return new FleetManagementOverviewPriority(
-                "舰队介绍尚未完善",
-                "补充舰队定位与活动方式，帮助成员和访客快速了解舰队。",
+                "组织介绍尚未完善",
+                "补充组织定位与活动方式，帮助成员和访客快速了解组织。",
                 "完善资料",
                 FleetManagementOverviewTarget.Profile,
                 RequiresAttention: true);
@@ -49,7 +49,7 @@ internal static class FleetManagementOverviewPresentation
         {
             return new FleetManagementOverviewPriority(
                 "当前没有待处理事项",
-                "舰队资料、公告与加入申请均处于正常状态。",
+                "组织资料、公告与加入申请均处于正常状态。",
                 "查看管理记录",
                 FleetManagementOverviewTarget.Log,
                 RequiresAttention: false);

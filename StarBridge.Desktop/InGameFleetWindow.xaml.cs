@@ -70,7 +70,7 @@ public partial class InGameFleetWindow : Window
         }
 
         FleetNameText.Text = string.IsNullOrWhiteSpace(snapshot.FleetName)
-            ? "未命名舰队"
+            ? "未命名组织"
             : snapshot.FleetName;
         FleetCodeText.Text = string.IsNullOrWhiteSpace(snapshot.FleetCode)
             ? "识别码未设置"
@@ -87,7 +87,7 @@ public partial class InGameFleetWindow : Window
             ? "暂无当前公告"
             : snapshot.AnnouncementTitle;
         AnnouncementContentText.Text = string.IsNullOrWhiteSpace(snapshot.AnnouncementContent)
-            ? "舰队发布公告后会显示在这里。"
+            ? "组织发布公告后会显示在这里。"
             : snapshot.AnnouncementContent;
 
         TotalMemberCountText.Text = snapshot.TotalMembers.ToString();
@@ -212,12 +212,12 @@ public partial class InGameFleetWindow : Window
         var rows = members.ToArray();
         CollaborationMemberList.ItemsSource = rows;
         CollaborationEmptyText.TitleOverride = !string.IsNullOrWhiteSpace(search)
-            ? "没有找到匹配的舰队成员"
+            ? "没有找到匹配的组织成员"
             : _collaborationFilter switch
             {
-                "same-server" => "当前没有识别到同一服务器的舰队成员",
-                "in-game" => "当前没有舰队成员在游戏中",
-                _ => "暂无可显示的舰队成员"
+                "same-server" => "当前没有识别到同一服务器的组织成员",
+                "in-game" => "当前没有组织成员在游戏中",
+                _ => "暂无可显示的组织成员"
             };
         CollaborationEmptyText.Visibility = rows.Length == 0
             ? Visibility.Visible

@@ -840,8 +840,8 @@ public partial class InGameRoomWindow : Window
         object sender,
         System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != Key.Enter ||
-            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        if (MessageComposerKeyboardPolicy.Resolve(e.Key, Keyboard.Modifiers) !=
+            MessageComposerKeyAction.Send)
         {
             return;
         }

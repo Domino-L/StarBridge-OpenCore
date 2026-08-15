@@ -138,15 +138,15 @@ public partial class InGameSocialWindow : Window
 
         CommunicationDirectoryTitleText.Text = isChannels ? "频道" : "私聊";
         CommunicationDirectoryDetailText.Text = isChannels
-            ? "查看舰队和房间中的消息"
+            ? "查看组织和房间中的消息"
             : "只显示你和好友的一对一消息";
         ConversationEmptyState.TitleOverride = isChannels ? "还没有可用频道" : "还没有私聊会话";
         ConversationEmptyState.DescriptionOverride = isChannels
-            ? "加入舰队或房间后，频道会显示在这里。"
+            ? "加入组织或房间后，频道会显示在这里。"
             : "从好友列表选择一位好友，即可开始私聊。";
         ChatNoSelectionTitleText.Text = isChannels ? "选择一个频道" : "选择一位好友";
         ChatNoSelectionDetailText.Text = isChannels
-            ? "选择舰队或房间频道查看消息。"
+            ? "选择组织或房间频道查看消息。"
             : "从左侧选择一位好友开始私聊。";
 
         var activeKey = pane.ActiveConversation?.Key;
@@ -167,7 +167,7 @@ public partial class InGameSocialWindow : Window
                                   (isChannels ? "选择一个频道" : "选择一位好友");
         ActiveUserDetailText.Text = pane.ActiveConversation?.ContextText ??
                                     (isChannels
-                                        ? "从左侧选择舰队或房间频道"
+                                        ? "从左侧选择组织或房间频道"
                                         : "从左侧选择一位好友");
         if (pane.ActiveConversation is { Kind: InGameChatChannelKind.Private } &&
             pane.ActiveUser is { } activeUser)
@@ -190,7 +190,7 @@ public partial class InGameSocialWindow : Window
             ActiveUserPresenceText.Text = string.Empty;
             ActiveUserRelationText.Text = activeConversation.Kind switch
             {
-                InGameChatChannelKind.Fleet => "舰队频道",
+                InGameChatChannelKind.Fleet => "组织频道",
                 InGameChatChannelKind.Room => "房间频道",
                 _ => string.Empty
             };
@@ -273,7 +273,7 @@ public partial class InGameSocialWindow : Window
         {
             InGameSocialSection.Friends => "添加好友、处理申请并直接开始私聊",
             InGameSocialSection.DirectMessages => "只显示你和好友的一对一消息",
-            _ => "查看舰队和房间中的消息"
+            _ => "查看组织和房间中的消息"
         };
         if (_snapshot is not null)
         {
@@ -425,7 +425,8 @@ public partial class InGameSocialWindow : Window
         object sender,
         System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != Key.Enter || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        if (MessageComposerKeyboardPolicy.Resolve(e.Key, Keyboard.Modifiers) !=
+            MessageComposerKeyAction.Send)
         {
             return;
         }

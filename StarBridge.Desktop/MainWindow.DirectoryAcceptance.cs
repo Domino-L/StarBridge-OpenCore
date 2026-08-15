@@ -64,7 +64,7 @@ public partial class MainWindow
         (_findFleetAcceptanceScenarioButton, _findFleetAcceptanceScenarioPopup) =
             CreateDirectoryAcceptanceScenarioControl(
                 FindFleetHeaderActionsPanel,
-                "寻找舰队验收场景",
+                "寻找组织验收场景",
                 FindFleetAcceptanceScenarioMenuItem_Click);
         (_partyLobbyAcceptanceScenarioButton, _partyLobbyAcceptanceScenarioPopup) =
             CreateDirectoryAcceptanceScenarioControl(
@@ -225,10 +225,10 @@ public partial class MainWindow
                 _fleetDirectoryState.FailLoad(requestVersion, true, "");
                 break;
             case "error":
-                _fleetDirectoryState.FailLoad(requestVersion, false, "暂时无法读取舰队目录，请稍后重试。");
+                _fleetDirectoryState.FailLoad(requestVersion, false, "暂时无法读取组织目录，请稍后重试。");
                 break;
             case "no-permission":
-                _fleetDirectoryState.FailLoad(requestVersion, false, "当前账号暂时无法查看公开舰队，请检查登录状态。");
+                _fleetDirectoryState.FailLoad(requestVersion, false, "当前账号暂时无法查看公开组织，请检查登录状态。");
                 break;
             default:
                 _fleetDirectoryState.CompleteLoad(requestVersion, cards.Length);
@@ -237,7 +237,7 @@ public partial class MainWindow
 
         if (scenario is "no-results" or "filter-conflict")
         {
-            FindFleetSearchBox.Text = scenario == "no-results" ? "不存在的舰队" : "互相冲突的筛选条件";
+            FindFleetSearchBox.Text = scenario == "no-results" ? "不存在的组织" : "互相冲突的筛选条件";
         }
 
         ApplyFleetSearchFilter();
@@ -271,13 +271,13 @@ public partial class MainWindow
             .Select(index =>
             {
                 var name = index == count - 1 && count > 12
-                    ? "用于验证极长舰队名称在窄窗口中仍能安全省略而不会挤压操作区域的联合舰队"
+                    ? "用于验证极长组织名称在窄窗口中仍能安全省略而不会挤压操作区域的联合组织"
                     : $"{names[index % names.Length]} {index + 1:00}";
                 var snapshot = new NetworkFleetSnapshot(
                     Name: name,
                     Code: $"QA{index + 1:000}",
                     Commander: index % 3 == 0 ? "多米诺" : $"指挥官 {index + 1:00}",
-                    Description: "用于检查列表、筛选、详情、长文案和高密度滚动的模拟舰队资料。",
+                    Description: "用于检查列表、筛选、详情、长文案和高密度滚动的模拟组织资料。",
                     Type: index % 2 == 0 ? "综合协作" : "专项行动",
                     ActiveTime: index % 2 == 0 ? "周末 19:00–23:00" : "工作日 20:00–22:00",
                     JoinPolicy: index % 3 == 0 ? "直接加入" : "申请加入",
@@ -285,8 +285,8 @@ public partial class MainWindow
                     LogoImageData: null,
                     OnlineMembers: 1 + index % 8,
                     TotalMembers: 8 + index * 3,
-                    NoticeTitle: "公开舰队公告",
-                    NoticeContent: "欢迎查看舰队公开资料。",
+                    NoticeTitle: "公开组织公告",
+                    NoticeContent: "欢迎查看组织公开资料。",
                     CurrentTaskTitle: null,
                     CurrentTaskBrief: null,
                     CurrentTaskParticipants: null,

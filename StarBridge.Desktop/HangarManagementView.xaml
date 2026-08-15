@@ -397,7 +397,7 @@
                             <TextBlock x:Name="LastReadText" Grid.Column="1" Text="" Style="{StaticResource BridgeDirectoryFieldValueTextStyle}" />
                             <TextBlock Grid.Row="1" Margin="0,7,0,0" Text="最近同步" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
                             <TextBlock x:Name="LastSyncText" Grid.Row="1" Grid.Column="1" Margin="0,7,0,0" Text="" Style="{StaticResource BridgeDirectoryFieldValueTextStyle}" />
-                            <TextBlock Grid.Row="2" Margin="0,7,0,0" Text="舰队可见性" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
+                            <TextBlock Grid.Row="2" Margin="0,7,0,0" Text="组织可见性" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" />
                             <TextBlock x:Name="ShareStatusText" Grid.Row="2" Grid.Column="1" Margin="0,7,0,0" Text="" Style="{StaticResource BridgeDirectoryAuxTextStyle}" />
                         </Grid>
                         <Button Content="管理共享设置"
@@ -457,7 +457,7 @@
                                              Visibility="Collapsed" />
             <TextBlock x:Name="StatusText"
                        Style="{StaticResource BridgeDirectoryAuxTextStyle}"
-                       Text="机库数据仅在你主动扫描或同步时更新。专属图片会用于个人主页、舰队舰船和游戏内菜单。" />
+                       Text="机库数据仅在你主动扫描或同步时更新。专属图片会用于个人主页、组织舰船和游戏内菜单。" />
         </StackPanel>
     </Grid>
 </UserControl>

@@ -294,7 +294,7 @@ public partial class MainWindow
                 $"api/fleets/chat/channels?fleetCode={escapedFleetCode}");
             if (snapshot is null)
             {
-                throw new InvalidDataException("舰队聊天数据为空。");
+                throw new InvalidDataException("组织聊天数据为空。");
             }
 
             if (!IsFleetChatDirectoryCurrent(lane))
@@ -318,7 +318,7 @@ public partial class MainWindow
                        _fleetChatChannels.FirstOrDefault();
             if (next is null)
             {
-                ResetFleetChat("当前没有可访问的舰队聊天。", clearChannels: false);
+                ResetFleetChat("当前没有可访问的组织聊天。", clearChannels: false);
                 return;
             }
 
@@ -352,7 +352,7 @@ public partial class MainWindow
 
             if (showErrors)
             {
-                FleetChatStatusText.Text = UserFacingError.Describe(ex, "舰队聊天暂时无法同步，请稍后重试。");
+                FleetChatStatusText.Text = UserFacingError.Describe(ex, "组织聊天暂时无法同步，请稍后重试。");
                 FleetChatStatusText.Foreground = StatusPalette.DangerBrush;
             }
 
@@ -417,7 +417,7 @@ public partial class MainWindow
             FleetChatInputBox.IsEnabled = history.CanSend;
             FleetChatSendButton.IsEnabled = history.CanSend && !_isSendingFleetChatMessage;
             FleetChatStatusText.Text = history.CanSend
-                ? "仅当前舰队成员可见 · Enter 发送，Shift+Enter 换行"
+                ? "仅当前组织成员可见 · Enter 发送，Shift+Enter 换行"
                 : history.Error ?? "当前无法发送消息。";
             FleetChatStatusText.Foreground = history.CanSend
                 ? StatusPalette.DisabledBrush
@@ -595,7 +595,8 @@ public partial class MainWindow
 
     private void FleetChatInputBox_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        if (MessageComposerKeyboardPolicy.Resolve(e.Key, Keyboard.Modifiers) !=
+            MessageComposerKeyAction.Send)
         {
             return;
         }
@@ -616,7 +617,7 @@ public partial class MainWindow
         }
 
         FleetChatStatusText.Text = !_hasFleet
-            ? "加入舰队后可以使用通讯。"
+            ? "加入组织后可以使用通讯。"
             : "完成登录与身份验证后可以使用通讯。";
         FleetChatStatusText.Foreground = StatusPalette.WarningBrush;
         FleetChatSyncStateText.Text = "通讯已暂停";
@@ -625,7 +626,7 @@ public partial class MainWindow
 
     private void RenderFleetChat()
     {
-        FleetChatActiveChannelTitle.Text = "舰队聊天";
+        FleetChatActiveChannelTitle.Text = "组织聊天";
         FleetChatMessageEmptyState.Visibility = _fleetChatMessages.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -900,7 +901,7 @@ public partial class MainWindow
     private string ResolveFleetOverlayChatTitle()
     {
         var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
-        return zh ? "舰队通讯" : "FLEET COMMS";
+        return zh ? "组织通讯" : "ORGANIZATION COMMS";
     }
 
     private OverlayChatMessage[] ResolveFleetOverlayChatMessages() =>
@@ -968,7 +969,7 @@ public sealed class FleetChatChannelRow : INotifyPropertyChanged
     public string IconGlyph => "\uE8BD";
     public Brush AccentBrush { get; }
     public string PreviewText => string.IsNullOrWhiteSpace(Channel.LastMessagePreview)
-        ? "全舰队通讯"
+        ? "全组织通讯"
         : Channel.LastMessagePreview;
     public string UnreadText => _unreadCount > 99 ? "99+" : _unreadCount.ToString();
     public Visibility UnreadVisibility => _unreadCount > 0 ? Visibility.Visible : Visibility.Collapsed;

@@ -154,7 +154,8 @@ public partial class MainWindow
                 IdentityVerificationBannerTitleText.Text = "等待游戏身份";
                 IdentityVerificationBannerDetailText.Text =
                     "进入游戏后将从 Game.log 识别游戏 ID；完成绑定前不会同步用户数据";
-                IdentityVerificationBannerActionButton.Visibility = Visibility.Collapsed;
+                IdentityVerificationBannerActionButton.Content = "前往绑定设置";
+                IdentityVerificationBannerActionButton.Visibility = Visibility.Visible;
                 break;
         }
 
@@ -185,6 +186,12 @@ public partial class MainWindow
 
     private async void IdentityVerificationBannerActionButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_identityBindingAssessment.State == IdentityVerificationState.AwaitingGameIdentity)
+        {
+            OpenPersonalIdentitySettings_Click(sender, e);
+            return;
+        }
+
         await ShowIdentityBindingPromptAsync(force: true);
     }
 
@@ -208,7 +215,7 @@ public partial class MainWindow
             var replacing = assessment.State == IdentityVerificationState.Mismatch;
             var title = replacing ? "无法验证身份" : "绑定游戏身份";
             var message = (replacing
-                ? $"当前检测到的游戏 ID 与账号绑定信息不一致。\n\n已绑定：{assessment.BoundGameName}\n当前检测：{assessment.DetectedGameName}\n\n为保护账号数据，所有同步功能已暂停。本地游玩时长仍会继续记录。重新绑定后，舰队身份、权限和机库归属会迁移到新的游戏 ID。"
+                ? $"当前检测到的游戏 ID 与账号绑定信息不一致。\n\n已绑定：{assessment.BoundGameName}\n当前检测：{assessment.DetectedGameName}\n\n为保护账号数据，所有同步功能已暂停。本地游玩时长仍会继续记录。重新绑定后，组织身份、权限和机库归属会迁移到新的游戏 ID。"
                 : $"已从 Game.log 识别到游戏 ID：{assessment.DetectedGameName}\n\n星海舰桥需要绑定该游戏 ID，用于校验当前账号的游戏身份，避免同一账号切换到其他游戏 ID 后继续同步并造成资料错乱。不同星海舰桥账号可以绑定相同的游戏 ID。") +
                 "\n\n如果暂不绑定，星海舰桥将退出。下次启动后仍可重新完成绑定。";
             var confirmed = StarBridgeMessageBox.ShowAction(

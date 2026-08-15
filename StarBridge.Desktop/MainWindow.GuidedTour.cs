@@ -128,7 +128,7 @@ public partial class MainWindow
             case GuideStep.Complete:
                 _guidedTourTarget = null;
                 GuidedTourTitleText.Text = "启航航线已完成";
-                GuidedTourBodyText.Text = "你已经走过自己的账号、设置与资料，也知道了好友、舰队、房间、浮层和帮助入口。之后仍可在帮助中心重新查看。";
+                GuidedTourBodyText.Text = "你已经走过自己的账号、设置与资料，也知道了好友、组织、房间、浮层和帮助入口。之后仍可在帮助中心重新查看。";
                 GuidedTourProgressText.Text = "启航航线 · 完成";
                 GuidedTourBackButton.Visibility = Visibility.Visible;
                 GuidedTourPrimaryButton.Content = "完成引导";
@@ -183,8 +183,8 @@ public partial class MainWindow
                 BridgeFleetNav_Click(BridgeFleetNavButton, new RoutedEventArgs());
                 ConfigureOverviewStep(
                     BridgeFleetNavButton,
-                    "舰队",
-                    "没有舰队时可以浏览并申请加入；加入后，这里会成为成员、舰船、聊天和管理的长期协作空间。",
+                    "组织",
+                    "没有组织时可以浏览并申请加入；加入后，这里会成为成员、舰船、聊天和管理的长期协作空间。",
                     chapterIndex: 4);
                 return true;
             case GuideStep.RoomsOverview:

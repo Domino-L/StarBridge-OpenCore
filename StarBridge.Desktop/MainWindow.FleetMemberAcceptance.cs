@@ -29,10 +29,10 @@ public partial class MainWindow
             Height = 30,
             MinWidth = 92,
             Margin = new Thickness(0, 0, 10, 0),
-            ToolTip = "切换舰队成员页的本地模拟状态",
+            ToolTip = "切换组织成员页的本地模拟状态",
             Style = (Style)FindResource("SecondaryButton")
         };
-        AutomationProperties.SetName(_fleetMemberAcceptanceScenarioButton, "舰队成员验收场景");
+        AutomationProperties.SetName(_fleetMemberAcceptanceScenarioButton, "组织成员验收场景");
         _fleetMemberAcceptanceScenarioButton.Click += FleetMemberAcceptanceScenarioButton_Click;
         FleetMembersHeaderActionsGrid.Children.Insert(0, _fleetMemberAcceptanceScenarioButton);
 
@@ -67,7 +67,7 @@ public partial class MainWindow
 
         var description = new TextBlock
         {
-            Text = "只改变当前窗口显示，不会修改舰队或账号数据。",
+            Text = "只改变当前窗口显示，不会修改组织或账号数据。",
             Margin = new Thickness(0, 3, 0, 10),
             TextWrapping = TextWrapping.Wrap
         };
@@ -170,7 +170,7 @@ public partial class MainWindow
 
         (FleetMembersSearchEmptyText.Text, FleetMembersSearchEmptyDetailText.Text) = scenario switch
         {
-            _ => ("暂无舰队成员", "成员加入舰队后将在此显示。")
+            _ => ("暂无组织成员", "成员加入组织后将在此显示。")
         };
         SetFleetMemberAcceptanceButtonLabel(GetFleetMemberAcceptanceScenarioLabel(scenario));
     }
@@ -183,15 +183,15 @@ public partial class MainWindow
         FleetMembersSearchBox.Clear();
         FleetMembersDeckList.ItemsSource = _fleetMemberSearchView;
         _fleetMemberSearchView?.Refresh();
-        FleetMembersSearchEmptyText.Text = "暂无舰队成员";
-        FleetMembersSearchEmptyDetailText.Text = "成员加入舰队后将在此显示。";
+        FleetMembersSearchEmptyText.Text = "暂无组织成员";
+        FleetMembersSearchEmptyDetailText.Text = "成员加入组织后将在此显示。";
         SetFleetMemberAcceptanceButtonLabel(null);
     }
 
     private static PlayerRow[] CreateFleetMemberAllStatesScenario() =>
     [
-        CreateFleetMemberAcceptanceRow("多米诺", "domino_CN", "舰队指挥官", "Online", "InGame", "圣盾 伊德里斯-P", "地点：新巴贝奇", "pub_use1", true, true, FleetCommanderDefaultRoleColor),
-        CreateFleetMemberAcceptanceRow("曙光", "Citizen-2800", "舰队副指挥官", "Online", "AppOnline", "Unknown", "Unknown", null, false, false, FleetRoleColorPalette.Blue),
+        CreateFleetMemberAcceptanceRow("多米诺", "domino_CN", "组织负责人", "Online", "InGame", "圣盾 伊德里斯-P", "地点：新巴贝奇", "pub_use1", true, true, FleetCommanderDefaultRoleColor),
+        CreateFleetMemberAcceptanceRow("曙光", "Citizen-2800", "组织副负责人", "Online", "AppOnline", "Unknown", "Unknown", null, false, false, FleetRoleColorPalette.Blue),
         CreateFleetMemberAcceptanceRow("北辰", "Citizen-2801", "成员", "Offline", "Offline", "Unknown", "Unknown", null, false),
         CreateFleetMemberAcceptanceRow("远航者", "Citizen-2802", "成员", "Online", "InGame", "Unknown", "Unknown", null, false),
         CreateFleetMemberAcceptanceRow("星港守望", "Citizen-2803", "成员", "Online", "InGame", "Unknown", "Unknown", "pub_euw1", true),
@@ -200,8 +200,8 @@ public partial class MainWindow
 
     private static PlayerRow[] CreateFleetMemberOtherCommanderScenario() =>
     [
-        CreateFleetMemberAcceptanceRow("多米诺", "domino_CN", "舰队副指挥官", "Online", "InGame", "圣盾 伊德里斯-P", "地点：新巴贝奇", "pub_use1", true, false, FleetRoleColorPalette.Blue),
-        CreateFleetMemberAcceptanceRow("曙光", "Citizen-2800", "舰队指挥官", "Online", "AppOnline", "Unknown", "Unknown", null, false, true, FleetCommanderDefaultRoleColor),
+        CreateFleetMemberAcceptanceRow("多米诺", "domino_CN", "组织副负责人", "Online", "InGame", "圣盾 伊德里斯-P", "地点：新巴贝奇", "pub_use1", true, false, FleetRoleColorPalette.Blue),
+        CreateFleetMemberAcceptanceRow("曙光", "Citizen-2800", "组织负责人", "Online", "AppOnline", "Unknown", "Unknown", null, false, true, FleetCommanderDefaultRoleColor),
         CreateFleetMemberAcceptanceRow("北辰", "Citizen-2801", "成员", "Offline", "Offline", "Unknown", "Unknown", null, false)
     ];
 

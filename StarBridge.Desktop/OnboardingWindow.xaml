@@ -175,7 +175,7 @@
                                                    FontSize="14"
                                                    FontWeight="SemiBold" />
                                         <TextBlock Margin="0,7,0,0"
-                                                   Text="星海舰桥是一款面向 Star Citizen 玩家与舰队的测试版协同工具。它提供舰队、房间、好友、个人资料和游戏浮层等功能。"
+                                                   Text="星海舰桥是一款面向 Star Citizen 玩家与组织的测试版协同工具。它提供组织、房间、好友、个人资料和游戏浮层等功能。"
                                                    Foreground="#C7D6DF"
                                                    LineHeight="21"
                                                    TextWrapping="Wrap" />
@@ -192,7 +192,7 @@
                                                    FontSize="14"
                                                    FontWeight="SemiBold" />
                                         <TextBlock Margin="0,7,0,0"
-                                                   Text="登录后才能同步舰队、好友、聊天、公开资料和即时状态。星海舰桥账号独立于 RSI 账号，不会要求你的 RSI 登录凭据。"
+                                                   Text="登录后才能同步组织、好友、聊天、公开资料和即时状态。星海舰桥账号独立于 RSI 账号，不会要求你的 RSI 登录凭据。"
                                                    Foreground="#C7D6DF"
                                                    LineHeight="21"
                                                    TextWrapping="Wrap" />
@@ -419,7 +419,7 @@
                                        FontSize="10"
                                        FontWeight="SemiBold" />
                             <TextBlock x:Name="FeatureTourTitleText"
-                                       Text="寻找舰队"
+                                       Text="寻找组织"
                                        Margin="0,7,0,0"
                                        Foreground="#E6F1F8"
                                        FontSize="22"

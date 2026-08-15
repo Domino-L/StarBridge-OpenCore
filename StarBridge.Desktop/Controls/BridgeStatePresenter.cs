@@ -43,7 +43,7 @@ internal static class BridgeStateCatalog
         BridgeStateKind.AccessDenied => new(
             Icon: "⌧",
             Title: "只有指挥官可以查看审核队列",
-            Description: "如需权限，请联系舰队指挥官",
+            Description: "如需权限，请联系组织负责人",
             ActionText: string.Empty),
         BridgeStateKind.OfflineCache => new(
             Icon: "◐",

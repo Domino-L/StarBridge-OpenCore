@@ -55,7 +55,7 @@ public partial class MainWindow
         }
 
         System.Windows.Clipboard.SetText(code);
-        NetworkStatusText.Text = $"已复制舰队识别码：{code}";
+        NetworkStatusText.Text = $"已复制组织识别码：{code}";
     }
 
     private void ToggleFleetRailButton_Click(object sender, RoutedEventArgs e)
@@ -546,7 +546,7 @@ public partial class MainWindow
         AddFleetCommandMiniField(fields, "开始时间", plan.StartTime.ToString("MM-dd HH:mm"), FleetCommandBrush(BridgeBrushToken.Ink));
         AddFleetCommandMiniField(fields, "接取情况", participants, FleetCommandAccentBrush);
         AddFleetCommandMiniField(fields, "指挥官", FormatCommanderName(_callsign, _localPlayer, _fleetChiefCommander), FleetCommandBrush(BridgeBrushToken.Ink));
-        AddFleetCommandMiniField(fields, "参与范围", "全舰队", FleetCommandBrush(BridgeBrushToken.Ink));
+        AddFleetCommandMiniField(fields, "参与范围", "全组织", FleetCommandBrush(BridgeBrushToken.Ink));
         AddFleetCommandMiniField(
             fields,
             "当前状态",
@@ -1323,8 +1323,8 @@ public partial class MainWindow
 
         if (ToggleFleetRailButton is not null)
         {
-            ToggleFleetRailButton.Content = zh ? "退出舰队" : "Leave Fleet";
-            ToggleFleetRailButton.ToolTip = zh ? "退出当前舰队" : "Leave current fleet";
+            ToggleFleetRailButton.Content = zh ? "退出组织" : "Leave Organization";
+            ToggleFleetRailButton.ToolTip = zh ? "退出当前组织" : "Leave current organization";
         }
     }
 }

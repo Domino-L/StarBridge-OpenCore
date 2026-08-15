@@ -292,8 +292,8 @@ public partial class MainWindow
         {
             var row = CreateFleetRoleGroupRow(
                 FleetCommanderRoleGroupKey,
-                "舰队指挥官",
-                "舰队的唯一指挥席位，默认拥有全部权限；可调整公开显示的身份颜色。",
+                "组织负责人",
+                "组织的唯一负责人席位，默认拥有全部权限；可调整公开显示的身份颜色。",
                 FleetCommanderDefaultRoleColor,
                 0,
                 true,
@@ -313,8 +313,8 @@ public partial class MainWindow
         {
             var row = CreateFleetRoleGroupRow(
                 FleetDeputyCommanderRoleGroupKey,
-                "舰队副指挥官",
-                "协助舰队指挥官处理日常管理与调度。",
+                "组织副负责人",
+                "协助组织负责人处理日常管理与调度。",
                 FleetDeputyCommanderDefaultRoleColor,
                 1,
                 true,
@@ -487,7 +487,7 @@ public partial class MainWindow
 
     private void RefreshFleetViewsAfterRestore()
     {
-        LocalFleetText.Text = _hasFleet ? $"{_fleetName} [{_fleetCode}]" : "未加入舰队";
+        LocalFleetText.Text = _hasFleet ? $"{_fleetName} [{_fleetCode}]" : "未加入组织";
         RefreshFleetHeader();
         UpdateFleetEntryPanels();
         RefreshFleetOperationalSurfaces();
@@ -708,7 +708,7 @@ public partial class MainWindow
 
             ApplyFleetEventLogFilter();
 
-            LocalFleetText.Text = _hasFleet ? $"{_fleetName} [{_fleetCode}]" : "未加入舰队";
+            LocalFleetText.Text = _hasFleet ? $"{_fleetName} [{_fleetCode}]" : "未加入组织";
         }
         catch
         {

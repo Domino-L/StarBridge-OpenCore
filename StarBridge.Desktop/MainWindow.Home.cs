@@ -80,7 +80,7 @@ public partial class MainWindow
 
         if (!IsLoggedIn)
         {
-            HomeIdentityDetailText.Text = "登录后可同步好友、舰队、房间与个人资料；本地 Game.log 识别仍可使用。";
+            HomeIdentityDetailText.Text = "登录后可同步好友、组织、房间与个人资料；本地 Game.log 识别仍可使用。";
         }
         else if (!string.IsNullOrWhiteSpace(_localPlayer))
         {
@@ -197,7 +197,7 @@ public partial class MainWindow
 
         if (!IsLoggedIn)
         {
-            Add("login", "登录或注册账号", "同步好友、舰队、房间与个人资料", accent);
+            Add("login", "登录或注册账号", "同步好友、组织、房间与个人资料", accent);
         }
 
         if (string.IsNullOrWhiteSpace(_logPath) || !File.Exists(_logPath))
@@ -225,7 +225,7 @@ public partial class MainWindow
             : 0;
         if (pendingFleetApplications > 0 && CanCurrentUserManageFleetInfo())
         {
-            Add("fleet-applications", $"{pendingFleetApplications} 个舰队加入申请", "直接前往审核队列", warning);
+            Add("fleet-applications", $"{pendingFleetApplications} 个组织加入申请", "直接前往审核队列", warning);
         }
 
         var pendingRoomApplications = _currentPartyRoom is { ViewerIsHost: true } room
@@ -241,7 +241,7 @@ public partial class MainWindow
                           (startupFleetDataIsLive ? Math.Max(0, _fleetChatTotalUnread) : 0);
         if (totalUnread > 0)
         {
-            Add("messages", $"{totalUnread} 条未读消息", "查看好友私聊与舰队通讯", success);
+            Add("messages", $"{totalUnread} 条未读消息", "查看好友私聊与组织通讯", success);
         }
 
         HomePendingCountText.Text = $"{_homePendingItems.Count} 项";
@@ -264,7 +264,7 @@ public partial class MainWindow
             StartupDataGateState.IdentityRequired ||
             (startupState == StartupDataGateState.Initial && IsLoggedIn))
         {
-            HomeFleetTitleText.Text = "舰队与通讯";
+            HomeFleetTitleText.Text = "组织与通讯";
             HomeFleetActionButton.Content = startupState switch
             {
                 StartupDataGateState.Error => "重试同步",
@@ -285,7 +285,7 @@ public partial class MainWindow
             {
                 StartupDataGateState.Error => "当前没有可用缓存，请检查网络后重试。",
                 StartupDataGateState.IdentityRequired => "进入游戏后将从 Game.log 识别游戏 ID；完成绑定前不会同步用户数据。",
-                _ => "舰队、权限、任务与成员状态到位前不会显示旧数据。"
+                _ => "组织、权限、任务与成员状态到位前不会显示旧数据。"
             };
             HomeFleetCommunicationText.Text = startupState == StartupDataGateState.IdentityRequired
                 ? "等待游戏身份"
@@ -299,8 +299,8 @@ public partial class MainWindow
             ? startupState == StartupDataGateState.OfflineCache
                 ? $"{_fleetName} · 本地缓存"
                 : _fleetName
-            : "舰队与通讯";
-        HomeFleetActionButton.Content = _hasFleet ? "进入我的舰队" : "寻找舰队";
+            : "组织与通讯";
+        HomeFleetActionButton.Content = _hasFleet ? "进入我的组织" : "寻找组织";
         HomeFleetActionButton.Tag = _hasFleet ? "fleet" : "find-fleet";
 
         if (_hasFleet)
@@ -311,13 +311,13 @@ public partial class MainWindow
                 ? "暂无当前公告"
                 : announcementTitle;
             HomeFleetAnnouncementDetailText.Text = string.IsNullOrWhiteSpace(announcementContent)
-                ? "舰队当前没有正在广播的公告。"
+                ? "组织当前没有正在广播的公告。"
                 : announcementContent;
         }
         else
         {
-            HomeFleetAnnouncementTitleText.Text = "尚未加入舰队";
-            HomeFleetAnnouncementDetailText.Text = "寻找适合你的舰队，或使用邀请码加入。";
+            HomeFleetAnnouncementTitleText.Text = "尚未加入组织";
+            HomeFleetAnnouncementDetailText.Text = "寻找适合你的组织，或使用邀请码加入。";
         }
 
         if (_currentPartyRoom is { } room)
@@ -336,12 +336,12 @@ public partial class MainWindow
         {
             var preview = !string.IsNullOrWhiteSpace(latestFleetMessage.Text)
                 ? latestFleetMessage.Text
-                : latestFleetMessage.Attachment?.Title ?? "发送了一条舰队消息";
+                : latestFleetMessage.Attachment?.Title ?? "发送了一条组织消息";
             HomeFleetCommunicationText.Text = $"{latestFleetMessage.SenderCallsign}：{preview}";
         }
         else
         {
-            HomeFleetCommunicationText.Text = _hasFleet ? "暂无新消息" : "加入舰队后可使用舰队聊天";
+            HomeFleetCommunicationText.Text = _hasFleet ? "暂无新消息" : "加入组织后可使用组织聊天";
         }
 
         HomeFleetUnreadText.Text = _fleetChatTotalUnread > 0
@@ -536,10 +536,10 @@ public partial class MainWindow
 
         if (!_hasFleet)
         {
-            return ("find-fleet", "寻找舰队");
+            return ("find-fleet", "寻找组织");
         }
 
-        return ("fleet-chat", "打开舰队通讯");
+        return ("fleet-chat", "打开组织通讯");
     }
 
     private FleetPlayer? GetHomeLocalPlayer()

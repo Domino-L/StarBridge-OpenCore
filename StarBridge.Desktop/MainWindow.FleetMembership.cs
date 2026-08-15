@@ -20,12 +20,12 @@ public partial class MainWindow
 
     private async void JoinNetworkFleet_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("加入舰队需要先登录星海舰桥账号。"))
+        if (!EnsureLoggedIn("加入组织需要先登录星海舰桥账号。"))
         {
             return;
         }
 
-        if (!EnsureIdentityInitialized("加入舰队"))
+        if (!EnsureIdentityInitialized("加入组织"))
         {
             return;
         }
@@ -37,21 +37,21 @@ public partial class MainWindow
 
         if (IsSameFleet(card.Snapshot.Name) || IsSameFleet(card.Snapshot.Code))
         {
-            NetworkStatusText.Text = "你已经在该舰队中。";
+            NetworkStatusText.Text = "你已经在该组织中。";
             await ShowFleetDirectoryActionNoticeAsync(
-                "你已在该舰队中",
+                "你已在该组织中",
                 $"当前账号已经是“{card.Name}”的成员。",
-                "无需再次加入，可以前往“我的舰队”查看成员、聊天和舰船。");
+                "无需再次加入，可以前往“我的组织”查看成员、聊天和舰船。");
             return;
         }
 
         if (!card.CanJoin)
         {
-            NetworkStatusText.Text = "当前舰队暂不支持从目录直接加入。";
+            NetworkStatusText.Text = "当前组织暂不支持从目录直接加入。";
             await ShowFleetDirectoryActionNoticeAsync(
                 "暂时无法加入",
-                $"“{card.Name}”当前不支持从舰队目录直接加入。",
-                "请查看舰队的加入方式；仅限邀请的舰队需要使用有效邀请码。");
+                $"“{card.Name}”当前不支持从组织目录直接加入。",
+                "请查看组织的加入方式；仅限邀请的组织需要使用有效邀请码。");
             return;
         }
 
@@ -65,14 +65,14 @@ public partial class MainWindow
         {
             var isCommander = IsCurrentUserFleetCommander();
             var message = isCommander
-                ? "舰队指挥官不能直接切换舰队。"
-                : $"需要先离开当前舰队“{_fleetName}”。";
+                ? "组织负责人不能直接切换组织。"
+                : $"需要先离开当前组织“{_fleetName}”。";
             var detail = isCommander
-                ? "请先在舰队管理中转移指挥权或解散当前舰队，再返回这里加入其他舰队。"
-                : $"为避免成员身份和内部数据发生冲突，请先在“我的舰队”中退出，再加入“{card.Name}”。";
+                ? "请先在组织管理中转移管理权或解散当前组织，再返回这里加入其他组织。"
+                : $"为避免成员身份和内部数据发生冲突，请先在“我的组织”中退出，再加入“{card.Name}”。";
             NetworkStatusText.Text = message;
             await ShowFleetDirectoryActionNoticeAsync(
-                "无法切换舰队",
+                "无法切换组织",
                 message,
                 detail);
             return;
@@ -81,7 +81,7 @@ public partial class MainWindow
         var fleetCode = card.Snapshot.Code.Trim();
         if (!_findFleetJoinInProgressCodes.Add(fleetCode))
         {
-            NetworkStatusText.Text = "正在处理这支舰队的加入操作，请稍候。";
+            NetworkStatusText.Text = "正在处理这个组织的加入操作，请稍候。";
             await ShowFleetDirectoryActionNoticeAsync(
                 "操作正在进行",
                 $"正在处理“{card.Name}”的加入操作。",
@@ -136,7 +136,7 @@ public partial class MainWindow
                 await ShowFleetDirectoryActionNoticeAsync(
                     "申请已提交",
                     $"已向“{card.Name}”提交加入申请。",
-                    "舰队审核后，申请状态会在目录中自动更新。");
+                    "组织审核后，申请状态会在目录中自动更新。");
             }
             catch (Exception ex)
             {
@@ -166,7 +166,7 @@ public partial class MainWindow
                 var error = await ReadResponseErrorAsync(response);
                 NetworkStatusText.Text = $"加入失败：{error}";
                 await ShowFleetDirectoryActionNoticeAsync(
-                    "加入舰队失败",
+                    "加入组织失败",
                     $"暂时无法加入“{card.Name}”。",
                     error);
                 return;
@@ -177,19 +177,19 @@ public partial class MainWindow
             await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
             await PullNetworkFleetsAsync(silent: true);
             await PullNetworkSnapshotsAsync(silent: true);
-            NetworkStatusText.Text = $"已加入舰队：{card.Name}";
+            NetworkStatusText.Text = $"已加入组织：{card.Name}";
             NavigateToMyFleet();
             ShowOneTimeGuideHint(
                 "fleet-joined-member",
-                "舰队成员引导",
-                "你已经加入舰队。可以先查看成员的飞船、地点与所在服务器，并在“个人”页面完善呼号、头像和舰船数据库。");
+                "组织成员引导",
+                "你已经加入组织。可以先查看成员的飞船、地点与所在服务器，并在“个人”页面完善呼号、头像和舰船数据库。");
         }
         catch (Exception ex)
         {
-            var error = UserFacingError.Describe(ex, "暂时无法加入舰队，请稍后重试。");
+            var error = UserFacingError.Describe(ex, "暂时无法加入组织，请稍后重试。");
             NetworkStatusText.Text = error;
             await ShowFleetDirectoryActionNoticeAsync(
-                "加入舰队失败",
+                "加入组织失败",
                 $"暂时无法加入“{card.Name}”。",
                 error);
         }
@@ -213,7 +213,7 @@ public partial class MainWindow
             "",
             danger: false,
             showCancel: false,
-            footerText: "关闭提示后可以继续浏览舰队目录。");
+            footerText: "关闭提示后可以继续浏览组织目录。");
     }
 
     private void RestoreAccountAvatarFromServer(string? avatarImageData)
@@ -341,14 +341,14 @@ public partial class MainWindow
 
     private async Task LeaveCurrentFleetAsync()
     {
-        if (!EnsureLoggedIn("离开舰队需要先登录星海舰桥账号。"))
+        if (!EnsureLoggedIn("离开组织需要先登录星海舰桥账号。"))
         {
             return;
         }
 
         if (!_hasFleet || string.IsNullOrWhiteSpace(_fleetCode))
         {
-            NetworkStatusText.Text = "当前没有可离开的舰队。";
+            NetworkStatusText.Text = "当前没有可离开的组织。";
             return;
         }
 
@@ -359,16 +359,16 @@ public partial class MainWindow
             if (candidates.Count == 0)
             {
                 await ShowAppNoticeAsync(
-                    "无法直接退出舰队",
-                    "你是当前舰队指挥官，退出前需要先选择接手成员。",
-                    "当前没有可接手的舰队成员。请先邀请成员并完成交接，或前往“解散舰队”执行解散操作。");
+                    "无法直接退出组织",
+                    "你是当前组织负责人，退出前需要先选择接手成员。",
+                    "当前没有可接手的组织成员。请先邀请成员并完成交接，或前往“解散组织”执行解散操作。");
                 return;
             }
 
             var recommended = PickRecommendedFleetSuccessor(candidates);
             if (recommended is null)
             {
-                NetworkStatusText.Text = "没有可移交的舰队成员。";
+                NetworkStatusText.Text = "没有可移交的组织成员。";
                 return;
             }
 
@@ -381,10 +381,10 @@ public partial class MainWindow
             transferCommanderTo = selection.Player.Name;
         }
         else if (!await ShowAppConfirmationAsync(
-                     "离开舰队",
-                     $"确认离开舰队“{_fleetName}”？",
-                     "离开后你将失去该舰队的成员身份、成员同步和舰队内部数据访问。之后如需回来，需要重新申请或使用邀请码加入。",
-                     "离开舰队",
+                     "离开组织",
+                     $"确认离开组织“{_fleetName}”？",
+                     "离开后你将失去该组织的成员身份、成员同步和组织内部数据访问。之后如需回来，需要重新申请或使用邀请码加入。",
+                     "离开组织",
                      "取消"))
         {
             return;
@@ -397,7 +397,7 @@ public partial class MainWindow
                 new FleetLeaveRequest(_fleetCode, transferCommanderTo));
             if (!response.IsSuccessStatusCode)
             {
-                NetworkStatusText.Text = $"离开舰队失败：{await ReadResponseErrorAsync(response)}";
+                NetworkStatusText.Text = $"离开组织失败：{await ReadResponseErrorAsync(response)}";
                 return;
             }
 
@@ -407,32 +407,32 @@ public partial class MainWindow
             await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
             await PullNetworkFleetsAsync(silent: true);
             await PullNetworkSnapshotsAsync(silent: true);
-            NetworkStatusText.Text = "已离开舰队。";
+            NetworkStatusText.Text = "已离开组织。";
             NavigateToMyFleet();
         }
         catch (Exception ex)
         {
-            NetworkStatusText.Text = UserFacingError.Describe(ex, "暂时无法离开舰队，请稍后重试。");
+            NetworkStatusText.Text = UserFacingError.Describe(ex, "暂时无法离开组织，请稍后重试。");
         }
     }
 
     private async void DisbandFleetButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("解散舰队需要先登录星海舰桥账号。"))
+        if (!EnsureLoggedIn("解散组织需要先登录星海舰桥账号。"))
         {
             return;
         }
 
         if (!_hasFleet || string.IsNullOrWhiteSpace(_fleetCode))
         {
-            DisbandFleetStatusText.Text = "当前没有可解散的舰队。";
+            DisbandFleetStatusText.Text = "当前没有可解散的组织。";
             return;
         }
 
         var password = DisbandFleetPasswordBox.Password;
         if (string.IsNullOrWhiteSpace(password))
         {
-            DisbandFleetStatusText.Text = "请输入账号密码后再解散舰队。";
+            DisbandFleetStatusText.Text = "请输入账号密码后再解散组织。";
             return;
         }
 
@@ -449,19 +449,19 @@ public partial class MainWindow
             ClearFleetState();
             ConfirmAuthoritativeNoFleetState();
             DisbandFleetPasswordBox.Password = "";
-            DisbandFleetStatusText.Text = "舰队已解散。";
-            NetworkStatusText.Text = "舰队已从服务器移除";
+            DisbandFleetStatusText.Text = "组织已解散。";
+            NetworkStatusText.Text = "组织已从服务器移除";
             SaveCurrentConfig();
             await PullNetworkFleetsAsync(silent: true);
             await PullNetworkSnapshotsAsync(silent: true);
             await ShowAppNoticeAsync(
-                "舰队已解散",
-                "服务器已确认舰队解散。",
-                "本地舰队状态已清理，旧同步数据不会重新创建该舰队。如需继续使用，请创建或加入新的舰队。");
+                "组织已解散",
+                "服务器已确认组织解散。",
+                "本地组织状态已清理，旧同步数据不会重新创建该组织。如需继续使用，请创建或加入新的组织。");
         }
         catch (Exception ex)
         {
-            DisbandFleetStatusText.Text = UserFacingError.Describe(ex, "舰队未能解散，请稍后重试。");
+            DisbandFleetStatusText.Text = UserFacingError.Describe(ex, "组织未能解散，请稍后重试。");
         }
     }
 
@@ -560,7 +560,7 @@ public partial class MainWindow
         _fleetBannerSourcePath = null;
         _createFleetLogoPath = null;
         ClearFleetScopedCollectionsForJoin();
-        LocalFleetText.Text = "未加入舰队";
+        LocalFleetText.Text = "未加入组织";
         LeaveFleetButton.Visibility = Visibility.Collapsed;
         RefreshFleetHeader();
         UpdateFleetEntryPanels();

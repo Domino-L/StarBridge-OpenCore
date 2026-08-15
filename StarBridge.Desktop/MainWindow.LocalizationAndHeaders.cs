@@ -160,16 +160,16 @@ public partial class MainWindow
         LanguageBox.SelectedIndex = zh ? 1 : 0;
         LanguageBox.SelectionChanged += LanguageBox_SelectionChanged;
 
-        FindFleetNavText.Text = zh ? "寻找舰队" : "Find Fleet";
-        MyFleetNavText.Text = zh ? "我的舰队" : "My Fleet";
-        BridgeFindFleetSectionButton.Content = zh ? "寻找舰队" : "Find Fleet";
+        FindFleetNavText.Text = zh ? "寻找组织" : "Find Organization";
+        MyFleetNavText.Text = zh ? "我的组织" : "My Organization";
+        BridgeFindFleetSectionButton.Content = zh ? "寻找组织" : "Find Organization";
         System.Windows.Automation.AutomationProperties.SetName(
             BridgeFindFleetSectionButton,
-            zh ? "寻找舰队" : "Find Fleet");
-        BridgeMyFleetSectionButton.Content = zh ? "我的舰队" : "My Fleet";
+            zh ? "寻找组织" : "Find Organization");
+        BridgeMyFleetSectionButton.Content = zh ? "我的组织" : "My Organization";
         System.Windows.Automation.AutomationProperties.SetName(
             BridgeMyFleetSectionButton,
-            zh ? "我的舰队" : "My Fleet");
+            zh ? "我的组织" : "My Organization");
         BridgePartyNavText.Text = zh ? "房间" : "Rooms";
         BridgePartyNavButton.ToolTip = zh ? "房间" : "Rooms";
         System.Windows.Automation.AutomationProperties.SetName(
@@ -187,19 +187,19 @@ public partial class MainWindow
             zh ? "信息" : "Info");
         MySquadNavText.Text = zh ? "组队大厅" : "Party Lobby";
         OverlayNavText.Text = zh ? "游戏浮层" : "Overlay";
-        FindFleetTab.Header = zh ? "寻找舰队" : "Find Fleet";
-        FindFleetTitleText.Text = zh ? "寻找舰队" : "Find Fleet";
+        FindFleetTab.Header = zh ? "寻找组织" : "Find Organization";
+        FindFleetTitleText.Text = zh ? "寻找组织" : "Find Organization";
         FindFleetPlaceholderText.Text = zh
-            ? "搜索公开舰队，确认加入规则后加入同一舰队以同步信息。"
-            : "Search public fleets, confirm the join policy, then join the same fleet for synchronization.";
-        RefreshFleetDirectoryButton.Content = zh ? "刷新舰队" : "Refresh Fleets";
+            ? "搜索公开组织，确认加入规则后加入同一组织以同步信息。"
+            : "Search public organizations, confirm the join policy, then join the same organization for synchronization.";
+        RefreshFleetDirectoryButton.Content = zh ? "刷新组织" : "Refresh Organizations";
         SelectLogButton.Content = zh ? "选择日志" : "Select Log";
         ToggleOverlayButton.Content = zh ? "切换浮层" : "Toggle Overlay";
         NetworkTestNavButton.Content = zh ? "联网测试 / 监控" : "Network / Monitor";
         HotkeyLimitHintText.Text = zh
             ? "热键会在桌面与游戏内保持可用；若提示按键被占用，请更换组合键。"
             : "The shortcut stays available on desktop and in game. Choose another combination if it is already in use.";
-        FleetTab.Header = zh ? "舰队" : "Fleet";
+        FleetTab.Header = zh ? "组织" : "Organization";
         MySquadTab.Header = zh ? "组队大厅" : "Party Lobby";
         ApplyPartyLobbyLanguage(zh);
         RefreshFleetRailHeaders();
@@ -415,13 +415,13 @@ public partial class MainWindow
         if (OverlayInspectorMemberScopeBox.Items.Count >= 3)
         {
             ((ComboBoxItem)OverlayInspectorMemberScopeBox.Items[0]).Content = zh ? "当前小队" : "Current squad";
-            ((ComboBoxItem)OverlayInspectorMemberScopeBox.Items[1]).Content = zh ? "全舰队" : "All fleet";
+            ((ComboBoxItem)OverlayInspectorMemberScopeBox.Items[1]).Content = zh ? "全组织" : "All organization";
             ((ComboBoxItem)OverlayInspectorMemberScopeBox.Items[2]).Content = zh ? "其他小队" : "Other squads";
         }
         if (OverlayFullScreenMemberScopeBox.Items.Count >= 3)
         {
             ((ComboBoxItem)OverlayFullScreenMemberScopeBox.Items[0]).Content = zh ? "当前小队" : "Current squad";
-            ((ComboBoxItem)OverlayFullScreenMemberScopeBox.Items[1]).Content = zh ? "全舰队" : "All fleet";
+            ((ComboBoxItem)OverlayFullScreenMemberScopeBox.Items[1]).Content = zh ? "全组织" : "All organization";
             ((ComboBoxItem)OverlayFullScreenMemberScopeBox.Items[2]).Content = zh ? "其他小队" : "Other squads";
         }
         if (OverlayInspectorMemberPriorityBox.Items.Count >= 3)
@@ -595,12 +595,12 @@ public partial class MainWindow
         PlayerIdLabel.Text = zh ? "玩家 ID" : "Player ID";
         CallsignLabel.Text = zh ? "呼号" : "Callsign";
         EmailNotificationsCheck.Content = zh ? "允许" : "Allow";
-        FleetLabel.Text = zh ? "舰队" : "Fleet";
-        LocalFleetText.Text = zh ? "本地舰队" : "Local Fleet";
+        FleetLabel.Text = zh ? "组织" : "Organization";
+        LocalFleetText.Text = zh ? "本地组织" : "Local Organization";
         StatusLabel.Text = zh ? "状态" : "Status";
         ShipDatabaseTitleText.Text = zh ? "个人舰船库" : "Personal Ship Database";
         ShipDatabaseHintText.Text = zh
-            ? "来自官网机库整库读取，用于个人资产查看与舰队舰船数据库同步。不会保存 RSI 账号密码。"
+            ? "来自官网机库整库读取，用于个人资产查看与组织舰船库同步。不会保存 RSI 账号密码。"
             : "Read from the official hangar for personal asset review and fleet ship database sync. RSI credentials are never saved.";
         OpenHangarReaderButton.Content = zh ? "读取官网机库" : "Read Hangar";
         ClearShipDatabaseButton.Content = zh ? "清空舰船库" : "Clear Ships";
@@ -721,7 +721,7 @@ public partial class MainWindow
 
         BridgeFleetIdentityLogoImage.Source = image;
         BridgeFleetIdentityMark.ToolTip = string.IsNullOrWhiteSpace(_fleetName)
-            ? "当前舰队"
+            ? "当前组织"
             : _fleetName;
         BridgeFleetIdentityMark.Visibility = Visibility.Visible;
     }
@@ -781,7 +781,7 @@ public partial class MainWindow
         var mutedBrush = FindBrush("MutedTextBrush", Brushes.LightSlateGray);
         var disabledBrush = FindBrush("StatusDisabledBrush", Brushes.LightSlateGray);
 
-        PersonalHeaderFleetNameText.Text = _hasFleet ? _fleetName : "暂无所属舰队";
+        PersonalHeaderFleetNameText.Text = _hasFleet ? _fleetName : "暂无所属组织";
         PersonalHeaderFleetCodeText.Text = _hasFleet
             ? string.IsNullOrWhiteSpace(_fleetCode) ? "识别码未设置" : _fleetCode
             : "";

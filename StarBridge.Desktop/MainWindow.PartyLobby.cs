@@ -1838,8 +1838,9 @@ public partial class MainWindow
 
     private void PartyRoomChatInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != System.Windows.Input.Key.Enter ||
-            System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+        if (MessageComposerKeyboardPolicy.Resolve(
+                e.Key,
+                System.Windows.Input.Keyboard.Modifiers) != MessageComposerKeyAction.Send)
         {
             return;
         }
@@ -2190,7 +2191,7 @@ public partial class MainWindow
                     PresenceBrush = GetPartyPresenceBrush(presence),
                     LocationText = localMemberState?.LocationText ?? FormatPartyRoomLocation(member.LocationText),
                     ShipText = localMemberState?.ShipText ??
-                               (string.IsNullOrWhiteSpace(member.ShipText) ? "等待舰船同步" : member.ShipText),
+                               ShipDisplayNamePresentation.ResolveChinese(member.ShipText, "等待舰船同步"),
                     ShardText = localMemberState?.ShardText ?? FormatPartyRoomServer(member.ShardText)
                 };
             })

@@ -69,7 +69,7 @@
                        Foreground="{StaticResource AccentBrush}" />
             <TextBlock Grid.Row="1"
                        Margin="0,10,0,18"
-                       Text="登录后可同步舰队、任务与玩家状态。你也可以先跳过，以浏览模式进入应用。"
+                       Text="登录后可同步组织、任务与玩家状态。你也可以先跳过，以浏览模式进入应用。"
                        Foreground="{StaticResource MutedTextBrush}"
                        TextWrapping="Wrap" />
 
@@ -127,7 +127,7 @@
                             Click="ForgotPasswordButton_Click" />
 
                     <TextBlock Grid.Row="3"
-                               Text="使用注册邮箱和密码登录。未登录时只能浏览，无法同步和管理舰队。"
+                               Text="使用注册邮箱和密码登录。未登录时只能浏览，无法同步和管理组织。"
                                Foreground="{StaticResource MutedTextBrush}"
                                TextWrapping="Wrap" />
                 </Grid>
@@ -301,7 +301,7 @@
                     <TextBlock Margin="0,5,0,0"
                                Foreground="{StaticResource MutedTextBrush}"
                                TextWrapping="Wrap"
-                               Text="邮箱仅用于登录、验证和必要安全通知，不会公开给舰队成员。" />
+                               Text="邮箱仅用于登录、验证和必要安全通知，不会公开给组织成员。" />
                     <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
                         <Button Content="了解安全措施"
                                 Style="{StaticResource SecurityLinkButton}"

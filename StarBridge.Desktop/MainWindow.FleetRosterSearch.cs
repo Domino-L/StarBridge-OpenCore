@@ -85,10 +85,10 @@ public partial class MainWindow
         RestoreFleetMemberCurrentItem(_fleetMemberSearchView?.CurrentItem as PlayerRow);
         var isSearching = !string.IsNullOrWhiteSpace(FleetMembersSearchBox.Text);
         FleetMembersSearchEmptyText.Text = isSearching
-            ? "没有找到匹配的舰队成员"
-            : "暂无舰队成员";
+            ? "没有找到匹配的组织成员"
+            : "暂无组织成员";
         FleetMembersSearchEmptyDetailText.Text = isSearching
             ? "可尝试搜索呼号、游戏 ID、服务器、角色、飞船或地点。"
-            : "成员加入舰队后将在此显示。";
+            : "成员加入组织后将在此显示。";
     }
 }

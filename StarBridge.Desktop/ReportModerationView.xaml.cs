@@ -616,7 +616,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
     {
         "personal_profile" => "个人资料",
         "friend_chat" => "好友私信",
-        "fleet_chat" => "舰队通讯",
+        "fleet_chat" => "组织通讯",
         "party_room" => "组队房间",
         ReportEvidenceCategories.ShipImage => "舰船图片",
         _ => "应用内入口"
@@ -626,7 +626,7 @@ public partial class ReportModerationView : System.Windows.Controls.UserControl
     {
         ReportEvidenceCategories.Profile => "公开资料",
         ReportEvidenceCategories.DirectMessage => "双方私信",
-        ReportEvidenceCategories.FleetChat => "舰队通讯",
+        ReportEvidenceCategories.FleetChat => "组织通讯",
         ReportEvidenceCategories.RoomChat => "房间聊天",
         ReportEvidenceCategories.RoomContent => "房间资料",
         ReportEvidenceCategories.ShipImage => "舰船图片",

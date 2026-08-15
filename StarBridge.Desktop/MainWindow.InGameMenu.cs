@@ -45,8 +45,8 @@ public partial class MainWindow
         bool signedIn)
     {
         var status = signedIn
-            ? "正在加载舰队、好友、消息和房间"
-            : "登录后即可查看舰队、好友、消息和房间。";
+            ? "正在加载组织、好友、消息和房间"
+            : "登录后即可查看组织、好友、消息和房间。";
         if (!_inGameMenuCoordinator.BeginAccountSession(
                 accountSession,
                 status,
@@ -519,7 +519,7 @@ public partial class MainWindow
             ? "菜单浮层"
             : "Game menu";
         OverlayMenuModeDescriptionText.Text = zh
-            ? "打开浏览器、图片、舰队、通讯与房间工具"
+            ? "打开浏览器、图片、组织、通讯与房间工具"
             : "Open browser, image, fleet, communication, and room tools";
         OverlayInformationModeSelectionText.Text = zh
             ? "正在设置"
@@ -1139,14 +1139,14 @@ public partial class MainWindow
             ? FirstNonEmpty(context.RoomTitle, "当前房间")
             : context.IsLocalOnly
                 ? "仅自己可见"
-                : FirstNonEmpty(_fleetName, "当前舰队");
+                : FirstNonEmpty(_fleetName, "当前组织");
         var sceneDetail = context.Kind == OverlaySceneKind.PartyRoom
             ? FirstNonEmpty(context.RoomGoal, context.RoomActivity, "已加入房间，等待队友更新信息")
             : context.IsLocalOnly
-                ? "你暂未加入舰队或房间；当前信息只在本机显示。"
+                ? "你暂未加入组织或房间；当前信息只在本机显示。"
                 : _hasFleet
-                    ? $"已加入 {FirstNonEmpty(_fleetName, "舰队")}，可以查看舰队消息。"
-                    : "加入舰队或房间后，这里会显示队友信息。";
+                    ? $"已加入 {FirstNonEmpty(_fleetName, "组织")}，可以查看组织消息。"
+                    : "加入组织或房间后，这里会显示队友信息。";
         var memberCount = context.Kind == OverlaySceneKind.PartyRoom && context.RoomMemberCount > 0
             ? context.RoomMemberCount
             : scene.Players.Count;
@@ -1178,10 +1178,12 @@ public partial class MainWindow
             sceneDetail,
             context.DisplayName,
             memberCount,
-            PlayerSessionStatePresentation.ResolveShip(
-                menuPresence,
-                menuHasServerSession,
-                NormalizeRuntimeMenuValue(local?.SharedShipText)),
+            ShipDisplayNamePresentation.ResolveChinese(
+                PlayerSessionStatePresentation.ResolveShip(
+                    menuPresence,
+                    menuHasServerSession,
+                    NormalizeRuntimeMenuValue(local?.SharedShipText)),
+                ShipDisplayNamePresentation.UnknownShip),
             PlayerSessionStatePresentation.ResolveLocation(
                 menuPresence,
                 menuHasServerSession,
@@ -1231,13 +1233,13 @@ public partial class MainWindow
         if (!IsLoggedIn)
         {
             return InGameFleetSnapshot.Unavailable(
-                "登录后即可查看你所在舰队的详情与当前信息。");
+                "登录后即可查看你所在组织的详情与当前信息。");
         }
 
         if (!_hasFleet)
         {
             return InGameFleetSnapshot.Unavailable(
-                "加入舰队后，这里会显示舰队成员与共享舰船。");
+                "加入组织后，这里会显示组织成员与共享舰船。");
         }
         var localServerShard = IsGameServerRegionCurrent()
             ? _gameServerShard.Trim()
@@ -1283,7 +1285,7 @@ public partial class MainWindow
                     FirstNonEmpty(
                         GetFleetRole(player.Name, player.Callsign),
                         player.Role,
-                        "舰队成员"),
+                        "组织成员"),
                     IsFleetCommander(player.Name, player.Callsign),
                     PlayerSessionStatePresentation.ResolveShip(
                         presence,
@@ -1331,15 +1333,15 @@ public partial class MainWindow
             .ToArray();
         var announcement = _fleetCurrentAnnouncement;
         var status = CanSynchronizeUserData
-            ? "舰队状态将自动更新"
+            ? "组织状态将自动更新"
             : "正在显示最近同步信息，连接恢复后将自动更新";
 
         return InGameFleetProjection.Build(
             true,
-            FirstNonEmpty(_fleetName, "未命名舰队"),
+            FirstNonEmpty(_fleetName, "未命名组织"),
             FirstNonEmpty(_fleetCode, "识别码未设置"),
             FormatCommanderName(_callsign, _localPlayer, _fleetChiefCommander),
-            FirstNonEmpty(_fleetDescription, "暂无舰队简介"),
+            FirstNonEmpty(_fleetDescription, "暂无组织简介"),
             _fleetLogoPath,
             FirstNonEmpty(announcement?.Title, _fleetNoticeTitle),
             FirstNonEmpty(announcement?.Content, _fleetNoticeContent),
@@ -1374,7 +1376,7 @@ public partial class MainWindow
         if (channel is null)
         {
             _inGameMenuCoordinator.ShowNotice(
-                "正在同步舰队通讯",
+                "正在同步组织通讯",
                 "频道就绪后会显示在通讯窗口的频道列表中。",
                 isLoading: true);
             return;
@@ -3095,14 +3097,14 @@ public partial class MainWindow
             row.ChannelId,
             row.DisplayName,
             row.PreviewText,
-            "舰队频道",
+            "组织频道",
             _fleetLogoPath,
             GetInitials(FirstNonEmpty(_fleetName, _fleetCode, row.DisplayName)),
             row.AccentBrush,
             row.Channel.LastMessageAt is { } lastMessageAt
                 ? CommunicationTimeFormatter.Format(lastMessageAt)
                 : "",
-            "舰队",
+            "组织",
             Visibility.Visible,
             row.UnreadText,
             row.UnreadVisibility);

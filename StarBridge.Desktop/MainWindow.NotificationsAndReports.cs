@@ -350,7 +350,7 @@ public partial class MainWindow
             await ShowAppNoticeAsync(
                 "通知中心暂不可用",
                 "完成登录与身份验证后即可查看通知。",
-                "好友、舰队和房间的原有入口不会受到影响。");
+                "好友、组织和房间的原有入口不会受到影响。");
             return;
         }
 
@@ -368,7 +368,7 @@ public partial class MainWindow
         _notificationCenterView = view;
         ApplicationLayerHost.ShowWorkspace(
             "通知中心",
-            "好友、舰队、房间与账号安全",
+            "好友、组织、房间与账号安全",
             view,
             () =>
             {
@@ -508,8 +508,8 @@ public partial class MainWindow
         {
             await ShowAppNoticeAsync(
                 "无法打开审核队列",
-                "你当前没有审核舰队申请的权限。",
-                "可以联系舰队管理者，或在舰队原页面查看你有权访问的内容。");
+                "你当前没有审核组织申请的权限。",
+                "可以联系组织管理者，或在组织原页面查看你有权访问的内容。");
             return;
         }
 
@@ -563,7 +563,7 @@ public partial class MainWindow
     private Task<bool> ShowNotificationUnavailableAsync() => ShowAppNoticeAsync(
         "内容已失效",
         "这项内容已处理或不再可用。",
-        "你仍可在对应的好友、舰队或房间页面查看最新状态。");
+        "你仍可在对应的好友、组织或房间页面查看最新状态。");
 
     private void RefreshPersonalProfileReportAction()
     {

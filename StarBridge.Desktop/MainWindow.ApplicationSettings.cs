@@ -26,6 +26,7 @@ public partial class MainWindow
 
         PersonalAppVersionValueText.Text = $"V{GetAppVersion()}";
         PersonalAppConfigPathValueText.Text = DesktopAppConfig.ConfigDirectory;
+        LocalDataRootPathText.Text = DesktopAppConfig.ConfigDirectory;
         RefreshApplicationBehaviorPresentation();
         RefreshGameplayStatisticsPresentation();
         var canRedeem = IsLoggedIn;
@@ -33,6 +34,76 @@ public partial class MainWindow
         TemporaryEntitlementCodeBox.Opacity = canRedeem ? 1 : 0.58;
         RedeemTemporaryEntitlementButton.IsEnabled = canRedeem;
         RedeemTemporaryEntitlementButton.Opacity = canRedeem ? 1 : 0.58;
+    }
+
+    private void MigrateLocalDataRootButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "选择星海舰桥的数据保存位置",
+            InitialDirectory = Directory.Exists(DesktopAppConfig.ConfigDirectory)
+                ? DesktopAppConfig.ConfigDirectory
+                : null,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        string destinationRoot;
+        try
+        {
+            destinationRoot = DesktopStorageRoot.ValidateMigrationDestination(dialog.FolderName);
+        }
+        catch (Exception ex)
+        {
+            StarBridgeMessageBox.Show(
+                this,
+                UserFacingError.Describe(ex, "无法使用所选文件夹，请选择一个空的专用文件夹。"),
+                "无法更改数据位置",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        if (string.Equals(
+                Path.TrimEndingDirectorySeparator(destinationRoot),
+                Path.TrimEndingDirectorySeparator(DesktopAppConfig.ConfigDirectory),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            LocalDataManagementActionText.Text = "数据已经保存在所选位置。";
+            return;
+        }
+
+        if (StarBridgeMessageBox.Show(
+                this,
+                $"星海舰桥将退出并重启，把配置、缓存、预设和个人数据迁移到：\n\n{destinationRoot}\n\n复制完成后会逐文件校验，确认无误才切换到新目录。是否继续？",
+                "迁移数据并重启",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            DesktopStorageRoot.ScheduleMigration(destinationRoot);
+            LocalDataManagementActionText.Text = "迁移请求已保存，正在退出并重启应用…";
+            if (System.Windows.Application.Current is App app)
+            {
+                app.RequestExitForDataRootMigration();
+            }
+        }
+        catch (Exception ex)
+        {
+            StarBridgeMessageBox.Show(
+                this,
+                UserFacingError.Describe(ex, "迁移请求没有保存，当前数据目录未改变。"),
+                "无法开始迁移",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
     private void BindGameplayStatisticsOwner()
@@ -83,7 +154,7 @@ public partial class MainWindow
         GameplayDataConsentAllowButton.IsEnabled = _gameplayStatisticsRecorder.HasOwner;
         GameplayDataConsentAllowButton.Opacity = GameplayDataConsentAllowButton.IsEnabled ? 1 : 0.52;
         GameplayDataConsentFooterText.Text = _gameplayStatisticsRecorder.HasOwner
-            ? "此选择不会影响日志读取、浮层或舰队即时状态。"
+            ? "此选择不会影响日志读取、浮层或组织即时状态。"
             : "登录账号或等待游戏角色识别后，才可开始记录。";
         GameplayDataConsentOverlay.Visibility = Visibility.Visible;
         GameplayDataConsentAllowButton.Focus();
@@ -948,6 +1019,7 @@ public partial class MainWindow
             }
 
             ApplyAuthResponse(auth);
+            await RefreshNotificationCenterAsync(showErrors: false);
             SaveCurrentConfig();
             TemporaryEntitlementCodeBox.Clear();
             TemporaryEntitlementStatusText.Text = "兑换成功。";

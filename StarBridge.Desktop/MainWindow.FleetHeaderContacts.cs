@@ -23,7 +23,7 @@ public partial class MainWindow
         _fleetHeaderExternalContactsAccessibleText = presentation.AccessibleText;
         FleetExternalContactsDetailList.ItemsSource = presentation.Entries;
         FleetExternalContactsDetailStatusText.Text = useChinese
-            ? $"共 {presentation.Entries.Count} 条舰队内部联系方式"
+            ? $"共 {presentation.Entries.Count} 条组织内部联系方式"
             : $"{presentation.Entries.Count} fleet contact entries";
         FleetExternalContactsDetailStatusText.Foreground = FindBrush("MutedTextBrush", Brushes.LightSlateGray);
         FleetExternalContactsDetailPanel.Show();

@@ -1117,8 +1117,8 @@ public partial class MainWindow
                 ExpectedProfileRevision: _fleetProfileRevision,
                 InviteCodeCreationPolicy: _fleetInviteCodeCreationPolicy,
                 FleetInvitationCardPolicy: _fleetInvitationCardPolicy),
-            "舰队资料已同步",
-            "舰队资料同步失败",
+            "组织资料已同步",
+            "组织资料同步失败",
             silent);
     }
 

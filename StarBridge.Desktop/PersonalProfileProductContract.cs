@@ -8,7 +8,7 @@ internal sealed record PersonalProfilePublicFleetAffiliation(
     string? PositionColor)
 {
     public static PersonalProfilePublicFleetAffiliation None { get; } = new(
-        "未加入舰队",
+        "未加入组织",
         "",
         null,
         "",
@@ -103,7 +103,7 @@ internal static class PersonalProfileProductContract
             fleetName.Trim(),
             (fleetCode ?? "").Trim(),
             NormalizePublicAssetId(fleetLogoAssetId),
-            string.IsNullOrWhiteSpace(positionTitle) ? "舰队成员" : positionTitle.Trim(),
+            string.IsNullOrWhiteSpace(positionTitle) ? "组织成员" : positionTitle.Trim(),
             NormalizeColor(positionColor));
     }
 

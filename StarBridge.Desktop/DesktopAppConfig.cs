@@ -23,9 +23,7 @@ internal sealed record DesktopAppConfig(
     string? AccountId = null,
     DateTimeOffset? FleetStateCachedAtUtc = null)
 {
-    public static readonly string ConfigDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "StarBridge");
+    public static string ConfigDirectory => DesktopStorageRoot.CurrentRoot;
 
     private static readonly string ConfigPath = Path.Combine(ConfigDirectory, "desktop.config");
     private static readonly string OverlaySettingsPath = Path.Combine(ConfigDirectory, "overlay.settings");
@@ -119,17 +117,8 @@ internal sealed record DesktopAppConfig(
             config.FleetStateCachedAtUtc?.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? ""
         };
 
-        try
-        {
-            Directory.CreateDirectory(ConfigDirectory);
-            File.WriteAllLines(ConfigPath, lines);
-            return;
-        }
-        catch
-        {
-            Directory.CreateDirectory(FallbackConfigDirectory);
-            File.WriteAllLines(FallbackConfigPath, lines);
-        }
+        Directory.CreateDirectory(ConfigDirectory);
+        File.WriteAllLines(ConfigPath, lines);
     }
 
     public static string? LoadOverlaySettings()
@@ -294,16 +283,8 @@ internal sealed record DesktopAppConfig(
 
     private static void WriteTextWithFallback(string path, string fallbackPath, string value)
     {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, value);
-            return;
-        }
-        catch
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(fallbackPath)!);
-            File.WriteAllText(fallbackPath, value);
-        }
+        _ = fallbackPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, value);
     }
 }

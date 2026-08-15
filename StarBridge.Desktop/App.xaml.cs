@@ -25,6 +25,7 @@ public partial class App : System.Windows.Application
     private TrayQuickPanel? _trayQuickPanel;
     private bool _exitRequested;
     private bool _updateRestartRequested;
+    private bool _dataRootRestartRequested;
 
     static App()
     {
@@ -40,7 +41,7 @@ public partial class App : System.Windows.Application
 
     internal bool ExitRequested => _exitRequested;
 
-    internal bool IsUpdateRestartRequested => _updateRestartRequested;
+    internal bool IsUpdateRestartRequested => _updateRestartRequested || _dataRootRestartRequested;
 
     internal bool ShouldKeepRunningInBackground =>
         BehaviorSettings.KeepRunningInBackground && !_exitRequested;
@@ -70,6 +71,29 @@ public partial class App : System.Windows.Application
         }
 
         RegisterSingleInstanceActivation();
+        if (!DesktopStorageRoot.TryPrepareForStartup(
+                out _,
+                out var storageWarning,
+                out var storageError))
+        {
+            MessageBox.Show(
+                storageError ?? "数据目录不可用。",
+                "无法打开数据目录",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(storageWarning))
+        {
+            MessageBox.Show(
+                storageWarning,
+                "数据目录迁移未完成",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
         BehaviorSettings = ApplicationBehaviorSettingsStore.Load().Normalize();
         if (!WindowsStartupRegistration.TrySetEnabled(BehaviorSettings.LaunchAtStartup, out var startupError))
         {
@@ -102,6 +126,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        var restartForDataRoot = _dataRootRestartRequested;
         DisposeTrayIcon();
         _singleInstanceActivationStopping = true;
         try
@@ -130,6 +155,22 @@ public partial class App : System.Windows.Application
 
         _singleInstanceMutex?.Dispose();
         base.OnExit(e);
+
+        if (restartForDataRoot && !string.IsNullOrWhiteSpace(Environment.ProcessPath))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = Environment.ProcessPath,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                WriteCrashLog(ex);
+            }
+        }
     }
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
@@ -240,12 +281,21 @@ public partial class App : System.Windows.Application
     internal void RequestExit()
     {
         _updateRestartRequested = false;
+        _dataRootRestartRequested = false;
         RequestExitCore();
     }
 
     internal void RequestExitForUpdate()
     {
         _updateRestartRequested = true;
+        _dataRootRestartRequested = false;
+        RequestExitCore();
+    }
+
+    internal void RequestExitForDataRootMigration()
+    {
+        _updateRestartRequested = false;
+        _dataRootRestartRequested = true;
         RequestExitCore();
     }
 
@@ -271,6 +321,7 @@ public partial class App : System.Windows.Application
     {
         _exitRequested = false;
         _updateRestartRequested = false;
+        _dataRootRestartRequested = false;
         UpdateTrayIconVisibility();
     }
 

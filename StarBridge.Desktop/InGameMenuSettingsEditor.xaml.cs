@@ -93,7 +93,7 @@ public partial class InGameMenuSettingsEditor : WpfUserControl
         ToolDisplayNames = new Dictionary<InGameMenuTool, string>
         {
             [InGameMenuTool.InformationOverlay] = "信息浮层（始终保留）",
-            [InGameMenuTool.Fleet] = "舰队",
+            [InGameMenuTool.Fleet] = "组织",
             [InGameMenuTool.Friends] = "好友",
             [InGameMenuTool.Chat] = "通讯",
             [InGameMenuTool.Rooms] = "组队房间",

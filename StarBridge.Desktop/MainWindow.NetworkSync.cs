@@ -54,7 +54,7 @@ public partial class MainWindow
             signedIn: false);
         try
         {
-            ResetAccountScopedState("登录后即可查看舰队通讯。");
+            ResetAccountScopedState("登录后即可查看组织通讯。");
             ResetAccountAvatarState();
             _authToken = null;
             _accountId = null;
@@ -159,7 +159,7 @@ public partial class MainWindow
 
         var result = await ShowSyncChoiceAsync(
             "选择同步范围",
-            "首次启用前，请决定哪些本地状态可以参与 StarBridge 舰队协作。个人机库需要单独授权。",
+            "首次启用前，请决定哪些本地状态可以参与 StarBridge 组织协作。个人机库需要单独授权。",
             resetPersonalHangar: true,
             confirmText: "保存选择");
         return result is not null;
@@ -453,9 +453,9 @@ public partial class MainWindow
 
         _presenceHeartbeatTopNotice = new TopStatusNotice(
             "在线状态同步中断",
-            "其他玩家可能暂时看到你处于离线状态，应用正在自动重试。",
+            "其他玩家可能暂时看到你处于离线状态；应用会自动重试，也可立即重试。",
             SyncStatusOverlayTone.Warning,
-            ShowRetry: false);
+            ShowRetry: true);
         NetworkStatusText.Text = "在线状态同步中断，正在自动重试";
         RenderTopStatusNotice();
         RefreshHeaderStatusBar();

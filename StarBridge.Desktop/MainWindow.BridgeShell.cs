@@ -291,9 +291,9 @@ public partial class MainWindow
         {
             SetBridgeScene(
                 BridgeSceneKind.Fleet,
-                "舰队",
-                "寻找舰队",
-                "浏览公开舰队与加入条件",
+                "组织",
+                "寻找组织",
+                "浏览公开组织与加入条件",
                 "\uE902");
             SetBridgeSelectedModule(BridgeFleetNavButton);
         }
@@ -302,10 +302,10 @@ public partial class MainWindow
             var startupFleetDataIsLive = _startupDataGate.Current.State == StartupDataGateState.Live;
             SetBridgeScene(
                 BridgeSceneKind.Fleet,
-                "舰队",
+                "组织",
                 startupFleetDataIsLive && _hasFleet && !string.IsNullOrWhiteSpace(_fleetName)
                     ? _fleetName
-                    : "我的舰队",
+                    : "我的组织",
                 "成员、舰船与协作",
                 "\uE902");
             SetBridgeSelectedModule(BridgeFleetNavButton);

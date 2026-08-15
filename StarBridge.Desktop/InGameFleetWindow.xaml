@@ -5,7 +5,7 @@
         xmlns:controls="clr-namespace:StarBridge.Desktop.Controls"
         xmlns:theming="clr-namespace:StarBridge.Desktop.Theming"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="游戏内舰队面板"
+        Title="游戏内组织面板"
         Icon="/Assets/Brand/StarBridge_AppIcon.ico"
         Width="1180"
         Height="760"
@@ -537,7 +537,7 @@
                         <ColumnDefinition Width="42" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Margin="14,5,0,0">
-                        <TextBlock Text="舰队协作"
+                        <TextBlock Text="组织协作"
                                    Foreground="{DynamicResource BridgeInk}"
                                    FontFamily="Segoe UI Semibold"
                                    FontSize="13"
@@ -551,7 +551,7 @@
                             Height="42"
                             Style="{StaticResource CloseWindowCaptionButton}"
                             Tag="Close"
-                            ToolTip="关闭舰队面板"
+                            ToolTip="关闭组织面板"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True"
                             Click="CloseButton_Click" />
                 </Grid>
@@ -566,7 +566,7 @@
                                                      Margin="0,0,0,10"
                                                      IsActive="False"
                                                      Visibility="Collapsed" />
-                    <TextBlock Text="舰队信息暂不可用"
+                    <TextBlock Text="组织信息暂不可用"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource BridgeInk}"
                                FontSize="18"
@@ -651,7 +651,7 @@
                                 BorderBrush="{DynamicResource BridgeStatusWarn}"
                                 BorderThickness="2,0,0,0">
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="舰队指挥官"
+                                <TextBlock Text="组织负责人"
                                            Style="{StaticResource FleetSectionLabel}" />
                                 <TextBlock x:Name="FleetCommanderText"
                                            Margin="0,4,0,0"
@@ -669,7 +669,7 @@
                                 BorderBrush="{Binding Path=(theming:BridgeSceneContext.AccentBrush), RelativeSource={RelativeSource Self}}"
                                 BorderThickness="2,0,0,0">
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="舰队公告"
+                                <TextBlock Text="组织公告"
                                            Style="{StaticResource FleetSectionLabel}" />
                                 <TextBlock x:Name="AnnouncementTitleText"
                                            Margin="0,4,0,0"
@@ -687,7 +687,7 @@
                             </StackPanel>
                         </Border>
                         <Button Grid.Column="4"
-                                Content="舰队通讯"
+                                Content="组织通讯"
                                 MinWidth="120"
                                 Height="32"
                                 Padding="14,0"
@@ -946,7 +946,7 @@
                                LineHeight="14"
                                LineStackingStrategy="BlockLineHeight"
                                TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="舰队信息会自动更新 · Esc 返回游戏"
+                    <TextBlock Text="组织信息会自动更新 · Esc 返回游戏"
                                HorizontalAlignment="Right"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource BridgeInk3}"

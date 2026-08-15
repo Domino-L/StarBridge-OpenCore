@@ -19,7 +19,7 @@ public partial class MainWindow
         FleetTypeSummaryText.Text = _hasFleet ? summary.CompactText : "未设置";
         FleetActivityScheduleButton.ToolTip = _hasFleet
             ? $"{summary.FullText}\n\n点击查看完整排期"
-            : "尚未加入舰队";
+            : "尚未加入组织";
         FleetActivityScheduleButton.IsEnabled = _hasFleet;
     }
 
@@ -52,7 +52,7 @@ public partial class MainWindow
             .ToArray();
         var fleetNow = GetCurrentFleetTime();
         FleetActivityScheduleTimeZoneText.Text =
-            $"舰队时区 {FormatUtcOffset(fleetNow.Offset)} · 当前 {fleetNow:MM-dd HH:mm}";
+            $"组织时区 {FormatUtcOffset(fleetNow.Offset)} · 当前 {fleetNow:MM-dd HH:mm}";
         EditFleetActivityScheduleButton.Visibility = CanCurrentUserManageFleetInfo()
             ? Visibility.Visible
             : Visibility.Collapsed;

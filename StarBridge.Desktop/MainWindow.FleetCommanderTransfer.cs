@@ -83,7 +83,7 @@ public partial class MainWindow
         FleetSuccessorComboBox.SelectedItem = selectedItem ??
                                                FleetSuccessorComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
         FleetSuccessorMessageText.Text =
-            "舰队仍有其他成员。请选择新的舰队指挥官，交接完成后你会离开舰队。";
+            "组织仍有其他成员。请选择新的组织负责人，交接完成后你会离开组织。";
         FleetSuccessorOverlay.Show();
         FleetSuccessorCancelButton.Focus();
         return _fleetSuccessorSource.Task;

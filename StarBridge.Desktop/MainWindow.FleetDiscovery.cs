@@ -86,7 +86,7 @@ public partial class MainWindow
         {
             var isLoading = status is FleetDirectoryLoadStatus.Loading or FleetDirectoryLoadStatus.Refreshing;
             RefreshFleetDirectoryButton.IsEnabled = !isLoading;
-            RefreshFleetDirectoryButton.Content = isLoading ? "正在刷新" : "刷新舰队";
+            RefreshFleetDirectoryButton.Content = isLoading ? "正在刷新" : "刷新组织";
             RefreshFleetDirectoryButton.Opacity = isLoading ? 0.66 : 1;
         }
     }
@@ -129,7 +129,7 @@ public partial class MainWindow
         if (FindFleetSearchCountText is not null)
         {
             FindFleetSearchCountText.Text = string.IsNullOrWhiteSpace(query)
-                ? hasAdvancedFilters ? $"筛选 {_networkFleets.Count}" : $"{_networkFleets.Count} 个舰队"
+                ? hasAdvancedFilters ? $"筛选 {_networkFleets.Count}" : $"{_networkFleets.Count} 个组织"
                 : $"匹配 {_networkFleets.Count}";
         }
 
@@ -143,9 +143,9 @@ public partial class MainWindow
                 : Visibility.Collapsed;
             FindFleetEmptyText.Text = string.IsNullOrWhiteSpace(query)
                 ? hasAdvancedFilters
-                    ? "没有符合筛选条件的舰队。可以重置筛选或稍后刷新目录。"
-                    : "暂无公开舰队。你可以创建舰队，或稍后刷新目录。"
-                : "没有找到匹配的舰队。请尝试舰队全名、识别码或标签。";
+                    ? "没有符合筛选条件的组织。可以重置筛选或稍后刷新目录。"
+                    : "暂无公开组织。你可以创建组织，或稍后刷新目录。"
+                : "没有找到匹配的组织。请尝试组织全名、识别码或标签。";
         }
 
         RefreshFindFleetDetailSelection();
@@ -730,10 +730,10 @@ public partial class MainWindow
         AddFilterLabel(filters.Application, "申请加入");
         AddFilterLabel(filters.InviteOnly, "邀请码加入");
         AddFilterLabel(filters.Pending, "申请处理中");
-        AddFilterLabel(filters.ScaleSmall, "小型舰队 · 1–10 人");
-        AddFilterLabel(filters.ScaleMedium, "中型舰队 · 11–50 人");
-        AddFilterLabel(filters.ScaleLarge, "大型舰队 · 51–299 人");
-        AddFilterLabel(filters.ScaleVeryLarge, "超大型舰队 · 300 人以上");
+        AddFilterLabel(filters.ScaleSmall, "小型组织 · 1–10 人");
+        AddFilterLabel(filters.ScaleMedium, "中型组织 · 11–50 人");
+        AddFilterLabel(filters.ScaleLarge, "大型组织 · 51–299 人");
+        AddFilterLabel(filters.ScaleVeryLarge, "超大型组织 · 300 人以上");
         AddFilterLabel(filters.SameTimeZone, "同时区");
         AddFilterLabel(filters.ActiveEarlyMorning, "凌晨活跃");
         AddFilterLabel(filters.ActiveMorning, "上午活跃");
@@ -1015,14 +1015,14 @@ public partial class MainWindow
                 {
                     candidates.Add((100, CreateFleetDirectorySystemChip(
                         "时区相同",
-                        "舰队默认时区与你当前时区的 UTC 偏移一致。",
+                        "组织默认时区与你当前时区的 UTC 偏移一致。",
                         BridgeBrushToken.StatusOk)));
                 }
                 else if (offsetDifference <= TimeSpan.FromHours(1))
                 {
                     candidates.Add((95, CreateFleetDirectorySystemChip(
                         "时差较小",
-                        "舰队默认时区与你当前时区相差不超过 1 小时。",
+                        "组织默认时区与你当前时区相差不超过 1 小时。",
                         BridgeBrushToken.StatusOk)));
                 }
             }
@@ -1040,7 +1040,7 @@ public partial class MainWindow
         {
             candidates.Add((90, CreateFleetDirectorySystemChip(
                 "无门槛",
-                "该舰队公开设置为直接加入，无需申请审核或邀请码。",
+                "该组织公开设置为直接加入，无需申请审核或邀请码。",
                 BridgeBrushToken.StatusOk)));
         }
 
@@ -1049,7 +1049,7 @@ public partial class MainWindow
         {
             candidates.Add((85, CreateFleetDirectorySystemChip(
                 "大规模",
-                "该舰队公开成员规模达到 51 人或以上。",
+                "该组织公开成员规模达到 51 人或以上。",
                 BridgeBrushToken.StatusInfo)));
         }
 
@@ -1060,7 +1060,7 @@ public partial class MainWindow
                 : snapshot.RecruitingTarget.Trim();
             candidates.Add((110, CreateFleetDirectorySystemChip(
                 $"正在招募 · {recruitingTarget}",
-                $"该舰队当前公开招募群体：{recruitingTarget}。",
+                $"该组织当前公开招募群体：{recruitingTarget}。",
                 BridgeBrushToken.StatusOk)));
         }
 
@@ -1070,7 +1070,7 @@ public partial class MainWindow
         {
             candidates.Add((70, CreateFleetDirectorySystemChip(
                 "舰船丰富",
-                "该舰队公开舰船总数达到 20 艘或以上。",
+                "该组织公开舰船总数达到 20 艘或以上。",
                 BridgeBrushToken.StatusInfo)));
         }
 
@@ -1079,7 +1079,7 @@ public partial class MainWindow
         {
             candidates.Add((65, CreateFleetDirectorySystemChip(
                 "舰种多样",
-                "该舰队公开的舰船资源覆盖至少 3 个类型。",
+                "该组织公开的舰船资源覆盖至少 3 个类型。",
                 BridgeBrushToken.StatusInfo)));
         }
 
@@ -1088,7 +1088,7 @@ public partial class MainWindow
         {
             candidates.Add((60, CreateFleetDirectorySystemChip(
                 "多区域活动",
-                "该舰队公开了至少 2 个主要活跃星系。",
+                "该组织公开了至少 2 个主要活跃星系。",
                 BridgeBrushToken.StatusInfo)));
         }
 
@@ -1100,7 +1100,7 @@ public partial class MainWindow
         {
             candidates.Add((50, CreateFleetDirectorySystemChip(
                 "资料完整",
-                "该舰队公开了介绍、玩法标签、活动时间和主要活跃区域。",
+                "该组织公开了介绍、玩法标签、活动时间和主要活跃区域。",
                 BridgeBrushToken.StatusOff)));
         }
 
@@ -1211,7 +1211,7 @@ public partial class MainWindow
         var accent = FleetCommandBrush(BridgeBrushToken.StatusOff);
         return new FleetDirectoryTagChip(
             tagText,
-            "舰队标签",
+            "组织标签",
             "旧标签或未归类标签。",
             accent,
             CloneFleetDirectoryBrush(accent, 0.62),
@@ -1364,7 +1364,7 @@ public partial class MainWindow
         {
             FindFleetDetailJoinButton.Tag = card;
             FindFleetDetailJoinButton.IsEnabled = card?.CanJoin == true;
-            FindFleetDetailJoinButton.Content = card?.JoinButtonText ?? "选择舰队";
+            FindFleetDetailJoinButton.Content = card?.JoinButtonText ?? "选择组织";
             FindFleetDetailJoinButton.Opacity = FindFleetDetailJoinButton.IsEnabled ? 1 : 0.58;
             FindFleetDetailJoinButton.Visibility = card?.CanJoin == true ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -1377,12 +1377,12 @@ public partial class MainWindow
 
         if (card is null)
         {
-            SetText(FindFleetDetailNameText, "选择一个舰队");
+            SetText(FindFleetDetailNameText, "选择一个组织");
             SetText(FindFleetDetailCodeText, "识别码 / --");
             SetText(FindFleetDetailCommanderText, "指挥官：--");
-            SetText(FindFleetDetailDescriptionText, "从左侧目录中选择舰队后，这里会显示简介、活动时间、舰船展示和加入方式。");
+            SetText(FindFleetDetailDescriptionText, "从左侧目录中选择组织后，这里会显示简介、活动时间、舰船展示和加入方式。");
             SetText(FindFleetDetailActiveTimeText, "活动时间 / --");
-            SetText(FindFleetDetailTimeZoneText, "舰队默认时间 / 未公开");
+            SetText(FindFleetDetailTimeZoneText, "组织默认时间 / 未公开");
             SetText(FindFleetDetailMembersText, "成员规模 / --");
             SetText(FindFleetDetailJoinPolicyText, "加入方式 / --");
             SetText(FindFleetDetailRecruitingText, "招募状态 / --");
@@ -1390,8 +1390,8 @@ public partial class MainWindow
             SetText(FindFleetDetailSystemText, "未公开");
             SetText(FindFleetDetailLanguageText, "语言 / 未公开");
             SetText(FindFleetDetailContactText, "未公开联系方式");
-            SetText(FindFleetDetailRequirementText, "选择舰队后查看加入要求。");
-            SetText(FindFleetDetailHintText, "选择适合的舰队后，可以申请加入或使用邀请码进入。");
+            SetText(FindFleetDetailRequirementText, "选择组织后查看加入要求。");
+            SetText(FindFleetDetailHintText, "选择适合的组织后，可以申请加入或使用邀请码进入。");
             RefreshFindFleetDetailShipDistribution(null);
             if (FindFleetDetailTagChips is not null)
             {
@@ -1417,10 +1417,10 @@ public partial class MainWindow
         SetText(FindFleetDetailCodeText, $"识别码 / {card.FleetCodeText}");
         SetText(FindFleetDetailCommanderText, $"指挥官：{card.CommanderText}");
         SetText(FindFleetDetailDescriptionText, string.IsNullOrWhiteSpace(card.Description)
-            ? "暂无公开舰队介绍。"
+            ? "暂无公开组织介绍。"
             : card.Description);
         SetText(FindFleetDetailActiveTimeText, card.LocalActiveTimeLine);
-        SetText(FindFleetDetailTimeZoneText, $"舰队默认时间 / {card.FleetDefaultTimeText}");
+        SetText(FindFleetDetailTimeZoneText, $"组织默认时间 / {card.FleetDefaultTimeText}");
         SetText(FindFleetDetailMembersText, card.MembersLine);
         SetText(FindFleetDetailJoinPolicyText, card.JoinPolicyLine);
         SetText(FindFleetDetailRecruitingText, card.RecruitingStatusText);
@@ -1665,7 +1665,7 @@ public partial class MainWindow
         }
 
         System.Windows.Clipboard.SetText(code);
-        NetworkStatusText.Text = $"已复制舰队识别码：{code}";
+        NetworkStatusText.Text = $"已复制组织识别码：{code}";
     }
 
     private void FindFleetInviteButton_Click(object sender, RoutedEventArgs e)
@@ -1691,12 +1691,12 @@ public partial class MainWindow
 
         if (FindFleetInviteJoinButton is not null)
         {
-            FindFleetInviteJoinButton.Content = "加入舰队";
+            FindFleetInviteJoinButton.Content = "加入组织";
             FindFleetInviteJoinButton.IsEnabled = false;
             FindFleetInviteJoinButton.Opacity = 0.58;
         }
 
-        SetFindFleetInviteStatus("输入邀请码后先验证，再加入舰队。", ManageProfileStatusTone.Info);
+        SetFindFleetInviteStatus("输入邀请码后先验证，再加入组织。", ManageProfileStatusTone.Info);
 
         FindFleetInviteDialogOverlay.Show();
     }
@@ -1756,17 +1756,17 @@ public partial class MainWindow
             RefreshFindFleetInvitePreview(preview);
             if (IsFindFleetInviteForCurrentFleet(preview))
             {
-                SetFindFleetInviteStatus("你已经在这个舰队中，可以继续查看名片详情。", ManageProfileStatusTone.Info);
+                SetFindFleetInviteStatus("你已经在这个组织中，可以继续查看名片详情。", ManageProfileStatusTone.Info);
             }
             else if (_hasFleet)
             {
                 SetFindFleetInviteStatus(
-                    $"你当前已加入“{_fleetName}”。如需接受邀请，请先手动退出当前舰队。",
+                    $"你当前已加入“{_fleetName}”。如需接受邀请，请先手动退出当前组织。",
                     ManageProfileStatusTone.Warning);
             }
             else
             {
-                SetFindFleetInviteStatus("邀请有效。确认舰队信息后可以加入。", ManageProfileStatusTone.Success);
+                SetFindFleetInviteStatus("邀请有效。确认组织信息后可以加入。", ManageProfileStatusTone.Success);
             }
         }
         catch (Exception ex)
@@ -1777,7 +1777,7 @@ public partial class MainWindow
 
     private async Task<bool> ChooseSyncScopeForFleetEntryAsync(string fleetName, bool isApplication)
     {
-        var action = isApplication ? "提交加入申请" : "加入舰队";
+        var action = isApplication ? "提交加入申请" : "加入组织";
         var result = await ShowSyncChoiceAsync(
             $"{action}前选择同步范围",
             isApplication
@@ -1798,7 +1798,7 @@ public partial class MainWindow
 
         if (IsFindFleetInviteForCurrentFleet(_findFleetInvitePreview))
         {
-            SetFindFleetInviteStatus("你已经在这个舰队中，可以继续查看名片详情。", ManageProfileStatusTone.Info);
+            SetFindFleetInviteStatus("你已经在这个组织中，可以继续查看名片详情。", ManageProfileStatusTone.Info);
             return;
         }
 
@@ -1810,12 +1810,12 @@ public partial class MainWindow
             return;
         }
 
-        if (!EnsureLoggedIn("使用邀请码加入舰队需要先登录星海舰桥账号。"))
+        if (!EnsureLoggedIn("使用邀请码加入组织需要先登录星海舰桥账号。"))
         {
             return;
         }
 
-        if (!EnsureIdentityInitialized("邀请码加入舰队"))
+        if (!EnsureIdentityInitialized("邀请码加入组织"))
         {
             return;
         }
@@ -1825,7 +1825,7 @@ public partial class MainWindow
             return;
         }
 
-        SetFindFleetInviteStatus("正在加入舰队...", ManageProfileStatusTone.Info);
+        SetFindFleetInviteStatus("正在加入组织...", ManageProfileStatusTone.Info);
         try
         {
             var response = await PostNetworkJsonAsync("api/fleets/invites/accept", new FleetInviteAcceptRequest(_findFleetInviteCode));
@@ -1838,7 +1838,7 @@ public partial class MainWindow
             var snapshot = await response.Content.ReadFromJsonAsync<NetworkFleetSnapshot>();
             if (snapshot is null)
             {
-                SetFindFleetInviteStatus("服务器没有返回舰队资料，请稍后重试。", ManageProfileStatusTone.Danger);
+                SetFindFleetInviteStatus("服务器没有返回组织资料，请稍后重试。", ManageProfileStatusTone.Danger);
                 return;
             }
 
@@ -1846,20 +1846,20 @@ public partial class MainWindow
             await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
             await PullNetworkFleetsAsync(silent: true);
             await PullNetworkSnapshotsAsync(silent: true);
-            NetworkStatusText.Text = $"已加入舰队：{snapshot.Name}";
+            NetworkStatusText.Text = $"已加入组织：{snapshot.Name}";
             CloseFindFleetInviteDialog();
             NavigateToMyFleet();
         }
         catch (Exception ex)
         {
-            SetFindFleetInviteStatus(UserFacingError.Describe(ex, "暂时无法加入舰队，请稍后重试。"), ManageProfileStatusTone.Danger);
+            SetFindFleetInviteStatus(UserFacingError.Describe(ex, "暂时无法加入组织，请稍后重试。"), ManageProfileStatusTone.Danger);
         }
     }
 
     private void RefreshFindFleetInvitePreview(FleetInvitePreviewResponse preview)
     {
         SetText(FindFleetInvitePreviewFleetText, $"{preview.FleetName} / {preview.FleetCode}");
-        SetText(FindFleetInvitePreviewCommanderText, $"邀请舰队：{preview.FleetName} · 指挥官：{NormalizeOptionalField(preview.Commander)}");
+        SetText(FindFleetInvitePreviewCommanderText, $"邀请组织：{preview.FleetName} · 负责人：{NormalizeOptionalField(preview.Commander)}");
         SetText(FindFleetInvitePreviewMetaText, $"{FormatFindFleetInviteAcceptMode(preview)} · {FormatFindFleetInviteExpiry(preview)}");
         SetText(FindFleetInvitePreviewUsesText, FormatFindFleetInviteUses(preview));
 
@@ -1873,10 +1873,10 @@ public partial class MainWindow
             var alreadyInTargetFleet = IsFindFleetInviteForCurrentFleet(preview);
             var mustLeaveCurrentFleet = _hasFleet && !alreadyInTargetFleet;
             FindFleetInviteJoinButton.Content = alreadyInTargetFleet
-                ? "已在该舰队"
+                ? "已在该组织"
                 : mustLeaveCurrentFleet
-                    ? "请先退出当前舰队"
-                    : "加入舰队";
+                    ? "请先退出当前组织"
+                    : "加入组织";
             FindFleetInviteJoinButton.IsEnabled = !_hasFleet;
             FindFleetInviteJoinButton.Opacity = _hasFleet ? 0.58 : 1;
         }

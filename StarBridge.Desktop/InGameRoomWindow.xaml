@@ -588,7 +588,7 @@
                                 Padding="14,0"
                                 BorderBrush="{DynamicResource BridgeRowHairline}"
                                 BorderThickness="0,1,0,0">
-                            <TextBlock Text="临时房间不会改变你在舰队中的成员关系。"
+                            <TextBlock Text="临时房间不会改变你在组织中的成员关系。"
                                        Foreground="{DynamicResource BridgeInk3}"
                                        FontSize="9.5"
                                        VerticalAlignment="Center" />
@@ -1536,7 +1536,7 @@
                                                   SelectedIndex="0">
                                             <ComboBoxItem Content="所有玩家" Tag="everyone" />
                                             <ComboBoxItem Content="房主好友" Tag="friends" />
-                                            <ComboBoxItem Content="同舰队成员" Tag="fleet" />
+                                            <ComboBoxItem Content="同组织成员" Tag="fleet" />
                                             <ComboBoxItem Content="仅受邀玩家" Tag="invite" />
                                         </ComboBox>
                                     </StackPanel>

@@ -302,7 +302,7 @@ public partial class AccountSafetyView : System.Windows.Controls.UserControl
         AccountSanctionTypes.ProfileRestriction => "公开个人资料暂停",
         AccountSanctionTypes.RoomCreationRestriction => "创建房间限制",
         AccountSanctionTypes.RoomParticipationRestriction => "房间加入与邀请限制",
-        AccountSanctionTypes.FleetParticipationRestriction => "舰队创建、加入与邀请限制",
+        AccountSanctionTypes.FleetParticipationRestriction => "组织创建、加入与邀请限制",
         AccountSanctionTypes.ShipMediaUploadRestriction => "舰船图片上传限制",
         AccountSanctionTypes.SocialRestriction => "社交功能限制",
         AccountSanctionTypes.AccountRestriction => "账号功能限制",

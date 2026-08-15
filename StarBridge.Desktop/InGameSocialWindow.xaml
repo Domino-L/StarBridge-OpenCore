@@ -402,7 +402,7 @@
                                    FontWeight="SemiBold"
                                    TextAlignment="Center" />
                         <TextBlock x:Name="SocialUnavailableDetailText"
-                                   Text="登录星海舰桥账号后，即可联系好友、舰队成员和房间队友。"
+                                   Text="登录星海舰桥账号后，即可联系好友、组织成员和房间队友。"
                                    Margin="0,8,0,0"
                                    Foreground="{DynamicResource BridgeInk2}"
                                    FontSize="11"

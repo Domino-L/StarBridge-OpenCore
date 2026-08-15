@@ -401,7 +401,7 @@ public partial class MainWindow
 
         ShowSyncStatusOverlay(
             "正在同步服务器数据",
-            "正在同步账号、舰队、任务和玩家状态...",
+            "正在同步账号、组织、任务和玩家状态...",
             showRetry: false);
         var slowNotice = BeginSyncStatusSlowNotice();
         var elapsed = Stopwatch.StartNew();

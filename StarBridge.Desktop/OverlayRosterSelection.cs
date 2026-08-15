@@ -67,6 +67,54 @@ public sealed record OverlayRosterSelectionSettings(
 }
 
 /// <summary>
+/// Owns the automatic roster page independently from live roster refreshes. Presence,
+/// ship and location updates must not keep pulling the visible member page back to zero;
+/// only a real scene or local presentation-setting change starts a new rotation cycle.
+/// </summary>
+internal sealed class OverlayRosterRotationCursor
+{
+    private OverlayRosterSelectionSettings? _settings;
+    private OverlaySceneKind? _sceneKind;
+
+    internal int Page { get; private set; }
+
+    internal bool ApplyContext(
+        OverlayRosterSelectionSettings settings,
+        OverlaySceneKind sceneKind)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var normalized = settings.Normalize();
+        var changed = !_sceneKind.HasValue ||
+                      _sceneKind.Value != sceneKind ||
+                      !Equivalent(_settings, normalized);
+        _settings = normalized;
+        _sceneKind = sceneKind;
+        if (changed)
+        {
+            Page = 0;
+        }
+
+        return changed;
+    }
+
+    internal void Advance() => Page++;
+
+    private static bool Equivalent(
+        OverlayRosterSelectionSettings? left,
+        OverlayRosterSelectionSettings right) =>
+        left is not null &&
+        left.IncludeOfflineMembers == right.IncludeOfflineMembers &&
+        left.OverflowMode == right.OverflowMode &&
+        left.UserRowLimit == right.UserRowLimit &&
+        left.RotationIntervalSeconds == right.RotationIntervalSeconds &&
+        SequenceEqual(left.PinnedAccountIds, right.PinnedAccountIds) &&
+        SequenceEqual(left.ExcludedAccountIds, right.ExcludedAccountIds);
+
+    private static bool SequenceEqual(string[]? left, string[]? right) =>
+        (left ?? []).SequenceEqual(right ?? [], StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
 /// Owns the local profile partition used by roster-selection preferences. A signed-out
 /// session is a real profile, not an uninitialized cache sentinel.
 /// </summary>

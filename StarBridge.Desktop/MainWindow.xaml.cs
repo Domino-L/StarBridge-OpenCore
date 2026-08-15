@@ -2140,7 +2140,7 @@ public partial class MainWindow : Window, IAppUpdateUi
             try
             {
                 ResetAccountAvatarState();
-                ResetAccountScopedState("正在加载新账号的舰队通讯…");
+                ResetAccountScopedState("正在加载新账号的组织通讯…");
             }
             finally
             {
@@ -3095,12 +3095,12 @@ public partial class MainWindow : Window, IAppUpdateUi
             return;
         }
 
-        if (!EnsureLoggedIn("创建舰队需要先登录星海舰桥账号。"))
+        if (!EnsureLoggedIn("创建组织需要先登录星海舰桥账号。"))
         {
             return;
         }
 
-        if (!EnsureIdentityInitialized("创建舰队"))
+        if (!EnsureIdentityInitialized("创建组织"))
         {
             return;
         }
@@ -3134,12 +3134,12 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private async void CreateFleetSubmit_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("创建舰队需要先登录星海舰桥账号。"))
+        if (!EnsureLoggedIn("创建组织需要先登录星海舰桥账号。"))
         {
             return;
         }
 
-        if (!EnsureIdentityInitialized("创建舰队"))
+        if (!EnsureIdentityInitialized("创建组织"))
         {
             return;
         }
@@ -3199,7 +3199,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         _fleetNoticePublishedAt = null;
         ResetFleetAnnouncements();
 
-        NetworkStatusText.Text = "正在创建舰队并等待服务器确认...";
+        NetworkStatusText.Text = "正在创建组织并等待服务器确认...";
         CreateFleetValidationText.Text = "";
         var createSnapshot = BuildLocalFleetSnapshot(includeDirectoryImages: true, includeRepeatedImages: false);
         var confirmedFleet = await PushFleetDirectorySnapshotAsync(
@@ -3212,8 +3212,8 @@ public partial class MainWindow : Window, IAppUpdateUi
             _isCreatingFleet = true;
             CreateFleetSubmitButton.IsEnabled = true;
             CreateFleetValidationText.Text = string.IsNullOrWhiteSpace(NetworkStatusText.Text)
-                ? "创建舰队失败：服务器没有确认舰队数据，请检查网络或稍后重试。"
-                : NetworkStatusText.Text.Replace("发布舰队失败", "创建舰队失败", StringComparison.Ordinal);
+                ? "创建组织失败：服务器没有确认组织数据，请检查网络或稍后重试。"
+                : NetworkStatusText.Text.Replace("发布舰队失败", "创建组织失败", StringComparison.Ordinal);
             UpdateFleetEntryPanels();
             return;
         }
@@ -3238,7 +3238,7 @@ public partial class MainWindow : Window, IAppUpdateUi
             : "舰队已创建，正在同步本机状态。";
         ShowOneTimeGuideHint(
             "fleet-created-commander",
-            "舰队指挥官引导",
+            "组织负责人引导",
             "舰队已经创建。下一步建议前往“管理舰队”设置公告、行动计划、任务、成员权限和舰船数据库，再邀请成员加入。");
     }
 
@@ -3263,7 +3263,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         _fleetBannerSourcePath = null;
         _fleetEmailNotificationsEnabled = true;
         _createFleetLogoPath = selectedLogoPath;
-        LocalFleetText.Text = "未加入舰队";
+        LocalFleetText.Text = "未加入组织";
         CreateFleetValidationText.Text = string.IsNullOrWhiteSpace(failureText)
             ? "创建失败：服务器没有确认舰队创建。请检查登录状态和网络连接后重试。"
             : failureText;
@@ -3410,7 +3410,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         }
         else if (!string.IsNullOrWhiteSpace(code) && !codeValid)
         {
-            message = "舰队识别码需为 3-10 位，仅允许大写英文和数字。";
+            message = "组织识别码需为 3-10 位，仅允许大写英文和数字。";
         }
         else if (!activeFromValid || !activeToValid)
         {
@@ -3418,7 +3418,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         }
         else if (selectedTagCount > MaxManageFleetTags)
         {
-            message = $"舰队标签最多选择 {MaxManageFleetTags.ToString(CultureInfo.InvariantCulture)} 个。";
+            message = $"组织标签最多选择 {MaxManageFleetTags.ToString(CultureInfo.InvariantCulture)} 个。";
         }
         else if (selectedSystemCount == 0)
         {
@@ -4117,12 +4117,13 @@ public partial class MainWindow : Window, IAppUpdateUi
                         : networkSnapshot is not null
                             ? false
                             : null;
-            var localizedShip = ShipNameLocalizer.DisplayName(rawShip, _language);
             var inferredLocation = FormatLocationInference(rawLocation, locationConfidence);
-            var displayShip = PlayerSessionStatePresentation.ResolveShip(
-                presence,
-                hasServerSession,
-                localizedShip);
+            var displayShip = ShipDisplayNamePresentation.ResolveChinese(
+                PlayerSessionStatePresentation.ResolveShip(
+                    presence,
+                    hasServerSession,
+                    rawShip),
+                ShipDisplayNamePresentation.UnknownShip);
             var displayLocation = PlayerSessionStatePresentation.ResolveLocation(
                 presence,
                 hasServerSession,
@@ -4265,7 +4266,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         if (isFleetCommander ?? IsFleetCommander(playerName, callsign))
         {
-            return "舰队指挥官";
+            return "组织负责人";
         }
 
         var permission = GetFleetPermission(playerName, callsign);
@@ -4655,12 +4656,14 @@ public partial class MainWindow : Window, IAppUpdateUi
         }
 
         var role = NormalizeRoleTitle(roleTitle);
-        if (role.Equals("舰队指挥官", StringComparison.OrdinalIgnoreCase))
+        if (role.Equals("组织负责人", StringComparison.OrdinalIgnoreCase) ||
+            role.Equals("舰队指挥官", StringComparison.OrdinalIgnoreCase))
         {
             return "fleet_commander";
         }
 
-        if (role.Equals("舰队副指挥官", StringComparison.OrdinalIgnoreCase) ||
+        if (role.Equals("组织副负责人", StringComparison.OrdinalIgnoreCase) ||
+            role.Equals("舰队副指挥官", StringComparison.OrdinalIgnoreCase) ||
             role.Equals("副指挥官", StringComparison.OrdinalIgnoreCase) ||
             role.Equals("副官", StringComparison.OrdinalIgnoreCase))
         {
@@ -4678,8 +4681,8 @@ public partial class MainWindow : Window, IAppUpdateUi
         var key = NormalizeRoleGroupKey(roleGroupKey, roleTitle);
         return key switch
         {
-            "fleet_commander" => "舰队指挥官",
-            "fleet_deputy_commander" => "舰队副指挥官",
+            "fleet_commander" => "组织负责人",
+            "fleet_deputy_commander" => "组织副负责人",
             "" => "基础成员",
             _ => NormalizeRoleTitle(roleTitle)
         };
@@ -4851,8 +4854,9 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private string FormatShipForUser(string? ship)
     {
-        var display = ShipNameLocalizer.DisplayName(ShipNameLocalizer.NormalizeCode(ship), _language);
-        return FormatUnknownForUser(display);
+        return ShipDisplayNamePresentation.ResolveChinese(
+            ship,
+            ShipDisplayNamePresentation.UnknownShip);
     }
 
     private string FormatLocationForUser(string? location)
@@ -5106,41 +5110,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     }
 
     private static string MapGameServerRegion(string shard)
-    {
-        var normalized = shard.ToLowerInvariant();
-
-        if (normalized.Contains("use") ||
-            normalized.Contains("usw") ||
-            normalized.Contains("_us") ||
-            normalized.Contains("pub_us"))
-        {
-            return "美服";
-        }
-
-        if (normalized.Contains("eu"))
-        {
-            return "欧服";
-        }
-
-        if (normalized.Contains("aus") ||
-            normalized.Contains("_au") ||
-            normalized.Contains("oce"))
-        {
-            return "澳服";
-        }
-
-        if (normalized.Contains("asia") ||
-            normalized.Contains("apse") ||
-            normalized.Contains("_ap") ||
-            normalized.Contains("sg") ||
-            normalized.Contains("jp") ||
-            normalized.Contains("hk"))
-        {
-            return "亚服";
-        }
-
-        return "未知";
-    }
+        => GameServerRegionPresentation.ResolveRegion(shard) ?? "未知";
 
     private void RefreshHeaderStatusBar()
     {

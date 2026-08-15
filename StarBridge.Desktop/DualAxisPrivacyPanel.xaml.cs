@@ -249,19 +249,19 @@ public partial class DualAxisPrivacyPanel : System.Windows.Controls.UserControl
         var fields = projection.FleetStatusFields;
         if (fields == PlayerSharedStateFields.None)
         {
-            return "不向舰队成员共享状态";
+            return "不向组织成员共享状态";
         }
 
         var hasAdministrators = projection.FleetAdministrators.StatusFields != PlayerSharedStateFields.None;
         var hasMembers = projection.FleetMembers.StatusFields != PlayerSharedStateFields.None;
         var hasSpecifiedPeople = projection.SelectedFleetGroupMembers.StatusFields != PlayerSharedStateFields.None;
         var audience = hasMembers
-            ? "所有舰队成员"
+            ? "所有组织成员"
             : hasAdministrators && hasSpecifiedPeople
-                ? "舰队管理员和指定人员"
+                ? "组织管理者和指定人员"
                 : hasAdministrators
-                    ? "仅舰队管理员"
-                    : "舰队内的指定人员";
+                    ? "仅组织管理者"
+                    : "组织内的指定人员";
         return $"{audience}可查看{FormatFields(fields)}";
     }
 

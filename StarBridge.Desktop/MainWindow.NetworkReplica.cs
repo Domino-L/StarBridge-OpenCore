@@ -636,7 +636,7 @@ public partial class MainWindow
             .Select(item => new FleetEventLogRow(
                 item.Id.Trim(),
                 item.Timestamp == default ? DateTimeOffset.UtcNow : item.Timestamp,
-                string.IsNullOrWhiteSpace(item.Type) ? "舰队" : item.Type,
+                string.IsNullOrWhiteSpace(item.Type) ? "组织" : item.Type,
                 SanitizeFleetEventText(item.Title),
                 SanitizeFleetEventText(item.Detail),
                 EndTimestamp: item.EndTimestamp,

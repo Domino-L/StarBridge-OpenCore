@@ -167,20 +167,20 @@ public partial class MainWindow
     {
         if (!_hasFleet)
         {
-            return "当前未加入舰队";
+            return "当前未加入组织";
         }
 
         if (!canSendFleetCard)
         {
-            return "无权发送舰队邀请";
+            return "无权发送组织邀请";
         }
 
         if (isDirectMessage)
         {
-            return friendAlreadyInFleet ? "已在当前舰队" : "邀请加入舰队";
+            return friendAlreadyInFleet ? "已在当前组织" : "邀请加入组织";
         }
 
-        return eligibleRoomMembers > 0 ? "邀请房间成员加入舰队" : "房间成员均在当前舰队";
+        return eligibleRoomMembers > 0 ? "邀请房间成员加入组织" : "房间成员均在当前组织";
     }
 
     private bool IsActiveFriendInCurrentPartyRoom()
@@ -288,7 +288,7 @@ public partial class MainWindow
         }
 
         var statusText = isPartyRoom ? PartyRoomChatStatusText : FriendChatStatusText;
-        statusText.Text = "正在生成舰队邀请…";
+        statusText.Text = "正在生成组织邀请…";
         statusText.Foreground = StatusPalette.InfoBrush;
         try
         {
@@ -323,10 +323,10 @@ public partial class MainWindow
 
             var attachment = new ChatAttachmentContract(
                 ChatAttachmentKinds.FleetInvitation,
-                $"舰队邀请 · {snapshot.Name}",
+                $"组织邀请 · {snapshot.Name}",
                 isPartyRoom
-                    ? $"可供当前房间中尚未加入舰队的 {eligibleRoomMembers} 位成员使用。打开名片可查看舰队详情。"
-                    : "打开名片可查看舰队详情；当前未加入舰队时可接受邀请。",
+                    ? $"可供当前房间中尚未加入组织的 {eligibleRoomMembers} 位成员使用。打开名片可查看组织详情。"
+                    : "打开名片可查看组织详情；当前未加入组织时可接受邀请。",
                 FleetInviteCode: invite.Code,
                 ExpiresAt: invite.ExpiresAt);
             if (isPartyRoom)
@@ -340,7 +340,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            statusText.Text = UserFacingError.Describe(ex, "舰队邀请未发送，请检查网络后重试。");
+            statusText.Text = UserFacingError.Describe(ex, "组织邀请未发送，请检查网络后重试。");
             statusText.Foreground = StatusPalette.DangerBrush;
         }
     }

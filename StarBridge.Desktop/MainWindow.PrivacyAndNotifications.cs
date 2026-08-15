@@ -834,9 +834,9 @@ public partial class MainWindow
         {
             SyncPrivacyVisibilityScope.Private => "仅在本机显示，不向舰队共享状态。",
             SyncPrivacyVisibilityScope.AdminOnly => "仅舰队管理者可查看允许共享的状态。",
-            SyncPrivacyVisibilityScope.SpecifiedMembers => "仅你选择的舰队成员和管理者可查看允许共享的状态。",
-            SyncPrivacyVisibilityScope.Fleet => "全舰队成员可以查看允许共享的状态。",
-            _ => "全舰队成员可以查看允许共享的状态。"
+            SyncPrivacyVisibilityScope.SpecifiedMembers => "仅你选择的组织成员和管理者可查看允许共享的状态。",
+            SyncPrivacyVisibilityScope.Fleet => "全组织成员可以查看允许共享的状态。",
+            _ => "全组织成员可以查看允许共享的状态。"
         };
 
     private void ApplyNotificationSettingsToControls()
@@ -996,7 +996,7 @@ public partial class MainWindow
         var audiences = new List<string>(3);
         if (_notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.Fleet))
         {
-            audiences.Add("舰队成员");
+            audiences.Add("组织成员");
         }
 
         if (_notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.Friends))

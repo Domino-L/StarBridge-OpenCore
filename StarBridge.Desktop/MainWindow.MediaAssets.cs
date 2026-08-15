@@ -89,7 +89,7 @@ public partial class MainWindow
         var confirmed = await ShowAppConfirmationAsync(
             "清空个人机库？",
             $"将移除当前读取到的 {_ownedShips.Count} 艘舰船。",
-            "本地机库记录会被清空，并在下次同步时从舰队舰船库移除。之后仍可重新读取 RSI 官网机库。",
+            "本地机库记录会被清空，并在下次同步时从组织舰船库移除。之后仍可重新读取 RSI 官网机库。",
             "确认清空",
             "保留机库");
         if (!confirmed)
@@ -313,7 +313,7 @@ public partial class MainWindow
             ? _avatarPath
             : null;
         if (StarBridgeMessageBox.Show(
-                "确认清理本地图片缓存？只会删除可重新生成的临时图片，头像、账号、舰队和机库数据不会被删除。",
+                "确认清理本地图片缓存？只会删除可重新生成的临时图片，头像、账号、组织和机库数据不会被删除。",
                 "清理图片缓存",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -428,7 +428,7 @@ public partial class MainWindow
             $"显示名称：{PersonalDisplayNameText.Text}",
             $"邮箱：{PersonalMaskedEmailText.Text}",
             $"身份标识：{GameNameText.Text}",
-            $"舰队：{LocalFleetText.Text}",
+            $"组织：{LocalFleetText.Text}",
             "",
             "[本地日志与识别]",
             $"游戏日志路径（Game.log）：{LogPathBox.Text}",
@@ -474,7 +474,7 @@ public partial class MainWindow
         }
 
         var croppedPath = ChooseAndCropImage(
-            "选择舰队标志",
+            "选择组织标志",
             "fleet-logo.png",
             LocalImageStorage.UserAsset);
         if (croppedPath is null)
@@ -482,7 +482,7 @@ public partial class MainWindow
             return;
         }
 
-        if (!ValidateRequiredFleetImagePayload("舰队标志", croppedPath, FleetSyncImageMaxBytes))
+        if (!ValidateRequiredFleetImagePayload("组织标志", croppedPath, FleetSyncImageMaxBytes))
         {
             return;
         }
@@ -506,7 +506,7 @@ public partial class MainWindow
         {
             if (!await PushFleetInfoAsync(silent: false, includeImages: true, requireLogoImage: true, scope: FleetInfoUpdateScope.Logo))
             {
-                RestoreFleetStateAfterFailedMutation(rollbackState, "舰队队标同步失败，已恢复本地队标状态。");
+                RestoreFleetStateAfterFailedMutation(rollbackState, "组织标志同步失败，已恢复本地标志状态。");
                 LoadCreateFleetLogoPreview();
                 LoadFleetHeaderLogoPreview();
                 RefreshManageFleetBasicProfile();
@@ -519,7 +519,7 @@ public partial class MainWindow
 
     private void ChooseFleetBanner_Click(object sender, RoutedEventArgs e)
     {
-        SetFleetDescriptionStatus("舰队横幅功能已停用。", ManageProfileStatusTone.Locked);
+        SetFleetDescriptionStatus("组织横幅功能已停用。", ManageProfileStatusTone.Locked);
         AppendOutput("Fleet banner feature is disabled.");
     }
 
@@ -594,7 +594,7 @@ public partial class MainWindow
         BannerPickerStatusText.Foreground = mutedBrush;
         BannerPickerStatusText.Text = "等待选择图片";
         BannerPickerImageSizeText.Text = "未选择";
-        BannerPickerRatioText.Text = $"目标 {GetFleetBannerCropRatio():0.0}:1 / 公开舰队横幅";
+        BannerPickerRatioText.Text = $"目标 {GetFleetBannerCropRatio():0.0}:1 / 公开组织横幅";
         BannerPickerFitHintText.Text = "选择图片后可拖动并缩放裁剪框，最终按裁剪框保存。";
         BannerPickerCropScaleText.Text = "100%";
         UpdateBannerPickerCropWorkspaceSize();
@@ -649,7 +649,7 @@ public partial class MainWindow
     {
         var dialog = new OpenFileDialog
         {
-            Title = "选择舰队横幅图片",
+            Title = "选择组织横幅图片",
             Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp;*.webp|PNG|*.png|JPEG|*.jpg;*.jpeg|BMP|*.bmp|WebP|*.webp",
             CheckFileExists = true,
             Multiselect = false
@@ -758,7 +758,7 @@ public partial class MainWindow
         var targetRatio = GetFleetBannerCropRatio();
         BannerPickerRatioText.Text = $"图片 {(image.PixelWidth / Math.Max(1d, image.PixelHeight)):0.00}:1 / 目标 {targetRatio:0.0}:1 / {FormatBannerFileSize(path)}";
         BannerPickerFitHintText.Text = image.PixelWidth >= 1600 && image.PixelHeight >= 400
-            ? "图片尺寸适合作为公开舰队横幅。寻找舰队列表会优先顶满高度。"
+            ? "图片尺寸适合作为公开组织横幅。寻找组织列表会优先顶满高度。"
             : "图片尺寸偏小，建议使用更高分辨率的超宽横幅图。";
         BannerPickerPathText.Text = path;
         BannerPickerApplyButton.IsEnabled = !isCurrentBanner;
@@ -1307,7 +1307,7 @@ public partial class MainWindow
 
     private void BannerPickerRestoreDefaultButton_Click(object sender, RoutedEventArgs e)
     {
-        ApplyFleetBannerPath(null, null, "舰队横幅已恢复默认，公开舰队展示已恢复默认背景。");
+        ApplyFleetBannerPath(null, null, "组织横幅已恢复默认，公开组织展示已恢复默认背景。");
         AppendOutput("Fleet banner restored to default locally.");
         CloseFleetBannerPickerOverlay();
     }
@@ -1337,7 +1337,7 @@ public partial class MainWindow
             AppendOutput("Fleet banner source image was unavailable; using cropped banner as the next edit source.");
         }
 
-        ApplyFleetBannerPath(bannerPath, sourcePath, "舰队横幅已更新，寻找舰队展示将使用该图片。");
+        ApplyFleetBannerPath(bannerPath, sourcePath, "组织横幅已更新，寻找组织展示将使用该图片。");
         AppendOutput("Fleet banner updated locally.");
         CloseFleetBannerPickerOverlay();
     }
@@ -1384,7 +1384,7 @@ public partial class MainWindow
 
     private void RemoveFleetBanner_Click(object sender, RoutedEventArgs e)
     {
-        SetFleetDescriptionStatus("舰队横幅功能已停用。", ManageProfileStatusTone.Locked);
+        SetFleetDescriptionStatus("组织横幅功能已停用。", ManageProfileStatusTone.Locked);
         AppendOutput("Fleet banner feature is disabled.");
     }
 

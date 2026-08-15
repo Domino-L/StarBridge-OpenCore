@@ -103,7 +103,7 @@ public partial class MainWindow
         SetFleetAnnouncementStatus(
             _fleetAnnouncementCanManage
                 ? "可发布新公告，或管理当前广播。"
-                : "公告历史仅供舰队成员查看。",
+                : "公告历史仅供组织成员查看。",
             StatusPalette.DisabledBrush);
         if (!previousSignature.Equals(BuildFleetAnnouncementSignature(_fleetCurrentAnnouncement), StringComparison.Ordinal))
         {
@@ -406,7 +406,7 @@ public partial class MainWindow
         _fleetAnnouncementEditorCreatesNew = createNew || _fleetCurrentAnnouncement is null;
         _returnToAnnouncementCenterAfterEdit = returnToCenter;
         FleetAnnouncementCenterPanel.Hide();
-        FleetNoticeEditorPanel.Title = _fleetAnnouncementEditorCreatesNew ? "发布舰队公告" : "编辑当前公告";
+        FleetNoticeEditorPanel.Title = _fleetAnnouncementEditorCreatesNew ? "发布组织公告" : "编辑当前公告";
         PublishFleetNoticeButton.Content = _fleetAnnouncementEditorCreatesNew ? "发布公告" : "保存修订";
         FleetNoticeTitleBox.Text = _fleetAnnouncementEditorCreatesNew ? "" : _fleetCurrentAnnouncement?.Title ?? _fleetNoticeTitle;
         FleetNoticeContentBox.Text = _fleetAnnouncementEditorCreatesNew ? "" : _fleetCurrentAnnouncement?.Content ?? _fleetNoticeContent;

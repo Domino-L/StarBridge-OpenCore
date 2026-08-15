@@ -251,7 +251,7 @@ public partial class HangarManagementView : System.Windows.Controls.UserControl
         LastSyncText.Text = snapshot.LastSyncText;
         ShareStatusText.Text = !snapshot.SyncEnabled
             ? "同步已关闭"
-            : snapshot.SharingEnabled ? "已向舰队公开摘要" : "仅自己可见";
+            : snapshot.SharingEnabled ? "已向组织公开摘要" : "仅自己可见";
         ShareStatusText.Foreground = BridgeTokenBrushes.GetRequired(
             this,
             snapshot.SharingEnabled

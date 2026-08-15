@@ -204,7 +204,7 @@ internal static class DirectMessagePresentation
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(context.SharedFleetName))
         {
-            parts.Add($"同舰队 · {context.SharedFleetName}");
+            parts.Add($"同组织 · {context.SharedFleetName}");
         }
         if (!string.IsNullOrWhiteSpace(context.SharedRoomTitle))
         {
@@ -215,7 +215,7 @@ internal static class DirectMessagePresentation
         {
             DirectMessageOrigins.PersonalProfile => "通过个人资料发起",
             DirectMessageOrigins.FriendCenter => "通过好友中心发起",
-            DirectMessageOrigins.FleetMember => "通过舰队成员发起",
+            DirectMessageOrigins.FleetMember => "通过组织成员发起",
             DirectMessageOrigins.SquadMember => "通过小队成员发起",
             DirectMessageOrigins.PartyRoom => "通过组队房间发起",
             _ => "通过玩家入口发起"

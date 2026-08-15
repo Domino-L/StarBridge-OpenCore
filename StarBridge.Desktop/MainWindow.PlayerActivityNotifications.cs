@@ -207,7 +207,7 @@ public partial class MainWindow
         var audiences = new List<string>(3);
         if (scope.HasFlag(PlayerActivityNotificationScope.Fleet))
         {
-            audiences.Add("舰队成员");
+            audiences.Add("组织成员");
         }
 
         if (scope.HasFlag(PlayerActivityNotificationScope.Friends))

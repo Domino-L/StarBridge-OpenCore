@@ -36,8 +36,8 @@ public partial class MainWindow
         var hasNotice = !string.IsNullOrWhiteSpace(_fleetNoticeTitle);
         if (!hasNotice)
         {
-            FleetActionPlanTitleText.Text = "暂无舰队公告";
-            FleetActionPlanSummaryText.Text = "等待舰队指挥发布公告";
+            FleetActionPlanTitleText.Text = "暂无组织公告";
+            FleetActionPlanSummaryText.Text = "等待组织负责人发布公告";
             FleetActionPlanTimeText.Text = "";
             JoinFleetActionButton.Visibility = Visibility.Collapsed;
             return;
@@ -60,7 +60,7 @@ public partial class MainWindow
                 ? "暂无当前任务"
                 : "当前无任务";
             FleetActionPlanSummaryText.Text = CanCurrentUserPublishTasks()
-                ? "请前往 管理舰队-发布任务 进行任务发布"
+                ? "请前往 管理组织-发布任务 进行任务发布"
                 : "";
             FleetActionPlanTimeText.Text = "";
             JoinFleetActionButton.Visibility = Visibility.Collapsed;
@@ -214,7 +214,7 @@ public partial class MainWindow
         var hasAnnouncement = !string.IsNullOrWhiteSpace(_fleetNoticeTitle);
         ManageOverviewProfileText.Text = hasDescription
             ? "资料与介绍已完善"
-            : "舰队介绍尚未填写";
+            : "组织介绍尚未填写";
         ManageOverviewNoticeText.Text = string.IsNullOrWhiteSpace(_fleetNoticeTitle)
             ? "尚未发布"
             : $"已发布 · {_fleetNoticeTitle}";
@@ -325,10 +325,10 @@ public partial class MainWindow
         {
             ManageJoinPolicyImpactText.Text = normalizedPolicy switch
             {
-                "Application" => "玩家可在寻找舰队中提交申请，批准后才会加入舰队。",
-                "Invite" => "舰队不会开放公开入口，后续通过邀请流程加入。",
-                "Closed" => "舰队入口会显示为暂停加入，玩家不能直接加入或提交申请。",
-                _ => "玩家可在寻找舰队中直接加入，适合公开招募阶段。"
+                "Application" => "玩家可在寻找组织中提交申请，批准后才会加入组织。",
+                "Invite" => "组织不会开放公开入口，后续通过邀请流程加入。",
+                "Closed" => "组织入口会显示为暂停加入，玩家不能直接加入或提交申请。",
+                _ => "玩家可在寻找组织中直接加入，适合公开招募阶段。"
             };
         }
     }
@@ -367,8 +367,8 @@ public partial class MainWindow
         var recruitingEnabled = ManageRecruitingEnabledCheck?.IsChecked == true;
         var recruitingTarget = NormalizeFleetRecruitingTarget(GetSelectedComboBoxTag(ManageRecruitingTargetBox) ?? _fleetRecruitingTarget);
         ManageRecruitingSummaryText.Text = recruitingEnabled
-            ? $"寻找舰队会标记为正在招募，优先面向：{recruitingTarget}。舰队说明统一使用基础资料中的舰队介绍。"
-            : "未开启招募时，舰队仍可被搜索，但不会获得招募展示加权。";
+            ? $"寻找组织会标记为正在招募，优先面向：{recruitingTarget}。组织说明统一使用基础资料中的组织介绍。"
+            : "未开启招募时，组织仍可被搜索，但不会获得招募展示加权。";
     }
 
     private void RefreshManageFleetPublicVisibilitySettings()
@@ -402,7 +402,7 @@ public partial class MainWindow
             GetSelectedComboBoxTag(ManagePublicMemberScaleBox) ?? _fleetPublicMemberScaleMode);
         var shipScaleMode = NormalizeFleetPublicShipScaleMode(
             GetSelectedComboBoxTag(ManagePublicShipScaleBox) ?? _fleetPublicShipScaleMode);
-        var listing = listingEnabled ? "公开展示" : "不出现在寻找舰队";
+        var listing = listingEnabled ? "公开展示" : "不出现在寻找组织";
         var profile = profileEnabled ? "资料可见" : "资料关闭";
         var members = memberScaleMode switch
         {
@@ -432,7 +432,7 @@ public partial class MainWindow
         _isManageProfileRefreshing = true;
         try
         {
-            var fleetName = string.IsNullOrWhiteSpace(_fleetName) ? "未命名舰队" : _fleetName;
+            var fleetName = string.IsNullOrWhiteSpace(_fleetName) ? "未命名组织" : _fleetName;
             var fleetCode = string.IsNullOrWhiteSpace(_fleetCode) ? "未设置" : _fleetCode;
 
             ManageBasicFleetNameText.Text = fleetName;
@@ -500,14 +500,14 @@ public partial class MainWindow
 
     private void ManageProfileEditButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureLoggedIn("编辑舰队基础资料需要先登录。"))
+        if (!EnsureLoggedIn("编辑组织基础资料需要先登录。"))
         {
             return;
         }
 
         if (!CanCurrentUserManageFleetInfo())
         {
-            SetFleetDescriptionStatus("当前账号没有修改舰队资料的权限。", ManageProfileStatusTone.Locked);
+            SetFleetDescriptionStatus("当前账号没有修改组织资料的权限。", ManageProfileStatusTone.Locked);
             return;
         }
 
@@ -560,12 +560,12 @@ public partial class MainWindow
             var lockedAreas = new List<string>();
             if (!canAccessProfileFields)
             {
-                lockedAreas.Add("舰队介绍、活跃区域、活动信息、更多信息");
+                lockedAreas.Add("组织介绍、活跃区域、活动信息、更多信息");
             }
 
             if (!canAccessAvatar)
             {
-                lockedAreas.Add("舰队标志");
+                lockedAreas.Add("组织标志");
             }
 
             ManageProfilePermissionNotice.Visibility = lockedAreas.Count > 0
@@ -960,7 +960,7 @@ public partial class MainWindow
                      FindFleetTimeZoneOptionBySameOffset(timeZoneId);
 
         ManageFleetActivityTimeZoneSummaryText.Text =
-            $"按舰队默认时区：{option?.DisplayName ?? "未设置"}";
+            $"按组织默认时区：{option?.DisplayName ?? "未设置"}";
     }
 
     private FleetTimeZoneOptionRow? FindFleetTimeZoneOptionBySameOffset(string timeZoneId)
@@ -1759,7 +1759,7 @@ public partial class MainWindow
         if (ManageLegacyPrivateExternalContactsText is not null)
         {
             ManageLegacyPrivateExternalContactsText.Text = _legacyExternalContactPublicationConfirmed
-                ? "已确认：保存后，这些联系方式将在寻找舰队中公开。"
+                ? "已确认：保存后，这些联系方式将在寻找组织中公开。"
                 : "这些旧版联系方式目前未公开。保存其他设置不会公开它们；请清空不希望公开的内容，或确认公开后再保存。";
         }
 
@@ -1904,7 +1904,7 @@ public partial class MainWindow
         }
 
         ((ComboBoxItem)comboBox.Items[0]).Content = zh ? "自动" : "Auto";
-        ((ComboBoxItem)comboBox.Items[1]).Content = zh ? "舰队" : "Fleet";
+        ((ComboBoxItem)comboBox.Items[1]).Content = zh ? "组织" : "Organization";
         ((ComboBoxItem)comboBox.Items[2]).Content = zh ? "当前房间" : "Current party";
     }
 
@@ -1912,7 +1912,7 @@ public partial class MainWindow
     {
         if (!CanCurrentUserEditFleetProfile())
         {
-            SetFleetDescriptionStatus("当前账号没有修改舰队标签的权限。", ManageProfileStatusTone.Locked);
+            SetFleetDescriptionStatus("当前账号没有修改组织标签的权限。", ManageProfileStatusTone.Locked);
             return;
         }
 
@@ -2132,7 +2132,7 @@ public partial class MainWindow
         {
             if (_manageTagDraftIds.Count >= MaxManageFleetTags)
             {
-                SetManageTagStatus($"最多选择 {MaxManageFleetTags.ToString(CultureInfo.InvariantCulture)} 个舰队标签。");
+                SetManageTagStatus($"最多选择 {MaxManageFleetTags.ToString(CultureInfo.InvariantCulture)} 个组织标签。");
                 return;
             }
 
@@ -2242,7 +2242,7 @@ public partial class MainWindow
         SetManageProfileSelectedTagIds(_manageTagDraftIds);
         HandleManageProfileDraftChanged();
         CloseManageTagSelector();
-        SetFleetDescriptionStatus("舰队标签已更新，保存基础资料后生效。", ManageProfileStatusTone.Info);
+        SetFleetDescriptionStatus("组织标签已更新，保存基础资料后生效。", ManageProfileStatusTone.Info);
     }
 
     private ISet<string> GetManageTagSelectorSourceIds()
@@ -2708,18 +2708,18 @@ public partial class MainWindow
             return;
         }
 
-        if (!EnsureLoggedIn("保存舰队基础资料需要先登录。"))
+        if (!EnsureLoggedIn("保存组织基础资料需要先登录。"))
         {
             return;
         }
 
         if (!CanCurrentUserManageFleetInfo())
         {
-            SetFleetDescriptionStatus("当前账号没有保存舰队资料的权限。", ManageProfileStatusTone.Locked);
+            SetFleetDescriptionStatus("当前账号没有保存组织资料的权限。", ManageProfileStatusTone.Locked);
             return;
         }
 
-        SetManageProfileSaveState(ManageProfileSaveState.Saving, "正在保存本地设置并同步到舰队...");
+        SetManageProfileSaveState(ManageProfileSaveState.Saving, "正在保存本地设置并同步到组织...");
 
         var hadManageProfileDraftChanges = _isManageProfileDirty;
         var rollbackState = CaptureManageProfileRollbackState();
@@ -2781,7 +2781,7 @@ public partial class MainWindow
             _legacyExternalContactPublicationConfirmed,
             _fleetExternalContacts);
 
-        AddFleetLog("舰队", "基础资料更新", "公开展示与活动信息已更新");
+        AddFleetLog("组织", "基础资料更新", "公开展示与活动信息已更新");
         RefreshFleetHeader();
         RefreshTaskManagementPanel();
         SaveCurrentConfig();
@@ -2810,18 +2810,18 @@ public partial class MainWindow
                                   publicContactsBefore != _fleetPublicShowExternalContacts;
         SetFleetDescriptionStatus(
             shouldSyncFleetInfo
-                ? "已保存到本地，正在同步舰队资料..."
+                ? "已保存到本地，正在同步组织资料..."
                 : "基础资料已保存到本地。",
             ManageProfileStatusTone.Info);
 
         if (shouldSyncFleetInfo)
         {
             ProtectFleetProfileUntilServerEcho();
-            SetFleetDescriptionStatus("正在同步舰队基础资料...", ManageProfileStatusTone.Info);
+            SetFleetDescriptionStatus("正在同步组织基础资料...", ManageProfileStatusTone.Info);
             if (!await PushFleetInfoAsync(silent: false))
             {
                 ClearFleetProfileSyncEchoProtection();
-                RestoreFleetStateAfterFailedMutation(rollbackState, "舰队基础资料同步失败，已恢复本地资料状态。");
+                RestoreFleetStateAfterFailedMutation(rollbackState, "组织基础资料同步失败，已恢复本地资料状态。");
                 ShowManageProfileSaveFailure("基础资料同步失败，已恢复本地设置。");
                 return;
             }
@@ -2859,7 +2859,7 @@ public partial class MainWindow
         var fleetName = GetTextBoxDraftValue(ManageProfileFleetNameBox, _fleetName);
         if (string.IsNullOrWhiteSpace(fleetName))
         {
-            fleetName = "未命名舰队";
+            fleetName = "未命名组织";
         }
 
         var fleetCode = GetTextBoxDraftValue(ManageProfileFleetCodeBox, _fleetCode);
@@ -2871,7 +2871,7 @@ public partial class MainWindow
         var commander = FormatCommanderName(_callsign, _localPlayer, _fleetChiefCommander);
         var description = NormalizeFleetDescription(GetTextBoxDraftValue(FleetDescriptionEditBox, _fleetDescription));
         var noticeSummary = GetTextBoxDraftValue(ManageProfileAnnouncementBox, _fleetNoticeContent);
-        var noticeTitle = string.IsNullOrWhiteSpace(noticeSummary) ? "暂无舰队公告" : "舰队公告";
+        var noticeTitle = string.IsNullOrWhiteSpace(noticeSummary) ? "暂无组织公告" : "组织公告";
         var selectedSystems = _manageFleetSystemOptions
             .Where(option => _selectedFleetSystemIds.Contains(option.Id))
             .Select(option => option.ChineseName)
@@ -2884,7 +2884,7 @@ public partial class MainWindow
             ? "基础资料可见"
             : "仅内部可见";
         noticeSummary = string.IsNullOrWhiteSpace(noticeSummary)
-            ? "公告会显示在舰队信息页。"
+            ? "公告会显示在组织信息页。"
             : noticeSummary;
 
         ManagePreviewFleetNameText.Text = fleetName;
@@ -2893,7 +2893,7 @@ public partial class MainWindow
         ManagePreviewSystemText.Text = systemText;
         ManagePreviewNoticeTitleText.Text = noticeTitle;
         ManagePreviewNoticeSummaryText.Text = noticeSummary;
-        ManagePreviewJoinTitleText.Text = "舰队简介";
+        ManagePreviewJoinTitleText.Text = "组织简介";
         ManagePreviewJoinSummaryText.Text = string.IsNullOrWhiteSpace(description) ? FleetDescriptionPublicPlaceholder : description;
         ManagePreviewJoinPolicyText.Text = profileVisibilityText;
 

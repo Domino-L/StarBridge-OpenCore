@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: 星海舰桥版本
-      placeholder: 例如 0.6.3
+      placeholder: 例如 0.6.4
     validations:
       required: true
   - type: input

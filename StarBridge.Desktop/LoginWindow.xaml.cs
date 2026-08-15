@@ -99,7 +99,7 @@ public partial class LoginWindow : Window
         ConfirmButton.Content = isRegister ? "注册" : "登录";
         SetStatus(isRegister
             ? "注册后将使用登录邮箱接收验证码，并把呼号绑定到你的星海舰桥个人身份。"
-            : "使用注册邮箱登录。未登录时只能浏览，无法同步和管理舰队。");
+            : "使用注册邮箱登录。未登录时只能浏览，无法同步和管理组织。");
     }
 
     private void ForgotPasswordButton_Click(object sender, RoutedEventArgs e)
@@ -145,9 +145,9 @@ public partial class LoginWindow : Window
     {
         StarBridgeMessageBox.Show(
             this,
-            "StarBridge 登录邮箱用于注册、登录验证和必要的账户安全通知，不会向舰队成员公开。\n\n" +
+            "StarBridge 登录邮箱用于注册、登录验证和必要的账户安全通知，不会向组织成员公开。\n\n" +
             "呼号、游戏 ID、公开资料和协作状态只会按你选择的可见范围显示。在“同步与隐私”中可以单独管理在线、飞船、地点、服务器、事件、机库和游玩统计。\n\n" +
-            "好友私信、舰队聊天和房间聊天会保存于 StarBridge 服务，仅对应会话或舰队的可见成员可以查看。\n\n" +
+            "好友私信、组织聊天和房间聊天会保存于 StarBridge 服务，仅对应会话或组织的可见成员可以查看。\n\n" +
             "主动提交举报或申诉时，相关内容、对象快照和处理记录会保存在 StarBridge 服务；证据仅授权审核账号可见。\n\n" +
             "Game.log 在你的电脑上以只读方式处理，原始日志不会作为状态同步上传。诊断记录只在你主动提交反馈时离开设备。\n\n" +
             "RSI 官网登录凭据不属于 StarBridge 的数据范围：应用不会要求、读取或保存这些凭据。",

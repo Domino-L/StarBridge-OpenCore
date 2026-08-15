@@ -381,11 +381,6 @@ public partial class MainWindow
         RefreshPersonalProfileAccessState();
     }
 
-    private void PersonalProfileVisitorBackButton_Click(object sender, RoutedEventArgs e)
-    {
-        ExitPersonalProfileVisitorMode(restoreReturnTab: true);
-    }
-
     private async Task OpenPersonalProfileVisitorAsync(PlayerRow target)
     {
         if (_isPersonalProfileEditMode && _isPersonalProfileDirty)
@@ -1962,16 +1957,12 @@ public partial class MainWindow
 
     private void RefreshPersonalProfileVisitorChrome()
     {
-        PersonalProfileVisitorBackButton.Visibility = _isPersonalProfileVisitorMode
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
         if (_isPersonalProfileVisitorMode)
         {
             var callsign = _personalProfileVisitorDocument?.Identity.Callsign ??
                            _personalProfileVisitorTarget?.Callsign ??
                            _personalProfileVisitorTarget?.Name ??
-                           "舰队成员";
+                           "组织成员";
             PersonalProfilePageTitleText.Text = "公开资料";
             PersonalProfilePageDescriptionText.Text = $"查看 {callsign} 愿意公开的身份、活动节奏与个人模块。";
             PersonalProfilePreviewTitleText.Text = $"正在查看 {callsign}";
@@ -2060,7 +2051,7 @@ public partial class MainWindow
         var affiliation = _personalProfileVisitorDocument?.FleetAffiliation;
         if (affiliation is null)
         {
-            PersonalHeaderFleetNameText.Text = "未公开舰队身份";
+            PersonalHeaderFleetNameText.Text = "未公开组织身份";
             PersonalHeaderFleetCodeText.Text = "";
             PersonalHeaderFleetRoleText.Text = "";
             PersonalHeaderFleetLogoImage.Source = null;

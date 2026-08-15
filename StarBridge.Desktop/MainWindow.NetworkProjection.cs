@@ -66,10 +66,10 @@ public partial class MainWindow
     {
         var lines = new List<string>
         {
-            "StarBridge 舰队邮件通知",
+            "StarBridge 组织邮件通知",
             "",
             $"事件：{eventName}",
-            $"舰队：{_fleetName} ({_fleetCode})",
+            $"组织：{_fleetName} ({_fleetCode})",
             ResolveFleetEmailSenderLine()
         };
 
@@ -86,14 +86,14 @@ public partial class MainWindow
         var display = FormatCommanderName(_callsign, _localPlayer);
         if (IsCurrentUserFleetCommander())
         {
-            return $"发送人：{display} / 舰队指挥官";
+            return $"发送人：{display} / 组织负责人";
         }
 
         var permission = GetCurrentUserFleetPermission();
         var role = permission is { PermissionEnabled: true } &&
                    !string.IsNullOrWhiteSpace(permission.RoleTitle)
             ? permission.RoleTitle
-            : "舰队成员";
+            : "组织成员";
         return $"发送人：{display} / {role}";
     }
 
@@ -379,7 +379,7 @@ public partial class MainWindow
             var commanderPermission = new NetworkFleetMemberPermissionSnapshot(
                 commanderName,
                 GetCallsignFromDisplayName(_fleetChiefCommander),
-                "舰队指挥官",
+                "组织负责人",
                 true,
                 true,
                 true,
@@ -407,7 +407,7 @@ public partial class MainWindow
                 _localPlayer.Trim(),
                 string.IsNullOrWhiteSpace(_callsign) ? localPermission?.Callsign : _callsign,
                 IsFleetCommander(_localPlayer, _callsign)
-                    ? "舰队指挥官"
+                    ? "组织负责人"
                     : NormalizeRoleTitle(localPermission?.RoleTitle ?? "成员"),
                 localPermission?.PermissionEnabled ?? false,
                 localPermission?.CanRemoveMembers ?? false,
@@ -439,7 +439,7 @@ public partial class MainWindow
             player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
         var permission = GetFleetPermission(_localPlayer);
         var role = IsFleetCommander(_localPlayer, _callsign)
-            ? "舰队指挥官"
+            ? "组织负责人"
             : NormalizeRoleTitle(permission?.RoleTitle ?? local?.Role ?? "成员");
 
         var privacyProjection = GetLocalFleetPresencePrivacyProjection();

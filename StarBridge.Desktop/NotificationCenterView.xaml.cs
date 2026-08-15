@@ -98,7 +98,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
             ShowState(
                 BridgeStateKind.Empty,
                 "目前没有新的通知",
-                "需要处理的好友、舰队和房间事项会显示在这里。");
+                "需要处理的好友、组织和房间事项会显示在这里。");
             return;
         }
 
@@ -455,7 +455,7 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
 
     private static string CategoryLabel(string category) => category switch
     {
-        NotificationCategories.Fleet => "舰队",
+        NotificationCategories.Fleet => "组织",
         NotificationCategories.Room => "房间",
         NotificationCategories.Safety => "安全",
         NotificationCategories.System => "系统",

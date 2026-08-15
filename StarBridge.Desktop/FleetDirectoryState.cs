@@ -110,7 +110,7 @@ public sealed class FleetDirectoryState
         // shared startup gate decides whether those items may be shown after
         // the request terminates as OfflineCache.
         LoadStatus = FleetDirectoryLoadStatus.Loading;
-        StatusMessage = "正在加载公开舰队...";
+        StatusMessage = "正在加载公开组织...";
         return requestVersion;
     }
 
@@ -130,7 +130,7 @@ public sealed class FleetDirectoryState
         }
 
         LoadStatus = itemCount > 0 ? FleetDirectoryLoadStatus.Ready : FleetDirectoryLoadStatus.Empty;
-        StatusMessage = itemCount > 0 ? "" : "暂时没有可显示的公开舰队。";
+        StatusMessage = itemCount > 0 ? "" : "暂时没有可显示的公开组织。";
         return true;
     }
 
@@ -143,8 +143,8 @@ public sealed class FleetDirectoryState
 
         LoadStatus = hasCachedItems ? FleetDirectoryLoadStatus.OfflineCache : FleetDirectoryLoadStatus.Error;
         StatusMessage = hasCachedItems
-            ? "目录刷新失败，当前显示上一次成功加载的舰队。"
-            : string.IsNullOrWhiteSpace(message) ? "舰队目录加载失败，请重试。" : message.Trim();
+            ? "目录刷新失败，当前显示上一次成功加载的组织。"
+            : string.IsNullOrWhiteSpace(message) ? "组织目录加载失败，请重试。" : message.Trim();
         return true;
     }
 

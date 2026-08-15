@@ -58,7 +58,7 @@ internal static class IdentityInitialization
             false,
             false,
             $"已读取游戏名：{playerName}，等待玩家 ID",
-            "请进入 PU，直到 Game.log 出现玩家 ID 信息。完成后才可加入或创建舰队。");
+            "请进入 PU，直到 Game.log 出现玩家 ID 信息。完成后才可加入或创建组织。");
     }
 
     public static string? FindDefaultGameLog()

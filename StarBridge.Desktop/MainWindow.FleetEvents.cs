@@ -1086,15 +1086,15 @@ public partial class MainWindow
 
         if (!CanCurrentUserDeleteFleetLogs())
         {
-            FleetMemberManagementStatusText.Text = "当前账号没有删除舰队日志的权限。";
+            FleetMemberManagementStatusText.Text = "当前账号没有删除组织日志的权限。";
             return;
         }
 
         var deleted = await PushFleetMutationAsync(
             "api/fleets/logs/delete",
             new FleetLogDeleteRequest(_fleetCode, logId),
-            "舰队日志已删除并同步。",
-            "舰队日志删除失败",
+            "组织日志已删除并同步。",
+            "组织日志删除失败",
             silent: false);
         if (!deleted)
         {

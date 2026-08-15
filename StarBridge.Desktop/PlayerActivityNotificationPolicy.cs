@@ -205,7 +205,7 @@ internal sealed class PlayerActivityNotificationTracker
         var relationships = new List<string>(3);
         if (member.IsFleetMember)
         {
-            relationships.Add("舰队成员");
+            relationships.Add("组织成员");
         }
 
         if (member.IsAcceptedFriend)

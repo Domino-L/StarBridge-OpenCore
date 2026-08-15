@@ -29,7 +29,7 @@ internal static class ChatAttachmentPresentation
         return attachment?.Kind switch
         {
             ChatAttachmentKinds.OverlayPreset => "查看预设",
-            ChatAttachmentKinds.FleetInvitation => "查看舰队",
+            ChatAttachmentKinds.FleetInvitation => "查看组织",
             _ => "查看"
         };
     }
@@ -42,7 +42,7 @@ internal static class ChatAttachmentPresentation
     public static string TypeText(ChatAttachmentContract? attachment) => attachment?.Kind switch
     {
         ChatAttachmentKinds.OverlayPreset => "浮层预设",
-        ChatAttachmentKinds.FleetInvitation => "舰队邀请",
+        ChatAttachmentKinds.FleetInvitation => "组织邀请",
         ChatAttachmentKinds.PartyRoomInvitation => "房间邀请",
         _ => "消息卡片"
     };

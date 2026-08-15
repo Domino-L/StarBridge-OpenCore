@@ -41,11 +41,13 @@ internal sealed record InGameFleetMemberRow(
                                     Callsign.Equals(GameId, StringComparison.OrdinalIgnoreCase)
         ? Callsign
         : $"{Callsign} · {GameId}";
-    public string RoleText => string.IsNullOrWhiteSpace(Role) ? "舰队成员" : Role;
-    public string ShipText => PlayerSessionStatePresentation.ResolveShip(
-        Presence,
-        HasServerSession,
-        Ship);
+    public string RoleText => string.IsNullOrWhiteSpace(Role) ? "组织成员" : Role;
+    public string ShipText => ShipDisplayNamePresentation.ResolveChinese(
+        PlayerSessionStatePresentation.ResolveShip(
+            Presence,
+            HasServerSession,
+            Ship),
+        ShipDisplayNamePresentation.UnknownShip);
     public string LocationText => PlayerSessionStatePresentation.ResolveLocation(
         Presence,
         HasServerSession,
@@ -149,7 +151,7 @@ internal sealed record InGameFleetSnapshot(
     internal static InGameFleetSnapshot Unavailable(string statusText) =>
         InGameFleetProjection.Build(
             false,
-            "舰队面板",
+            "组织面板",
             "",
             "",
             "",

@@ -130,6 +130,25 @@ if (Test-Path -LiteralPath $websitePath -PathType Leaf) {
             throw "Website release notes do not match release-notes/catalog.json: $requiredReleaseText"
         }
     }
+
+    $websiteStylesPath = Join-Path $Root "StarBridge.Web\styles.css"
+    if (-not (Test-Path -LiteralPath $websiteStylesPath -PathType Leaf)) {
+        throw "Website stylesheet was not found: $websiteStylesPath"
+    }
+
+    $styleVersionMatch = [Text.RegularExpressions.Regex]::Match(
+        $website,
+        'styles\.css\?v=(?<version>[a-f0-9]{12})',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if (-not $styleVersionMatch.Success) {
+        throw "Website stylesheet reference must use the first 12 characters of its SHA-256 as the cache version."
+    }
+
+    $expectedStyleVersion = (Get-FileHash -LiteralPath $websiteStylesPath -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
+    $actualStyleVersion = $styleVersionMatch.Groups["version"].Value
+    if ($actualStyleVersion -ne $expectedStyleVersion) {
+        throw "Website stylesheet cache version '$actualStyleVersion' does not match styles.css SHA-256 prefix '$expectedStyleVersion'."
+    }
 }
 
 Write-Host "Version migration checks passed for StarBridge $authoredVersion across $($currentReleaseSurfaces.Count) current release surfaces."

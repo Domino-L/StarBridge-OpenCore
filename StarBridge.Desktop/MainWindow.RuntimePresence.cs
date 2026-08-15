@@ -202,9 +202,7 @@ public partial class MainWindow
 
     private static string LoadOrCreateAppStatsClientId()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "StarBridge");
+        var directory = DesktopAppConfig.ConfigDirectory;
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "app-client-id.txt");
         if (File.Exists(path))

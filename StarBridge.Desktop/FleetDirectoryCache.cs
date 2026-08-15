@@ -21,8 +21,7 @@ public sealed class FleetDirectoryCache
     {
         _cachePath = string.IsNullOrWhiteSpace(cachePath)
             ? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "StarBridge",
+                DesktopAppConfig.ConfigDirectory,
                 "Cache",
                 "fleet-directory.json")
             : cachePath;

@@ -253,7 +253,7 @@ public partial class MainWindow
                 ApplyNetworkSyncMasterState();
                 UpdateShipDatabaseSummary();
                 NetworkStatusText.Text = "隐私设置已保存";
-                DualAxisPrivacyEditor.SetGroupStatus("已保存；舰队成员与同房间的人会按各自设置查看。");
+                DualAxisPrivacyEditor.SetGroupStatus("已保存；组织成员与同房间的人会按各自设置查看。");
 
                 await RefreshPrivateVisibilityGroupsAsync();
                 if (!_accountSessionCoordinator.IsCurrent(session))
@@ -466,7 +466,7 @@ public partial class MainWindow
         PopulateVisibilityGroupMemberCandidates(group?.MemberAccountIds ?? []);
         SpecifiedVisibilityMembersOverlay.Title = group is null ? "新建私有分组" : "编辑私有分组";
         SpecifiedVisibilityMembersOverlay.Description =
-            "选择这组观看者。分组只属于你，不改变舰队角色、房间准入或任何管理权限。";
+            "选择这组观看者。分组只属于你，不改变组织角色、房间准入或任何管理权限。";
         RefreshSpecifiedVisibilitySelectionText();
         SpecifiedVisibilityMembersOverlay.Show();
         VisibilityGroupNameBox.Focus();
@@ -616,7 +616,7 @@ public partial class MainWindow
         var confirmed = await ShowAppConfirmationAsync(
             "删除私有分组？",
             $"将删除“{VisibilityGroupNameBox.Text.Trim()}”。",
-            "舰队成员与同房间的人对该分组的引用会立即失效，不会保留展开后的成员名单。",
+            "组织成员与同房间的人对该分组的引用会立即失效，不会保留展开后的成员名单。",
             "删除分组",
             "取消",
             footerText: "分组只影响你发布的共享状态，不影响角色或权限。");

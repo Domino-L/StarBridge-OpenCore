@@ -910,6 +910,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _rosterRotationTimer = new();
+    private readonly OverlayRosterRotationCursor _rosterRotationCursor = new();
     private readonly DispatcherTimer _eventNotificationTimer = new(DispatcherPriority.Render) { Interval = EventNotificationIdleInterval };
     private readonly Queue<PendingOverlayEventNotification> _pendingEventNotifications = new();
     private readonly Queue<PendingCommunicationEvent> _pendingCommunicationEvents = new();
@@ -952,7 +953,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private string _rosterLanguage = "zh";
     private string _rosterLocalShard = "";
     private double _memberPanelHeight = 440;
-    private int _rosterRotationPage;
     private string _fleetNoticeTitle = "";
     private string _squadsTitle = "";
     private string _membersTitle = "";
@@ -972,7 +972,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private IReadOnlyList<OverlayOverviewLocationCount> _overviewVisibleLocations = [];
     private string _overviewLocationPlaceholder = "";
     private string _overviewLocationPlaceholderMetric = "";
-    private OverlaySceneKind _overviewSceneKind = OverlaySceneKind.Fleet;
     private double _overviewPanelWidth = OverlayOverviewLocationLayout.HorizontalThreshold;
     private double _overviewPanelHeight = 200;
     private Visibility _memberStatusVisibility = Visibility.Visible;
@@ -1056,7 +1055,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     {
         _rosterRotationTimer.Tick += (_, _) =>
         {
-            _rosterRotationPage++;
+            _rosterRotationCursor.Advance();
             RefreshMembersFromAuthorizedRoster();
         };
         _timer.Tick += (_, _) =>
@@ -1629,10 +1628,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         ArgumentNullException.ThrowIfNull(roster);
         _authorizedRoster = roster;
         _rosterSelectionSettings = rosterSelectionSettings.Normalize();
+        var effectiveSceneContext = sceneContext ?? OverlaySceneContext.Fleet(settings.ScenePreference);
+        _rosterRotationCursor.ApplyContext(_rosterSelectionSettings, effectiveSceneContext.Kind);
         _rosterDisplaySettings = settings;
         _rosterLanguage = language;
         _rosterLocalShard = localShard;
-        _rosterRotationPage = 0;
 
         RefreshCore(
             roster.Members,
@@ -1642,7 +1642,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             commandState,
             localPresence,
             localShard,
-            sceneContext,
+            effectiveSceneContext,
             chatMessages);
         RefreshMembersFromAuthorizedRoster();
     }
@@ -1722,7 +1722,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         var nextNoticeText = string.IsNullOrWhiteSpace(commandState.NoticeText)
             ? hasFleet
                 ? zh ? "已接入舰队频道，等待指挥同步" : "Fleet channel linked. Awaiting command sync."
-                : zh ? "无舰队。请先加入或创建舰队。" : "No fleet. Join or create a fleet first."
+                : zh ? "无组织。请先加入或创建组织。" : "No organization. Join or create an organization first."
             : commandState.NoticeText!;
 
         var nextNoticeSignature = $"{nextNoticeTitle}\n{nextNoticeText}";
@@ -1756,7 +1756,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 _memberPanelHeight,
                 _rosterLocalShard,
                 null,
-                _rosterRotationPage));
+                _rosterRotationCursor.Page));
         var shouldRotate =
             _rosterSelectionSettings.OverflowMode == OverlayRosterOverflowMode.Rotate &&
             projection.HiddenOnlineCount + projection.HiddenOfflineCount > 0;
@@ -1901,7 +1901,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         ChatTitle = sceneContext.Kind == OverlaySceneKind.PartyRoom
             ? zh ? "房间通讯" : "PARTY COMMS"
             : string.IsNullOrWhiteSpace(sceneContext.ChatChannelTitle)
-                ? zh ? "舰队通讯" : "FLEET COMMS"
+                ? zh ? "组织通讯" : "ORGANIZATION COMMS"
                 : sceneContext.ChatChannelTitle;
         OnChanged(nameof(ChatDisplayMode));
         OnChanged(nameof(ChatSide));
@@ -2127,49 +2127,32 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     }
 
     public void ApplyOverviewPanelLayout(
-        OverlaySquadStatusDisplayMode legacyPartyMode,
+        OverlaySquadStatusDisplayMode _,
         double panelWidth,
         double panelHeight)
     {
         _overviewPanelWidth = double.IsFinite(panelWidth) ? Math.Max(0, panelWidth) : 0;
         _overviewPanelHeight = double.IsFinite(panelHeight) ? Math.Max(0, panelHeight) : 0;
 
-        if (_overviewSceneKind != OverlaySceneKind.PartyRoom)
-        {
-            // D67 fleet layout is fully dimension-driven. The legacy serialized
-            // SquadStatusDisplayMode remains readable for compatibility, but it
-            // cannot override the fleet overview's automatic geometry.
-            SquadStatusCompactVisibility = Visibility.Collapsed;
-            SquadStatusDetailVisibility = Visibility.Collapsed;
-            var layout = OverlayOverviewLocationLayout.Resolve(
-                _overviewPanelWidth,
-                _overviewPanelHeight,
-                OverviewTopLocations);
-            OverviewVisibleLocations = layout.VisibleItems;
-            var hasLocations = layout.VisibleItems.Count > 0;
-            OverviewLocationsHorizontalVisibility = hasLocations &&
-                                                    layout.Orientation == OverlayOverviewLocationOrientation.Horizontal
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            OverviewLocationsVerticalVisibility = hasLocations &&
-                                                  layout.Orientation == OverlayOverviewLocationOrientation.Vertical
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            return;
-        }
-
-        OverviewVisibleLocations = [];
-        OverviewLocationsHorizontalVisibility = Visibility.Collapsed;
-        OverviewLocationsVerticalVisibility = Visibility.Collapsed;
-        var useDetailed = legacyPartyMode switch
-        {
-            OverlaySquadStatusDisplayMode.Compact => false,
-            OverlaySquadStatusDisplayMode.Detailed => true,
-            _ => _overviewPanelWidth >= 220 && _overviewPanelHeight >= 168
-        };
-
-        SquadStatusCompactVisibility = useDetailed ? Visibility.Collapsed : Visibility.Visible;
-        SquadStatusDetailVisibility = useDetailed ? Visibility.Visible : Visibility.Collapsed;
+        // Fleet and room scenes share one dimension-driven information skeleton.
+        // The serialized legacy mode remains readable for compatibility but can no
+        // longer make the room scene regress to a second overview layout.
+        SquadStatusCompactVisibility = Visibility.Collapsed;
+        SquadStatusDetailVisibility = Visibility.Collapsed;
+        var layout = OverlayOverviewLocationLayout.Resolve(
+            _overviewPanelWidth,
+            _overviewPanelHeight,
+            OverviewTopLocations);
+        OverviewVisibleLocations = layout.VisibleItems;
+        var hasLocations = layout.VisibleItems.Count > 0;
+        OverviewLocationsHorizontalVisibility = hasLocations &&
+                                                layout.Orientation == OverlayOverviewLocationOrientation.Horizontal
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        OverviewLocationsVerticalVisibility = hasLocations &&
+                                              layout.Orientation == OverlayOverviewLocationOrientation.Vertical
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void RefreshGameEventNotifications(
@@ -2347,7 +2330,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             OverlayEventNotificationTypes.SameServer,
             zh ? "同服概况" : "Same server",
             zh
-                ? $"当前有 {sameServerCount.ToString(CultureInfo.InvariantCulture)} 名舰队成员与你在同服务器"
+                ? $"当前有 {sameServerCount.ToString(CultureInfo.InvariantCulture)} 名组织成员与你在同服务器"
                 : $"{sameServerCount.ToString(CultureInfo.InvariantCulture)} fleet members share your server",
             AlertBrush,
             important: true);
@@ -3463,22 +3446,15 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         OverviewLocationPlaceholder = overview.LocationPlaceholder;
         OverviewLocationPlaceholderMetric = overview.LocationPlaceholderMetric;
         SquadStatusBrush = overview.StatusBrush;
-        _overviewSceneKind = sceneContext.Kind;
-        FleetOverviewVisibility = sceneContext.Kind == OverlaySceneKind.Fleet
+        FleetOverviewVisibility = Visibility.Visible;
+        FleetOverviewFocusVisibility = !string.IsNullOrWhiteSpace(overview.Focus)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        FleetOverviewFocusVisibility = sceneContext.Kind == OverlaySceneKind.Fleet &&
-                                       !string.IsNullOrWhiteSpace(overview.Focus)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        OverviewLocationPlaceholderVisibility = sceneContext.Kind == OverlaySceneKind.Fleet &&
-                                                overview.TopLocations.Count == 0 &&
+        OverviewLocationPlaceholderVisibility = overview.TopLocations.Count == 0 &&
                                                 !string.IsNullOrWhiteSpace(overview.LocationPlaceholder)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        PartyOverviewVisibility = sceneContext.Kind == OverlaySceneKind.PartyRoom
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        PartyOverviewVisibility = Visibility.Collapsed;
         OverviewTopLocations = overview.TopLocations;
         ApplyOverviewPanelLayout(
             settings.SquadStatusDisplayMode,
