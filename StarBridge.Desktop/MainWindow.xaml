@@ -27535,20 +27535,32 @@
                                                                 <Grid>
                                                                     <Grid.ColumnDefinitions>
                                                                         <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="160" />
+                                                                        <ColumnDefinition Width="350" />
                                                                     </Grid.ColumnDefinitions>
                                                                     <StackPanel>
                                                                         <TextBlock Text="通知范围" Foreground="{DynamicResource BridgeInk}" FontWeight="SemiBold" />
                                                                         <TextBlock Text="只接收所选成员范围内的状态变化。" Margin="0,3,8,0" Foreground="{DynamicResource BridgeInk2}" FontSize="10.5" />
                                                                     </StackPanel>
-                                                                    <ComboBox x:Name="PlayerActivityNotificationScopeBox"
-                                                                              Grid.Column="1"
-                                                                              Height="30"
-                                                                              Style="{StaticResource NotificationOptionBoxStyle}"
-                                                                              SelectionChanged="PlayerActivityNotificationOption_SelectionChanged">
-                                                                        <ComboBoxItem Content="当前组队房间" Tag="PartyRoom" />
-                                                                        <ComboBoxItem Content="全舰队" Tag="Fleet" />
-                                                                    </ComboBox>
+                                                                    <StackPanel Grid.Column="1"
+                                                                                Orientation="Horizontal"
+                                                                                HorizontalAlignment="Right"
+                                                                                VerticalAlignment="Center">
+                                                                        <CheckBox x:Name="PlayerActivityFleetScopeCheck"
+                                                                                  Style="{StaticResource NotificationSwitchStyle}"
+                                                                                  Checked="PlayerActivityNotificationSetting_Changed"
+                                                                                  Unchecked="PlayerActivityNotificationSetting_Changed" />
+                                                                        <TextBlock Text="舰队成员" Margin="6,0,14,0" Foreground="{DynamicResource BridgeInk2}" VerticalAlignment="Center" />
+                                                                        <CheckBox x:Name="PlayerActivityFriendScopeCheck"
+                                                                                  Style="{StaticResource NotificationSwitchStyle}"
+                                                                                  Checked="PlayerActivityNotificationSetting_Changed"
+                                                                                  Unchecked="PlayerActivityNotificationSetting_Changed" />
+                                                                        <TextBlock Text="好友" Margin="6,0,14,0" Foreground="{DynamicResource BridgeInk2}" VerticalAlignment="Center" />
+                                                                        <CheckBox x:Name="PlayerActivityRoomScopeCheck"
+                                                                                  Style="{StaticResource NotificationSwitchStyle}"
+                                                                                  Checked="PlayerActivityNotificationSetting_Changed"
+                                                                                  Unchecked="PlayerActivityNotificationSetting_Changed" />
+                                                                        <TextBlock Text="同房间" Margin="6,0,0,0" Foreground="{DynamicResource BridgeInk2}" VerticalAlignment="Center" />
+                                                                    </StackPanel>
                                                                 </Grid>
                                                             </Border>
 

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -676,6 +677,12 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
         RefreshCompactSettingsToggleText();
     }
 
+    private void CompactSettingsPopup_Opened(object? sender, EventArgs e)
+    {
+        InGameToolWindowBehavior.SetClickThrough(this, false);
+        _ = InGameToolWindowBehavior.TakeForegroundInput(this);
+    }
+
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
@@ -761,6 +768,15 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
             return;
         }
 
+        if (_isPureImageMode)
+        {
+            EndImageViewportPan();
+            _surfaceDragStart = e.GetPosition(this);
+            _surfaceDragPending = true;
+            e.Handled = true;
+            return;
+        }
+
         if (TryGetImageRegionPoint(e, out _) &&
             _viewportPan.TryBegin(
                 ImageScrollViewer,
@@ -772,14 +788,6 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
             e.Handled = true;
             return;
         }
-
-        if (!_isPureImageMode || !_menuSessionActive)
-        {
-            return;
-        }
-
-        _surfaceDragStart = e.GetPosition(this);
-        _surfaceDragPending = true;
     }
 
     private void ImageSurface_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -831,7 +839,6 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
 
         if (!_surfaceDragPending ||
             !_isPureImageMode ||
-            !_menuSessionActive ||
             e.LeftButton != MouseButtonState.Pressed)
         {
             return;
@@ -985,7 +992,9 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
         }
 
         var resizeToImage = ImageWindowChrome.Visibility == Visibility.Visible;
-        ApplyBorderlessPresentation(resizeToImage, clickThrough: true);
+        ApplyBorderlessPresentation(
+            resizeToImage,
+            clickThrough: !_isPureImageMode);
     }
 
     private void ApplyBorderlessPresentation(bool resizeToImage, bool clickThrough)
@@ -995,6 +1004,7 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
             return;
         }
 
+        var framedArea = CaptureFramedAreaPresentation();
         if (ImageWindowChrome.Visibility == Visibility.Visible)
         {
             _editingBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
@@ -1014,20 +1024,111 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
         ImageBottomDockRow.Height = new GridLength(0);
         ImageWindowFrame.BorderThickness = new Thickness(0);
         ImageAccentLine.Visibility = Visibility.Collapsed;
-        ImageScrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        ImageScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        // Borderless presentations must hide the editor chrome without disabling
+        // scrolling. Disabled resets the viewport offsets to zero and exposes the
+        // top-left of the full source image instead of the user's framed area.
+        ImageScrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        ImageScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
         ImageWindowShellChrome.ResizeBorderThickness = new Thickness(0);
         ResizeMode = ResizeMode.NoResize;
         MinWidth = 1;
         MinHeight = 1;
         ApplyTransparentImageSurface();
 
-        if (resizeToImage)
+        if (framedArea is not null)
+        {
+            ApplyFramedAreaPresentation(framedArea);
+        }
+        else if (resizeToImage)
         {
             ResizeAroundCurrentCenter();
         }
 
-        InGameToolWindowBehavior.SetClickThrough(this, clickThrough);
+        InGameToolWindowBehavior.SetClickThrough(
+            this,
+            clickThrough,
+            preventActivation: _isPureImageMode && !_menuSessionActive);
+    }
+
+    private FramedAreaPresentation? CaptureFramedAreaPresentation()
+    {
+        if (_fitToWindow ||
+            _image is null ||
+            DisplayedImage.ActualWidth <= 0 ||
+            DisplayedImage.ActualHeight <= 0 ||
+            ImageScrollViewer.ViewportWidth <= 0 ||
+            ImageScrollViewer.ViewportHeight <= 0)
+        {
+            return null;
+        }
+
+        var contentLeft = Math.Max(
+            0,
+            (ImageScrollContent.ActualWidth - DisplayedImage.ActualWidth) / 2);
+        var contentTop = Math.Max(
+            0,
+            (ImageScrollContent.ActualHeight - DisplayedImage.ActualHeight) / 2);
+        var sourceRect = new Rect(
+            Math.Clamp(
+                (ImageScrollViewer.HorizontalOffset - contentLeft) /
+                DisplayedImage.ActualWidth,
+                0,
+                1),
+            Math.Clamp(
+                (ImageScrollViewer.VerticalOffset - contentTop) /
+                DisplayedImage.ActualHeight,
+                0,
+                1),
+            Math.Clamp(
+                ImageScrollViewer.ViewportWidth / DisplayedImage.ActualWidth,
+                0,
+                1),
+            Math.Clamp(
+                ImageScrollViewer.ViewportHeight / DisplayedImage.ActualHeight,
+                0,
+                1));
+        var viewportOrigin = ImageScrollViewer.TranslatePoint(
+            new System.Windows.Point(),
+            this);
+        return new FramedAreaPresentation(
+            sourceRect,
+            new Rect(
+                Left + viewportOrigin.X,
+                Top + viewportOrigin.Y,
+                ImageScrollViewer.ViewportWidth,
+                ImageScrollViewer.ViewportHeight));
+    }
+
+    private void ApplyFramedAreaPresentation(FramedAreaPresentation presentation)
+    {
+        Width = Math.Max(1, presentation.WindowBounds.Width);
+        Height = Math.Max(1, presentation.WindowBounds.Height);
+        Left = presentation.WindowBounds.Left;
+        Top = presentation.WindowBounds.Top;
+        UpdateLayout();
+        RestoreFramedSourceRect(presentation.SourceRect);
+        Dispatcher.BeginInvoke(
+            () => RestoreFramedSourceRect(presentation.SourceRect),
+            DispatcherPriority.Loaded);
+    }
+
+    private void RestoreFramedSourceRect(Rect sourceRect)
+    {
+        if (DisplayedImage.ActualWidth <= 0 || DisplayedImage.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var contentLeft = Math.Max(
+            0,
+            (ImageScrollContent.ActualWidth - DisplayedImage.ActualWidth) / 2);
+        var contentTop = Math.Max(
+            0,
+            (ImageScrollContent.ActualHeight - DisplayedImage.ActualHeight) / 2);
+        ImageScrollViewer.ScrollToHorizontalOffset(
+            contentLeft + sourceRect.X * DisplayedImage.ActualWidth);
+        ImageScrollViewer.ScrollToVerticalOffset(
+            contentTop + sourceRect.Y * DisplayedImage.ActualHeight);
     }
 
     private void ApplyTransparentImageSurface()
@@ -1163,6 +1264,9 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
         CompactImageSettingsPanel.Visibility = layout.UseCompactSettings
             ? Visibility.Visible
             : Visibility.Collapsed;
+        CompactSettingsPopup.Placement = _isToolbarDockedToBottom
+            ? PlacementMode.Top
+            : PlacementMode.Bottom;
         CompactSettingsPopup.IsOpen = layout.ShowExpandedSettings;
         RefreshCompactSettingsToggleText();
         Grid.SetRow(ImageEditorChrome, _isToolbarDockedToBottom ? 4 : 0);
@@ -1250,4 +1354,8 @@ public partial class InGameImageWindow : Window, IInGameScreenshotVisibilityGuar
         bool PureImageMode,
         bool ToolbarDockedToBottom,
         bool IsEdited);
+
+    private sealed record FramedAreaPresentation(
+        Rect SourceRect,
+        Rect WindowBounds);
 }

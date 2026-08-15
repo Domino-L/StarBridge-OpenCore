@@ -292,8 +292,8 @@ public partial class MainWindow
         var overlaySettings = OverlayStartupTransitionPolicy.ResolveForOpen(
             GetEffectiveOverlaySettings(),
             StarCitizenProcessProbe.IsForeground());
-        OpenOverlayWindow(overlaySettings);
-        if (focusGameWindow && overlaySettings.AutoFocusGameWindowOnOpen)
+        var opened = OpenOverlayWindow(overlaySettings);
+        if (opened && focusGameWindow && overlaySettings.AutoFocusGameWindowOnOpen)
         {
             ScheduleGameFocusAfterOverlayStartup(overlaySettings);
         }
@@ -398,7 +398,7 @@ public partial class MainWindow
         return (int)Math.Ceiling(OverlayCompositionStartupTransitionWindow.PreferredGameFocusDelayMs);
     }
 
-    private void OpenOverlayWindow(OverlayDisplaySettings overlaySettings)
+    private bool OpenOverlayWindow(OverlayDisplaySettings overlaySettings)
     {
         _overlayHiddenForMainWindowMinimize = false;
         var stopwatch = Stopwatch.StartNew();
@@ -406,22 +406,44 @@ public partial class MainWindow
         var localShard = IsGameServerRegionCurrent() ? _gameServerShard : "";
         var surfaceBounds = ResolveOverlayTargetSurfaceBounds();
         var transitionContext = BuildOverlayStartupTransitionContext(overlaySettings);
-        _overlayWindow = CreateOverlayHost(
+        var overlayHost = CreateOverlayHost(
             overlaySettings,
             commandState,
             _localPresence,
             localShard,
             surfaceBounds,
             transitionContext);
-        _overlayWindow.Closed += (_, _) =>
+        _overlayWindow = overlayHost;
+        overlayHost.Closed += (_, _) =>
         {
-            _overlayWindow = null;
+            if (ReferenceEquals(_overlayWindow, overlayHost))
+            {
+                _overlayWindow = null;
+            }
+
             RefreshPersonalIdentityConsole();
             RefreshOverlayOverviewSummary();
         };
         try
         {
-            _overlayWindow.Show();
+            var opened = OverlayStartupBoundary.TryShow(
+                overlayHost.Show,
+                overlayHost.Close,
+                exception =>
+                {
+                    App.WriteDiagnosticLog($"overlay-startup-contained | {exception}");
+                    AppendOutput($"OVERLAY | startup failed={exception.GetBaseException().Message}");
+                    _ = ShowAppNoticeAsync(
+                        "信息浮层未能启动",
+                        "图形渲染初始化没有及时完成，主应用仍可继续使用。",
+                        "请稍后重试；如果问题再次发生，可在“帮助与反馈”中提交诊断记录。");
+                });
+            if (!opened && ReferenceEquals(_overlayWindow, overlayHost))
+            {
+                _overlayWindow = null;
+            }
+
+            return opened;
         }
         finally
         {

@@ -433,6 +433,17 @@ public sealed class FleetState
             ShipNamesMatch(player.Ship, ship))
         {
             ClearShipInference(player, evidence);
+
+            // An authoritative vehicle exit must also revoke the reconnect fallback;
+            // otherwise the next online presentation refresh restores the ship that
+            // this event just cleared.
+            if (string.IsNullOrWhiteSpace(ship) ||
+                string.IsNullOrWhiteSpace(player.LastKnownShip) ||
+                ShipNamesMatch(player.LastKnownShip, ship))
+            {
+                player.LastKnownShip = null;
+                player.LastKnownShipInstanceId = null;
+            }
         }
     }
 
@@ -450,7 +461,10 @@ public sealed class FleetState
         var releaseShip = string.IsNullOrWhiteSpace(ship) ? player.Ship : ship;
         if (ImmediateVehicleExitCatalog.Contains(releaseShip))
         {
-            ClearShipInference(player, "Control seat release confirms vehicle exit");
+            ClearShipInferenceIfCurrentShip(
+                player,
+                releaseShip,
+                "Control seat release confirms vehicle exit");
             return;
         }
 
@@ -486,20 +500,8 @@ public sealed class FleetState
 
     private static bool ShipNamesMatch(string? left, string? right)
     {
-        return NormalizeShipComparisonKey(left) == NormalizeShipComparisonKey(right);
-    }
-
-    private static string NormalizeShipComparisonKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "";
-        }
-
-        return new string(value
-            .Where(char.IsLetterOrDigit)
-            .Select(char.ToLowerInvariant)
-            .ToArray());
+        return ShipIdentityCanonicalizer.ComparisonKey(left) ==
+               ShipIdentityCanonicalizer.ComparisonKey(right);
     }
 
     private static void ClearShipInference(FleetPlayer player, string evidence)

@@ -100,6 +100,9 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private const float NightShadowSlashLength = 38.0f;
     private const float NightShadowBottomSlashLength = 32.0f;
     private const int SlowOperationThresholdMs = 80;
+    // Local diagnostics have observed otherwise-successful DirectComposition
+    // cold starts taking just over three seconds under GPU contention.
+    internal const int StartupReadyTimeoutMilliseconds = 5000;
     private static readonly string[] NightShadowJoinableModuleKeys = ["Squads", "Members", "Chat"];
     private readonly Dispatcher _ownerDispatcher;
     private readonly ManualResetEventSlim _started = new(false);
@@ -500,7 +503,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             _thread.SetApartmentState(ApartmentState.STA);
             _thread.Start();
 
-            if (!_started.Wait(TimeSpan.FromMilliseconds(2200)))
+            if (!_started.Wait(TimeSpan.FromMilliseconds(StartupReadyTimeoutMilliseconds)))
             {
                 throw new TimeoutException("DirectComposition overlay startup timed out.");
             }
@@ -600,12 +603,32 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         try
         {
             _renderDispatcher = Dispatcher.CurrentDispatcher;
+            if (IsDisposeRequested())
+            {
+                _started.Set();
+                return;
+            }
+
             var createStopwatch = Stopwatch.StartNew();
             CreateWindowAndResources();
             LogPerformance("dcomp-hud-create-window-resources", createStopwatch);
+            if (IsDisposeRequested())
+            {
+                _started.Set();
+                DisposeOnRenderThread();
+                return;
+            }
+
             var firstFrameStopwatch = Stopwatch.StartNew();
             DrawFrame();
             LogPerformance("dcomp-hud-first-frame", firstFrameStopwatch);
+            if (IsDisposeRequested())
+            {
+                _started.Set();
+                DisposeOnRenderThread();
+                return;
+            }
+
             ShowWindow(_source!.Handle, SwShowna);
             EnableMouseClickThrough();
             StartHitTraceDiagnostics();
@@ -624,6 +647,14 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             LogPerformance("dcomp-hud-render-failed", readyStopwatch, force: true);
             App.WriteCrashLog(exception);
             DisposeOnRenderThread();
+        }
+    }
+
+    private bool IsDisposeRequested()
+    {
+        lock (_disposeLock)
+        {
+            return _disposed;
         }
     }
 

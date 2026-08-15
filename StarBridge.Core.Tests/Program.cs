@@ -11,7 +11,9 @@ var tests = new (string Name, Action Test)[]
     ("Weak old ship signal does not replace a newer ship channel join", WeakOldShipSignalDoesNotReplaceNewerShipChannelJoin),
     ("Stale exit for previous ship does not clear current ship", StaleExitForPreviousShipDoesNotClearCurrentShip),
     ("Exit for current ship clears current ship", ExitForCurrentShipClearsCurrentShip),
+    ("Exit for current ship survives the following online presentation refresh", ExitForCurrentShipSurvivesFollowingOnlineRefresh),
     ("Confirmed immediate-exit vehicles clear ship on control release", ConfirmedImmediateExitVehiclesClearShip),
+    ("F8 runtime aliases clear ship on control release", F8RuntimeAliasesClearShipOnControlRelease),
     ("Unconfirmed vehicles keep ship on control release", UnconfirmedVehiclesKeepShipOnControlRelease),
     ("Medical response notification parses player downed", MedicalResponseNotificationParsesPlayerDowned),
     ("Incapacitated evidence stays internal until death is confirmed", IncapacitatedEvidenceStaysInternalUntilDeathIsConfirmed),
@@ -465,6 +467,24 @@ static void ExitForCurrentShipClearsCurrentShip()
     AssertEqual("None", player.ShipConfidence, "ship confidence");
 }
 
+static void ExitForCurrentShipSurvivesFollowingOnlineRefresh()
+{
+    var state = new FleetState();
+    var time = DateTimeOffset.Parse("2026-08-14T17:47:52Z");
+
+    state.Apply(new FleetEvent(FleetEventType.PlayerEnteredShip, "Pilot", Ship: "ANVL_F8C_Lightning", Timestamp: time));
+    state.Apply(new FleetEvent(FleetEventType.PlayerOffline, "Pilot", Timestamp: time.AddMinutes(1)));
+    state.Apply(new FleetEvent(FleetEventType.PlayerOnline, "Pilot", Timestamp: time.AddMinutes(2)));
+    state.Apply(new FleetEvent(FleetEventType.PlayerExitedShip, "Pilot", Ship: "ANVL_F8C_Lightning", Timestamp: time.AddMinutes(3)));
+
+    // RenderState refreshes the local player's online flag immediately after applying the log event.
+    state.SetPlayerOnlineState("Pilot", online: true, time.AddMinutes(3).AddMilliseconds(1));
+
+    var player = SinglePlayer(state);
+    AssertEqual("Unknown", player.Ship, "current ship after online presentation refresh");
+    AssertEqual("None", player.ShipConfidence, "ship confidence after online presentation refresh");
+}
+
 static void ConfirmedImmediateExitVehiclesClearShip()
 {
     var time = DateTimeOffset.Parse("2026-07-07T20:00:00Z");
@@ -497,6 +517,43 @@ static void ConfirmedImmediateExitVehiclesClearShip()
         var player = SinglePlayer(state);
         AssertEqual("Unknown", player.Ship, $"{vehicleCode} current ship");
         AssertEqual("None", player.ShipConfidence, $"{vehicleCode} ship confidence");
+    }
+}
+
+static void F8RuntimeAliasesClearShipOnControlRelease()
+{
+    var time = DateTimeOffset.Parse("2026-08-14T18:54:18Z");
+    var aliasPairs = new[]
+    {
+        (Acquire: "ANVL_F8C_Lightning", Release: "ANVL_Lightning_F8C"),
+        (Acquire: "ANVL_Lightning_F8C", Release: "ANVL_F8C_Lightning"),
+        (Acquire: "ANVL_F8C_Lightning_Collector_Military", Release: "ANVL_Lightning_F8C_Collector_Military")
+    };
+
+    foreach (var (acquire, release) in aliasPairs)
+    {
+        var state = new FleetState();
+
+        // Game.log uses both identifiers for the same F8C during one flight.
+        state.Apply(new FleetEvent(
+            FleetEventType.PlayerControllingShip,
+            "Pilot",
+            Ship: acquire,
+            Timestamp: time));
+        state.Apply(new FleetEvent(
+            FleetEventType.PlayerStoppedDrivingShip,
+            "Pilot",
+            Ship: release,
+            Timestamp: time.AddSeconds(10)));
+
+        var player = SinglePlayer(state);
+        AssertEqual("Unknown", player.Ship, $"{acquire} -> {release} current ship");
+        AssertEqual("None", player.ShipConfidence, $"{acquire} -> {release} ship confidence");
+
+        // A later online presentation refresh must not restore the ship that
+        // the authoritative control-seat release just cleared.
+        state.SetPlayerOnlineState("Pilot", true, time.AddSeconds(11));
+        AssertEqual("Unknown", SinglePlayer(state).Ship, $"{acquire} -> {release} refresh remains clear");
     }
 }
 

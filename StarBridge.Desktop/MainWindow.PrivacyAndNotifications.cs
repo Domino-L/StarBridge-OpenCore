@@ -889,7 +889,12 @@ public partial class MainWindow
         }
 
         PlayerActivityNotificationCheck.IsChecked = _notificationSettings.EnablePlayerActivityNotifications;
-        SelectComboBoxTag(PlayerActivityNotificationScopeBox, _notificationSettings.PlayerActivityScope.ToString());
+        PlayerActivityFleetScopeCheck.IsChecked =
+            _notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.Fleet);
+        PlayerActivityFriendScopeCheck.IsChecked =
+            _notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.Friends);
+        PlayerActivityRoomScopeCheck.IsChecked =
+            _notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.PartyRoom);
         SelectComboBoxTag(PlayerActivityNotificationPositionBox, _notificationSettings.PlayerActivityPosition.ToString());
         PlayerActivityOnlineCheck.IsChecked = _notificationSettings.NotifyPlayerOnline;
         PlayerActivityOfflineCheck.IsChecked = _notificationSettings.NotifyPlayerOffline;
@@ -937,11 +942,23 @@ public partial class MainWindow
 
     private PlayerActivityNotificationScope GetSelectedPlayerActivityNotificationScope()
     {
-        return PlayerActivityNotificationScopeBox?.SelectedItem is ComboBoxItem item &&
-               Enum.TryParse<PlayerActivityNotificationScope>(item.Tag?.ToString(), true, out var scope) &&
-               Enum.IsDefined(scope)
-            ? scope
-            : PlayerActivityNotificationScope.Fleet;
+        var scope = PlayerActivityNotificationScope.None;
+        if (IsSwitchOn(PlayerActivityFleetScopeCheck))
+        {
+            scope |= PlayerActivityNotificationScope.Fleet;
+        }
+
+        if (IsSwitchOn(PlayerActivityFriendScopeCheck))
+        {
+            scope |= PlayerActivityNotificationScope.Friends;
+        }
+
+        if (IsSwitchOn(PlayerActivityRoomScopeCheck))
+        {
+            scope |= PlayerActivityNotificationScope.PartyRoom;
+        }
+
+        return scope;
     }
 
     private DesktopNotificationPosition GetSelectedPlayerActivityNotificationPosition()
@@ -976,12 +993,23 @@ public partial class MainWindow
             _notificationSettings.NotifyPlayerStartedGame,
             _notificationSettings.NotifyPlayerStoppedGame
         }.Count(value => value);
-        var scope = _notificationSettings.PlayerActivityScope switch
+        var audiences = new List<string>(3);
+        if (_notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.Fleet))
         {
-            PlayerActivityNotificationScope.PartyRoom => "当前组队房间",
-            PlayerActivityNotificationScope.Fleet => "全舰队",
-            _ => "全舰队"
-        };
+            audiences.Add("舰队成员");
+        }
+
+        if (_notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.Friends))
+        {
+            audiences.Add("好友");
+        }
+
+        if (_notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.PartyRoom))
+        {
+            audiences.Add("同房间成员");
+        }
+
+        var scope = audiences.Count == 0 ? "未选择通知对象" : string.Join(" + ", audiences);
         var position = _notificationSettings.PlayerActivityPosition switch
         {
             DesktopNotificationPosition.TopLeft => "左上角",
@@ -991,8 +1019,10 @@ public partial class MainWindow
         };
         PlayerActivityNotificationStatusText.Text = eventCount == 0
             ? "已开启，但尚未选择需要提醒的事件。"
-            : $"配置已保存 · {scope} · {position} · {eventCount} 类事件";
-        PlayerActivityNotificationStatusText.Foreground = eventCount == 0
+            : audiences.Count == 0
+                ? "已开启，但尚未选择需要提醒的成员范围。"
+                : $"配置已保存 · {scope} · {position} · {eventCount} 类事件";
+        PlayerActivityNotificationStatusText.Foreground = eventCount == 0 || audiences.Count == 0
             ? StatusPalette.WarningBrush
             : StatusPalette.SuccessBrush;
     }

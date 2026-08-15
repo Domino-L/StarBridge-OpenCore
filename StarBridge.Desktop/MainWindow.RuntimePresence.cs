@@ -516,8 +516,8 @@ public partial class MainWindow
 
     private void OpenOverlayWindowFromAutomation(OverlayDisplaySettings settings, bool isGameForeground)
     {
-        OpenOverlayWindow(settings);
-        if (settings.AutoFocusGameWindowOnOpen && !isGameForeground)
+        var opened = OpenOverlayWindow(settings);
+        if (opened && settings.AutoFocusGameWindowOnOpen && !isGameForeground)
         {
             ScheduleGameFocusAfterOverlayStartup(settings);
         }

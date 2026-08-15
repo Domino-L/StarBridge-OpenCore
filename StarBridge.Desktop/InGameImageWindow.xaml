@@ -331,13 +331,14 @@
 
                         <Popup x:Name="CompactSettingsPopup"
                                PlacementTarget="{Binding ElementName=CompactImageSettingsPanel}"
-                               Placement="Relative"
+                               Placement="Bottom"
                                HorizontalOffset="0"
-                               VerticalOffset="42"
+                               VerticalOffset="0"
                                AllowsTransparency="True"
                                StaysOpen="True"
+                               Opened="CompactSettingsPopup_Opened"
                                Closed="CompactSettingsPopup_Closed">
-                            <Border Width="520"
+                            <Border Width="{Binding ActualWidth, ElementName=CompactImageSettingsPanel}"
                                     Padding="12"
                                     Background="{StaticResource AvionicsGlassPanelBrush}"
                                     BorderBrush="{StaticResource AvionicsStructuralFrameBrush}"

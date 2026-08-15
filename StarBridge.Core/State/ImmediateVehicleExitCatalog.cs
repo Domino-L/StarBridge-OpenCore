@@ -144,9 +144,7 @@ internal static class ImmediateVehicleExitCatalog
             return false;
         }
 
-        var normalized = new string(vehicleCode
-            .Where(char.IsLetterOrDigit)
-            .ToArray());
+        var normalized = ShipIdentityCanonicalizer.ComparisonKey(vehicleCode);
 
         return ConfirmedVehicleCodes.Contains(normalized);
     }

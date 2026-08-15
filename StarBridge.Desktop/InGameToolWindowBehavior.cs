@@ -54,7 +54,10 @@ internal static class InGameToolWindowBehavior
         MoveLoopObservers.Add(window, new MoveLoopObserver(window, stateChanged));
     }
 
-    internal static void SetClickThrough(Window window, bool enabled)
+    internal static void SetClickThrough(
+        Window window,
+        bool enabled,
+        bool preventActivation = false)
     {
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == IntPtr.Zero)
@@ -69,8 +72,11 @@ internal static class InGameToolWindowBehavior
 
         var style = GetWindowLongPtr(handle, GwlExStyle).ToInt64();
         var next = enabled
-            ? style | WsExTransparent | WsExNoActivate
-            : style & ~(WsExTransparent | WsExNoActivate);
+            ? style | WsExTransparent
+            : style & ~WsExTransparent;
+        next = enabled || preventActivation
+            ? next | WsExNoActivate
+            : next & ~WsExNoActivate;
         if (next != style)
         {
             _ = SetWindowLongPtr(handle, GwlExStyle, new IntPtr(next));

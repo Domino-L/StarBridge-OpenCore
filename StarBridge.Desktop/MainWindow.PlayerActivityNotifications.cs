@@ -21,15 +21,29 @@ public partial class MainWindow
 
     private bool ShouldRefreshPartyRoomForDesktopNotifications() =>
         _notificationSettings.EnablePlayerActivityNotifications &&
-        _notificationSettings.PlayerActivityScope == PlayerActivityNotificationScope.PartyRoom;
+        _notificationSettings.PlayerActivityScope.HasFlag(PlayerActivityNotificationScope.PartyRoom);
 
     private void ProcessPlayerActivityDesktopNotifications()
     {
         var partyIdentityKeys = BuildCurrentPartyIdentityKeys();
+        var acceptedFriends = (_friendCenterSnapshot?.Friends ?? [])
+            .Select(entry => FriendCenterUserResolver.Resolve(entry.User, _networkSnapshots.Values))
+            .ToArray();
+        var friendIdentityKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var friend in acceptedFriends)
+        {
+            friendIdentityKeys.UnionWith(BuildIdentityKeys(friend.AccountId, friend.GameId, friend.Callsign));
+        }
+
         var members = new List<PlayerActivityMemberState>();
         foreach (var player in _players)
         {
             var key = BuildPlayerActivityKey(player.AccountId, player.Name, player.Callsign);
+            var isAcceptedFriend = HasAnyPlayerIdentity(
+                friendIdentityKeys,
+                player.AccountId,
+                player.Name,
+                player.Callsign);
             members.Add(new PlayerActivityMemberState(
                 key,
                 player.Name,
@@ -40,8 +54,10 @@ public partial class MainWindow
                 player.AccountId,
                 player.SharedPresence,
                 player.IsSelf,
-                player.AllowsSharedEvent(PlayerSharedEventTypes.Presence),
-                HasAnyPlayerIdentity(partyIdentityKeys, player.AccountId, player.Name, player.Callsign)));
+                player.AllowsSharedEvent(PlayerSharedEventTypes.Presence) || isAcceptedFriend,
+                IsFleetMember: true,
+                IsAcceptedFriend: isAcceptedFriend,
+                IsInPartyRoom: HasAnyPlayerIdentity(partyIdentityKeys, player.AccountId, player.Name, player.Callsign)));
         }
 
         if (_currentPartyRoom is not null)
@@ -70,8 +86,51 @@ public partial class MainWindow
                     PlayerPresencePresentation.ResolveShared(partyMember.PresenceText, partyMember.PresenceText),
                     isSelf,
                     AllowsPresenceEvents: true,
+                    IsFleetMember: false,
+                    IsAcceptedFriend: HasAnyPlayerIdentity(
+                        friendIdentityKeys,
+                        partyMember.AccountId,
+                        partyMember.GameId,
+                        partyMember.Callsign),
                     IsInPartyRoom: true));
             }
+        }
+
+        foreach (var friend in acceptedFriends)
+        {
+            var friendIdentity = BuildIdentityKeys(friend.AccountId, friend.GameId, friend.Callsign);
+            if (members.Any(member => HasAnyPlayerIdentity(
+                    friendIdentity,
+                    member.AccountId,
+                    member.GameId,
+                    member.Callsign)))
+            {
+                continue;
+            }
+
+            var displayName = DisplayCallsign(friend.Callsign, friend.GameId);
+            members.Add(new PlayerActivityMemberState(
+                BuildPlayerActivityKey(friend.AccountId, friend.GameId, friend.Callsign),
+                friend.GameId,
+                friend.Callsign,
+                displayName,
+                GetInitials(displayName),
+                friend.AvatarImageData,
+                friend.AccountId,
+                PlayerPresencePresentation.ResolveShared(friend.Presence, friend.Presence),
+                HasAnyPlayerIdentity(
+                    BuildIdentityKeys(_accountId, _localPlayer, _callsign),
+                    friend.AccountId,
+                    friend.GameId,
+                    friend.Callsign),
+                AllowsPresenceEvents: true,
+                IsFleetMember: false,
+                IsAcceptedFriend: true,
+                IsInPartyRoom: HasAnyPlayerIdentity(
+                    partyIdentityKeys,
+                    friend.AccountId,
+                    friend.GameId,
+                    friend.Callsign)));
         }
 
         var context = new PlayerActivityNotificationContext(
@@ -82,7 +141,8 @@ public partial class MainWindow
             members,
             _notificationSettings,
             context,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            establishBaselineOnly: _startupDataGate.Current.State != StartupDataGateState.Live);
         foreach (var notification in notifications)
         {
             _playerActivityToastManager.Show(notification, _notificationSettings.PlayerActivityPosition, this);
@@ -106,6 +166,20 @@ public partial class MainWindow
         if (target is not null && !target.IsSelf && !string.IsNullOrWhiteSpace(target.AccountId))
         {
             await OpenPersonalProfileVisitorAsync(target);
+            return;
+        }
+
+        var friendEntry = _friendCenterSnapshot?.Friends.FirstOrDefault(entry =>
+            (!string.IsNullOrWhiteSpace(notification.AccountId) &&
+             entry.User.AccountId.Equals(notification.AccountId, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(notification.GameId) &&
+             entry.User.GameId.Equals(notification.GameId, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(notification.Callsign) &&
+             entry.User.Callsign.Equals(notification.Callsign, StringComparison.OrdinalIgnoreCase)));
+        if (friendEntry is not null)
+        {
+            var friend = FriendCenterUserResolver.Resolve(friendEntry.User, _networkSnapshots.Values);
+            await OpenFriendProfileAsync(new FriendCenterRow(friend, friendEntry.RelationshipUpdatedAt));
         }
     }
 
@@ -122,8 +196,31 @@ public partial class MainWindow
             _avatarPath,
             _accountId,
             "测试通知 · 开始游戏",
+            DescribeSelectedPlayerActivityAudience(),
             "#42CF7C");
         _playerActivityToastManager.Show(preview, GetSelectedPlayerActivityNotificationPosition(), this);
+    }
+
+    private string DescribeSelectedPlayerActivityAudience()
+    {
+        var scope = GetSelectedPlayerActivityNotificationScope();
+        var audiences = new List<string>(3);
+        if (scope.HasFlag(PlayerActivityNotificationScope.Fleet))
+        {
+            audiences.Add("舰队成员");
+        }
+
+        if (scope.HasFlag(PlayerActivityNotificationScope.Friends))
+        {
+            audiences.Add("好友");
+        }
+
+        if (scope.HasFlag(PlayerActivityNotificationScope.PartyRoom))
+        {
+            audiences.Add("同房间成员");
+        }
+
+        return audiences.Count == 0 ? "未选择通知对象" : string.Join(" · ", audiences);
     }
 
     private HashSet<string> BuildCurrentPartyIdentityKeys()

@@ -31,7 +31,7 @@ internal partial class PlayerActivityToastWindow : Window
         RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
         InitialsText.Content = notification.Initials;
         DisplayNameText.Text = notification.DisplayName;
-        EventText.Text = notification.EventText;
+        EventText.Text = $"{notification.EventText} · {notification.AudienceText}";
         var accent = ResolveBrush(notification.AccentColor);
         AccentLine.Background = accent;
         StatusDot.Fill = accent;

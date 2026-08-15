@@ -514,6 +514,7 @@ public partial class MainWindow
         RefreshPersonalProfileFriendAction();
         QueueFriendCommunicationEvents(communicationEvents);
         RefreshInGameSocialSnapshot();
+        ProcessPlayerActivityDesktopNotifications();
     }
 
     private void FriendCenterSectionButton_Click(object sender, RoutedEventArgs e)

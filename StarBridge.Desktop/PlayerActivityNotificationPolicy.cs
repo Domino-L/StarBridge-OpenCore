@@ -21,6 +21,8 @@ internal sealed record PlayerActivityMemberState(
     PlayerPresenceKind Presence,
     bool IsSelf,
     bool AllowsPresenceEvents,
+    bool IsFleetMember,
+    bool IsAcceptedFriend,
     bool IsInPartyRoom);
 
 internal sealed record PlayerActivityNotificationContext(
@@ -38,6 +40,7 @@ internal sealed record PlayerActivityDesktopNotification(
     string? AvatarSource,
     string? AccountId,
     string EventText,
+    string AudienceText,
     string AccentColor);
 
 internal sealed class PlayerActivityNotificationTracker
@@ -49,7 +52,8 @@ internal sealed class PlayerActivityNotificationTracker
         IReadOnlyCollection<PlayerActivityMemberState> members,
         NotificationSettings settings,
         PlayerActivityNotificationContext context,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool establishBaselineOnly = false)
     {
         var normalized = settings.Normalize();
         var currentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -71,6 +75,11 @@ internal sealed class PlayerActivityNotificationTracker
 
             previous = NormalizePresence(previous);
             _previous[member.Key] = current;
+            if (establishBaselineOnly)
+            {
+                continue;
+            }
+
             if (previous == current || !TryResolveKind(previous, current, normalized, out var kind))
             {
                 continue;
@@ -114,11 +123,10 @@ internal sealed class PlayerActivityNotificationTracker
             return false;
         }
 
-        return settings.PlayerActivityScope switch
-        {
-            PlayerActivityNotificationScope.PartyRoom => member.IsInPartyRoom,
-            _ => true
-        };
+        var scope = settings.PlayerActivityScope;
+        return scope.HasFlag(PlayerActivityNotificationScope.Fleet) && member.IsFleetMember ||
+               scope.HasFlag(PlayerActivityNotificationScope.Friends) && member.IsAcceptedFriend ||
+               scope.HasFlag(PlayerActivityNotificationScope.PartyRoom) && member.IsInPartyRoom;
     }
 
     private static bool TryResolveKind(
@@ -188,7 +196,29 @@ internal sealed class PlayerActivityNotificationTracker
             member.AvatarSource,
             member.AccountId,
             eventText,
+            DescribeAudience(member),
             accent);
+    }
+
+    private static string DescribeAudience(PlayerActivityMemberState member)
+    {
+        var relationships = new List<string>(3);
+        if (member.IsFleetMember)
+        {
+            relationships.Add("舰队成员");
+        }
+
+        if (member.IsAcceptedFriend)
+        {
+            relationships.Add("好友");
+        }
+
+        if (member.IsInPartyRoom && relationships.Count == 0)
+        {
+            relationships.Add("同房间成员");
+        }
+
+        return relationships.Count == 0 ? "玩家" : string.Join(" · ", relationships);
     }
 
     private static PlayerPresenceKind NormalizePresence(PlayerPresenceKind presence) =>

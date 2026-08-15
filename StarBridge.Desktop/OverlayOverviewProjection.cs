@@ -226,13 +226,17 @@ internal static class OverlayOverviewProjection
             .Select(player => FleetLocationProjection.Resolve(player, language))
             .Where(location => location.HasValue)
             .Select(location => location!.Value)
-            .GroupBy(location => location.Key, StringComparer.OrdinalIgnoreCase)
+            // Runtime aliases can carry different source keys while resolving to
+            // the same user-visible place (for example inventory and quantum
+            // identifiers for New Babbage). The overview must not render those
+            // aliases as two locations.
+            .GroupBy(location => location.DisplayName.Trim(), StringComparer.OrdinalIgnoreCase)
             .Select(group => new OverlayOverviewLocationCount(
-                group.Key,
                 group
-                    .Select(location => location.DisplayName)
-                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .Select(location => location.Key)
+                    .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
                     .First(),
+                group.Key,
                 group.Count(),
                 onlineCount,
                 zh

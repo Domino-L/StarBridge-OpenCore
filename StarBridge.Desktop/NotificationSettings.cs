@@ -3,10 +3,13 @@ namespace StarBridge.Desktop;
 using System.IO;
 using System.Text.Json;
 
+[Flags]
 internal enum PlayerActivityNotificationScope
 {
+    None = 0,
     PartyRoom = 1,
-    Fleet = 2
+    Fleet = 2,
+    Friends = 4
 }
 
 internal enum DesktopNotificationPosition
@@ -52,13 +55,24 @@ internal sealed record NotificationSettings(
 
     public NotificationSettings Normalize() => this with
     {
-        PlayerActivityScope = Enum.IsDefined(PlayerActivityScope)
-            ? PlayerActivityScope
-            : PlayerActivityNotificationScope.Fleet,
+        PlayerActivityScope = NormalizePlayerActivityScope(PlayerActivityScope),
         PlayerActivityPosition = Enum.IsDefined(PlayerActivityPosition)
             ? PlayerActivityPosition
             : DesktopNotificationPosition.BottomRight
     };
+
+    private static PlayerActivityNotificationScope NormalizePlayerActivityScope(
+        PlayerActivityNotificationScope scope)
+    {
+        const PlayerActivityNotificationScope supported =
+            PlayerActivityNotificationScope.PartyRoom |
+            PlayerActivityNotificationScope.Fleet |
+            PlayerActivityNotificationScope.Friends;
+        var normalized = scope & supported;
+        return normalized == PlayerActivityNotificationScope.None && scope != PlayerActivityNotificationScope.None
+            ? PlayerActivityNotificationScope.Fleet
+            : normalized;
+    }
 
     private static readonly string SettingsPath = Path.Combine(
         DesktopAppConfig.ConfigDirectory,
