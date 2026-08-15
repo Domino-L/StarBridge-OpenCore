@@ -2456,7 +2456,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             QueueEventNotification(
                 OverlayEventNotificationTypes.ShipChange,
                 zh ? "飞船变化" : "Ship changed",
-                zh ? $"{next.DisplayName} 切换飞船：{next.Ship}" : $"{next.DisplayName} switched ship: {next.Ship}",
+                OverlayEventShipPresentation.FormatShipChange(next.DisplayName, next.Ship, zh),
                 TitleBrush);
         }
 

@@ -16,7 +16,8 @@ internal static class OnboardingState
     private const string PreviousGuideVersion = "starbridge-onboarding-v2";
     private const string PreviousSpotlightGuideVersion = "starbridge-onboarding-v3";
     private const string PreviousInteractiveGuideVersion = "starbridge-onboarding-v4";
-    private const string CurrentGuideVersion = "starbridge-onboarding-v5";
+    private const string PreviousPersonalFirstGuideVersion = "starbridge-onboarding-v5";
+    private const string CurrentGuideVersion = "starbridge-onboarding-v6";
     private static readonly string CompletionPath = Path.Combine(
         DesktopAppConfig.ConfigDirectory,
         "onboarding.complete");
@@ -49,6 +50,7 @@ internal static class OnboardingState
                 PreviousGuideVersion => OnboardingCompletionStatus.Legacy,
                 PreviousSpotlightGuideVersion => OnboardingCompletionStatus.Legacy,
                 PreviousInteractiveGuideVersion => OnboardingCompletionStatus.Legacy,
+                PreviousPersonalFirstGuideVersion => OnboardingCompletionStatus.Legacy,
                 _ => OnboardingCompletionStatus.Missing
             };
         }
@@ -87,9 +89,16 @@ internal static class OnboardingState
     {
         try
         {
-            return File.Exists(FeatureTourPath) &&
-                   int.TryParse(File.ReadAllText(FeatureTourPath).Trim(), out var step)
-                ? Math.Clamp(step, 0, 5)
+            if (!File.Exists(FeatureTourPath))
+            {
+                return 0;
+            }
+
+            var marker = File.ReadAllText(FeatureTourPath).Trim();
+            var prefix = CurrentGuideVersion + ":";
+            return marker.StartsWith(prefix, StringComparison.Ordinal) &&
+                   int.TryParse(marker[prefix.Length..], out var step)
+                ? Math.Clamp(step, 0, OnboardingJourney.AuthenticatedChapterCount)
                 : 0;
         }
         catch
@@ -103,7 +112,9 @@ internal static class OnboardingState
         try
         {
             Directory.CreateDirectory(DesktopAppConfig.ConfigDirectory);
-            File.WriteAllText(FeatureTourPath, Math.Clamp(step, 0, 5).ToString());
+            File.WriteAllText(
+                FeatureTourPath,
+                $"{CurrentGuideVersion}:{Math.Clamp(step, 0, OnboardingJourney.AuthenticatedChapterCount)}");
         }
         catch
         {

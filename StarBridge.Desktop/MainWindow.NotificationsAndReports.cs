@@ -458,6 +458,10 @@ public partial class MainWindow
             case NotificationActionTargets.AccountSafety:
                 await ShowAccountSafetyWorkspaceAsync();
                 return;
+            case NotificationActionTargets.OverlaySettings:
+                ApplicationLayerHost.CloseWorkspace();
+                OpenOverlayAppearanceSettings();
+                return;
             default:
                 await ShowNotificationUnavailableAsync();
                 ApplicationLayerHost.CloseWorkspace();
@@ -499,7 +503,8 @@ public partial class MainWindow
 
     private async Task NavigateToFleetApplicationsAsync(string? fleetCode)
     {
-        if (!CanCurrentUserReviewFleetApplications())
+        var permissionRefreshCompleted = await PullNetworkFleetsAsync(silent: true);
+        if (!permissionRefreshCompleted || !CanCurrentUserReviewFleetApplications())
         {
             await ShowAppNoticeAsync(
                 "无法打开审核队列",

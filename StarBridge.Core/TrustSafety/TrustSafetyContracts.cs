@@ -25,6 +25,7 @@ public static class NotificationActionTargets
     public const string RoomApplications = "room_applications";
     public const string MyReports = "my_reports";
     public const string AccountSafety = "account_safety";
+    public const string OverlaySettings = "overlay_settings";
 }
 
 public sealed record NotificationItemContract(

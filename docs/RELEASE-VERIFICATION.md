@@ -3,9 +3,9 @@
 请只运行来自 [StarBridge-OpenCore Releases](https://github.com/Domino-L/StarBridge-OpenCore/releases)
 或 [星海舰桥官网](https://scstarbridge.com/) 的安装器。相同文件名不能证明文件可信。
 
-## 0.6.2 的签名状态
+## 0.6.3 的签名状态
 
-0.6.2 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
+0.6.3 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
 签名和时间戳。如果 Windows 显示“未知发布者”，或 `Get-AuthenticodeSignature`
 不是 `Valid`，请不要安装或运行该文件。
 
@@ -15,11 +15,11 @@
 
 ```powershell
 $repo = "Domino-L/StarBridge-OpenCore"
-$tag = "v0.6.2"
+$tag = "v0.6.3"
 
 gh release verify $tag --repo $repo
 gh release download $tag --repo $repo --dir ".\release"
-gh release verify-asset $tag ".\release\StarBridge-0.6.2-win-x64-update.zip" --repo $repo
+gh release verify-asset $tag ".\release\StarBridge-0.6.3-win-x64-update.zip" --repo $repo
 ```
 
 `gh release verify` 应确认 Release 已不可变，`gh release verify-asset` 应确认本地文件属于
@@ -30,7 +30,7 @@ gh release verify-asset $tag ".\release\StarBridge-0.6.2-win-x64-update.zip" --r
 Release 随附的 `SHA256SUMS.txt` 覆盖安装器、更新包、更新清单和审计材料：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath ".\release\StarBridge-0.6.2-win-x64-setup.exe"
+Get-FileHash -Algorithm SHA256 -LiteralPath ".\release\StarBridge-0.6.3-win-x64-setup.exe"
 ```
 
 输出必须与 `SHA256SUMS.txt` 中同名文件的值完全一致。更新 ZIP 内的
@@ -39,12 +39,12 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\release\StarBridge-0.6.2-win-x64-
 ## 3. 验证 Authenticode
 
 ```powershell
-Get-AuthenticodeSignature -LiteralPath ".\release\StarBridge-0.6.2-win-x64-setup.exe" |
+Get-AuthenticodeSignature -LiteralPath ".\release\StarBridge-0.6.3-win-x64-setup.exe" |
     Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 ```
 
 `Status` 必须是 `Valid`，且 `SignerCertificate` 和 `TimeStamperCertificate` 都必须存在。
-Release 中的 `StarBridge-0.6.2-authenticode-status.json` 和许可证据包内的
+Release 中的 `StarBridge-0.6.3-authenticode-status.json` 和许可证据包内的
 `AUTHENTICODE-STATUS.json` 应对主程序、完整安装器和在线安装器全部记录为有效。
 
 ## 4. 检查 SBOM、构建来源和媒体边界
@@ -63,11 +63,11 @@ Release 中的 `StarBridge-0.6.2-authenticode-status.json` 和许可证据包内
 完全一致。可以复跑公开载荷审计：
 
 ```powershell
-Expand-Archive ".\release\StarBridge-0.6.2-win-x64-update.zip" ".\payload"
+Expand-Archive ".\release\StarBridge-0.6.3-win-x64-update.zip" ".\payload"
 & ".\scripts\Test StarBridge Binary Distribution.ps1" `
     -PayloadRoot ".\payload" `
-    -ArchivePath ".\release\StarBridge-0.6.2-win-x64-update.zip" `
-    -ExpectedVersion "0.6.2" `
+    -ArchivePath ".\release\StarBridge-0.6.3-win-x64-update.zip" `
+    -ExpectedVersion "0.6.3" `
     -RequireAuthenticode
 ```
 

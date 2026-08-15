@@ -574,6 +574,26 @@ public partial class MainWindow
         OverlayNav_Click(this, new RoutedEventArgs());
     }
 
+    private void OpenOverlayAppearanceSettings()
+    {
+        OpenOverlaySettingsFromTray();
+        SetOverlaySettingsWorkspace(OverlaySettingsArea.Information);
+        Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                var target = ResolveOverlaySettingsSection("appearance");
+                if (target is null)
+                {
+                    return;
+                }
+
+                _overlaySettingsProgrammaticTargetKey = "appearance";
+                SetActiveOverlaySettingsSection("appearance");
+                ScrollOverlaySettingsToSection(target);
+            }),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
     private IntPtr MainWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == WmGetMinMaxInfo)

@@ -18,17 +18,20 @@ public partial class MainWindow
     private enum GuideStep
     {
         None,
-        Introduction,
         LoginFirst,
+        AccountOverview,
+        SettingsOverview,
+        ProfileHangarOverview,
+        FriendsOverview,
+        FleetOverview,
+        RoomsOverview,
+        OverlayOverview,
+        SupportOverview,
+        Complete,
+        Introduction,
         OpenAccountMenu,
         OpenIdentitySettings,
-        SelectLog,
-        HomeOverview,
-        FindFleetOverview,
-        MyFleetOverview,
-        MySquadOverview,
-        OverlayOverview,
-        Complete
+        SelectLog
     }
 
     private sealed record OverlayGuidePage(
@@ -48,30 +51,37 @@ public partial class MainWindow
     private TaskCompletionSource<bool>? _initialGuideCompletionSource;
     private IReadOnlyList<OverlayGuidePage> _overlayGuidePages = Array.Empty<OverlayGuidePage>();
     private int _overlayGuidePageIndex;
-    private bool _introductionReadToEnd;
     private bool _guidedTourLayoutScheduled;
     private FrameworkElement? _lastGuidedTourLayoutTarget;
+    private OnboardingJourneyStage _onboardingJourneyStage;
 
     private Task<bool> StartInitialGuidedTourAsync()
     {
         _initialGuideCompletionSource = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         _guideMode = GuideMode.Initial;
-
-        if (!OnboardingState.HasReadIntroduction())
-        {
-            ShowInitialGuideStep(GuideStep.Introduction);
-        }
-        else if (!OnboardingState.HasCompletedPreparation())
-        {
-            ShowInitialGuideStep(IsLoggedIn ? GuideStep.OpenAccountMenu : GuideStep.LoginFirst);
-        }
-        else
-        {
-            ShowFeatureTourStep(OnboardingState.GetFeatureTourStep());
-        }
+        OnboardingState.ClearDeferred();
+        ShowJourneyStage(OnboardingJourney.Resume(IsLoggedIn, OnboardingState.GetFeatureTourStep()));
 
         return _initialGuideCompletionSource.Task;
+    }
+
+    private void ShowJourneyStage(OnboardingJourneyStage stage)
+    {
+        _onboardingJourneyStage = stage;
+        ShowInitialGuideStep(stage.Chapter switch
+        {
+            OnboardingJourneyChapter.Login => GuideStep.LoginFirst,
+            OnboardingJourneyChapter.Account => GuideStep.AccountOverview,
+            OnboardingJourneyChapter.Settings => GuideStep.SettingsOverview,
+            OnboardingJourneyChapter.ProfileAndHangar => GuideStep.ProfileHangarOverview,
+            OnboardingJourneyChapter.Friends => GuideStep.FriendsOverview,
+            OnboardingJourneyChapter.Fleet => GuideStep.FleetOverview,
+            OnboardingJourneyChapter.Rooms => GuideStep.RoomsOverview,
+            OnboardingJourneyChapter.Overlay => GuideStep.OverlayOverview,
+            OnboardingJourneyChapter.Support => GuideStep.SupportOverview,
+            _ => GuideStep.Complete
+        });
     }
 
     private void ShowInitialGuideStep(GuideStep step)
@@ -81,10 +91,11 @@ public partial class MainWindow
         GuidedTourOverlay.Visibility = Visibility.Visible;
         GuidedTourIntroductionScrollViewer.Visibility = Visibility.Collapsed;
         GuidedTourBodyText.Visibility = Visibility.Visible;
-        GuidedTourSecondaryButton.Content = "稍后继续";
+        GuidedTourSecondaryButton.Content = "暂时收起";
         GuidedTourSecondaryButton.Visibility = Visibility.Visible;
+        GuidedTourBackButton.Visibility = Visibility.Collapsed;
         GuidedTourPrimaryButton.Visibility = Visibility.Collapsed;
-        GuidedTourEyebrowText.Text = "首次启航";
+        GuidedTourEyebrowText.Text = step == GuideStep.LoginFirst ? "首次启航" : "启航航线";
 
         if (IsBridgeShellEnabled && TryConfigureBridgeFeatureTourStep(step))
         {
@@ -96,7 +107,6 @@ public partial class MainWindow
         {
             case GuideStep.Introduction:
                 _guidedTourTarget = null;
-                _introductionReadToEnd = false;
                 GuidedTourTitleText.Text = "开始前，请阅读使用说明";
                 GuidedTourBodyText.Text = "阅读到说明底部后才能继续。接下来会带你完成必要设置，并依次认识主要功能。";
                 GuidedTourIntroductionScrollViewer.Visibility = Visibility.Visible;
@@ -107,80 +117,21 @@ public partial class MainWindow
                 break;
             case GuideStep.LoginFirst:
                 ConfigureClickStep(
-                    HeaderAuthenticationButton,
-                    "登录账号（可选）",
-                    "登录后可以使用好友、舰队、房间和资料同步。你也可以先浏览应用，需要在线功能时再登录。",
-                    "准备 · 登录入口");
-                GuidedTourPrimaryButton.Content = "暂不登录，继续";
+                    IsBridgeShellEnabled ? BridgeAuthenticationButton : HeaderAuthenticationButton,
+                    "先登录你的账号",
+                    "完整引导会在登录后开始。在此之前只介绍登录入口；如果现在不登录，后续章节不会出现。",
+                    "首次启航 · 登录");
+                GuidedTourPrimaryButton.Content = "登录 / 注册";
                 GuidedTourPrimaryButton.IsEnabled = true;
                 GuidedTourPrimaryButton.Visibility = Visibility.Visible;
-                break;
-            case GuideStep.OpenAccountMenu:
-                ConfigureClickStep(
-                    IsBridgeShellEnabled ? BridgeSettingsButton : HeaderSettingsButton,
-                    "打开设置",
-                    "点击右上角的设置按钮，进入应用设置。",
-                    "准备 · 设置入口");
-                break;
-            case GuideStep.OpenIdentitySettings:
-                ConfigureClickStep(
-                    PersonalDashboardIdentityButton,
-                    "进入账号与识别",
-                    "点击左侧的“账号与识别”。这里集中管理登录、头像、Game.log 与游戏身份。",
-                    "准备 · 账号与识别");
-                break;
-            case GuideStep.SelectLog:
-                ConfigureClickStep(
-                    PersonalIdentityLogActionPanel,
-                    "连接 Game.log",
-                    "点击“重新扫描”自动查找，或点击“选择日志”手动选择 StarCitizen\\LIVE\\Game.log。连接后可以识别游戏身份、舰船、地点和游戏状态，也可以稍后再设置。",
-                    "准备 · 游戏日志");
-                GuidedTourPrimaryButton.Content = "稍后连接，继续导览";
-                GuidedTourPrimaryButton.IsEnabled = true;
-                GuidedTourPrimaryButton.Visibility = Visibility.Visible;
-                break;
-            case GuideStep.HomeOverview:
-                ConfigureOverviewStep(
-                    BrandHomeButton,
-                    "首页",
-                    "左上角的星海舰桥标志是首页入口，可查看使用帮助、版本说明和问题反馈。",
-                    "顶部导航 · 1 / 5");
-                break;
-            case GuideStep.FindFleetOverview:
-                ConfigureOverviewStep(
-                    FindFleetNavButton,
-                    "寻找舰队",
-                    "浏览公开舰队、筛选招募条件，并在了解详情后提交加入申请。",
-                    "顶部导航 · 2 / 5");
-                break;
-            case GuideStep.MyFleetOverview:
-                ConfigureOverviewStep(
-                    MyFleetNavButton,
-                    "我的舰队",
-                    "查看舰队成员、聊天、公告、事件与舰船。尚未加入舰队时，也可以从这里创建舰队。",
-                    "顶部导航 · 3 / 5");
-                break;
-            case GuideStep.MySquadOverview:
-                ConfigureOverviewStep(
-                    MySquadNavButton,
-                    "组队大厅与当前房间",
-                    "寻找或创建临时组队房间。加入房间后，这个入口会显示为“当前房间”，方便快速返回。",
-                    "顶部导航 · 4 / 5");
-                break;
-            case GuideStep.OverlayOverview:
-                OnboardingState.MarkHintCompleted(OverlayInitialTourVisitedHintId);
-                ConfigureOverviewStep(
-                    OverlayNavButton,
-                    "游戏浮层",
-                    "管理游戏内浮层的模块、布局、外观、准星、事件提醒和显示行为。首次进入时还可以选择查看详细设置引导。",
-                    "顶部导航 · 5 / 5");
                 break;
             case GuideStep.Complete:
                 _guidedTourTarget = null;
-                GuidedTourTitleText.Text = "初步引导已完成";
-                GuidedTourBodyText.Text = "你已经了解账号与识别及顶部主要入口。现在可以按自己的节奏浏览和使用星海舰桥。";
-                GuidedTourProgressText.Text = "可以开始使用";
-                GuidedTourPrimaryButton.Content = "完成初步引导";
+                GuidedTourTitleText.Text = "启航航线已完成";
+                GuidedTourBodyText.Text = "你已经走过自己的账号、设置与资料，也知道了好友、舰队、房间、浮层和帮助入口。之后仍可在帮助中心重新查看。";
+                GuidedTourProgressText.Text = "启航航线 · 完成";
+                GuidedTourBackButton.Visibility = Visibility.Visible;
+                GuidedTourPrimaryButton.Content = "完成引导";
                 GuidedTourPrimaryButton.IsEnabled = true;
                 GuidedTourPrimaryButton.Visibility = Visibility.Visible;
                 break;
@@ -193,40 +144,78 @@ public partial class MainWindow
     {
         switch (step)
         {
-            case GuideStep.HomeOverview:
+            case GuideStep.AccountOverview:
+                OpenPersonalIdentitySettings_Click(this, new RoutedEventArgs());
+                RefreshBridgeShellForSelectedTab();
                 ConfigureOverviewStep(
-                    BridgeFleetNavButton,
-                    "舰队",
-                    "寻找或管理舰队，并在舰队内查看成员、舰船和舰队聊天。",
-                    "模块导航 · 1 / 5");
+                    PersonalDashboardIdentityButton,
+                    "我的账号",
+                    "先认识和自己有关的内容：登录状态、头像、呼号、游戏 ID 与 Game.log 都在这里。你可以现在设置，也可以只查看后继续。",
+                    chapterIndex: 0);
                 return true;
-            case GuideStep.FindFleetOverview:
+            case GuideStep.SettingsOverview:
+                HeaderSettingsButton_Click(this, new RoutedEventArgs());
+                RefreshBridgeShellForSelectedTab();
                 ConfigureOverviewStep(
-                    BridgePartyNavButton,
-                    "房间",
-                    "寻找或创建临时房间；房间成员与房间聊天都留在当前房间中。",
-                    "模块导航 · 2 / 5");
+                    PersonalDashboardAppSettingsButton,
+                    "我的设置",
+                    "同步与隐私、提醒方式和应用选项都在设置中。你可以按自己的习惯调整；引导不会要求你必须改成某个值。",
+                    chapterIndex: 1);
                 return true;
-            case GuideStep.MyFleetOverview:
+            case GuideStep.ProfileHangarOverview:
+                PersonalNav_Click(BridgePersonalNavButton, new RoutedEventArgs());
+                RefreshBridgeShellForSelectedTab();
                 ConfigureOverviewStep(
                     BridgePersonalNavButton,
-                    "我的",
-                    "从头像菜单进入个人资料、我的机库、账号识别与安全记录。",
-                    "模块导航 · 3 / 5");
+                    "我的资料与机库",
+                    "个人主页展示你的公开资料、游戏定位与舰船概况。右上角头像菜单还可以进入“我的机库”管理舰船和专属图片。",
+                    chapterIndex: 2);
                 return true;
-            case GuideStep.MySquadOverview:
+            case GuideStep.FriendsOverview:
+                BridgeSocialNav_Click(BridgeSocialNavButton, new RoutedEventArgs());
                 ConfigureOverviewStep(
                     BridgeSocialNavButton,
                     "好友",
-                    "处理好友申请、查看好友状态，并单独进行好友私信。",
-                    "模块导航 · 4 / 5");
+                    "这里可以查看好友、处理申请和打开私信。先自由看看，不需要为了完成引导而添加任何人。",
+                    chapterIndex: 3);
+                return true;
+            case GuideStep.FleetOverview:
+                BridgeFleetNav_Click(BridgeFleetNavButton, new RoutedEventArgs());
+                ConfigureOverviewStep(
+                    BridgeFleetNavButton,
+                    "舰队",
+                    "没有舰队时可以浏览并申请加入；加入后，这里会成为成员、舰船、聊天和管理的长期协作空间。",
+                    chapterIndex: 4);
+                return true;
+            case GuideStep.RoomsOverview:
+                BridgePartyNav_Click(BridgePartyNavButton, new RoutedEventArgs());
+                ConfigureOverviewStep(
+                    BridgePartyNavButton,
+                    "房间",
+                    "房间用于临时组队。你可以浏览已有房间或创建自己的房间；引导不会代替你提交或创建。",
+                    chapterIndex: 5);
                 return true;
             case GuideStep.OverlayOverview:
+                var previousTab = MainTabs.SelectedItem;
+                MainTabs.SelectedItem = OverlayEditTab;
+                SetActiveNav(OverlayNavButton);
+                QueueMainPageReveal(previousTab);
+                RenderOverlayEditor();
+                OnboardingState.MarkHintCompleted(OverlayInitialTourVisitedHintId);
+                RefreshBridgeShellForSelectedTab();
                 ConfigureOverviewStep(
                     BridgeOverlayNavButton,
                     "游戏浮层",
-                    "管理信息浮层、菜单浮层、游戏内工具及其显示方式。",
-                    "模块导航 · 5 / 5");
+                    "在这里配置信息浮层、菜单浮层与参考图。详细编辑有自己的设置引导，本次只带你认识入口。",
+                    chapterIndex: 6);
+                return true;
+            case GuideStep.SupportOverview:
+                BridgeInfoNav_Click(BridgeInfoNavButton, new RoutedEventArgs());
+                ConfigureOverviewStep(
+                    BridgeInfoNavButton,
+                    "信息与支持",
+                    "游戏日志识别、说明与声明、版本更新记录和问题反馈都在这里；以后也能从这里重新打开启航航线。",
+                    chapterIndex: 7);
                 return true;
             default:
                 return false;
@@ -237,13 +226,14 @@ public partial class MainWindow
         FrameworkElement target,
         string title,
         string body,
-        string progress)
+        int chapterIndex)
     {
         _guidedTourTarget = target;
         GuidedTourTitleText.Text = title;
-        GuidedTourBodyText.Text = body;
-        GuidedTourProgressText.Text = progress;
-        GuidedTourPrimaryButton.Content = "下一项";
+        GuidedTourBodyText.Text = body + "\n\n你可以继续操作当前页面；准备好后再点“我了解了”。";
+        GuidedTourProgressText.Text = $"启航航线 · {chapterIndex + 1} / {OnboardingJourney.AuthenticatedChapterCount}";
+        GuidedTourBackButton.Visibility = chapterIndex > 0 ? Visibility.Visible : Visibility.Collapsed;
+        GuidedTourPrimaryButton.Content = "我了解了";
         GuidedTourPrimaryButton.IsEnabled = true;
         GuidedTourPrimaryButton.Visibility = Visibility.Visible;
     }
@@ -256,29 +246,14 @@ public partial class MainWindow
     {
         _guidedTourTarget = target;
         GuidedTourTitleText.Text = title;
-        GuidedTourBodyText.Text = body + "\n\n请点击高亮区域继续。";
+        GuidedTourBodyText.Text = body;
         GuidedTourProgressText.Text = progress;
-        GuidedTourPrimaryButton.Visibility = Visibility.Collapsed;
+        GuidedTourPrimaryButton.Visibility = Visibility.Visible;
     }
 
     private void ShowFeatureTourStep(int step)
     {
-        switch (Math.Clamp(step, 0, 5))
-        {
-            case 0: ShowInitialGuideStep(GuideStep.HomeOverview); break;
-            case 1: ShowInitialGuideStep(GuideStep.FindFleetOverview); break;
-            case 2: ShowInitialGuideStep(GuideStep.MyFleetOverview); break;
-            case 3: ShowInitialGuideStep(GuideStep.MySquadOverview); break;
-            case 4: ShowInitialGuideStep(GuideStep.OverlayOverview); break;
-            default: ShowInitialGuideStep(GuideStep.Complete); break;
-        }
-    }
-
-    private void ContinueAfterPreparationAction()
-    {
-        OnboardingState.MarkPreparationCompleted();
-        OnboardingState.SetFeatureTourStep(0);
-        ShowFeatureTourStep(0);
+        ShowJourneyStage(OnboardingJourney.Resume(isLoggedIn: true, savedChapterIndex: step));
     }
 
     private void NotifyGuidedTourAction(GuideStep action)
@@ -290,23 +265,19 @@ public partial class MainWindow
 
         if (_guideStep == GuideStep.LoginFirst && action == GuideStep.LoginFirst)
         {
-            ShowInitialGuideStep(GuideStep.OpenAccountMenu);
-        }
-        else if (_guideStep == GuideStep.OpenAccountMenu && action == GuideStep.OpenAccountMenu)
-        {
-            ShowInitialGuideStep(GuideStep.OpenIdentitySettings);
-        }
-        else if (_guideStep == GuideStep.OpenIdentitySettings && action == GuideStep.OpenIdentitySettings)
-        {
-            ShowInitialGuideStep(GuideStep.SelectLog);
-        }
-        else if (_guideStep == GuideStep.SelectLog && action == GuideStep.SelectLog)
-        {
-            ContinueAfterPreparationAction();
+            if (!IsLoggedIn)
+            {
+                return;
+            }
+
+            OnboardingState.MarkIntroductionRead();
+            OnboardingState.MarkPreparationCompleted();
+            OnboardingState.SetFeatureTourStep(0);
+            ShowJourneyStage(OnboardingJourney.Next(_onboardingJourneyStage, isLoggedIn: true));
         }
     }
 
-    private void GuidedTourPrimaryButton_Click(object sender, RoutedEventArgs e)
+    private async void GuidedTourPrimaryButton_Click(object sender, RoutedEventArgs e)
     {
         if (_guideMode == GuideMode.OverlaySettings)
         {
@@ -316,35 +287,9 @@ public partial class MainWindow
 
         switch (_guideStep)
         {
-            case GuideStep.Introduction when _introductionReadToEnd:
-                OnboardingState.MarkIntroductionRead();
-                ShowInitialGuideStep(IsLoggedIn ? GuideStep.OpenAccountMenu : GuideStep.LoginFirst);
-                break;
             case GuideStep.LoginFirst:
-                ShowInitialGuideStep(GuideStep.OpenAccountMenu);
-                break;
-            case GuideStep.SelectLog:
-                ContinueAfterPreparationAction();
-                break;
-            case GuideStep.HomeOverview:
-                OnboardingState.SetFeatureTourStep(1);
-                ShowFeatureTourStep(1);
-                break;
-            case GuideStep.FindFleetOverview:
-                OnboardingState.SetFeatureTourStep(2);
-                ShowFeatureTourStep(2);
-                break;
-            case GuideStep.MyFleetOverview:
-                OnboardingState.SetFeatureTourStep(3);
-                ShowFeatureTourStep(3);
-                break;
-            case GuideStep.MySquadOverview:
-                OnboardingState.SetFeatureTourStep(4);
-                ShowFeatureTourStep(4);
-                break;
-            case GuideStep.OverlayOverview:
-                OnboardingState.SetFeatureTourStep(5);
-                ShowFeatureTourStep(5);
+                await HandleOnboardingActionAsync(OnboardingNextAction.Login);
+                NotifyGuidedTourAction(GuideStep.LoginFirst);
                 break;
             case GuideStep.Complete:
                 OnboardingState.MarkCompleted();
@@ -352,7 +297,24 @@ public partial class MainWindow
                 RefreshOnboardingSupportPanel();
                 _initialGuideCompletionSource?.TrySetResult(true);
                 break;
+            default:
+                var next = OnboardingJourney.Next(_onboardingJourneyStage, IsLoggedIn);
+                OnboardingState.SetFeatureTourStep(next.AuthenticatedIndex);
+                ShowJourneyStage(next);
+                break;
         }
+    }
+
+    private void GuidedTourBackButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_guideMode != GuideMode.Initial || !IsLoggedIn)
+        {
+            return;
+        }
+
+        var previous = OnboardingJourney.Previous(_onboardingJourneyStage);
+        OnboardingState.SetFeatureTourStep(previous.AuthenticatedIndex);
+        ShowJourneyStage(previous);
     }
 
     private void GuidedTourSecondaryButton_Click(object sender, RoutedEventArgs e)
@@ -378,7 +340,6 @@ public partial class MainWindow
             return;
         }
 
-        _introductionReadToEnd = true;
         GuidedTourPrimaryButton.IsEnabled = true;
         GuidedTourProgressText.Text = "说明已阅读";
     }

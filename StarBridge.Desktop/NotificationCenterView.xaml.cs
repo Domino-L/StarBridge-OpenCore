@@ -178,7 +178,9 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
 
         var action = new Button
         {
-            Content = item.IsAvailable ? item.ActionLabel : "内容已失效",
+            Content = !string.IsNullOrWhiteSpace(item.ActionLabel)
+                ? item.ActionLabel
+                : item.IsAvailable ? "查看" : "内容已失效",
             MinWidth = 92,
             Height = 32,
             Margin = new Thickness(14, 0, 0, 0),
@@ -297,6 +299,11 @@ public partial class NotificationCenterView : System.Windows.Controls.UserContro
 
     internal async Task RunNotificationActionAsync(NotificationItemContract item)
     {
+        if (!item.IsAvailable)
+        {
+            return;
+        }
+
         SetLoading(true, "正在打开通知内容…");
         try
         {

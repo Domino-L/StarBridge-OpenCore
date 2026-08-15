@@ -81,12 +81,6 @@ public partial class MainWindow
             return true;
         }
 
-        if (OnboardingState.IsDeferred())
-        {
-            await InitializeLoginAndNetworkAsync();
-            return false;
-        }
-
         _onboardingDialogOpen = true;
         try
         {
@@ -295,6 +289,7 @@ public partial class MainWindow
         }
 
         OnboardingState.ClearDeferred();
+        OnboardingState.SetFeatureTourStep(0);
         _onboardingDialogOpen = true;
         var completed = false;
         try

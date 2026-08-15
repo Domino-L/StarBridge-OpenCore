@@ -33256,25 +33256,35 @@
             </Grid>
         </Border>
 
-        <Canvas x:Name="GuidedTourOverlay"
-                Grid.RowSpan="2"
-                Panel.ZIndex="500"
-                Visibility="Collapsed"
-                SizeChanged="GuidedTourOverlay_SizeChanged">
-            <Border x:Name="GuidedTourMaskTop"
-                    Background="#D9050A0F"
+        <Grid x:Name="GuidedTourOverlay"
+              Grid.RowSpan="2"
+              Panel.ZIndex="500"
+              Visibility="Collapsed"
+              SizeChanged="GuidedTourOverlay_SizeChanged">
+            <Canvas x:Name="GuidedTourVisualLayer"
+                    IsHitTestVisible="False">
+                <Border x:Name="GuidedTourMaskTop"
+                    Background="{DynamicResource BridgeScrim}"
+                    Opacity="0.48"
+                    IsHitTestVisible="False"
                     Panel.ZIndex="0" />
             <Border x:Name="GuidedTourMaskLeft"
-                    Background="#D9050A0F"
+                    Background="{DynamicResource BridgeScrim}"
+                    Opacity="0.48"
+                    IsHitTestVisible="False"
                     Panel.ZIndex="0" />
             <Border x:Name="GuidedTourMaskRight"
-                    Background="#D9050A0F"
+                    Background="{DynamicResource BridgeScrim}"
+                    Opacity="0.48"
+                    IsHitTestVisible="False"
                     Panel.ZIndex="0" />
             <Border x:Name="GuidedTourMaskBottom"
-                    Background="#D9050A0F"
+                    Background="{DynamicResource BridgeScrim}"
+                    Opacity="0.48"
+                    IsHitTestVisible="False"
                     Panel.ZIndex="0" />
 
-            <Border x:Name="GuidedTourTargetFrame"
+                <Border x:Name="GuidedTourTargetFrame"
                     Width="120"
                     Height="42"
                     BorderBrush="#68D3FF"
@@ -33292,9 +33302,11 @@
                 <Border.RenderTransform>
                     <TranslateTransform x:Name="GuidedTourTargetTransform" />
                 </Border.RenderTransform>
-            </Border>
+                </Border>
+            </Canvas>
 
-            <Border x:Name="GuidedTourCoachCard"
+            <Canvas x:Name="GuidedTourCoachLayer">
+                <Border x:Name="GuidedTourCoachCard"
                     Width="400"
                     MaxWidth="420"
                     Padding="18"
@@ -33378,7 +33390,7 @@
                                 <LineBreak /><LineBreak />
                                 <Run Text="请勿在公开资料、聊天或公告中发布账号密码、验证码、现实身份、付款信息等敏感内容；重要资料请另行备份。" />
                                 <LineBreak /><LineBreak />
-                                <Run Text="继续即表示你已阅读以上说明。接下来会逐步标出需要操作的位置；点击高亮区域即可继续，其他区域会暂时锁定，避免误触。" />
+                                <Run Text="继续后会逐步标出主要入口。你可以在真实页面中自由查看和调整，也可以随时收起引导；引导不会代替你提交或保存任何操作。" />
                             </TextBlock>
                             <Border Height="1"
                                     Margin="0,16,0,8"
@@ -33394,6 +33406,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock x:Name="GuidedTourProgressText"
                                    Text="准备开始"
@@ -33401,26 +33414,36 @@
                                    Foreground="#6F8C9D"
                                    FontFamily="Bahnschrift"
                                    FontSize="10" />
-                        <Button x:Name="GuidedTourSecondaryButton"
+                        <Button x:Name="GuidedTourBackButton"
                                 Grid.Column="1"
-                                Content="稍后继续"
+                                Content="上一步"
+                                MinWidth="76"
+                                Height="34"
+                                Margin="10,0,0,0"
+                                Visibility="Collapsed"
+                                Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                                Click="GuidedTourBackButton_Click" />
+                        <Button x:Name="GuidedTourSecondaryButton"
+                                Grid.Column="2"
+                                Content="暂时收起"
                                 MinWidth="92"
                                 Height="34"
                                 Margin="10,0,0,0"
-                                Style="{StaticResource SecondaryButton}"
+                                Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
                                 Click="GuidedTourSecondaryButton_Click" />
                         <Button x:Name="GuidedTourPrimaryButton"
-                                Grid.Column="2"
+                                Grid.Column="3"
                                 Content="继续"
                                 MinWidth="104"
                                 Height="34"
                                 Margin="10,0,0,0"
-                                Style="{StaticResource PrimaryButton}"
+                                Style="{StaticResource BridgeDirectoryPrimaryButtonStyle}"
                                 Click="GuidedTourPrimaryButton_Click" />
                     </Grid>
                 </Grid>
-            </Border>
-        </Canvas>
+                </Border>
+            </Canvas>
+        </Grid>
 
         <local:ApplicationLayerHost x:Name="ApplicationLayerHost"
                                     Grid.Row="0"

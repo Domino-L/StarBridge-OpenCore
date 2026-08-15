@@ -24,9 +24,8 @@ public partial class MainWindow
         if (IsLoggedIn)
         {
             await AutoConnectNetworkAsync();
+            NotifyGuidedTourAction(GuideStep.LoginFirst);
         }
-
-        NotifyGuidedTourAction(GuideStep.LoginFirst);
     }
 
     private void HeaderAccountButton_Click(object sender, RoutedEventArgs e)
