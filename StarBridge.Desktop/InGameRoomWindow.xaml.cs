@@ -302,7 +302,14 @@ public partial class InGameRoomWindow : Window
 
     private void ApplyRoomChat(InGameRoomChatSnapshot chat)
     {
-        CurrentRoomChatList.ItemsSource = chat.Messages;
+        var messages = InGameSnapshotItemIdentity.PreserveEqualInstances(
+            CurrentRoomChatList.ItemsSource as IEnumerable<object>,
+            chat.Messages);
+        var messagesChanged = !ReferenceEquals(CurrentRoomChatList.ItemsSource, messages);
+        if (messagesChanged)
+        {
+            CurrentRoomChatList.ItemsSource = messages;
+        }
         Controls.InGameLoadingPresentation.Apply(
             CurrentRoomChatStatusText,
             CurrentRoomChatLoadingIndicator,
@@ -318,10 +325,10 @@ public partial class InGameRoomWindow : Window
             ? Visibility.Collapsed
             : Visibility.Visible;
 
-        if (chat.Messages.Length > 0)
+        if (messagesChanged && messages.Length > 0)
         {
             Dispatcher.BeginInvoke(() =>
-                CurrentRoomChatList.ScrollIntoView(chat.Messages[^1]));
+                CurrentRoomChatList.ScrollIntoView(messages[^1]));
         }
     }
 

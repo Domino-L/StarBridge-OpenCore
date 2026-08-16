@@ -2379,7 +2379,7 @@ public partial class MainWindow
         PartyRoomCreateCapacityBox.SelectedItem = 6;
         PartyRoomCreateVisibilityBox.SelectedIndex = 0;
         PartyRoomCreateEligibilityBox.SelectedIndex = 0;
-        PartyRoomCreateAdmissionBox.SelectedIndex = 1;
+        PartyRoomCreateAdmissionBox.SelectedIndex = 0;
         PartyRoomCreatePasswordToggle.IsChecked = false;
         PartyRoomCreatePasswordBox.Clear();
         PartyRoomCreatePasswordBox.IsEnabled = false;

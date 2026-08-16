@@ -15757,7 +15757,7 @@
                                                     </Grid.ColumnDefinitions>
                                                     <StackPanel>
                                                         <TextBlock Text="加入方式" Style="{StaticResource BridgeDirectoryFieldLabelTextStyle}" Margin="0,0,0,6" />
-                                                        <ComboBox x:Name="PartyRoomCreateAdmissionBox" Style="{StaticResource PartyRoomCreateComboBox}" SelectedIndex="1">
+                                                        <ComboBox x:Name="PartyRoomCreateAdmissionBox" Style="{StaticResource PartyRoomCreateComboBox}" SelectedIndex="0">
                                                             <ComboBoxItem Content="直接加入" Tag="direct" />
                                                             <ComboBoxItem Content="房主批准" Tag="approval" />
                                                         </ComboBox>
@@ -27085,6 +27085,7 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
                                             <Button x:Name="RunApplicationDiagnosticsButton"
                                                     Content="运行一键诊断"
@@ -27109,6 +27110,13 @@
                                                     Margin="8,0,0,0"
                                                     Style="{StaticResource DangerButton}"
                                                     Click="ClearPersonalCacheButton_Click" />
+                                            <Button x:Name="InstallationMaintenanceButton"
+                                                    Grid.Column="4"
+                                                    Content="卸载与清理"
+                                                    Height="30"
+                                                    Margin="8,0,0,0"
+                                                    Style="{StaticResource DangerButton}"
+                                                    Click="InstallationMaintenanceButton_Click" />
                                         </Grid>
                                     </Grid>
                                 </controls:ChamferBorder>

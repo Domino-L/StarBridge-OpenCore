@@ -25,11 +25,11 @@
 | [下载完整安装包](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-win-x64-setup.exe) | 适合离线安装，或需要保留完整安装文件时使用。 |
 | [查看全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases) | 查看更新说明、历史版本和 SHA-256 校验文件。 |
 
-0.6.4.2 的主程序、完整安装器和在线安装器均要求可信 Windows 数字签名与时间戳。
+0.6.4.3 的主程序、完整安装器和在线安装器均要求可信 Windows 数字签名与时间戳。
 请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对
 `SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。如果 Windows 仍显示“未知发布者”，请停止安装并提交反馈。
 
-0.6.4.2 官方客户端不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+0.6.4.3 官方客户端不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
 缺少可用图片时会显示应用自带占位图；详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
 
 安装与首次使用说明见 [开始使用](docs/GETTING_STARTED.md)。如果下载或更新失败，请先查看 [下载帮助](docs/DOWNLOADS.md)。需要核验精确 Release tag、SHA-256、Windows 签名、SBOM 与构建来源时，请按 [Release 核验指南](docs/RELEASE-VERIFICATION.md) 操作。

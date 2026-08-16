@@ -4382,9 +4382,11 @@ public partial class MainWindow : Window, IAppUpdateUi
                (IsCurrentUserFleetCommander() ||
                 CanCurrentUserEditAnyFleetProfileField() ||
                 CanCurrentUserManageAnnouncements() ||
-                CanCurrentUserInviteFleetMembers() ||
                 CanCurrentUserReviewFleetApplications() ||
-                CanCurrentUserViewFleetLogs());
+                CanCurrentUserViewFleetLogs() ||
+                CanCurrentUserPublishTasks() ||
+                CanCurrentUserPublishPlans() ||
+                CanCurrentUserRemoveMembers());
     }
 
     private bool CanCurrentUserManageFleetInfo()

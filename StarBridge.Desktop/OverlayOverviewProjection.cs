@@ -298,7 +298,7 @@ internal static class OverlayOverviewProjection
 
         if (busiest is not null)
         {
-            var displayName = ServerRegionLabel(busiest.Code, zh);
+            var displayName = FormatOverviewRegionCode(busiest.Code, zh);
             return zh
                 ? $"{displayName} · {Number(busiest.Count)} 人"
                 : $"{displayName} · {Number(busiest.Count)}";
@@ -313,72 +313,14 @@ internal static class OverlayOverviewProjection
     {
         if (player.IsSelf)
         {
-            return NormalizeServerRegionCode(localShard);
+            return GameServerRegionPresentation.ResolveCode(localShard);
         }
 
-        return NormalizeServerRegionCode(player.ServerRegion) ??
-               NormalizeServerRegionCode(player.ServerShard);
+        return GameServerRegionPresentation.ResolveCode(player.ServerRegion) ??
+               GameServerRegionPresentation.ResolveCode(player.ServerShard);
     }
 
-    private static string? NormalizeServerRegionCode(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var normalized = value.Trim().ToLowerInvariant();
-        if (normalized is "unknown" or "未知")
-        {
-            return null;
-        }
-
-        if (normalized.Contains("美服") ||
-            normalized is "us" or "usa" ||
-            normalized.Contains("united states") ||
-            normalized.Contains("us east") ||
-            normalized.Contains("us west") ||
-            normalized.Contains("use") ||
-            normalized.Contains("usw") ||
-            normalized.Contains("_us") ||
-            normalized.Contains("pub_us") ||
-            normalized.StartsWith("us-", StringComparison.Ordinal))
-        {
-            return "US";
-        }
-
-        if (normalized.Contains("欧服") ||
-            normalized is "eu" or "europe" ||
-            normalized.Contains("eu-"))
-        {
-            return "EU";
-        }
-
-        if (normalized.Contains("澳服") ||
-            normalized is "au" or "aus" or "australia" or "oceania" ||
-            normalized.Contains("aus") ||
-            normalized.Contains("_au") ||
-            normalized.Contains("oce"))
-        {
-            return "AU";
-        }
-
-        if (normalized.Contains("亚服") ||
-            normalized is "ap" or "asia" ||
-            normalized.Contains("asia") ||
-            normalized.Contains("apse") ||
-            normalized.Contains("_ap") ||
-            normalized.Contains("sg") ||
-            normalized.Contains("jp") ||
-            normalized.Contains("hk"))
-        {
-            return "ASIA";
-        }
-
-        return null;
-    }
-
-    private static string ServerRegionLabel(string code, bool zh) => code switch
+    private static string FormatOverviewRegionCode(string code, bool zh) => code switch
     {
         "US" => zh ? "美服" : "US",
         "EU" => zh ? "欧服" : "EU",

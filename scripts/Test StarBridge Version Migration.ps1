@@ -144,7 +144,19 @@ if (Test-Path -LiteralPath $websitePath -PathType Leaf) {
         throw "Website stylesheet reference must use the first 12 characters of its SHA-256 as the cache version."
     }
 
-    $expectedStyleVersion = (Get-FileHash -LiteralPath $websiteStylesPath -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
+    $normalizedStyles = [IO.File]::ReadAllText(
+        $websiteStylesPath,
+        [Text.Encoding]::UTF8).Replace("`r`n", "`n")
+    $styleHasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $styleHash = [BitConverter]::ToString(
+            $styleHasher.ComputeHash(
+                [Text.UTF8Encoding]::new($false).GetBytes($normalizedStyles))).Replace("-", "")
+        $expectedStyleVersion = $styleHash.Substring(0, 12).ToLowerInvariant()
+    }
+    finally {
+        $styleHasher.Dispose()
+    }
     $actualStyleVersion = $styleVersionMatch.Groups["version"].Value
     if ($actualStyleVersion -ne $expectedStyleVersion) {
         throw "Website stylesheet cache version '$actualStyleVersion' does not match styles.css SHA-256 prefix '$expectedStyleVersion'."

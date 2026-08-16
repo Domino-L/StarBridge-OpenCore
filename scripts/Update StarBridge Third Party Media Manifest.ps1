@@ -55,6 +55,24 @@ $sourceIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordina
 $payloadPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $files = [Collections.Generic.List[object]]::new()
 
+function Get-CanonicalTextSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $text = [IO.File]::ReadAllText(
+        $Path,
+        [Text.UTF8Encoding]::new($false, $true)
+    ).Replace("`r`n", "`n").Replace("`r", "`n")
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString(
+            $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))
+        )).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function Assert-SafeRelativePath {
     param(
         [Parameter(Mandatory = $true)]
@@ -328,7 +346,7 @@ $manifest = [ordered]@{
     hashAlgorithm = "SHA256"
     distributionScope = "official-binary"
     sourceRegistry = "third-party-media-sources.json"
-    sourceRegistrySha256 = (Get-FileHash -LiteralPath $SourcesPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    sourceRegistrySha256 = Get-CanonicalTextSha256 -Path $SourcesPath
     files = @($files | Sort-Object payloadPath)
 }
 

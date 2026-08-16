@@ -945,6 +945,12 @@ public partial class MainWindow
                     ? startupMatches ? "注册状态与设置一致" : "注册状态与设置不一致，请重新切换开机自启动"
                     : $"无法读取：{startupError}"));
 
+            var installationScan = ApplicationInstallationMaintenance.Scan();
+            results.Add(new ApplicationDiagnosticResult(
+                "安装状态",
+                !installationScan.HasMaintenanceIssue,
+                ApplicationInstallationMaintenance.Describe(installationScan)));
+
             var passed = results.Count(result => result.Passed);
             ApplicationDiagnosticsSummaryText.Text = passed == results.Count
                 ? $"诊断完成 · {passed}/{results.Count} 项正常"
@@ -965,6 +971,128 @@ public partial class MainWindow
         finally
         {
             RunApplicationDiagnosticsButton.IsEnabled = true;
+        }
+    }
+
+    private async void InstallationMaintenanceButton_Click(object sender, RoutedEventArgs e)
+    {
+        InstallationMaintenanceButton.IsEnabled = false;
+        try
+        {
+            var scan = ApplicationInstallationMaintenance.Scan();
+            var target = ApplicationInstallationMaintenance.SelectUninstallTarget(scan);
+            var cleanupCount = scan.OrphanedRegistrations.Count +
+                               (scan.StartupEntry?.NeedsCleanup == true ? 1 : 0);
+
+            if (ApplicationInstallationMaintenance.IsReadOnlyPreviewBuild)
+            {
+                var previewTarget = target is null
+                    ? "没有可调用的官方卸载器"
+                    : $"拟调用：{target.DisplayName} {target.DisplayVersion}\n位置：{target.InstallDirectory}";
+                await ShowAppNoticeAsync(
+                    "Debug 安装清理检查",
+                    ApplicationInstallationMaintenance.Describe(scan),
+                    $"{previewTarget}\n拟清理的失效注册项：{cleanupCount}。\nDebug 版本仅显示检查结果，不会启动卸载器、删除注册项或改写开机启动项。",
+                    "完成检查");
+                return;
+            }
+
+            if (target is null && cleanupCount == 0)
+            {
+                await ShowAppNoticeAsync(
+                    "没有可调用的官方卸载器",
+                    "当前运行的可能是便携副本，或正式安装信息已经被手动删除。",
+                    $"程序位置：{scan.CurrentExecutable}\n为避免丢失旧版本内的数据，本工具不会直接删除程序目录。请退出后确认该目录内容，再手动移除不需要的副本。");
+                return;
+            }
+
+            var isCurrentTarget = target?.IsCurrentInstallation == true;
+            var actionTitle = target is null
+                ? "清理星海舰桥安装残留？"
+                : isCurrentTarget
+                    ? "卸载当前星海舰桥？"
+                    : "卸载检测到的其他版本？";
+            var actionMessage = target is null
+                ? $"将移除 {cleanupCount} 个确认失效的本应用注册项。"
+                : $"将启动 {target.DisplayName} {target.DisplayVersion} 的官方卸载器。";
+            var targetDetail = target is null
+                ? "不会扫描或删除其他软件的注册表，也不会删除星海舰桥用户数据。"
+                : $"安装位置：{target.InstallDirectory}\n" +
+                  (cleanupCount > 0 ? $"同时清理 {cleanupCount} 个失效注册项。" : "未发现额外失效注册项。") +
+                  " 用户数据目录会保留。";
+
+            var confirmed = await ShowAppConfirmationAsync(
+                actionTitle,
+                actionMessage,
+                targetDetail,
+                target is null ? "清理残留" : "启动卸载",
+                "取消",
+                danger: true,
+                footerText: isCurrentTarget
+                    ? "启动卸载器后，星海舰桥将退出。"
+                    : "只处理已确认属于星海舰桥的安装信息。");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var cleanup = ApplicationInstallationMaintenance.CleanupOrphansAndStaleStartup(scan);
+            if (target is null)
+            {
+                var cleanupSummary = cleanup.Errors.Count == 0
+                    ? $"已移除 {cleanup.RemovedUninstallRegistrations} 个失效卸载项" +
+                      (cleanup.RemovedStartupEntry ? "，并清理失效开机启动项。" : "。")
+                    : $"已完成部分清理，但有 {cleanup.Errors.Count} 项未能处理：{string.Join("；", cleanup.Errors)}";
+                await ShowAppNoticeAsync(
+                    cleanup.Errors.Count == 0 ? "安装残留已清理" : "安装残留部分清理",
+                    cleanupSummary,
+                    "用户数据和仍然有效的安装项没有被删除。",
+                    "完成");
+                return;
+            }
+
+            if (!ApplicationInstallationMaintenance.TryStartUninstaller(target, out var error))
+            {
+                await ShowAppNoticeAsync(
+                    "无法启动卸载器",
+                    error ?? "官方卸载器未能启动。",
+                    "请打开 Windows“已安装的应用”，搜索“星海舰桥”后重试卸载。");
+                return;
+            }
+
+            if (isCurrentTarget)
+            {
+                if (System.Windows.Application.Current is App app)
+                {
+                    app.RequestExit();
+                }
+                else
+                {
+                    System.Windows.Application.Current.Shutdown();
+                }
+
+                return;
+            }
+
+            if (_applicationBehaviorSettings.LaunchAtStartup)
+            {
+                WindowsStartupRegistration.TrySetEnabled(enabled: true, out _);
+            }
+
+            ApplicationDiagnosticsSummaryText.Text = "已启动其他版本的官方卸载器";
+            ApplicationDiagnosticsDetailText.Text = "完成卸载后可再次运行一键诊断，确认重复安装与开机启动项均已清除。";
+            ApplicationDiagnosticsSummaryText.Foreground = FindBrush("StatusSuccessBrush", Brushes.SpringGreen);
+        }
+        catch (Exception ex)
+        {
+            await ShowAppNoticeAsync(
+                "安装清理未完成",
+                UserFacingError.Describe(ex, "无法检查或处理安装信息，请稍后重试。"),
+                "未执行目录删除，用户数据不受影响。");
+        }
+        finally
+        {
+            InstallationMaintenanceButton.IsEnabled = true;
         }
     }
 

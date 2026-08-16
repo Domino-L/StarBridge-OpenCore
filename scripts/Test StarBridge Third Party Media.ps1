@@ -100,6 +100,24 @@ function Test-JsonPropertyExists {
     return $null -ne $InputObject.PSObject.Properties[$Name]
 }
 
+function Get-CanonicalTextSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $text = [IO.File]::ReadAllText(
+        $Path,
+        [Text.UTF8Encoding]::new($false, $true)
+    ).Replace("`r`n", "`n").Replace("`r", "`n")
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString(
+            $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))
+        )).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function ConvertTo-SafeAuditMessage {
     param([string]$Message)
 
@@ -710,9 +728,7 @@ try {
     if ($manifestRegistrySha256 -notmatch '^[0-9a-fA-F]{64}$') {
         throw "The media manifest has an invalid sourceRegistrySha256 value."
     }
-    $actualRegistrySha256 = (
-        Get-FileHash -LiteralPath $resolvedSourcesPath -Algorithm SHA256
-    ).Hash.ToLowerInvariant()
+    $actualRegistrySha256 = Get-CanonicalTextSha256 -Path $resolvedSourcesPath
     if (-not $actualRegistrySha256.Equals(
         $manifestRegistrySha256.ToLowerInvariant(),
         [StringComparison]::Ordinal

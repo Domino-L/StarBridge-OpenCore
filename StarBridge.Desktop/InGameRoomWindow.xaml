@@ -1553,7 +1553,7 @@
                                                   Height="36"
                                                   Style="{StaticResource BridgeDirectoryComboBoxStyle}"
                                                   Margin="0,6,0,14"
-                                                  SelectedIndex="1">
+                                                  SelectedIndex="0">
                                             <ComboBoxItem Content="直接加入" Tag="direct" />
                                             <ComboBoxItem Content="房主批准" Tag="approval" />
                                         </ComboBox>

@@ -19,26 +19,35 @@ internal static class GameServerRegionPresentation
             return zh ? "未进入游戏" : "Not in game";
         }
 
-        var kind = TryResolveKind(region) ?? TryResolveKind(shard);
-        return kind switch
+        var code = ResolveCode(region) ?? ResolveCode(shard);
+        return FormatCode(code, zh) ?? "—";
+    }
+
+    internal static string? ResolveCode(string? value)
+    {
+        return TryResolveKind(value) switch
         {
-            GameServerRegionKind.UnitedStates => zh ? "美服" : "US",
-            GameServerRegionKind.Europe => zh ? "欧服" : "Europe",
-            GameServerRegionKind.Australia => zh ? "澳服" : "Australia",
-            GameServerRegionKind.Asia => zh ? "亚服" : "Asia",
-            _ => "—"
+            GameServerRegionKind.UnitedStates => "US",
+            GameServerRegionKind.Europe => "EU",
+            GameServerRegionKind.Australia => "AU",
+            GameServerRegionKind.Asia => "ASIA",
+            _ => null
         };
     }
 
     internal static string? ResolveRegion(string? value, bool zh = true)
     {
-        var kind = TryResolveKind(value);
-        return kind switch
+        return FormatCode(ResolveCode(value), zh);
+    }
+
+    private static string? FormatCode(string? code, bool zh)
+    {
+        return code switch
         {
-            GameServerRegionKind.UnitedStates => zh ? "美服" : "US",
-            GameServerRegionKind.Europe => zh ? "欧服" : "Europe",
-            GameServerRegionKind.Australia => zh ? "澳服" : "Australia",
-            GameServerRegionKind.Asia => zh ? "亚服" : "Asia",
+            "US" => zh ? "美服" : "US",
+            "EU" => zh ? "欧服" : "Europe",
+            "AU" => zh ? "澳服" : "Australia",
+            "ASIA" => zh ? "亚服" : "Asia",
             _ => null
         };
     }
@@ -68,6 +77,7 @@ internal static class GameServerRegionPresentation
             normalized.Contains("pub_us", StringComparison.Ordinal) ||
             normalized.Contains("_use", StringComparison.Ordinal) ||
             normalized.Contains("_usw", StringComparison.Ordinal) ||
+            normalized.StartsWith("us-", StringComparison.Ordinal) ||
             normalized.EndsWith("_us", StringComparison.Ordinal))
         {
             return GameServerRegionKind.UnitedStates;
@@ -76,14 +86,25 @@ internal static class GameServerRegionPresentation
         if (normalized.Contains("欧服", StringComparison.Ordinal) ||
             normalized is "eu" or "eur" ||
             normalized.Contains("europe", StringComparison.Ordinal) ||
+            normalized.StartsWith("eu-", StringComparison.Ordinal) ||
             normalized.Contains("_eu", StringComparison.Ordinal))
         {
             return GameServerRegionKind.Europe;
         }
 
         if (normalized.Contains("澳服", StringComparison.Ordinal) ||
-            normalized is "au" or "aus" or "oce" or "oceania" ||
+            normalized is "au" or "aus" or "aps" or "oce" or "oceania" ||
             normalized.Contains("australia", StringComparison.Ordinal) ||
+            normalized.Contains("sydney", StringComparison.Ordinal) ||
+            normalized.Contains("melbourne", StringComparison.Ordinal) ||
+            ContainsRegionToken(normalized, "aps") ||
+            ContainsRegionTokenStartingWith(normalized, "apse2") ||
+            ContainsRegionTokenStartingWith(normalized, "apse4") ||
+            ContainsRegionTokenStartingWith(normalized, "apse6") ||
+            ContainsCloudRegion(normalized, "ap-southeast-2") ||
+            ContainsCloudRegion(normalized, "ap-southeast-4") ||
+            ContainsCloudRegion(normalized, "ap-southeast-6") ||
+            normalized.StartsWith("au-", StringComparison.Ordinal) ||
             normalized.Contains("_aus", StringComparison.Ordinal) ||
             normalized.Contains("_au", StringComparison.Ordinal) ||
             normalized.Contains("_oce", StringComparison.Ordinal))
@@ -97,6 +118,23 @@ internal static class GameServerRegionPresentation
             normalized.Contains("singapore", StringComparison.Ordinal) ||
             normalized.Contains("hong kong", StringComparison.Ordinal) ||
             normalized.Contains("japan", StringComparison.Ordinal) ||
+            ContainsRegionTokenStartingWith(normalized, "ape1") ||
+            ContainsRegionTokenStartingWith(normalized, "apse1") ||
+            ContainsRegionTokenStartingWith(normalized, "apse3") ||
+            ContainsRegionTokenStartingWith(normalized, "apse5") ||
+            ContainsRegionTokenStartingWith(normalized, "apse7") ||
+            ContainsRegionTokenStartingWith(normalized, "apse8") ||
+            ContainsRegionTokenStartingWith(normalized, "apne1") ||
+            ContainsRegionTokenStartingWith(normalized, "apne2") ||
+            ContainsRegionTokenStartingWith(normalized, "apne3") ||
+            ContainsRegionTokenStartingWith(normalized, "aps1") ||
+            ContainsRegionTokenStartingWith(normalized, "aps2") ||
+            ContainsCloudRegion(normalized, "ap-southeast-1") ||
+            ContainsCloudRegion(normalized, "ap-northeast-1") ||
+            ContainsCloudRegion(normalized, "ap-northeast-2") ||
+            ContainsCloudRegion(normalized, "ap-northeast-3") ||
+            ContainsCloudRegion(normalized, "ap-east-1") ||
+            normalized.StartsWith("asia-", StringComparison.Ordinal) ||
             normalized.Contains("_apse", StringComparison.Ordinal) ||
             normalized.Contains("_ap", StringComparison.Ordinal))
         {
@@ -104,6 +142,26 @@ internal static class GameServerRegionPresentation
         }
 
         return null;
+    }
+
+    private static bool ContainsCloudRegion(string value, string region)
+    {
+        return value.Contains(region, StringComparison.Ordinal) ||
+               value.Contains(region.Replace('-', '_'), StringComparison.Ordinal);
+    }
+
+    private static bool ContainsRegionToken(string value, string token)
+    {
+        return value
+            .Split(['_', '-', '.', ' ', '/', '\\', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(part => part.Equals(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ContainsRegionTokenStartingWith(string value, string tokenPrefix)
+    {
+        return value
+            .Split(['_', '-', '.', ' ', '/', '\\', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(part => part.StartsWith(tokenPrefix, StringComparison.OrdinalIgnoreCase));
     }
 
     private enum GameServerRegionKind

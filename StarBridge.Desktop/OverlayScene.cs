@@ -197,6 +197,12 @@ public static class OverlaySceneResolver
             return null;
         }
 
+        var resolved = GameServerRegionPresentation.ResolveRegion(value);
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved;
+        }
+
         var parts = value.Split('·', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return parts.Length == 0 ? value.Trim() : parts[0];
     }

@@ -48,6 +48,19 @@ public partial class MainWindow
 
     private void OpenChatAttachmentMenu(ChatAttachmentDestination destination)
     {
+        try
+        {
+            OpenChatAttachmentMenuCore(destination);
+        }
+        catch (Exception exception)
+        {
+            App.WriteCrashLog(exception);
+            ReportChatAttachmentFailure(destination, exception);
+        }
+    }
+
+    private void OpenChatAttachmentMenuCore(ChatAttachmentDestination destination)
+    {
         var menu = new ContextMenu
         {
             PlacementTarget = destination.Anchor,
@@ -76,6 +89,7 @@ public partial class MainWindow
             var eligibleRoomMembers = isDirectMessage ? 0 : CountPartyRoomFleetInvitationRecipients();
             var canSendFleetCard = CanCurrentUserSendFleetInvitationCard();
             menu.Items.Add(CreateChatAttachmentMenuItem(
+                destination,
                 ResolveFleetInvitationMenuText(isDirectMessage, friendAlreadyInFleet, eligibleRoomMembers, canSendFleetCard),
                 canSendFleetCard && (isDirectMessage
                     ? _activeFriendChatUser is not null && !friendAlreadyInFleet
@@ -87,6 +101,7 @@ public partial class MainWindow
                 var friendAlreadyInRoom = IsActiveFriendInCurrentPartyRoom();
                 var roomInvitationPending = HasPendingPartyRoomInvitationForActiveFriend();
                 menu.Items.Add(CreateChatAttachmentMenuItem(
+                    destination,
                     friendAlreadyInRoom
                         ? "已在当前房间"
                         : roomInvitationPending
@@ -100,7 +115,21 @@ public partial class MainWindow
             }
         }
 
-        menu.IsOpen = true;
+        var interaction = BeginInGameChatInteraction(destination.Anchor);
+        if (interaction is not null)
+        {
+            menu.Closed += (_, _) => interaction.Dispose();
+        }
+
+        try
+        {
+            menu.IsOpen = true;
+        }
+        catch
+        {
+            interaction?.Dispose();
+            throw;
+        }
     }
 
     private MenuItem CreateOverlayPresetAttachmentMenu(ChatAttachmentDestination destination)
@@ -124,6 +153,7 @@ public partial class MainWindow
         {
             var isCurrent = preset.Id.Equals(_activeOverlayPreset, StringComparison.OrdinalIgnoreCase);
             presetMenu.Items.Add(CreateChatAttachmentMenuItem(
+                destination,
                 isCurrent ? $"{preset.Name} · 当前" : preset.Name,
                 true,
                 async () => await SendOverlayPresetAsync(destination, preset)));
@@ -204,7 +234,11 @@ public partial class MainWindow
                    invitation.ExpiresAt > DateTimeOffset.UtcNow);
     }
 
-    private MenuItem CreateChatAttachmentMenuItem(string header, bool enabled, Func<Task> action)
+    private MenuItem CreateChatAttachmentMenuItem(
+        ChatAttachmentDestination destination,
+        string header,
+        bool enabled,
+        Func<Task> action)
     {
         var item = new MenuItem
         {
@@ -216,8 +250,65 @@ public partial class MainWindow
             item.Style = itemStyle;
         }
 
-        item.Click += async (_, _) => await action();
+        var actionRunning = false;
+        item.Click += async (_, _) =>
+        {
+            if (actionRunning)
+            {
+                return;
+            }
+
+            actionRunning = true;
+            item.IsEnabled = false;
+            using var interaction = BeginInGameChatInteraction(destination.Anchor);
+            try
+            {
+                await action();
+            }
+            catch (Exception exception)
+            {
+                App.WriteCrashLog(exception);
+                ReportChatAttachmentFailure(destination, exception);
+            }
+            finally
+            {
+                actionRunning = false;
+                item.IsEnabled = enabled;
+            }
+        };
         return item;
+    }
+
+    private IDisposable? BeginInGameChatInteraction(Button anchor) =>
+        Window.GetWindow(anchor) is InGameSocialWindow or InGameRoomWindow
+            ? _inGameMenuCoordinator.BeginTransientInteraction()
+            : null;
+
+    private void ReportChatAttachmentFailure(
+        ChatAttachmentDestination destination,
+        Exception exception)
+    {
+        var message = UserFacingError.Describe(
+            exception,
+            "分享未完成，请稍后重试。");
+        var statusText = destination.Target switch
+        {
+            ChatAttachmentTarget.FleetChannel => FleetChatStatusText,
+            ChatAttachmentTarget.PartyRoom => PartyRoomChatStatusText,
+            _ => FriendChatStatusText
+        };
+        statusText.Text = message;
+        statusText.Foreground = StatusPalette.DangerBrush;
+
+        switch (Window.GetWindow(destination.Anchor))
+        {
+            case InGameRoomWindow:
+                _inGameMenuCoordinator.ShowRoomStatus(message);
+                break;
+            case InGameSocialWindow:
+                _inGameMenuCoordinator.ShowSocialStatus(message);
+                break;
+        }
     }
 
     private ChatAttachmentContract BuildOverlayPresetAttachment(OverlayPresetEntry preset)

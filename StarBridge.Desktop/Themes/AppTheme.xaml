@@ -1657,6 +1657,7 @@
                             SnapsToDevicePixels="True">
                         <Grid Width="18"
                               Height="18"
+                              Margin="0,1,0,0"
                               HorizontalAlignment="Center"
                               VerticalAlignment="Center"
                               UseLayoutRounding="True"
@@ -1703,6 +1704,8 @@
                             <Grid x:Name="CloseIcon"
                                   Width="12"
                                   Height="12"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
                                   Visibility="Collapsed">
                                 <Line X1="2" Y1="2" X2="10" Y2="10"
                                       Stroke="{TemplateBinding Foreground}"

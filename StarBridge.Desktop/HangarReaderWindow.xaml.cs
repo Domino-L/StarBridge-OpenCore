@@ -18,7 +18,7 @@ public partial class HangarReaderWindow : Window
     private sealed record HangarPageState(
         int Page,
         int TotalPages,
-        int KindCount,
+        int ContentItemCount,
         HangarShipCandidate[] Candidates);
 
     private sealed record HangarNavigationResult(
@@ -229,6 +229,7 @@ public partial class HangarReaderWindow : Window
                 .filter(page => Number.isFinite(page) && page > 0);
               const page = activePage || urlPage || 1;
               const totalPages = Math.max(page, 1, ...pagerPages);
+              const contentItems = Array.from(document.querySelectorAll('.item'));
               const kinds = Array.from(document.querySelectorAll('.kind'));
               const ships = [];
               const normalizeImageUrl = value => {
@@ -355,7 +356,7 @@ public partial class HangarReaderWindow : Window
                   });
                 }
               });
-              return { Page: page, TotalPages: totalPages, KindCount: kinds.length, Candidates: ships };
+              return { Page: page, TotalPages: totalPages, ContentItemCount: contentItems.length, Candidates: ships };
             })();
             """);
 
@@ -452,23 +453,21 @@ public partial class HangarReaderWindow : Window
 
     private async Task<HangarPageState> WaitForHangarPageStateAsync(int expectedPage)
     {
-        string? previousSignature = null;
-        HangarPageState? previousState = null;
+        HangarPageScanObservation? previousObservation = null;
 
         for (var attempt = 0; attempt < 50; attempt++)
         {
             var state = await ReadCurrentHangarPageStateAsync();
-            var signature = BuildCandidateSignature(state.Candidates);
-            if (state.Page == expectedPage &&
-                state.KindCount > 0 &&
-                previousState?.Page == state.Page &&
-                string.Equals(previousSignature, signature, StringComparison.OrdinalIgnoreCase))
+            var observation = new HangarPageScanObservation(
+                state.Page,
+                state.ContentItemCount,
+                BuildCandidateSignature(state.Candidates));
+            if (HangarPageScanPolicy.IsStable(expectedPage, observation, previousObservation))
             {
                 return state;
             }
 
-            previousState = state;
-            previousSignature = signature;
+            previousObservation = observation;
             await Task.Delay(300);
         }
 

@@ -357,7 +357,32 @@ public sealed record FleetShipInventoryRow(
     public MediaBrush ShipSpecBadgeBorderBrush => SelectSpecBadgePalette().Border;
     public MediaBrush ShipSpecBadgeTextBrush => SelectSpecBadgePalette().Text;
 
-    public MediaBrush ShipStatusBrush => ShipStatus == "可飞" ? FlyableShipBrush : ConceptShipBrush;
+    public MediaBrush ShipStatusBrush
+    {
+        get
+        {
+            if (ShipStatus.Equals("可飞", StringComparison.OrdinalIgnoreCase) ||
+                ShipStatus.Equals("Flyable", StringComparison.OrdinalIgnoreCase) ||
+                ShipStatus.Contains("Flight Ready", StringComparison.OrdinalIgnoreCase))
+            {
+                return FlyableShipBrush;
+            }
+
+            if (ShipStatus.Contains("概念", StringComparison.OrdinalIgnoreCase) ||
+                ShipStatus.Contains("Concept", StringComparison.OrdinalIgnoreCase))
+            {
+                return ConceptShipBrush;
+            }
+
+            if (ShipStatus.Contains("不可", StringComparison.OrdinalIgnoreCase) ||
+                ShipStatus.Contains("unflyable", StringComparison.OrdinalIgnoreCase))
+            {
+                return UnflyableShipBrush;
+            }
+
+            return UnknownShipBrush;
+        }
+    }
     public MediaBrush ShipStatusBadgeBackgroundBrush => SelectStatusBadgePalette().Background;
     public MediaBrush ShipStatusBadgeBorderBrush => SelectStatusBadgePalette().Border;
     public MediaBrush ShipStatusBadgeTextBrush => SelectStatusBadgePalette().Text;

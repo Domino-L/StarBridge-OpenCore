@@ -453,7 +453,7 @@ public partial class MainWindow
                 code,
                 string.IsNullOrWhiteSpace(entry.Spec) ? "待分类" : entry.Spec,
                 entry.RoleDisplay(_language),
-                string.IsNullOrWhiteSpace(entry.Status) ? "概念" : entry.Status,
+                ShipCatalog.ResolveStatus(entry),
                 "未指定持有者",
                 "全库目录",
                 "目录项",

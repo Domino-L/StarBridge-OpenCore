@@ -82,6 +82,7 @@ public partial class MainWindow
     private void ResetAccountScopedState(string fleetChatStatus)
     {
         StopNetworkSyncTimers();
+        ResetFleetActivityAccountSession();
         ResetStartupDataGate();
         _profileSyncDebounceTimer.Stop();
         EndPersonalProfileAccountSession();
@@ -325,6 +326,7 @@ public partial class MainWindow
         {
             _networkSyncTimer.Start();
             _networkPlayerRealtimePullTimer.Start();
+            StartFleetActivityLoop();
         }
         else
         {
@@ -348,6 +350,7 @@ public partial class MainWindow
     {
         _networkSyncTimer.Stop();
         _networkPlayerRealtimePullTimer.Stop();
+        StopFleetActivityLoop();
         _networkRealtimePushTimer.Stop();
         _networkRealtimePushQueued = false;
     }

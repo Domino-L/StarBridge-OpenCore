@@ -219,6 +219,16 @@ public static partial class ShipCatalog
         return null;
     }
 
+    public static string ResolveStatus(ShipCatalogEntry? catalog)
+    {
+        return NormalizeStatus(catalog?.Status);
+    }
+
+    internal static string ResolveStatusValue(string? status)
+    {
+        return NormalizeStatus(status);
+    }
+
     public static string ResolveImagePath(
         ShipCatalogEntry? catalog,
         string? code,
@@ -339,7 +349,7 @@ public static partial class ShipCatalog
             return "概念";
         }
 
-        return string.IsNullOrWhiteSpace(status) ? "概念" : status;
+        return string.IsNullOrWhiteSpace(status) ? "未知" : status;
     }
 
     private static string RemoveManufacturerPrefix(string value)

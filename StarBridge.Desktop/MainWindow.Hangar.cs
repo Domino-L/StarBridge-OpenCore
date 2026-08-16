@@ -334,7 +334,7 @@ public partial class MainWindow
             var englishName = FormatFleetShipEnglishName(ship.Code, catalog?.EnglishName);
             var role = catalog?.RoleDisplay(_language) ?? "定位待补充";
             var value = string.IsNullOrWhiteSpace(ship.ValueDisplay) ? "未公布" : ship.ValueDisplay;
-            var status = string.IsNullOrWhiteSpace(catalog?.Status) ? "概念" : catalog!.Status;
+            var status = ShipCatalog.ResolveStatus(catalog);
             var category = GetOwnedShipRoleCategory(ship);
 
             _personalHangarPreviewRows.Add(new PersonalHangarPreviewRow(
@@ -518,7 +518,7 @@ public partial class MainWindow
             var nextShip = ship;
             if (existingShipsByKey.TryGetValue(key, out var existingShip))
             {
-                nextShip = nextShip with
+                nextShip = FleetShipCatalogProjection.InheritAuthoritativeMetadata(nextShip, existingShip) with
                 {
                     ImportedAt = existingShip.ImportedAt,
                     HangarImportedAt = ship.HangarImportedAt == default ? existingShip.HangarImportedAt : ship.HangarImportedAt,
@@ -670,7 +670,10 @@ public partial class MainWindow
                 continue;
             }
 
-            rows[BuildFleetShipKey(ship.OwnerGameName, ship.Code, ship.InstanceId)] = ship;
+            var key = BuildFleetShipKey(ship.OwnerGameName, ship.Code, ship.InstanceId);
+            rows[key] = rows.TryGetValue(key, out var existingShip)
+                ? FleetShipCatalogProjection.InheritAuthoritativeMetadata(ship, existingShip)
+                : ship;
         }
 
         var shipRows = new List<FleetShipInventoryRow>();
@@ -679,13 +682,10 @@ public partial class MainWindow
                      .ThenBy(ship => ship.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var catalog = ShipCatalog.Find(ship.Code, ship.DisplayName);
+            var catalogPresentation = FleetShipCatalogProjection.Resolve(ship, catalog, _language);
             var shipDisplayName = catalog?.DisplayName(_language) ?? ship.DisplayName;
             var shipEnglishName = FormatFleetShipEnglishName(ship.Code, catalog?.EnglishName);
-            var shipSpec = string.IsNullOrWhiteSpace(catalog?.Spec) ? "待分类" : catalog!.Spec;
-            var shipRole = catalog?.RoleDisplay(_language) ?? "";
-            var shipRoleVisual = GetFleetShipRoleVisual(GetFleetShipRoleCategory(catalog?.Role ?? ""));
-            var shipStatus = string.IsNullOrWhiteSpace(catalog?.Status) ? "概念" : catalog!.Status;
-            var shipPrice = catalog?.PriceDisplay ?? "未公布";
+            var shipRoleVisual = GetFleetShipRoleVisual(GetFleetShipRoleCategory(catalogPresentation.RawRole));
             var ownerDisplay = FormatFleetShipOwnerDisplay(ship.OwnerCallsign, ship.OwnerGameName);
             var ownerRosterMember = ResolveFleetShipOwnerRosterMember(ship);
             var ownerSnapshot = ResolveFleetShipOwnerSnapshot(ship);
@@ -702,10 +702,10 @@ public partial class MainWindow
                 GetInitials(ship.OwnerCallsign ?? ship.OwnerGameName),
                 hangarImportedAt.ToLocalTime().ToString("yyyy-MM-dd"),
                 ship.ImportedAt.ToLocalTime().ToString("yyyy-MM-dd"),
-                shipSpec,
-                shipRole,
-                shipStatus,
-                shipPrice,
+                catalogPresentation.Spec,
+                catalogPresentation.Role,
+                catalogPresentation.Status,
+                catalogPresentation.Price,
                 ResolveShipDisplayImagePath(
                     ship.CustomImageMediaId,
                     ShipCatalog.ResolveImagePath(catalog, ship.Code, ship.DisplayName)),
@@ -973,7 +973,7 @@ public partial class MainWindow
             var shipSpec = string.IsNullOrWhiteSpace(catalog?.Spec) ? "待分类" : catalog!.Spec;
             var shipRole = catalog?.RoleDisplay(_language) ?? "";
             var shipRoleVisual = GetFleetShipRoleVisual(GetFleetShipRoleCategory(catalog?.Role ?? ""));
-            var shipStatus = string.IsNullOrWhiteSpace(catalog?.Status) ? "可飞" : catalog!.Status;
+            var shipStatus = ShipCatalog.ResolveStatus(catalog);
             var shipPrice = catalog?.PriceDisplay ?? "未公布";
 
             rows.Add(new FleetShipInventoryRow(

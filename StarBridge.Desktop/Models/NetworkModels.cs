@@ -60,7 +60,11 @@ public sealed record NetworkOwnedShipSnapshot(
     string? CustomImageMediaId = null,
     double CustomImageCropFocusX = 0.5,
     double CustomImageCropFocusY = 0.5,
-    double CustomImageCropZoom = 1.0);
+    double CustomImageCropZoom = 1.0,
+    string? CatalogSpec = null,
+    string? CatalogRole = null,
+    string? CatalogStatus = null,
+    string? CatalogPriceUsd = null);
 
 public sealed record NetworkFleetActivityWindowSnapshot(
     string[]? Days,
@@ -213,7 +217,11 @@ public sealed record NetworkFleetShipSnapshot(
     string? CustomImageMediaId = null,
     double CustomImageCropFocusX = 0.5,
     double CustomImageCropFocusY = 0.5,
-    double CustomImageCropZoom = 1.0);
+    double CustomImageCropZoom = 1.0,
+    string? CatalogSpec = null,
+    string? CatalogRole = null,
+    string? CatalogStatus = null,
+    string? CatalogPriceUsd = null);
 
 public sealed record NetworkFleetEventLogSnapshot(
     string Id,

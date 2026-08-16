@@ -95,7 +95,8 @@ public partial class App : System.Windows.Application
         }
 
         BehaviorSettings = ApplicationBehaviorSettingsStore.Load().Normalize();
-        if (!WindowsStartupRegistration.TrySetEnabled(BehaviorSettings.LaunchAtStartup, out var startupError))
+        if (!ApplicationInstallationMaintenance.IsReadOnlyPreviewBuild &&
+            !WindowsStartupRegistration.TrySetEnabled(BehaviorSettings.LaunchAtStartup, out var startupError))
         {
             ApplicationBehaviorError = startupError;
         }

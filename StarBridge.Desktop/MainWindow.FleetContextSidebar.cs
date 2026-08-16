@@ -1012,6 +1012,7 @@ public partial class MainWindow
         if (text.Contains("成员", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("加入", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("退出", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("离开", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("上线", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("离线", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("移出", StringComparison.OrdinalIgnoreCase))
@@ -1398,6 +1399,7 @@ public partial class MainWindow
         var isGovernanceActivity =
             text.Contains("加入", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("退出", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("离开", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("申请", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("公告", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("介绍", StringComparison.OrdinalIgnoreCase) ||
@@ -1443,6 +1445,7 @@ public partial class MainWindow
                text.Contains("公告", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("加入", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("退出", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("离开", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("上线", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("离线", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("小队", StringComparison.OrdinalIgnoreCase) ||

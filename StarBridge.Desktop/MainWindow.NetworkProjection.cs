@@ -610,7 +610,11 @@ public partial class MainWindow
                 ship.CustomImageMediaId,
                 ship.CustomImageCropFocusX,
                 ship.CustomImageCropFocusY,
-                ship.CustomImageCropZoom))
+                ship.CustomImageCropZoom,
+                ship.CatalogSpec,
+                ship.CatalogRole,
+                ship.CatalogStatus,
+                ship.CatalogPriceUsd))
             .ToArray();
     }
 

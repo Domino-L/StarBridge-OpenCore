@@ -108,30 +108,41 @@ public partial class InGameSocialWindow : Window
                 snapshot.Friends.Length == 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            ApplyCommunicationPane(snapshot);
+            var messagesChanged = ApplyCommunicationPane(snapshot);
+
+            if (messagesChanged && ActivePane is { Messages.Length: > 0 } pane)
+            {
+                MessageList.Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Loaded,
+                    new Action(() => MessageList.ScrollIntoView(pane.Messages[^1])));
+            }
         }
         finally
         {
             _applyingSnapshot = false;
         }
-
-        if (ActivePane is { Messages.Length: > 0 } pane)
-        {
-            MessageList.Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.Loaded,
-                new Action(() => MessageList.ScrollIntoView(pane.Messages[^1])));
-        }
     }
 
-    private void ApplyCommunicationPane(InGameSocialSnapshot snapshot)
+    private bool ApplyCommunicationPane(InGameSocialSnapshot snapshot)
     {
         var isChannels = _section == InGameSocialSection.Channels;
         var pane = isChannels ? snapshot.Channels : snapshot.DirectMessages;
         var conversations = InGameSnapshotItemIdentity.PreserveEqualInstances(
             ConversationList.ItemsSource as IEnumerable<InGameChatChannelRow>,
             pane.Conversations);
-        ConversationList.ItemsSource = conversations;
-        MessageList.ItemsSource = pane.Messages;
+        if (!ReferenceEquals(ConversationList.ItemsSource, conversations))
+        {
+            ConversationList.ItemsSource = conversations;
+        }
+
+        var messages = InGameSnapshotItemIdentity.PreserveEqualInstances(
+            MessageList.ItemsSource as IEnumerable<object>,
+            pane.Messages);
+        var messagesChanged = !ReferenceEquals(MessageList.ItemsSource, messages);
+        if (messagesChanged)
+        {
+            MessageList.ItemsSource = messages;
+        }
         ConversationEmptyState.Visibility = pane.Conversations.Length == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -207,7 +218,10 @@ public partial class InGameSocialWindow : Window
         StatusText.Text = string.IsNullOrWhiteSpace(pane.StatusText)
             ? pane.CanSend ? "可以发送消息" : "选择好友或频道后即可发送消息"
             : pane.StatusText;
+        return messagesChanged;
     }
+
+    internal void SetStatus(string text) => StatusText.Text = text;
 
     internal void ResetAccountState(string statusText, bool isLoading = false)
     {

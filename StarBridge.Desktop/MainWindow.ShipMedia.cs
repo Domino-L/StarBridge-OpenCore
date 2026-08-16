@@ -109,9 +109,7 @@ public partial class MainWindow
                     ship.DisplayName);
                 var category = GetOwnedShipRoleCategory(ship);
                 var categoryVisual = GetFleetShipRoleVisual(category);
-                var status = string.IsNullOrWhiteSpace(catalogEntry?.Status)
-                    ? "状态待确认"
-                    : catalogEntry.Status;
+                var status = ShipCatalog.ResolveStatus(catalogEntry);
                 var isFlyable = status.Contains("可飞", StringComparison.OrdinalIgnoreCase) ||
                                 status.Contains("flight", StringComparison.OrdinalIgnoreCase) ||
                                 status.Contains("flyable", StringComparison.OrdinalIgnoreCase);

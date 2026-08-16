@@ -2122,8 +2122,20 @@ public partial class MainWindow
 
     private async void InGameMenuCoordinator_ChatAttachmentActionRequested(
         object? sender,
-        InGameChatAttachmentActionRequestedEventArgs e) =>
-        await HandleChatAttachmentActionAsync(e.Attachment);
+        InGameChatAttachmentActionRequestedEventArgs e)
+    {
+        try
+        {
+            await HandleChatAttachmentActionAsync(e.Attachment);
+        }
+        catch (Exception exception)
+        {
+            App.WriteCrashLog(exception);
+            _inGameMenuCoordinator.ShowNotice(
+                "附件操作失败",
+                UserFacingError.Describe(exception, "无法处理这个聊天附件，请稍后重试。"));
+        }
+    }
 
     private async void InGameMenuCoordinator_ProfileRequested(
         object? sender,

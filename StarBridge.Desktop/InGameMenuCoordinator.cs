@@ -26,6 +26,14 @@ internal sealed class InGameMenuClosedEventArgs(
 
 internal sealed class InGameMenuCoordinator : IDisposable
 {
+    private sealed class TransientInteractionLease(InGameMenuCoordinator owner) : IDisposable
+    {
+        private InGameMenuCoordinator? _owner = owner;
+
+        public void Dispose() =>
+            Interlocked.Exchange(ref _owner, null)?.EndTransientInteraction();
+    }
+
     private enum ToolKind
     {
         Browser,
@@ -59,6 +67,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     private bool _closingSession;
     private bool _menuSessionOpen;
     private bool _focusCheckPending;
+    private int _transientInteractionDepth;
     private bool _browserRequestedVisible;
     private bool _imageRequestedVisible;
     private bool _fleetRequestedVisible;
@@ -111,6 +120,26 @@ internal sealed class InGameMenuCoordinator : IDisposable
         _menuSessionOpen &&
         _window?.IsMenuOpen == true;
     internal bool IsFleetVisible => _fleetWindow?.IsVisible == true;
+
+    internal IDisposable BeginTransientInteraction()
+    {
+        _transientInteractionDepth++;
+        return new TransientInteractionLease(this);
+    }
+
+    private void EndTransientInteraction()
+    {
+        if (_transientInteractionDepth <= 0)
+        {
+            return;
+        }
+
+        _transientInteractionDepth--;
+        if (_transientInteractionDepth == 0 && _menuSessionOpen && !_closingSession)
+        {
+            ScheduleFocusCheck();
+        }
+    }
 
     internal bool BeginAccountSession(
         AccountSessionLease accountSession,
@@ -643,6 +672,9 @@ internal sealed class InGameMenuCoordinator : IDisposable
     internal void ShowRoomStatus(string text, bool isLoading = false) =>
         _roomWindow?.SetStatus(text, isLoading);
 
+    internal void ShowSocialStatus(string text) =>
+        _socialWindow?.SetStatus(text);
+
     internal void ShowRoomInvitationStatus(string text, bool isLoading = false) =>
         _roomWindow?.SetInvitationStatus(text, isLoading);
 
@@ -974,6 +1006,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
             _focusCheckPending = false;
             if (_closingSession ||
                 _captureInProgress ||
+                _transientInteractionDepth > 0 ||
                 _imageWindow is { IsChoosingImage: true } ||
                 SessionWindows().Any(window => window.IsActive) ||
                  ForegroundWindowBelongsToSession())

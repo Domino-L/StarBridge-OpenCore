@@ -1219,13 +1219,32 @@ public partial class MainWindow
             {
                 return false;
             }
+            if (!_fleetDirectoryState.IsLatestRequest(requestVersion))
+            {
+                return false;
+            }
+
+            var membershipCode = membership?.FleetCode?.Trim();
+            var membershipSnapshot = string.IsNullOrWhiteSpace(membershipCode)
+                ? null
+                : snapshots.FirstOrDefault(snapshot =>
+                      snapshot.Code.Equals(membershipCode, StringComparison.OrdinalIgnoreCase)) ??
+                  _allNetworkFleets
+                      .Select(card => card.Snapshot)
+                      .FirstOrDefault(snapshot =>
+                          snapshot.Code.Equals(membershipCode, StringComparison.OrdinalIgnoreCase));
+            if (membershipSnapshot is not null &&
+                (!_hasFleet || !IsSameFleet(membershipSnapshot.Code)))
+            {
+                JoinNetworkFleet(membershipSnapshot);
+            }
+
             var fetchedFleetCards = new List<NetworkFleetCard>();
-            var currentFleetExistsOnRelay = false;
-            NetworkFleetSnapshot? currentFleetSnapshot = null;
+            var currentFleetExistsOnRelay = membershipSnapshot is not null;
+            NetworkFleetSnapshot? currentFleetSnapshot = membershipSnapshot;
             var retainedPendingFleet = false;
             foreach (var snapshot in snapshots)
             {
-                var displaySnapshot = snapshot;
                 if (IsSameFleet(snapshot.Name) || IsSameFleet(snapshot.Code))
                 {
                     currentFleetExistsOnRelay = true;
@@ -1233,35 +1252,23 @@ public partial class MainWindow
                 }
 
                 fetchedFleetCards.Add(NetworkFleetCard.FromSnapshot(
-                    displaySnapshot,
+                    snapshot,
                     _fleetName,
                     _fleetCode,
                     _hasFleet,
                     _pendingFleetApplicationCodes));
             }
 
-            if (!string.IsNullOrWhiteSpace(membership?.FleetCode))
+            if (membershipSnapshot is not null &&
+                fetchedFleetCards.All(card =>
+                    !card.Snapshot.Code.Equals(membershipSnapshot.Code, StringComparison.OrdinalIgnoreCase)))
             {
-                var membershipSnapshot = snapshots.FirstOrDefault(snapshot =>
-                    snapshot.Code.Equals(membership.FleetCode, StringComparison.OrdinalIgnoreCase));
-                if (membershipSnapshot is not null)
-                {
-                    currentFleetExistsOnRelay = true;
-                    currentFleetSnapshot = membershipSnapshot;
-                    if (!_hasFleet || !IsSameFleet(membershipSnapshot.Code))
-                    {
-                        _hasFleet = true;
-                        _isCreatingFleet = false;
-                        MarkFleetMembershipChanged();
-                        LocalFleetText.Text = $"{membershipSnapshot.Name} [{membershipSnapshot.Code}]";
-                        UpdateFleetEntryPanels();
-                    }
-                }
-            }
-
-            if (!_fleetDirectoryState.IsLatestRequest(requestVersion))
-            {
-                return false;
+                fetchedFleetCards.Insert(0, NetworkFleetCard.FromSnapshot(
+                    membershipSnapshot,
+                    _fleetName,
+                    _fleetCode,
+                    _hasFleet,
+                    _pendingFleetApplicationCodes));
             }
 
             if (currentFleetSnapshot is not null)
@@ -1315,7 +1322,10 @@ public partial class MainWindow
             }
             _allNetworkFleets.Clear();
             _allNetworkFleets.AddRange(fetchedFleetCards);
-            _ = _fleetDirectoryCache.SaveAsync(snapshots);
+            _ = _fleetDirectoryCache.SaveAsync(fetchedFleetCards
+                .Select(card => card.Snapshot)
+                .DistinctBy(snapshot => snapshot.Code, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
             _fleetDirectoryState.CompleteLoad(requestVersion, fetchedFleetCards.Count);
             ApplyFleetSearchFilter(preservedVisibleOrder);
             RefreshFleetDirectoryViewState();
