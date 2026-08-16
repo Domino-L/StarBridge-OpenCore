@@ -745,16 +745,23 @@ public partial class MainWindow
 
         var candidate = ReadPersonalProfileSettingsFromEditor();
         var accountIdentity = GetPersonalProfileAccountIdentity();
+        var savedLocally = false;
         try
         {
+            candidate.Save(accountIdentity);
+            savedLocally = true;
             if (!CanSynchronizeUserData || string.IsNullOrWhiteSpace(accountIdentity) || _personalProfileRepository is null)
             {
-                candidate.Save(accountIdentity);
                 _personalProfileSettings = candidate;
                 _personalProfileSavedSettings = candidate.Copy();
                 CommitPersonalProfileIdentityDraft();
                 SetPersonalProfileEditMode(false);
                 RefreshPersonalProfileContent();
+                RefreshPersonalProfileOnlineTimeEditorState(
+                    IsLoggedIn
+                        ? "已保存到本地，完成游戏身份绑定后同步"
+                        : "已保存到本地，登录后同步",
+                    isWarning: true);
                 return;
             }
 
@@ -777,7 +784,6 @@ public partial class MainWindow
                     break;
                 case PersonalProfileSaveStatus.QueuedOffline:
                 case PersonalProfileSaveStatus.Unauthorized:
-                    candidate.Save(accountIdentity);
                     _personalProfileSettings = candidate;
                     _personalProfileSavedSettings = candidate.Copy();
                     CommitPersonalProfileIdentityDraft();
@@ -803,8 +809,26 @@ public partial class MainWindow
         }
         catch
         {
+            if (savedLocally)
+            {
+                try
+                {
+                    _personalProfileSettings = candidate;
+                    _personalProfileSavedSettings = candidate.Copy();
+                    CommitPersonalProfileIdentityDraft();
+                    SetPersonalProfileEditMode(false);
+                    RefreshPersonalProfileContent();
+                    RefreshPersonalProfileOnlineTimeEditorState("已保存到本地，远程同步暂时失败", isWarning: true);
+                    return;
+                }
+                catch
+                {
+                    // Fall through to the local-storage error below.
+                }
+            }
+
             PersonalProfileSaveButton.IsEnabled = _isPersonalProfileDirty;
-            RefreshPersonalProfileEditorState("主页设置保存失败，请检查本地配置目录后重试。", isWarning: true);
+            RefreshPersonalProfileEditorState("本地主页设置保存失败，请检查配置目录是否可写。", isWarning: true);
         }
     }
 

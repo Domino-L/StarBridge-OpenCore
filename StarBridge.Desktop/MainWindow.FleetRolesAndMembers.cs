@@ -687,15 +687,15 @@ public partial class MainWindow
                 continue;
             }
 
+            var roleTitle = _fleetRoleGroupDefinitions.TryGetValue(roleGroupKey, out var roleDefinition)
+                ? roleDefinition.DisplayName
+                : permission.RoleTitle;
             var permissionIds = ResolveRoleGroupPermissionIds(roleGroupKey, permission.ExtraAllowedPermissions);
-            if (permissionIds.Length == 0)
-            {
-                continue;
-            }
-
             var flags = MapPermissionIdsToFleetPermissionFlags(permissionIds);
             updates.Add((pair.Key, permission with
             {
+                RoleTitle = roleTitle,
+                RoleGroupKey = roleGroupKey,
                 CanRemoveMembers = flags.CanRemoveMembers,
                 CanPublishTasks = flags.CanPublishTasks,
                 CanPublishPlans = flags.CanPublishPlans,
@@ -928,7 +928,7 @@ public partial class MainWindow
                 OnlineStatus = player.SharedOnlineStatusValue,
                 LiveStatus = player.SharedLiveStatusValue,
                 RoleTitle = isCommander
-                    ? "组织负责人"
+                    ? GetFleetCommanderRoleTitle()
                     : hasInvalidCommanderRole
                         ? "权限无效"
                         : NormalizeRoleDisplayTitle(permission?.RoleTitle, permission?.RoleGroupKey),
@@ -971,7 +971,7 @@ public partial class MainWindow
                 AvatarPath = "",
                 OnlineStatus = "Offline",
                 RoleTitle = isCommander
-                    ? "组织负责人"
+                    ? GetFleetCommanderRoleTitle()
                     : hasInvalidCommanderRole
                         ? "权限无效"
                         : NormalizeRoleDisplayTitle(permission.RoleTitle, permission.RoleGroupKey),

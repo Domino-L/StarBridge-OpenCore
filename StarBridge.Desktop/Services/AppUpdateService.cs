@@ -749,8 +749,7 @@ try {
     private static string GetUpdateRoot()
     {
         return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "StarBridge",
+            DesktopStorageRoot.BootstrapDirectory,
             "Updates");
     }
 

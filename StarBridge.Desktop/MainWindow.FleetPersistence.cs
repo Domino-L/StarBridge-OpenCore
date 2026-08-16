@@ -381,7 +381,7 @@ public partial class MainWindow
         EnsureDefaultFleetRoleGroupDefinitions();
     }
 
-    private static LocalFleetRoleGroup? NormalizeFleetRoleGroupDefinition(
+    private LocalFleetRoleGroup? NormalizeFleetRoleGroupDefinition(
         LocalFleetRoleGroup role,
         bool migrateLegacyAnnouncementPermission)
     {

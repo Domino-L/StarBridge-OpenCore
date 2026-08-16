@@ -12,6 +12,7 @@ public partial class MainWindow
     {
         None,
         Initial,
+        IdentityBinding,
         OverlaySettings
     }
 
@@ -31,7 +32,8 @@ public partial class MainWindow
         Introduction,
         OpenAccountMenu,
         OpenIdentitySettings,
-        SelectLog
+        SelectLog,
+        BindIdentity
     }
 
     private sealed record OverlayGuidePage(
@@ -55,21 +57,80 @@ public partial class MainWindow
     private FrameworkElement? _lastGuidedTourLayoutTarget;
     private OnboardingJourneyStage _onboardingJourneyStage;
 
-    private Task<bool> StartInitialGuidedTourAsync()
+    private async Task<bool> StartInitialGuidedTourAsync()
     {
+        if (!IsLoggedIn)
+        {
+            return false;
+        }
+
+        await WaitForVisibleDialogsToCloseAsync();
+        if (Dispatcher.HasShutdownStarted || !IsLoaded)
+        {
+            return false;
+        }
+
+        var shouldStart = StarBridgeMessageBox.ShowAction(
+            this,
+            "是否开始应用引导流程？\n\n引导会先帮助你连接 Game.log，再带你完成登录、身份绑定并认识主要功能。你也可以暂不开始，之后从“信息与支持”重新打开。",
+            "开始应用引导流程",
+            "开始引导",
+            "暂不开始",
+            MessageBoxImage.Question);
+        if (!shouldStart)
+        {
+            OnboardingState.MarkDeferred();
+            return false;
+        }
+
         _initialGuideCompletionSource = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         _guideMode = GuideMode.Initial;
         OnboardingState.ClearDeferred();
-        ShowJourneyStage(OnboardingJourney.Resume(IsLoggedIn, OnboardingState.GetFeatureTourStep()));
+        _onboardingJourneyStage = OnboardingJourney.Resume(
+            isLoggedIn: true,
+            OnboardingState.GetFeatureTourStep());
+        if (_identityBindingSupported && !IsIdentityBindingVerified)
+        {
+            ShowMandatoryIdentityBindingGuide();
+        }
+        else
+        {
+            ShowJourneyStage(_onboardingJourneyStage);
+        }
 
-        return _initialGuideCompletionSource.Task;
+        return await _initialGuideCompletionSource.Task;
+    }
+
+    private async Task WaitForVisibleDialogsToCloseAsync()
+    {
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        while (!Dispatcher.HasShutdownStarted)
+        {
+            var hasVisibleDialog = false;
+            foreach (Window ownedWindow in OwnedWindows)
+            {
+                if (ownedWindow.IsVisible)
+                {
+                    hasVisibleDialog = true;
+                    break;
+                }
+            }
+
+            if (!hasVisibleDialog)
+            {
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                return;
+            }
+
+            await Task.Delay(100);
+        }
     }
 
     private void ShowJourneyStage(OnboardingJourneyStage stage)
     {
         _onboardingJourneyStage = stage;
-        ShowInitialGuideStep(stage.Chapter switch
+        var step = stage.Chapter switch
         {
             OnboardingJourneyChapter.Login => GuideStep.LoginFirst,
             OnboardingJourneyChapter.Account => GuideStep.AccountOverview,
@@ -81,13 +142,20 @@ public partial class MainWindow
             OnboardingJourneyChapter.Overlay => GuideStep.OverlayOverview,
             OnboardingJourneyChapter.Support => GuideStep.SupportOverview,
             _ => GuideStep.Complete
-        });
+        };
+        if (step == GuideStep.LoginFirst && !HasConnectedGameLog())
+        {
+            step = GuideStep.SelectLog;
+        }
+
+        ShowInitialGuideStep(step);
     }
 
     private void ShowInitialGuideStep(GuideStep step)
     {
         _guideMode = GuideMode.Initial;
         _guideStep = step;
+        GuidedTourInteractionBlocker.Visibility = Visibility.Collapsed;
         GuidedTourOverlay.Visibility = Visibility.Visible;
         GuidedTourIntroductionScrollViewer.Visibility = Visibility.Collapsed;
         GuidedTourBodyText.Visibility = Visibility.Visible;
@@ -95,7 +163,7 @@ public partial class MainWindow
         GuidedTourSecondaryButton.Visibility = Visibility.Visible;
         GuidedTourBackButton.Visibility = Visibility.Collapsed;
         GuidedTourPrimaryButton.Visibility = Visibility.Collapsed;
-        GuidedTourEyebrowText.Text = step == GuideStep.LoginFirst ? "首次启航" : "启航航线";
+        GuidedTourEyebrowText.Text = step is GuideStep.LoginFirst or GuideStep.SelectLog ? "首次启航" : "启航航线";
 
         if (IsBridgeShellEnabled && TryConfigureBridgeFeatureTourStep(step))
         {
@@ -114,6 +182,18 @@ public partial class MainWindow
                 GuidedTourPrimaryButton.IsEnabled = false;
                 GuidedTourPrimaryButton.Visibility = Visibility.Visible;
                 GuidedTourProgressText.Text = "说明 · 1 / 3";
+                break;
+            case GuideStep.SelectLog:
+                OpenPersonalIdentitySettings_Click(this, new RoutedEventArgs());
+                RefreshBridgeShellForSelectedTab();
+                ConfigureClickStep(
+                    PersonalQuickScanLogButton,
+                    "先连接 Game.log",
+                    "无需登录即可扫描游戏日志。连接后，应用才能识别你的 Star Citizen 游戏 ID，并在注册后用一个明确步骤请你确认绑定。",
+                    "首次启航 · 游戏日志");
+                GuidedTourPrimaryButton.Content = "扫描日志";
+                GuidedTourPrimaryButton.IsEnabled = true;
+                GuidedTourPrimaryButton.Visibility = Visibility.Visible;
                 break;
             case GuideStep.LoginFirst:
                 ConfigureClickStep(
@@ -263,6 +343,12 @@ public partial class MainWindow
             return;
         }
 
+        if (_guideStep == GuideStep.SelectLog && action == GuideStep.SelectLog)
+        {
+            ShowInitialGuideStep(GuideStep.LoginFirst);
+            return;
+        }
+
         if (_guideStep == GuideStep.LoginFirst && action == GuideStep.LoginFirst)
         {
             if (!IsLoggedIn)
@@ -285,11 +371,30 @@ public partial class MainWindow
             return;
         }
 
+        if (_guideMode == GuideMode.IdentityBinding)
+        {
+            await ContinueMandatoryIdentityBindingGuideAsync();
+            return;
+        }
+
         switch (_guideStep)
         {
+            case GuideStep.SelectLog:
+                if (QuickScanLogAndStart())
+                {
+                    ShowInitialGuideStep(GuideStep.LoginFirst);
+                }
+                break;
             case GuideStep.LoginFirst:
                 await HandleOnboardingActionAsync(OnboardingNextAction.Login);
-                NotifyGuidedTourAction(GuideStep.LoginFirst);
+                if (IsLoggedIn && _identityBindingSupported && !IsIdentityBindingVerified)
+                {
+                    ShowMandatoryIdentityBindingGuide();
+                }
+                else
+                {
+                    NotifyGuidedTourAction(GuideStep.LoginFirst);
+                }
                 break;
             case GuideStep.Complete:
                 OnboardingState.MarkCompleted();
@@ -325,6 +430,13 @@ public partial class MainWindow
             return;
         }
 
+        if (_guideMode == GuideMode.IdentityBinding)
+        {
+            SelectLog_Click(this, new RoutedEventArgs());
+            ShowMandatoryIdentityBindingGuide();
+            return;
+        }
+
         OnboardingState.MarkDeferred();
         HideGuidedTour();
         _initialGuideCompletionSource?.TrySetResult(false);
@@ -347,6 +459,7 @@ public partial class MainWindow
     private void HideGuidedTour()
     {
         GuidedTourOverlay.Visibility = Visibility.Collapsed;
+        GuidedTourInteractionBlocker.Visibility = Visibility.Collapsed;
         GuidedTourIntroductionScrollViewer.Visibility = Visibility.Collapsed;
         GuidedTourTargetFrame.Visibility = Visibility.Collapsed;
         _guidedTourTarget = null;

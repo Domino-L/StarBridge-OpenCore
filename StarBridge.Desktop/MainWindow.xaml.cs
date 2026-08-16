@@ -104,6 +104,8 @@ public partial class MainWindow : Window, IAppUpdateUi
     private const int FleetBannerSyncImageMaxBytes = 2 * 1024 * 1024;
     private const int InitialGameLogReplayMaxBytes = 2 * 1024 * 1024;
     private const int InitialGameLogReplayMaxLines = 1500;
+    private const int IdentityGameLogReplayMaxBytes = 8 * 1024 * 1024;
+    private const int IdentityGameLogReplayMaxLines = 20000;
     private const int QuantumContextReplayMaxBytes = 16 * 1024 * 1024;
     private const int QuantumContextReplayMaxLines = 30000;
     private static readonly TimeSpan LocalSquadEditProtectionWindow = TimeSpan.FromSeconds(45);
@@ -3724,7 +3726,7 @@ public partial class MainWindow : Window, IAppUpdateUi
 
             var dialog = new GuideHintWindow(
                 "未找到 Game.log",
-                "没有在各磁盘的 StarCitizen\\LIVE\\Game.log 找到日志。请确认游戏安装位置，或点击“选择日志”手动选择。")
+                "已检查磁盘根目录、RSI 默认安装目录和常见 Games 目录，但没有找到 StarCitizen\\LIVE\\Game.log。请确认游戏安装位置，或点击“选择日志”手动选择；游戏运行中也可以选择。")
             {
                 Owner = this
             };
@@ -3775,6 +3777,8 @@ public partial class MainWindow : Window, IAppUpdateUi
             QuantumContextReplayMaxBytes,
             QuantumContextReplayMaxLines);
 
+        RecoverPlayerIdentityFromLogHead(logPath);
+
         foreach (var line in GameLogInitialReplayReader.ReadTailLines(logPath, InitialGameLogReplayMaxBytes, InitialGameLogReplayMaxLines))
         {
             var fleetEvent = _parser.TryParse(line);
@@ -3786,6 +3790,7 @@ public partial class MainWindow : Window, IAppUpdateUi
 
         RenderState();
         RefreshOnboardingSupportPanel();
+        RefreshIdentityVerificationPresentation();
         RefreshHeaderStatusBar();
 
         _watcher = new GameLogWatcher(logPath, replayExistingLines: false, line =>
@@ -3804,6 +3809,36 @@ public partial class MainWindow : Window, IAppUpdateUi
         StartLocationHistoryScanIfAllowed();
         _ = RefreshGameServerFromLogSnapshotAfterStartAsync();
         return true;
+    }
+
+    private void RecoverPlayerIdentityFromLogHead(string logPath)
+    {
+        var recoveryParser = new RegexLogEventParser();
+        string? identityLine = null;
+        foreach (var line in GameLogInitialReplayReader.ReadHeadLines(
+                     logPath,
+                     IdentityGameLogReplayMaxBytes,
+                     IdentityGameLogReplayMaxLines))
+        {
+            var fleetEvent = recoveryParser.TryParse(line);
+            if (fleetEvent?.Type == FleetEventType.PlayerOnline &&
+                !string.IsNullOrWhiteSpace(fleetEvent.Player) &&
+                !string.IsNullOrWhiteSpace(fleetEvent.PlayerId))
+            {
+                identityLine = line;
+            }
+        }
+
+        if (identityLine is null)
+        {
+            return;
+        }
+
+        var recoveredIdentity = _parser.TryParse(identityLine);
+        if (recoveredIdentity is not null)
+        {
+            ApplyLine(identityLine, output: false, recoveredIdentity);
+        }
     }
 
     private async Task RefreshGameServerFromLogSnapshotAfterStartAsync()
@@ -4266,7 +4301,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     {
         if (isFleetCommander ?? IsFleetCommander(playerName, callsign))
         {
-            return "组织负责人";
+            return GetFleetCommanderRoleTitle();
         }
 
         var permission = GetFleetPermission(playerName, callsign);
@@ -4678,9 +4713,16 @@ public partial class MainWindow : Window, IAppUpdateUi
             : $"custom_{SanitizeRoleGroupKey(role)}";
     }
 
-    private static string NormalizeRoleDisplayTitle(string? roleTitle, string? roleGroupKey = null)
+    private string NormalizeRoleDisplayTitle(string? roleTitle, string? roleGroupKey = null)
     {
         var key = NormalizeRoleGroupKey(roleGroupKey, roleTitle);
+        if (!string.IsNullOrWhiteSpace(key) &&
+            _fleetRoleGroupDefinitions.TryGetValue(key, out var definition) &&
+            !string.IsNullOrWhiteSpace(definition.DisplayName))
+        {
+            return NormalizeRoleTitle(definition.DisplayName);
+        }
+
         return key switch
         {
             "fleet_commander" => "组织负责人",
@@ -4689,6 +4731,9 @@ public partial class MainWindow : Window, IAppUpdateUi
             _ => NormalizeRoleTitle(roleTitle)
         };
     }
+
+    private string GetFleetCommanderRoleTitle() =>
+        NormalizeRoleDisplayTitle("组织负责人", FleetCommanderRoleGroupKey);
 
     private static bool IsFleetCommanderRole(string? roleGroupKey, string? roleTitle = null)
     {

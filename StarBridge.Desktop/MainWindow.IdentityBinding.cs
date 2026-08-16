@@ -3,6 +3,7 @@ namespace StarBridge.Desktop;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.Http;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -16,8 +17,6 @@ public partial class MainWindow
     private bool _identityBindingSupported;
     private IdentityBindingAssessment _identityBindingAssessment =
         IdentityBindingPolicy.Evaluate(null, null, null);
-    private readonly IdentityBindingPromptTracker _identityBindingPromptTracker = new();
-    private bool _identityBindingPromptOpen;
     private bool _identityBindingRequestInProgress;
     private bool _onboardingDialogOpen;
 
@@ -58,9 +57,19 @@ public partial class MainWindow
         _identityBindingConfirmedAt = null;
         _identityBindingUpdatedAt = null;
         _identityBindingSupported = false;
-        _identityBindingPromptTracker.Reset();
         _identityBindingAssessment = IdentityBindingPolicy.Evaluate(null, null, _localPlayer);
         RefreshIdentityVerificationPresentation();
+        if (_guideMode == GuideMode.IdentityBinding)
+        {
+            if (_initialGuideCompletionSource is { Task.IsCompleted: false })
+            {
+                ShowJourneyStage(OnboardingJourney.Resume(isLoggedIn: false, savedChapterIndex: 0));
+            }
+            else
+            {
+                HideGuidedTour();
+            }
+        }
     }
 
     private void ReevaluateIdentityBinding(bool showPrompt)
@@ -93,18 +102,25 @@ public partial class MainWindow
         RefreshIdentityVerificationPresentation();
         RefreshHeaderStatusBar();
 
-        if (!_identityBindingPromptTracker.ShouldPrompt(
-                _accountId,
-                _identityBindingAssessment,
-                promptAllowed: showPrompt && IsLoaded && IsLoggedIn &&
-                               !_onboardingDialogOpen))
+        if (IsLoggedIn &&
+            _identityBindingSupported &&
+            !IsIdentityBindingVerified &&
+            IsLoaded &&
+            !_isLoginDialogOpen)
         {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(ShowMandatoryIdentityBindingGuide));
             return;
         }
 
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.Background,
-            new Action(async () => await ShowIdentityBindingPromptAsync(force: false)));
+        if (IsIdentityBindingVerified && _guideMode == GuideMode.IdentityBinding)
+        {
+            CompleteMandatoryIdentityBindingGuide();
+            return;
+        }
+
+        _ = showPrompt;
     }
 
     private void RefreshIdentityVerificationPresentation()
@@ -114,7 +130,43 @@ public partial class MainWindow
             return;
         }
 
-        if (!IsLoggedIn || !_identityBindingSupported || IsIdentityBindingVerified)
+        if (PersonalQuickScanLogButton is not null)
+        {
+            PersonalQuickScanLogButton.Content = HasConnectedGameLog()
+                ? "重新扫描"
+                : "扫描日志";
+        }
+
+        if (!IsLoggedIn)
+        {
+            if (HasConnectedGameLog())
+            {
+                IdentityVerificationBanner.Visibility = Visibility.Collapsed;
+                if (TopBannerReserveRow is not null)
+                {
+                    TopBannerReserveRow.Height = new GridLength(0);
+                }
+
+                return;
+            }
+
+            IdentityVerificationBanner.Visibility = Visibility.Visible;
+            if (TopBannerReserveRow is not null)
+            {
+                TopBannerReserveRow.Height = new GridLength(38);
+            }
+
+            var informationBrush = FindBrush("StatusInfoBrush", Brushes.DeepSkyBlue);
+            IdentityVerificationBannerTitleText.Text = "连接游戏日志";
+            IdentityVerificationBannerDetailText.Text = "登录前也可以先扫描 Game.log，稍后将用它识别并绑定你的游戏 ID";
+            IdentityVerificationBannerTitleText.Foreground = informationBrush;
+            IdentityVerificationBanner.BorderBrush = informationBrush;
+            IdentityVerificationBannerActionButton.Content = "扫描日志";
+            IdentityVerificationBannerActionButton.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (!_identityBindingSupported || IsIdentityBindingVerified)
         {
             IdentityVerificationBanner.Visibility = Visibility.Collapsed;
             if (TopBannerReserveRow is not null)
@@ -154,7 +206,7 @@ public partial class MainWindow
                 IdentityVerificationBannerTitleText.Text = "等待游戏身份";
                 IdentityVerificationBannerDetailText.Text =
                     "进入游戏后将从 Game.log 识别游戏 ID；完成绑定前不会同步用户数据";
-                IdentityVerificationBannerActionButton.Content = "前往绑定设置";
+                IdentityVerificationBannerActionButton.Content = "开始绑定";
                 IdentityVerificationBannerActionButton.Visibility = Visibility.Visible;
                 break;
         }
@@ -186,57 +238,127 @@ public partial class MainWindow
 
     private async void IdentityVerificationBannerActionButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_identityBindingAssessment.State == IdentityVerificationState.AwaitingGameIdentity)
+        if (!IsLoggedIn)
         {
-            OpenPersonalIdentitySettings_Click(sender, e);
+            QuickScanLogAndStart();
+            RefreshIdentityVerificationPresentation();
             return;
         }
 
         await ShowIdentityBindingPromptAsync(force: true);
     }
 
-    private async Task ShowIdentityBindingPromptAsync(bool force)
+    private bool HasConnectedGameLog() =>
+        !string.IsNullOrWhiteSpace(_logPath) &&
+        File.Exists(_logPath) &&
+        LogFileSelectionGuard.ValidateGameLogPath(_logPath).IsValid;
+
+    private Task ShowIdentityBindingPromptAsync(bool force)
     {
-        if (_identityBindingPromptOpen || _identityBindingRequestInProgress || !IsLoggedIn)
+        _ = force;
+        ShowMandatoryIdentityBindingGuide();
+        return Task.CompletedTask;
+    }
+
+    private void ShowMandatoryIdentityBindingGuide()
+    {
+        if (!IsLoggedIn || !_identityBindingSupported || IsIdentityBindingVerified)
+        {
+            return;
+        }
+
+        _guideMode = GuideMode.IdentityBinding;
+        _guideStep = GuideStep.BindIdentity;
+        _guidedTourTarget = null;
+        GuidedTourOverlay.Visibility = Visibility.Visible;
+        GuidedTourInteractionBlocker.Visibility = Visibility.Visible;
+        GuidedTourIntroductionScrollViewer.Visibility = Visibility.Collapsed;
+        GuidedTourBodyText.Visibility = Visibility.Visible;
+        GuidedTourBackButton.Visibility = Visibility.Collapsed;
+        GuidedTourEyebrowText.Text = "必需设置 · 只需一次";
+        GuidedTourProgressText.Text = "完成后自动启用好友、组织、房间与同步";
+
+        switch (_identityBindingAssessment.State)
+        {
+            case IdentityVerificationState.BindingRequired:
+                GuidedTourTitleText.Text = "确认你的游戏 ID";
+                GuidedTourBodyText.Text =
+                    $"已从 Game.log 识别到：{_identityBindingAssessment.DetectedGameName}\n\n确认后即可继续使用全部联网功能。";
+                GuidedTourPrimaryButton.Content = "确认绑定";
+                GuidedTourPrimaryButton.Visibility = Visibility.Visible;
+                GuidedTourSecondaryButton.Visibility = Visibility.Collapsed;
+                break;
+            case IdentityVerificationState.Mismatch:
+                GuidedTourTitleText.Text = "游戏 ID 已发生变化";
+                GuidedTourBodyText.Text =
+                    $"账号原绑定：{_identityBindingAssessment.BoundGameName}\n当前识别：{_identityBindingAssessment.DetectedGameName}\n\n确认重新绑定后即可恢复同步。";
+                GuidedTourPrimaryButton.Content = "确认重新绑定";
+                GuidedTourPrimaryButton.Visibility = Visibility.Visible;
+                GuidedTourSecondaryButton.Visibility = Visibility.Collapsed;
+                break;
+            default:
+                GuidedTourTitleText.Text = "连接 Game.log";
+                GuidedTourBodyText.Text = File.Exists(_logPath)
+                    ? "Game.log 已连接。请启动并进入一次 Star Citizen；识别到游戏 ID 后，本页会自动进入确认。"
+                    : "点击“自动查找”连接 StarCitizen\\LIVE\\Game.log；如果游戏装在特殊目录，可以手动选择。连接后进入一次游戏即可。";
+                GuidedTourPrimaryButton.Content = "自动查找";
+                GuidedTourPrimaryButton.Visibility = Visibility.Visible;
+                GuidedTourSecondaryButton.Content = "手动选择";
+                GuidedTourSecondaryButton.Visibility = Visibility.Visible;
+                break;
+        }
+
+        GuidedTourPrimaryButton.IsEnabled = !_identityBindingRequestInProgress;
+        ScheduleGuidedTourLayout();
+        GuidedTourPrimaryButton.Focus();
+    }
+
+    private async Task ContinueMandatoryIdentityBindingGuideAsync()
+    {
+        if (_identityBindingRequestInProgress || !IsLoggedIn)
         {
             return;
         }
 
         var assessment = _identityBindingAssessment;
-        if (assessment.State is not (IdentityVerificationState.BindingRequired or IdentityVerificationState.Mismatch) ||
+        if (assessment.State == IdentityVerificationState.AwaitingGameIdentity ||
             string.IsNullOrWhiteSpace(assessment.DetectedGameName))
         {
+            QuickScanLogAndStart();
+            ShowMandatoryIdentityBindingGuide();
             return;
         }
 
-        _identityBindingPromptOpen = true;
-        try
+        await BindDetectedGameIdentityAsync(
+            assessment.DetectedGameName,
+            assessment.State == IdentityVerificationState.Mismatch);
+        if (!IsIdentityBindingVerified)
         {
-            var replacing = assessment.State == IdentityVerificationState.Mismatch;
-            var title = replacing ? "无法验证身份" : "绑定游戏身份";
-            var message = (replacing
-                ? $"当前检测到的游戏 ID 与账号绑定信息不一致。\n\n已绑定：{assessment.BoundGameName}\n当前检测：{assessment.DetectedGameName}\n\n为保护账号数据，所有同步功能已暂停。本地游玩时长仍会继续记录。重新绑定后，组织身份、权限和机库归属会迁移到新的游戏 ID。"
-                : $"已从 Game.log 识别到游戏 ID：{assessment.DetectedGameName}\n\n星海舰桥需要绑定该游戏 ID，用于校验当前账号的游戏身份，避免同一账号切换到其他游戏 ID 后继续同步并造成资料错乱。不同星海舰桥账号可以绑定相同的游戏 ID。") +
-                "\n\n如果暂不绑定，星海舰桥将退出。下次启动后仍可重新完成绑定。";
-            var confirmed = StarBridgeMessageBox.ShowAction(
-                this,
-                message,
-                title,
-                replacing ? "重新绑定" : "绑定此游戏 ID",
-                "退出应用",
-                replacing ? MessageBoxImage.Warning : MessageBoxImage.Question);
-            if (!confirmed)
+            ShowMandatoryIdentityBindingGuide();
+        }
+    }
+
+    private void CompleteMandatoryIdentityBindingGuide()
+    {
+        GuidedTourInteractionBlocker.Visibility = Visibility.Collapsed;
+        if (_initialGuideCompletionSource is { Task.IsCompleted: false })
+        {
+            if (_onboardingJourneyStage.Chapter == OnboardingJourneyChapter.Login)
             {
-                ExitApplicationForUnboundIdentity();
-                return;
+                OnboardingState.MarkIntroductionRead();
+                OnboardingState.MarkPreparationCompleted();
+                OnboardingState.SetFeatureTourStep(0);
+                ShowJourneyStage(OnboardingJourney.Next(_onboardingJourneyStage, isLoggedIn: true));
+            }
+            else
+            {
+                ShowJourneyStage(_onboardingJourneyStage);
             }
 
-            await BindDetectedGameIdentityAsync(assessment.DetectedGameName, replacing);
+            return;
         }
-        finally
-        {
-            _identityBindingPromptOpen = false;
-        }
+
+        HideGuidedTour();
     }
 
     private void ExitApplicationForUnboundIdentity()
@@ -258,6 +380,11 @@ public partial class MainWindow
         _identityBindingRequestInProgress = true;
         IdentityVerificationBannerActionButton.IsEnabled = false;
         IdentityVerificationBannerActionButton.Content = replaceExisting ? "重新绑定中..." : "绑定中...";
+        if (_guideMode == GuideMode.IdentityBinding)
+        {
+            GuidedTourPrimaryButton.IsEnabled = false;
+            GuidedTourPrimaryButton.Content = replaceExisting ? "重新绑定中..." : "绑定中...";
+        }
         try
         {
             using var request = new HttpRequestMessage(
@@ -334,6 +461,10 @@ public partial class MainWindow
             _identityBindingRequestInProgress = false;
             IdentityVerificationBannerActionButton.IsEnabled = true;
             RefreshIdentityVerificationPresentation();
+            if (IsLoggedIn && _identityBindingSupported && !IsIdentityBindingVerified)
+            {
+                ShowMandatoryIdentityBindingGuide();
+            }
         }
     }
 }

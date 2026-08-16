@@ -705,6 +705,22 @@ public partial class MainWindow
         return cts;
     }
 
+    private void CompleteSyncStatusSlowNotice(CancellationTokenSource owner)
+    {
+        // A newer synchronization attempt owns the slot after replacing this
+        // token source. BeginSyncStatusSlowNotice has already cancelled and
+        // disposed the old owner in that case, so the old continuation must
+        // not touch it again.
+        if (!ReferenceEquals(_syncStatusOverlayCts, owner))
+        {
+            return;
+        }
+
+        _syncStatusOverlayCts = null;
+        owner.Cancel();
+        owner.Dispose();
+    }
+
     private async Task ShowSlowSyncNoticeAsync(CancellationToken cancellationToken)
     {
         try

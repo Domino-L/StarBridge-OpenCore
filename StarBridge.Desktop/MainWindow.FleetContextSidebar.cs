@@ -1463,7 +1463,7 @@ public partial class MainWindow
     {
         if (IsCurrentUserFleetCommander())
         {
-            return "组织负责人";
+            return GetFleetCommanderRoleTitle();
         }
 
         var permission = GetCurrentUserFleetPermission();

@@ -1868,6 +1868,12 @@ public partial class MainWindow
             return;
         }
 
+        var noPermissionTitle = IsLoggedIn
+            ? "完成游戏身份绑定后查看好友"
+            : "登录后查看好友";
+        var noPermissionDescription = IsLoggedIn
+            ? "应用账号已登录。连接 Game.log 并完成游戏身份绑定后，即可同步好友、申请与私信。"
+            : "登录应用账号并完成游戏身份绑定后，即可同步好友、申请与私信。";
         var presentation = state switch
         {
             FriendCenterViewState.Loading => (
@@ -1877,8 +1883,8 @@ public partial class MainWindow
                 string.Empty),
             FriendCenterViewState.NoPermission => (
                 Controls.BridgeStateKind.AccessDenied,
-                "登录后查看好友",
-                "登录并完成账号识别后，即可同步好友、申请与私信。",
+                noPermissionTitle,
+                noPermissionDescription,
                 string.Empty),
             _ => (
                 Controls.BridgeStateKind.Error,

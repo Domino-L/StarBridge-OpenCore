@@ -379,7 +379,7 @@ public partial class MainWindow
             var commanderPermission = new NetworkFleetMemberPermissionSnapshot(
                 commanderName,
                 GetCallsignFromDisplayName(_fleetChiefCommander),
-                "组织负责人",
+                GetFleetCommanderRoleTitle(),
                 true,
                 true,
                 true,
@@ -407,7 +407,7 @@ public partial class MainWindow
                 _localPlayer.Trim(),
                 string.IsNullOrWhiteSpace(_callsign) ? localPermission?.Callsign : _callsign,
                 IsFleetCommander(_localPlayer, _callsign)
-                    ? "组织负责人"
+                    ? GetFleetCommanderRoleTitle()
                     : NormalizeRoleTitle(localPermission?.RoleTitle ?? "成员"),
                 localPermission?.PermissionEnabled ?? false,
                 localPermission?.CanRemoveMembers ?? false,
@@ -439,7 +439,7 @@ public partial class MainWindow
             player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
         var permission = GetFleetPermission(_localPlayer);
         var role = IsFleetCommander(_localPlayer, _callsign)
-            ? "组织负责人"
+            ? GetFleetCommanderRoleTitle()
             : NormalizeRoleTitle(permission?.RoleTitle ?? local?.Role ?? "成员");
 
         var privacyProjection = GetLocalFleetPresencePrivacyProjection();

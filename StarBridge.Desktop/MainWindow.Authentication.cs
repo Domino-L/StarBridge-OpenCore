@@ -81,10 +81,15 @@ public partial class MainWindow
             return true;
         }
 
+        await InitializeLoginAndNetworkAsync();
+        if (!IsLoggedIn)
+        {
+            return false;
+        }
+
         _onboardingDialogOpen = true;
         try
         {
-            await InitializeLoginAndNetworkAsync();
             onboardingCompleted = await StartInitialGuidedTourAsync();
             return onboardingCompleted;
         }
@@ -288,6 +293,12 @@ public partial class MainWindow
             return;
         }
 
+        if (!IsLoggedIn)
+        {
+            await ShowLoginDialogAsync();
+            return;
+        }
+
         OnboardingState.ClearDeferred();
         OnboardingState.SetFeatureTourStep(0);
         _onboardingDialogOpen = true;
@@ -477,12 +488,7 @@ public partial class MainWindow
         }
         catch (OperationCanceledException)
         {
-            slowNotice.Cancel();
-            slowNotice.Dispose();
-            if (ReferenceEquals(_syncStatusOverlayCts, slowNotice))
-            {
-                _syncStatusOverlayCts = null;
-            }
+            CompleteSyncStatusSlowNotice(slowNotice);
             return;
         }
 
@@ -498,12 +504,7 @@ public partial class MainWindow
             };
         }
 
-        slowNotice.Cancel();
-        slowNotice.Dispose();
-        if (ReferenceEquals(_syncStatusOverlayCts, slowNotice))
-        {
-            _syncStatusOverlayCts = null;
-        }
+        CompleteSyncStatusSlowNotice(slowNotice);
 
         if (!CompleteStartupDataGate(completionAttempt, outcome, elapsed))
         {
@@ -649,13 +650,33 @@ public partial class MainWindow
             _isLoginDialogOpen = false;
         }
 
-        UpdateFleetEntryPanels();
-        SchedulePendingOverlayAppearanceUnlockNotice();
-
         if (IsLoggedIn)
         {
             await EnsureSyncConsentAsync();
         }
+
+        if (IsLoggedIn &&
+            _guideMode == GuideMode.None &&
+            OnboardingState.GetCompletionStatus() != OnboardingCompletionStatus.Current)
+        {
+            _onboardingDialogOpen = true;
+            try
+            {
+                _ = await StartInitialGuidedTourAsync();
+            }
+            finally
+            {
+                _onboardingDialogOpen = false;
+            }
+
+            if (!IsIdentityBindingVerified)
+            {
+                ReevaluateIdentityBinding(showPrompt: true);
+            }
+        }
+
+        UpdateFleetEntryPanels();
+        SchedulePendingOverlayAppearanceUnlockNotice();
     }
 
     private async Task<string> RequestVerificationCodeAsync(string email)

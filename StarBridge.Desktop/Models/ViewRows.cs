@@ -717,7 +717,7 @@ public sealed class FleetRoleGroupRow : INotifyPropertyChanged
         : "权限只控制管理、编辑、审核和导出操作。成员基础查看能力默认开放，不在这里配置。";
     public bool CanCopyRole => !IsCommanderSeat;
     public bool CanAssignMembers => !IsCommanderSeat;
-    public bool CanRenameRole => !IsCommanderSeat;
+    public bool CanRenameRole => true;
     public bool CanDeleteRole => !IsSystem;
     public MediaBrush AccentBrush => StatusPalette.BrushFromHex(Color, StatusPalette.InfoBrush);
     public MediaBrush CardBackgroundBrush => IsSelected

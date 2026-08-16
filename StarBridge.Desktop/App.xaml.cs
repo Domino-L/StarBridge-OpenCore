@@ -567,18 +567,14 @@ public partial class App : System.Windows.Application
 
     private static string GetCrashLogPath()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "StarBridge");
+        var directory = DesktopStorageRoot.BootstrapDirectory;
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, "desktop-crash.log");
     }
 
     private static string GetDiagnosticLogPath()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "StarBridge");
+        var directory = DesktopStorageRoot.BootstrapDirectory;
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, "desktop-overlay-diagnostics.log");
     }

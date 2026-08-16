@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace StarBridge.Desktop;
 
@@ -12,21 +13,38 @@ internal sealed record DesktopStorageMigrationResult(
 
 internal static class DesktopStorageRoot
 {
+    internal const string DebugDataRootEnvironmentVariable = "STARBRIDGE_DEBUG_DATA_ROOT";
     internal const string LocatorFileName = "data-root.path";
     internal const string PendingLocatorFileName = "pending-data-root.path";
     internal const string FailedPendingLocatorFileName = "failed-data-root.path";
 
     private static readonly StringComparer PathComparer = StringComparer.OrdinalIgnoreCase;
+    private static readonly UTF8Encoding StrictUtf8 = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
     private static string? _currentRoot;
 
-    internal static string BootstrapDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "StarBridge");
+    internal static string BootstrapDirectory { get; } = ResolveBootstrapDirectory();
 
     internal static string DefaultRoot => BootstrapDirectory;
 
     internal static string CurrentRoot =>
         _currentRoot ??= ResolveConfiguredRoot(BootstrapDirectory);
+
+    private static string ResolveBootstrapDirectory()
+    {
+#if DEBUG
+        var debugRoot = Environment.GetEnvironmentVariable(DebugDataRootEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(debugRoot))
+        {
+            return NormalizeDirectory(debugRoot);
+        }
+#endif
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "StarBridge");
+    }
 
     internal static void SetCurrentRootForTests(string root)
     {
@@ -65,6 +83,11 @@ internal static class DesktopStorageRoot
             }
 
             EnsureRootAvailable(sourceRoot);
+            if (ContainsDamagedPathMarker(sourceRoot))
+            {
+                warning = "检测到数据目录路径曾被旧版安装器错误转码。现有数据仍会保留使用；请在“设置 → 常规与数据”中选择名称正常的空文件夹完成安全迁移。";
+            }
+
             _currentRoot = sourceRoot;
             return true;
         }
@@ -99,7 +122,7 @@ internal static class DesktopStorageRoot
             return normalizedBootstrap;
         }
 
-        var configured = File.ReadAllText(locatorPath).Trim();
+        var configured = ReadPathFile(locatorPath);
         if (string.IsNullOrWhiteSpace(configured))
         {
             throw new InvalidDataException("数据目录指针为空。请恢复 data-root.path 的有效绝对路径。");
@@ -120,7 +143,7 @@ internal static class DesktopStorageRoot
             throw new FileNotFoundException("没有待处理的数据目录迁移请求。", pendingPath);
         }
 
-        var requested = File.ReadAllText(pendingPath).Trim();
+        var requested = ReadPathFile(pendingPath);
         var destinationRoot = ValidateMigrationDestination(normalizedSource, requested);
         if (PathEquals(normalizedSource, destinationRoot))
         {
@@ -159,6 +182,10 @@ internal static class DesktopStorageRoot
     {
         var normalizedSource = NormalizeDirectory(sourceRoot);
         var normalizedDestination = NormalizeDirectory(destinationRoot);
+        if (ContainsDamagedPathMarker(normalizedDestination))
+        {
+            throw new InvalidOperationException("所选路径包含损坏的替换字符，请重新选择名称正常的文件夹。中文目录本身受支持。");
+        }
 
         var root = Path.GetPathRoot(normalizedDestination);
         if (PathEquals(normalizedDestination, root))
@@ -395,7 +422,7 @@ internal static class DesktopStorageRoot
         var temporaryPath = path + $".{Guid.NewGuid():N}.tmp";
         try
         {
-            File.WriteAllText(temporaryPath, value + Environment.NewLine);
+            File.WriteAllText(temporaryPath, value + Environment.NewLine, StrictUtf8);
             File.Move(temporaryPath, path, overwrite: true);
         }
         finally
@@ -403,6 +430,30 @@ internal static class DesktopStorageRoot
             TryDeleteFile(temporaryPath);
         }
     }
+
+    private static string ReadPathFile(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        string value;
+        try
+        {
+            value = StrictUtf8.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var ansiCodePage = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ANSICodePage;
+            value = Encoding.GetEncoding(
+                ansiCodePage,
+                EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback).GetString(bytes);
+        }
+
+        return value.Trim().TrimStart('\uFEFF');
+    }
+
+    private static bool ContainsDamagedPathMarker(string path) =>
+        path.Contains('\uFFFD');
 
     private static string NormalizeDirectory(string path)
     {

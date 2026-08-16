@@ -64,7 +64,24 @@ internal static class IdentityInitialization
     public static string? FindDefaultGameLog()
     {
         var candidates = new List<string>();
-        AddCandidate(candidates, Path.Combine(GetSystemDriveRoot(), "StarCitizen", "LIVE", "Game.log"));
+        AddCommonCandidates(candidates, GetSystemDriveRoot());
+
+        AddCandidate(
+            candidates,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Roberts Space Industries",
+                "StarCitizen",
+                "LIVE",
+                "Game.log"));
+        AddCandidate(
+            candidates,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "Roberts Space Industries",
+                "StarCitizen",
+                "LIVE",
+                "Game.log"));
 
         foreach (var drive in DriveInfo.GetDrives())
         {
@@ -75,7 +92,7 @@ internal static class IdentityInitialization
                     continue;
                 }
 
-                AddCandidate(candidates, Path.Combine(drive.RootDirectory.FullName, "StarCitizen", "LIVE", "Game.log"));
+                AddCommonCandidates(candidates, drive.RootDirectory.FullName);
             }
             catch
             {
@@ -90,6 +107,39 @@ internal static class IdentityInitialization
             .OrderByDescending(item => item.LastWrite)
             .FirstOrDefault()
             ?.Path;
+    }
+
+    internal static IReadOnlyList<string> GetCommonCandidatesForRoot(string root)
+    {
+        var candidates = new List<string>();
+        AddCommonCandidates(candidates, root);
+        return candidates;
+    }
+
+    private static void AddCommonCandidates(List<string> candidates, string root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return;
+        }
+
+        string[][] prefixes =
+        [
+            [],
+            ["Roberts Space Industries"],
+            ["Games"],
+            ["Games", "Roberts Space Industries"],
+            ["RSI"],
+            ["Program Files", "Roberts Space Industries"],
+            ["Program Files (x86)", "Roberts Space Industries"]
+        ];
+
+        foreach (var prefix in prefixes)
+        {
+            AddCandidate(
+                candidates,
+                Path.Combine([root, .. prefix, "StarCitizen", "LIVE", "Game.log"]));
+        }
     }
 
     private static void AddCandidate(List<string> candidates, string path)

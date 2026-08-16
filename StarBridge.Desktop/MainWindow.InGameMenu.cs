@@ -1137,7 +1137,7 @@ public partial class MainWindow
                         player.Name.Equals(_localPlayer, StringComparison.OrdinalIgnoreCase));
         var sceneTitle = context.Kind == OverlaySceneKind.PartyRoom
             ? FirstNonEmpty(context.RoomTitle, "当前房间")
-            : context.IsLocalOnly
+            : context.IsLocalOnly || !_hasFleet
                 ? "仅自己可见"
                 : FirstNonEmpty(_fleetName, "当前组织");
         var sceneDetail = context.Kind == OverlaySceneKind.PartyRoom

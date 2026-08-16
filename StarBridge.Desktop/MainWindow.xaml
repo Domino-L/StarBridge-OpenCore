@@ -8172,11 +8172,17 @@
                                         Padding="12">
                                     <Grid>
                                         <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
                                             <RowDefinition Height="*" />
+                                            <RowDefinition Height="0" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <StackPanel>
+                                        <ScrollViewer x:Name="ManageFleetNavigationScrollViewer"
+                                                      Grid.Row="0"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      PanningMode="VerticalOnly"
+                                                      CanContentScroll="False">
+                                        <StackPanel Margin="0,0,4,0">
                                             <TextBlock Text="组织设置"
                                                        Foreground="{StaticResource PrimaryTextBrush}"
                                                        FontSize="16"
@@ -8233,6 +8239,7 @@
                                                     BorderBrush="{DynamicResource BridgeStatusBad}"
                                                     Click="ManageSettingsNavButton_Click" />
                                         </StackPanel>
+                                        </ScrollViewer>
 
                                         <Border Grid.Row="2"
                                                 Background="{StaticResource AvionicsGlassPanelBrush}"
@@ -11108,9 +11115,8 @@
                                                                 <Grid VerticalAlignment="Center">
                                                                     <Grid.ColumnDefinitions>
                                                                         <ColumnDefinition Width="Auto" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                        <ColumnDefinition Width="Auto" />
                                                                         <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
                                                                     </Grid.ColumnDefinitions>
                                                                     <TextBlock Text="{Binding InternalTypeText}"
                                                                                Margin="0,0,12,0"
@@ -11118,13 +11124,13 @@
                                                                                Style="{StaticResource HudCaptionText}" />
                                                                     <Grid x:Name="FleetRoleGroupNameDisplayPanel"
                                                                           Grid.Column="1"
+                                                                          HorizontalAlignment="Stretch"
                                                                           VerticalAlignment="Center">
                                                                         <Grid.ColumnDefinitions>
-                                                                            <ColumnDefinition Width="Auto" />
+                                                                            <ColumnDefinition Width="*" />
                                                                             <ColumnDefinition Width="Auto" />
                                                                         </Grid.ColumnDefinitions>
                                                                         <TextBlock Text="{Binding DisplayName}"
-                                                                                   MaxWidth="420"
                                                                                    Foreground="{StaticResource PrimaryTextBrush}"
                                                                                    FontSize="18"
                                                                                    FontWeight="SemiBold"
@@ -11150,9 +11156,10 @@
                                                                     <TextBox x:Name="FleetRoleGroupNameBox"
                                                                              Grid.Column="1"
                                                                              Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"
-                                                                             Width="360"
+                                                                             MinWidth="180"
                                                                              Height="32"
                                                                              Margin="0"
+                                                                             HorizontalAlignment="Stretch"
                                                                              FontSize="16"
                                                                              FontWeight="SemiBold"
                                                                              Visibility="Collapsed"
@@ -24871,7 +24878,7 @@
                                                             <RowDefinition Height="32" />
                                                         </Grid.RowDefinitions>
                                                         <Button Content="选择日志" Height="28" Style="{StaticResource BridgeDirectorySecondaryButtonStyle}" Click="SelectLog_Click" />
-                                                        <Button Grid.Column="1" Content="重新扫描" Height="28" Margin="8,0,0,0" Style="{StaticResource BridgeDirectorySecondaryButtonStyle}" Click="QuickScanLog_Click" />
+                                                        <Button x:Name="PersonalQuickScanLogButton" Grid.Column="1" Content="扫描日志" Height="28" Margin="8,0,0,0" Style="{StaticResource BridgeDirectorySecondaryButtonStyle}" Click="QuickScanLog_Click" />
                                                         <Button Grid.Row="1" Content="刷新状态" Height="28" Margin="0,4,0,0" Style="{StaticResource BridgeDirectorySecondaryButtonStyle}" Click="RefreshPersonalStatusButton_Click" />
                                                         <Button Grid.Row="1" Grid.Column="1" Content="打开配置目录" Height="28" Margin="8,4,0,0" Style="{StaticResource BridgeDirectorySecondaryButtonStyle}" Click="OpenPersonalConfigDirectoryButton_Click" />
                                                         <Button Grid.Row="2" Content="复制诊断信息" Height="28" Margin="0,4,0,0" Style="{StaticResource BridgeDirectorySecondaryButtonStyle}" Click="CopyPersonalDiagnosticInfoButton_Click" />
@@ -33286,6 +33293,9 @@
               Panel.ZIndex="500"
               Visibility="Collapsed"
               SizeChanged="GuidedTourOverlay_SizeChanged">
+            <Border x:Name="GuidedTourInteractionBlocker"
+                    Background="#01000000"
+                    Visibility="Collapsed" />
             <Canvas x:Name="GuidedTourVisualLayer"
                     IsHitTestVisible="False">
                 <Border x:Name="GuidedTourMaskTop"

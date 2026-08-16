@@ -479,17 +479,21 @@ public partial class MainWindow
                 continue;
             }
 
+            var roleGroupKey = NormalizeRoleGroupKey(permission.RoleGroupKey, permission.RoleTitle);
+            var roleTitle = _fleetRoleGroupDefinitions.TryGetValue(roleGroupKey, out var roleDefinition)
+                ? roleDefinition.DisplayName
+                : NormalizeRoleTitle(permission.RoleTitle);
             _fleetMemberPermissions[safeGameName] = new LocalFleetMemberPermission(
                 safeGameName,
                 safeCallsign,
-                NormalizeRoleTitle(permission.RoleTitle),
+                roleTitle,
                 permission.PermissionEnabled,
                 permission.CanRemoveMembers,
                 permission.CanPublishTasks,
                 permission.CanPublishPlans,
                 permission.CanManageFleetInfo,
                 permission.UpdatedAt,
-                NormalizeRoleGroupKey(permission.RoleGroupKey, permission.RoleTitle),
+                roleGroupKey,
                 permission.ExtraAllowedPermissions,
                 permission.ExtraDeniedPermissions);
         }

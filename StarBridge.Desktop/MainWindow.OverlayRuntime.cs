@@ -111,7 +111,7 @@ public partial class MainWindow
             _gameProcessTimer.Stop();
             StopNetworkSyncTimers();
             await PushOfflineSnapshotOnShutdownAsync();
-            Close();
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(Close));
             return;
         }
 

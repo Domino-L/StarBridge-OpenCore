@@ -142,6 +142,7 @@ public partial class MainWindow
     private bool CanShowPostOnboardingConsentPrompts()
     {
         return !_onboardingDialogOpen &&
+               _guideMode != GuideMode.IdentityBinding &&
                OnboardingState.GetCompletionStatus() == OnboardingCompletionStatus.Current;
     }
 
