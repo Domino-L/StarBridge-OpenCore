@@ -17524,7 +17524,7 @@
                                                       Margin="0,0,0,8" />
                                             <Slider x:Name="OverlayBackgroundOpacitySlider"
                                                     Minimum="15"
-                                                    Maximum="100"
+                                                    Maximum="200"
                                                     TickFrequency="5"
                                                     IsSnapToTickEnabled="False"
                                                     ValueChanged="OverlayOpacitySlider_ValueChanged" />

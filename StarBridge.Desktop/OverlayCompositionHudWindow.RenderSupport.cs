@@ -350,7 +350,10 @@ internal sealed partial class OverlayCompositionHudWindow
     private ID2D1SolidColorBrush GetBrush(ID2D1RenderTarget target, HudColor color, double alpha)
     {
 
-        var resolvedAlpha = (byte)Math.Clamp(Math.Round(color.A * Math.Clamp(alpha, 0, 1)), 0, 255);
+        var resolvedAlpha = (byte)Math.Clamp(
+            Math.Round(color.A * Math.Max(0, double.IsFinite(alpha) ? alpha : 0)),
+            byte.MinValue,
+            byte.MaxValue);
         var key = new BrushKey(color.R, color.G, color.B, resolvedAlpha);
         if (_frameBrushes is not null && _frameBrushes.TryGetValue(key, out var cached))
         {

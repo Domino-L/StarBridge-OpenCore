@@ -666,8 +666,8 @@ public sealed record OverlayDisplaySettings(
             OverlayLayoutItem.NormalizeBackgroundOpacity(EventNotificationBackgroundOpacity).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             SkipStartupTransitionWhenGameForeground ? "1" : "0",
             EffectiveRequestedSkin,
-            NormalizeOverallOpacity(TextOpacity).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
-            NormalizeOverallOpacity(BackgroundOpacity).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            NormalizeTextOpacity(TextOpacity).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeBackgroundOpacity(BackgroundOpacity).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public static OverlayDisplaySettings Parse(string? value)
@@ -840,19 +840,27 @@ public sealed record OverlayDisplaySettings(
                 : parts.Length > 43 && Enum.TryParse<OverlaySkin>(parts[43], out var legacyRequestedSkin)
                     ? legacyRequestedSkin
                     : Default.RequestedSkin,
-            ParseOverallOpacity(parts, 73, 5, Default.TextOpacity),
-            ParseOverallOpacity(parts, 74, 5, Default.BackgroundOpacity));
+            ParseOverallOpacity(parts, 73, 5, Default.TextOpacity, NormalizeTextOpacity),
+            ParseOverallOpacity(parts, 74, 5, Default.BackgroundOpacity, NormalizeBackgroundOpacity));
     }
 
-    public static double NormalizeOverallOpacity(double value) =>
+    public static double NormalizeTextOpacity(double value) =>
         Math.Clamp(double.IsFinite(value) ? value : 0.85, 0.15, 1.0);
 
-    private static double ParseOverallOpacity(string[] parts, int index, int legacyIndex, double fallback)
+    public static double NormalizeBackgroundOpacity(double value) =>
+        Math.Clamp(double.IsFinite(value) ? value : 0.85, 0.15, 2.0);
+
+    private static double ParseOverallOpacity(
+        string[] parts,
+        int index,
+        int legacyIndex,
+        double fallback,
+        Func<double, double> normalize)
     {
         var sourceIndex = parts.Length > index ? index : legacyIndex;
         return parts.Length > sourceIndex &&
                double.TryParse(parts[sourceIndex], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
-            ? NormalizeOverallOpacity(value)
+            ? normalize(value)
             : fallback;
     }
 

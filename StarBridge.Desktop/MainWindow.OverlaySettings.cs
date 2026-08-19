@@ -777,8 +777,8 @@ public partial class MainWindow
             _overlaySettings.EventNotificationBackgroundOpacity,
             OverlaySkipTransitionInGameCheck.IsChecked == true,
             overlaySkin,
-            OverlayDisplaySettings.NormalizeOverallOpacity(OverlayTextOpacitySlider.Value / 100.0),
-            OverlayDisplaySettings.NormalizeOverallOpacity(OverlayBackgroundOpacitySlider.Value / 100.0)));
+            OverlayDisplaySettings.NormalizeTextOpacity(OverlayTextOpacitySlider.Value / 100.0),
+            OverlayDisplaySettings.NormalizeBackgroundOpacity(OverlayBackgroundOpacitySlider.Value / 100.0)));
 
         RefreshCrosshairSettingLabels();
         RefreshOverlayTransitionControls();

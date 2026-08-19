@@ -828,7 +828,23 @@ public partial class OverlayWindow : Window, IOverlayHost
     private static Brush CloneBrushWithOpacity(Brush source, double opacity)
     {
         var brush = source.CloneCurrentValue();
-        brush.Opacity = Math.Clamp(brush.Opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(opacity), 0, 1);
+        var multiplier = Math.Max(0, double.IsFinite(opacity) ? opacity : 0);
+        if (brush is SolidColorBrush solidColorBrush)
+        {
+            var color = solidColorBrush.Color;
+            solidColorBrush.Color = Color.FromArgb(
+                (byte)Math.Clamp(
+                    Math.Round(color.A * multiplier),
+                    byte.MinValue,
+                    byte.MaxValue),
+                color.R,
+                color.G,
+                color.B);
+        }
+        else
+        {
+            brush.Opacity = Math.Clamp(brush.Opacity * multiplier, 0, 1);
+        }
         if (brush.CanFreeze)
         {
             brush.Freeze();

@@ -350,9 +350,12 @@ public partial class MainWindow
         const bool previewsVerdictAppearance = false;
         var usesCustomChrome = isLagrangeWeave || previewsVerdictAppearance;
         var mirrorChrome = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left;
-        var backgroundAlpha = (byte)Math.Round(
-            204 * OverlayLayoutItem.NormalizeBackgroundOpacity(
-                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity));
+        var backgroundAlpha = (byte)Math.Clamp(
+            Math.Round(204 * Math.Max(
+                0,
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity)),
+            byte.MinValue,
+            byte.MaxValue);
         var panel = new Border
         {
             Tag = "EventNotifications",

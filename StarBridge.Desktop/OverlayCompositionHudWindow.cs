@@ -994,8 +994,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         return new OverlayCompositionFrameState(
             width,
             height,
-            OverlayDisplaySettings.NormalizeOverallOpacity(_settings.TextOpacity),
-            OverlayDisplaySettings.NormalizeOverallOpacity(_settings.BackgroundOpacity),
+            OverlayDisplaySettings.NormalizeTextOpacity(_settings.TextOpacity),
+            OverlayDisplaySettings.NormalizeBackgroundOpacity(_settings.BackgroundOpacity),
             BuildPalette(),
             OverlaySkinCatalog.Get(_settings.Skin).RenderKind,
             _viewModel.NotificationVisibility == WpfVisibility.Visible,

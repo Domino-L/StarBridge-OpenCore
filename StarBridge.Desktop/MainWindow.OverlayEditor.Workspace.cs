@@ -1557,7 +1557,10 @@ public partial class MainWindow
     private static SolidColorBrush CreateOverlayEditorPanelBackground(bool isSelected, double backgroundOpacity)
     {
         var baseAlpha = isSelected ? 222 : 204;
-        var alpha = (byte)Math.Round(baseAlpha * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
+        var alpha = (byte)Math.Clamp(
+            Math.Round(baseAlpha * Math.Max(0, backgroundOpacity)),
+            byte.MinValue,
+            byte.MaxValue);
         return new SolidColorBrush(Color.FromArgb(alpha, 5, 18, 28));
     }
 

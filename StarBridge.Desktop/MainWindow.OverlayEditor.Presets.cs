@@ -524,9 +524,9 @@ public partial class MainWindow
             OverlayVisualTheme.Gatac => 12,
             _ => 0
         };
-        OverlayTextOpacitySlider.Value = OverlayDisplaySettings.NormalizeOverallOpacity(_overlaySettings.TextOpacity) * 100.0;
+        OverlayTextOpacitySlider.Value = OverlayDisplaySettings.NormalizeTextOpacity(_overlaySettings.TextOpacity) * 100.0;
         OverlayTextOpacityValueText.Text = $"{Math.Round(OverlayTextOpacitySlider.Value)}%";
-        OverlayBackgroundOpacitySlider.Value = OverlayDisplaySettings.NormalizeOverallOpacity(_overlaySettings.BackgroundOpacity) * 100.0;
+        OverlayBackgroundOpacitySlider.Value = OverlayDisplaySettings.NormalizeBackgroundOpacity(_overlaySettings.BackgroundOpacity) * 100.0;
         OverlayBackgroundOpacityValueText.Text = $"{Math.Round(OverlayBackgroundOpacitySlider.Value)}%";
         OverlayTransitionEnabledCheck.IsChecked = _overlaySettings.EnableStartupTransition;
         OverlaySkipTransitionInGameCheck.IsChecked = _overlaySettings.SkipStartupTransitionWhenGameForeground;
