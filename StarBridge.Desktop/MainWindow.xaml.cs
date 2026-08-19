@@ -1179,7 +1179,6 @@ public partial class MainWindow : Window, IAppUpdateUi
             RenderOverlayEditor();
             ApplyOverlayEditorChromeState();
             SetActiveOverlaySettingsSection("overview");
-            RestoreOverlayRunningState();
             if (!string.IsNullOrWhiteSpace(_logPath) && File.Exists(_logPath))
             {
                 StartWatching(_logPath);

@@ -29,6 +29,7 @@ public partial class MainWindow
         BindGameplayStatisticsOwner();
         ShowGameplayDataConsentIfNeeded();
         ShowLocationDataContributionConsentIfNeeded();
+        RestoreOverlayRunningState();
     }
 
     private bool ShowTestBuildNoticeIfNeeded()
