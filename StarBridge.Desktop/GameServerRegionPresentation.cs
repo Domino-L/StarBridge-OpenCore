@@ -19,9 +19,21 @@ internal static class GameServerRegionPresentation
             return zh ? "未进入游戏" : "Not in game";
         }
 
-        var code = ResolveCode(region) ?? ResolveCode(shard);
+        // A concrete shard identifier is direct runtime evidence. Prefer it over
+        // a reported region value because older clients/replicas may still carry
+        // a stale broad AP-family classification (for example ASIA + APSE2).
+        var code = ResolvePreferredCode(shard, region);
         return FormatCode(code, zh) ?? "—";
     }
+
+    internal static string? ResolvePreferredCode(string? shard, string? reportedRegion) =>
+        ResolveCode(shard) ?? ResolveCode(reportedRegion);
+
+    internal static string? ResolvePreferredRegion(
+        string? shard,
+        string? reportedRegion,
+        bool zh = true) =>
+        FormatCode(ResolvePreferredCode(shard, reportedRegion), zh);
 
     internal static string? ResolveCode(string? value)
     {

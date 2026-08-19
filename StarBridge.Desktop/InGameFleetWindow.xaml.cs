@@ -23,6 +23,7 @@ public partial class InGameFleetWindow : Window
     internal event EventHandler? ToolHidden;
     internal event EventHandler? RefreshRequested;
     internal event EventHandler? CommunicationRequested;
+    internal event EventHandler? BroadcastRequested;
     internal event EventHandler<InGameFleetMemberActionRequestedEventArgs>? MemberActionRequested;
     internal event EventHandler<InGameFleetShipImageReportRequestedEventArgs>? ShipImageReportRequested;
     internal event EventHandler<InGameFleetShipImagePreviewRequestedEventArgs>? ShipImagePreviewRequested;
@@ -89,6 +90,9 @@ public partial class InGameFleetWindow : Window
         AnnouncementContentText.Text = string.IsNullOrWhiteSpace(snapshot.AnnouncementContent)
             ? "组织发布公告后会显示在这里。"
             : snapshot.AnnouncementContent;
+        FleetBroadcastButton.Visibility = snapshot.CanPublishBroadcast
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         TotalMemberCountText.Text = snapshot.TotalMembers.ToString();
         InGameMemberCountText.Text = snapshot.InGameMembers.ToString();
@@ -350,6 +354,9 @@ public partial class InGameFleetWindow : Window
 
     private void OpenCommunicationButton_Click(object sender, RoutedEventArgs e) =>
         CommunicationRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OpenBroadcastButton_Click(object sender, RoutedEventArgs e) =>
+        BroadcastRequested?.Invoke(this, EventArgs.Empty);
 
     private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {

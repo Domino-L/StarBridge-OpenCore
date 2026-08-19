@@ -13,7 +13,7 @@ public partial class MainWindow
     private const string FleetDeputyCommanderRoleGroupKey = "fleet_deputy_commander";
     private const string FleetDeputyCommanderDefaultRoleColor = FleetRoleColorPalette.Blue;
 
-    private void RenderCachedIdentity()
+    private void RenderCachedIdentity(bool initializeOfflineState = false)
     {
         if (!IsLoggedIn)
         {
@@ -39,7 +39,14 @@ public partial class MainWindow
         GameNameText.Text = _localPlayer;
         PlayerIdText.Text = string.IsNullOrWhiteSpace(_localPlayerId) ? "Unknown" : _localPlayerId;
         ProfileStatusText.Text = _language == "zh" ? "已缓存身份" : "Cached Identity";
-        _fleetState.Apply(new FleetEvent(FleetEventType.PlayerOffline, _localPlayer));
+        if (initializeOfflineState)
+        {
+            // Normalize persisted runtime state once during startup. Routine account
+            // panel refreshes are presentation-only and must never erase a location
+            // that Game.log confirmed during the active session.
+            _fleetState.Apply(new FleetEvent(FleetEventType.PlayerOffline, _localPlayer));
+        }
+
         RenderState();
     }
 

@@ -1187,7 +1187,7 @@ public partial class MainWindow
             PlayerSessionStatePresentation.ResolveLocation(
                 menuPresence,
                 menuHasServerSession,
-                NormalizeRuntimeMenuValue(local?.SharedLocationText)),
+                NormalizeRuntimeMenuValue(local?.SharedLocationCompactDisplayText)),
             PlayerSessionStatePresentation.ResolveServer(
                 menuPresence,
                 menuHasServerSession,
@@ -1294,7 +1294,11 @@ public partial class MainWindow
                     PlayerSessionStatePresentation.ResolveLocation(
                         presence,
                         hasServerSession,
-                        FormatPartyRoomLocation(player.SharedLocationText)),
+                        LocationArrivalPresentation.ResolveCompactLocation(
+                            presence,
+                            hasServerSession,
+                            FormatPartyRoomLocation(player.SharedLocationText),
+                            player.ArrivalPendingConfirmation)),
                     PlayerSessionStatePresentation.ResolveServer(
                         presence,
                         hasServerSession,
@@ -1347,7 +1351,8 @@ public partial class MainWindow
             FirstNonEmpty(announcement?.Content, _fleetNoticeContent),
             memberRows,
             shipRows,
-            status);
+            status,
+            CanCurrentUserPublishFleetBroadcasts());
     }
 
     private void RefreshInGameFleetSnapshot()
@@ -2135,6 +2140,29 @@ public partial class MainWindow
                 "附件操作失败",
                 UserFacingError.Describe(exception, "无法处理这个聊天附件，请稍后重试。"));
         }
+    }
+
+    private void InGameMenuCoordinator_FleetBroadcastRequested(object? sender, EventArgs e)
+    {
+        if (!CanCurrentUserPublishFleetBroadcasts())
+        {
+            _inGameMenuCoordinator.ShowNotice(
+                "无法发送舰队广播",
+                "当前身份没有发送广播权限。请联系舰队负责人调整身份权限。");
+            return;
+        }
+
+        FleetSubTabs.SelectedItem = FleetBroadcastTab;
+        RefreshFleetRailHeaders();
+        RefreshFleetMainContentView();
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Show();
+        Activate();
+        FleetBroadcastMessageBox.Focus();
     }
 
     private async void InGameMenuCoordinator_ProfileRequested(

@@ -72,6 +72,15 @@ public partial class MainWindow
         }
 
         var previousSection = FleetSubTabs.SelectedItem;
+        if (ReferenceEquals(sender, FleetBroadcastRailButton) &&
+            !CanCurrentUserPublishFleetBroadcasts())
+        {
+            FleetSubTabs.SelectedItem = AllPlayersTab;
+            RefreshFleetRailHeaders();
+            RefreshFleetMainContentView();
+            return;
+        }
+
         if (sender == AllPlayersRailButton)
         {
             FleetSubTabs.SelectedItem = AllPlayersTab;
@@ -91,6 +100,10 @@ public partial class MainWindow
         else if (sender == FleetShipDatabaseRailButton)
         {
             FleetSubTabs.SelectedItem = FleetShipDatabaseTab;
+        }
+        else if (sender == FleetBroadcastRailButton)
+        {
+            FleetSubTabs.SelectedItem = FleetBroadcastTab;
         }
         else if (sender == ManageFleetRailButton)
         {
@@ -139,7 +152,8 @@ public partial class MainWindow
         var showCommandDeck = FleetSubTabs.SelectedItem == FleetCommandDeckTab;
         var showManage = FleetSubTabs.SelectedItem == ManageFleetTab;
         var showShipDatabase = FleetSubTabs.SelectedItem == FleetShipDatabaseTab;
-        var showExpandedCore = showChat || showEvents || showCommandDeck || showManage;
+        var showBroadcast = FleetSubTabs.SelectedItem == FleetBroadcastTab;
+        var showExpandedCore = showChat || showEvents || showCommandDeck || showBroadcast || showManage;
         var showDirectoryPanel = showMembers;
         var showSubTabContent = !showDirectoryPanel;
         FleetMembersDeckPanel.Visibility = Visibility.Visible;
@@ -184,6 +198,11 @@ public partial class MainWindow
         if (showCommandDeck)
         {
             RefreshFleetCommandDeck();
+        }
+
+        if (showBroadcast)
+        {
+            _ = RefreshFleetBroadcastsAsync(showErrors: true);
         }
 
         if (!showExpandedCore)
@@ -928,46 +947,7 @@ public partial class MainWindow
             return null;
         }
 
-        var normalized = text.ToLowerInvariant();
-        if (text.Contains("美服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("us east") ||
-            normalized.Contains("us west") ||
-            normalized.Contains("usa"))
-        {
-            return "美服";
-        }
-
-        if (text.Contains("欧服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("europe") ||
-            normalized.Contains(" eu "))
-        {
-            return "欧服";
-        }
-
-        if (text.Contains("澳服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("australia") ||
-            normalized.Contains("oceania"))
-        {
-            return "澳服";
-        }
-
-        if (text.Contains("亚服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("asia") ||
-            normalized.Contains("singapore") ||
-            normalized.Contains("hong kong") ||
-            normalized.Contains("japan"))
-        {
-            return "亚服";
-        }
-
-        if (normalized.Contains("pub_") ||
-            normalized.Contains("shard") ||
-            normalized.Contains("server"))
-        {
-            return NormalizeFleetCommandServerRegion(MapGameServerRegion(normalized));
-        }
-
-        return null;
+        return GameServerRegionPresentation.ResolveRegion(text);
     }
 
     private static string? NormalizeFleetCommandServerRegion(string? region)
@@ -1277,6 +1257,7 @@ public partial class MainWindow
             FleetEventsTab is null ||
             FleetCommandDeckTab is null ||
             FleetShipDatabaseTab is null ||
+            FleetBroadcastTab is null ||
             ManageFleetTab is null)
         {
             return;
@@ -1284,6 +1265,15 @@ public partial class MainWindow
 
         var zh = _language == "zh";
         ApplyOverlayModuleStyleLanguage(zh);
+        var canPublishBroadcast = CanCurrentUserPublishFleetBroadcasts();
+        FleetBroadcastRailButton.Visibility = canPublishBroadcast
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!canPublishBroadcast && FleetSubTabs.SelectedItem == FleetBroadcastTab)
+        {
+            FleetSubTabs.SelectedItem = AllPlayersTab;
+        }
+
         _isFleetRailCollapsed = false;
         FleetRailColumn.Width = new GridLength(0);
         AllPlayersTab.Header = zh ? "成员" : "Members";
@@ -1291,12 +1281,14 @@ public partial class MainWindow
         FleetEventsTab.Header = zh ? "事件" : "Events";
         FleetCommandDeckTab.Header = zh ? "指挥台" : "Command";
         FleetShipDatabaseTab.Header = zh ? "舰船" : "Ships";
+        FleetBroadcastTab.Header = zh ? "广播" : "Broadcast";
         ManageFleetTab.Header = zh ? "管理" : "Manage";
         AllPlayersRailButton.Content = zh ? "成员" : "Members";
         FleetChatRailButton.Content = zh ? "聊天" : "Chat";
         FleetEventsRailButton.Content = zh ? "事件" : "Events";
         FleetCommandDeckRailButton.Content = zh ? "指挥" : "Command";
         FleetShipDatabaseRailButton.Content = zh ? "舰船" : "Ships";
+        FleetBroadcastRailButton.Content = zh ? "广播" : "Broadcast";
         ManageFleetRailButton.Content = zh ? "管理" : "Manage";
 
         var activeRailButton = FleetSubTabs.SelectedItem switch
@@ -1306,6 +1298,7 @@ public partial class MainWindow
             _ when FleetSubTabs.SelectedItem == FleetEventsTab => FleetEventsRailButton,
             _ when FleetSubTabs.SelectedItem == FleetCommandDeckTab => FleetCommandDeckRailButton,
             _ when FleetSubTabs.SelectedItem == FleetShipDatabaseTab => FleetShipDatabaseRailButton,
+            _ when FleetSubTabs.SelectedItem == FleetBroadcastTab => FleetBroadcastRailButton,
             _ when FleetSubTabs.SelectedItem == ManageFleetTab => ManageFleetRailButton,
             _ => null
         };
@@ -1316,6 +1309,7 @@ public partial class MainWindow
                 FleetEventsRailButton,
                 FleetCommandDeckRailButton,
                 FleetShipDatabaseRailButton,
+                FleetBroadcastRailButton,
                 ManageFleetRailButton
             ],
             activeRailButton);

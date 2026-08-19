@@ -37,13 +37,14 @@ public partial class MainWindow
         StopFleetActivityLoop();
         _fleetActivityInstanceId = "";
         _fleetActivityVersion = -1;
+        ResetFleetBroadcasts();
     }
 
     private async Task RunFleetActivityLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (!CanSynchronizeUserData || !GetPresenceSharingDecision().CanReceiveRealtime)
+            if (!CanSynchronizeUserData)
             {
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
                 continue;
@@ -79,7 +80,11 @@ public partial class MainWindow
                 var previousVersion = instanceChanged ? -1 : _fleetActivityVersion;
                 _fleetActivityInstanceId = activity.InstanceId;
                 _fleetActivityVersion = activity.Version;
-                if (instanceChanged || previousVersion >= 0 && activity.Version > previousVersion)
+                if (previousVersion < 0)
+                {
+                    await RefreshFleetBroadcastsAsync(showErrors: false, cancellationToken);
+                }
+                else if (instanceChanged || activity.Version > previousVersion)
                 {
                     await RefreshFleetAfterRealtimeActivityAsync(session, cancellationToken);
                 }
@@ -123,6 +128,7 @@ public partial class MainWindow
         _isNetworkRealtimePullRunning = true;
         try
         {
+            await RefreshFleetBroadcastsAsync(showErrors: false, cancellationToken);
             await PullNetworkFleetsAsync(
                 silent: true,
                 refreshBehavior: FleetDirectoryRefreshBehavior.PreserveVisibleOrder);

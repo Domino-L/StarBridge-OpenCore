@@ -8,8 +8,14 @@ public static partial class LocationNameLocalizer
 {
     private const string Unknown = "Unknown";
     private const string VerifiedLocationFileName = "location-names-zh.txt";
-    private static readonly Lazy<IReadOnlyDictionary<string, string>> ChineseNames =
+    private const string LocationCatalogFileName = "starbridge_location_catalog.json";
+    private static readonly Lazy<LocationCatalogIndex> Catalog =
+        new(() => LocationCatalogIndex.Load(
+            Path.Combine(AppContext.BaseDirectory, "Data", LocationCatalogFileName)));
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> LegacyChineseNames =
         new(() => LoadChineseNames(VerifiedLocationFileName));
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> ChineseNames =
+        new(BuildCombinedChineseNames);
     private static readonly Lazy<IReadOnlyList<string>> ChineseDisplayNames =
         new(() => ChineseNames.Value.Values
             .Select(value => value.Trim())
@@ -21,6 +27,10 @@ public static partial class LocationNameLocalizer
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray());
+    private static readonly object UnknownDiagnosticsGate = new();
+    private static readonly Dictionary<string, UnknownLocationDiagnostic> UnknownDiagnostics =
+        new(StringComparer.OrdinalIgnoreCase);
+    private const int UnknownDiagnosticCapacity = 64;
 
     public static string DisplayName(string? location, string language)
     {
@@ -30,21 +40,111 @@ public static partial class LocationNameLocalizer
             return normalized;
         }
 
-        if (!language.Equals("zh", StringComparison.OrdinalIgnoreCase))
+        if (Catalog.Value.TryResolve(normalized, out var match))
         {
-            return normalized;
+            if (!language.Equals("zh", StringComparison.OrdinalIgnoreCase))
+            {
+                return match.NameEn;
+            }
+
+            return TryGetLegacyChineseName(normalized, match, out var legacyName)
+                ? legacyName
+                : match.NameZh;
         }
 
-        if (ChineseNames.Value.TryGetValue(normalized, out var localized))
+        if (language.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
+            LegacyChineseNames.Value.TryGetValue(normalized, out var localized))
         {
             return localized;
         }
 
+        ObserveUnknownLocation(normalized);
         return SimplifyHumanReadableLocation(normalized);
     }
 
     public static IReadOnlyDictionary<string, string> KnownChineseNames => ChineseNames.Value;
     public static IReadOnlyList<string> ConfirmedChineseDisplayNames => ChineseDisplayNames.Value;
+    public static bool IsCatalogLoaded => Catalog.Value.IsLoaded;
+    public static string? CatalogLoadError => Catalog.Value.LoadError;
+    public static LocationCatalogMetadata CatalogMetadata => Catalog.Value.Metadata;
+
+    public static IReadOnlyList<UnknownLocationDiagnostic> UnknownLocationDiagnostics
+    {
+        get
+        {
+            lock (UnknownDiagnosticsGate)
+            {
+                return UnknownDiagnostics.Values
+                    .OrderByDescending(item => item.LastSeenAtUtc)
+                    .ToArray();
+            }
+        }
+    }
+
+    public static bool TryResolve(string? location, out LocationCatalogMatch match)
+    {
+        var normalized = NormalizeLocation(location);
+        if (normalized.Equals(Unknown, StringComparison.OrdinalIgnoreCase))
+        {
+            match = null!;
+            return false;
+        }
+
+        var resolved = Catalog.Value.TryResolve(normalized, out match);
+        if (!resolved)
+        {
+            ObserveUnknownLocation(normalized);
+        }
+
+        return resolved;
+    }
+
+    public static bool CanPersistOrSynchronize(string? location)
+    {
+        var normalized = NormalizeLocation(location);
+        return !Catalog.Value.TryResolve(normalized, out var match) ||
+               !match.IsDynamic ||
+               match.Persistent;
+    }
+
+    public static string Breadcrumb(string? location, string language)
+    {
+        var hierarchy = Catalog.Value.GetHierarchy(NormalizeLocation(location));
+        if (hierarchy.Count == 0)
+        {
+            return DisplayName(location, language);
+        }
+
+        var chinese = language.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        return string.Join(
+            " › ",
+            hierarchy
+                .Select(item => chinese ? item.NameZh : item.NameEn)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    public static string CatalogDiagnosticSummary()
+    {
+        if (!IsCatalogLoaded)
+        {
+            return $"地点目录：加载失败（{CatalogLoadError ?? "未知错误"}）";
+        }
+
+        var metadata = CatalogMetadata;
+        var generated = metadata.GeneratedAtUtc?.ToString("u") ?? "未提供";
+        return string.Join(Environment.NewLine, new[]
+        {
+            $"地点目录：已加载 / schema {metadata.SchemaVersion}",
+            $"目录生成时间：{generated}",
+            $"游戏版本：{metadata.GameBuild ?? "未提供"}",
+            $"SCM 目录版本：{metadata.ScmCatalogVersion ?? "未提供"}",
+            $"规范地点 / 运行时别名 / 动态规则：{metadata.EntryCount} / {metadata.AliasCount} / {metadata.DynamicPatternCount}",
+            $"量子别名 / OOC 容器别名：{metadata.QuantumAliasCount} / {metadata.ObjectContainerAliasCount}",
+            $"SCM 已关联 / 排除定义：{metadata.ScmLinkedEntryCount} / {metadata.ExcludedEntryCount}",
+            $"本次运行未知地点代码：{UnknownLocationDiagnostics.Count}"
+        });
+    }
 
     public static string NormalizeLocation(string? location)
     {
@@ -54,9 +154,92 @@ public static partial class LocationNameLocalizer
             return Unknown;
         }
 
-        var normalized = location.Trim();
-        normalized = BracketIdRegex().Replace(normalized, "").Trim();
-        return string.IsNullOrWhiteSpace(normalized) ? Unknown : normalized;
+        return Catalog.Value.NormalizeCode(location);
+    }
+
+    private static void ObserveUnknownLocation(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Equals(Unknown, StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("None", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var safeCode = new string(value
+            .Where(character => !char.IsControl(character))
+            .Take(160)
+            .ToArray())
+            .Trim();
+        if (safeCode.Length == 0)
+        {
+            return;
+        }
+
+        lock (UnknownDiagnosticsGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (UnknownDiagnostics.TryGetValue(safeCode, out var existing))
+            {
+                UnknownDiagnostics[safeCode] = existing with
+                {
+                    Count = existing.Count + 1,
+                    LastSeenAtUtc = now
+                };
+                return;
+            }
+
+            if (UnknownDiagnostics.Count >= UnknownDiagnosticCapacity)
+            {
+                var oldest = UnknownDiagnostics.Values.MinBy(item => item.LastSeenAtUtc);
+                if (oldest is not null)
+                {
+                    UnknownDiagnostics.Remove(oldest.Code);
+                }
+            }
+
+            UnknownDiagnostics[safeCode] = new UnknownLocationDiagnostic(safeCode, 1, now);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildCombinedChineseNames()
+    {
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in Catalog.Value.Lookup)
+        {
+            names[pair.Key] = pair.Value.NameZh;
+        }
+
+        foreach (var pair in LegacyChineseNames.Value)
+        {
+            names[pair.Key] = pair.Value;
+            var prefixedAlias = $"LOC_{pair.Key}";
+            if (names.ContainsKey(prefixedAlias))
+            {
+                names[prefixedAlias] = pair.Value;
+            }
+        }
+
+        return names;
+    }
+
+    private static bool TryGetLegacyChineseName(
+        string normalized,
+        LocationCatalogMatch match,
+        out string name)
+    {
+        if (LegacyChineseNames.Value.TryGetValue(normalized, out name!))
+        {
+            return true;
+        }
+
+        if (normalized.StartsWith("LOC_", StringComparison.OrdinalIgnoreCase) &&
+            LegacyChineseNames.Value.TryGetValue(normalized[4..], out name!))
+        {
+            return true;
+        }
+
+        return LegacyChineseNames.Value.TryGetValue(match.CanonicalCode, out name!);
     }
 
     private static IReadOnlyDictionary<string, string> LoadChineseNames(string fileName)
@@ -180,9 +363,11 @@ public static partial class LocationNameLocalizer
     [GeneratedRegex(@"(?<code>[A-Za-z0-9_-]+)\s+(?<value>.+)", RegexOptions.Compiled)]
     private static partial Regex FlexibleTableLineRegex();
 
-    [GeneratedRegex(@"\s*\[[0-9]+\]\s*", RegexOptions.Compiled)]
-    private static partial Regex BracketIdRegex();
-
     [GeneratedRegex(@"\s*\([A-Za-z0-9 _.'-]+\)\s*", RegexOptions.Compiled)]
     private static partial Regex EnglishParenthesesRegex();
 }
+
+public sealed record UnknownLocationDiagnostic(
+    string Code,
+    int Count,
+    DateTimeOffset LastSeenAtUtc);

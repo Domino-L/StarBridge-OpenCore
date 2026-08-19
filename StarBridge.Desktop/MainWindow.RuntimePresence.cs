@@ -313,13 +313,12 @@ public partial class MainWindow
 
         _localPresence = next;
         RefreshHeaderAvatarPresenceDot();
-        if (!string.IsNullOrWhiteSpace(_localPlayer))
-        {
-            _fleetState.SetPlayerOnlineState(
-                _localPlayer,
-                PlayerPresence.IsOnline(_localPresence),
-                now.ToLocalTime());
-        }
+        LocalGameSessionStatePolicy.MarkActiveIfRunning(
+            _fleetState,
+            _localPlayer,
+            _isGameProcessRunning,
+            _localPresence,
+            now.ToLocalTime());
 
         if (refreshUi)
         {
@@ -427,7 +426,14 @@ public partial class MainWindow
         {
             var now = DateTimeOffset.UtcNow;
             var wasRunning = _isGameProcessRunning;
-            _isGameProcessRunning = StarCitizenProcessProbe.TryGetStart(out var gameProcessStartedAtUtc);
+            var processObserved = StarCitizenProcessProbe.TryGetStart(out var gameProcessStartedAtUtc);
+            var processObservation = GameProcessSessionBoundaryPolicy.Observe(
+                wasRunning,
+                processObserved,
+                now,
+                _gameProcessMissingSinceUtc);
+            _isGameProcessRunning = processObservation.IsRunning;
+            _gameProcessMissingSinceUtc = processObservation.MissingSinceUtc;
             _bridgeGameProcessStartedAtUtc = _isGameProcessRunning
                 ? gameProcessStartedAtUtc ?? _bridgeGameProcessStartedAtUtc ?? now
                 : null;
@@ -443,7 +449,7 @@ public partial class MainWindow
             UpdateOverlayGameAutomation(wasRunning, _isGameProcessRunning, isGameForeground);
             QueueLocalPlaySessionReminderIfDue(now, gameProcessStartedAtUtc);
 
-            if (wasRunning && !_isGameProcessRunning && !string.IsNullOrWhiteSpace(_localPlayer))
+            if (processObservation.SessionEnded && !string.IsNullOrWhiteSpace(_localPlayer))
             {
                 _fleetState.Apply(new FleetEvent(FleetEventType.PlayerOffline, _localPlayer));
             }

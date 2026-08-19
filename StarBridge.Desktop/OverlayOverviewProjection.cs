@@ -316,8 +316,9 @@ internal static class OverlayOverviewProjection
             return GameServerRegionPresentation.ResolveCode(localShard);
         }
 
-        return GameServerRegionPresentation.ResolveCode(player.ServerRegion) ??
-               GameServerRegionPresentation.ResolveCode(player.ServerShard);
+        return GameServerRegionPresentation.ResolvePreferredCode(
+            player.ServerShard,
+            player.ServerRegion);
     }
 
     private static string FormatOverviewRegionCode(string code, bool zh) => code switch

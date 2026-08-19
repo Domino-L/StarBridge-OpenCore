@@ -3,12 +3,12 @@
 StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情图和星系地图原图。
 这些图片即使出现在 StarBridge 的内部工作区或官方客户端中，也不会因此自动采用 Apache-2.0。
 
-## 0.6.5 公开载荷
+## 0.6.6 公开载荷
 
-0.6.5 的公开安装包和更新包不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+0.6.6 的公开安装包和更新包不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
 对应页面可能显示应用自带占位图，不影响账号、舰队、房间、通讯和浮层的主要功能。
 
-每个正式载荷必须包含通过状态的 `THIRD-PARTY-MEDIA-AUDIT.json`。对 0.6.5，该报告必须记录：
+每个正式载荷必须包含通过状态的 `THIRD-PARTY-MEDIA-AUDIT.json`。对 0.6.6，该报告必须记录：
 
 - `mode: payload`；
 - `rightsStatus: not-included`；
@@ -39,12 +39,12 @@ StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情
 ## Third-party media
 
 The Apache-2.0 source distribution does not include original ship images or
-system maps. StarBridge 0.6.5 public installers and update archives also omit
+system maps. StarBridge 0.6.6 public installers and update archives also omit
 all third-party media whose provenance or redistribution rights have not been
 verified. The client may display built-in placeholders where no approved image
 is available.
 
-Every official 0.6.5 payload must include a passing
+Every official 0.6.6 payload must include a passing
 `THIRD-PARTY-MEDIA-AUDIT.json` with `mode: payload`,
 `rightsStatus: not-included`, zero managed files, and zero managed bytes. The
 release gate also rejects media registration files and managed media

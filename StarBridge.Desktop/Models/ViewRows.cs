@@ -39,7 +39,9 @@ public sealed record PlayerRow(
     bool? SharedHasServerSession = null,
     bool IsFleetCommander = false,
     MediaBrush? RoleColorBrush = null,
-    bool HasFleetPosition = false)
+    bool HasFleetPosition = false,
+    bool ArrivalPendingConfirmation = false,
+    string? ArrivalTargetCode = null)
 {
     // Callsign 在无呼号时回落为游戏 ID（DisplayCallsign），此时两行会重复，故留空。
     public string GameId => string.Equals(Name, Callsign, StringComparison.OrdinalIgnoreCase)
@@ -61,10 +63,29 @@ public sealed record PlayerRow(
             ResolveSharedServerSession(),
             SharedShipText),
         ShipDisplayNamePresentation.UnknownShip);
-    public string SharedLocationDisplayText => PlayerSessionStatePresentation.ResolveLocation(
+    public string SharedLocationDisplayText => LocationArrivalPresentation.ResolveLocation(
         SharedPresence,
         ResolveSharedServerSession(),
-        SharedLocationText);
+        SharedLocationText,
+        ArrivalPendingConfirmation);
+    public string SharedLocationCompactDisplayText => LocationArrivalPresentation.ResolveCompactLocation(
+        SharedPresence,
+        ResolveSharedServerSession(),
+        SharedLocationText,
+        ArrivalPendingConfirmation);
+    public string LocationArrivalBadgeText => LocationArrivalPresentation.ResolveBadge(
+        ArrivalPendingConfirmation,
+        SharedPresence,
+        ResolveSharedServerSession());
+    public Visibility LocationArrivalBadgeVisibility => string.IsNullOrWhiteSpace(LocationArrivalBadgeText)
+        ? Visibility.Collapsed
+        : Visibility.Visible;
+    public string SharedLocationToolTip => LocationArrivalPresentation.ResolveDetail(
+        ArrivalPendingConfirmation,
+        SharedPresence,
+        ResolveSharedServerSession(),
+        SharedLocationText,
+        ArrivalTargetCode);
     internal FleetServerRelationshipKind? ResolvedServerRelationship { get; init; }
     // The legacy property name is retained for XAML compatibility. The member
     // table now presents a localized region, never a relationship label or a

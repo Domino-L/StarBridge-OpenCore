@@ -26,6 +26,11 @@ public static class FleetPresencePrivacyPolicy
             ? confidence
             : "None";
 
+        if (!LocationNameLocalizer.CanPersistOrSynchronize(projectedLocation))
+        {
+            return new FleetLocationPrivacyProjection("Unknown", "None");
+        }
+
         if (hideNonHighConfidence &&
             !projectedConfidence.Equals("High", StringComparison.OrdinalIgnoreCase))
         {

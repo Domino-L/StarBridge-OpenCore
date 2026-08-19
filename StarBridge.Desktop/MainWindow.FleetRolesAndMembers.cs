@@ -823,6 +823,7 @@ public partial class MainWindow
                 [
                     Item(FleetPermissionPolicy.EditFleetProfile, "编辑组织资料", "维护简介、活跃区域、活动时间和标签。", "资料", deputy),
                     Item(FleetPermissionPolicy.ManageAnnouncements, "维护组织公告", "发布、修订和撤下组织公告，并查看历史记录。", "公告", deputy),
+                    Item(FleetPermissionPolicy.PublishBroadcasts, "发送舰队广播", "向所有正在游戏中的舰队成员发送无法屏蔽的醒目广播。", "广播", allowed: false, danger: true),
                     Item("fleet.avatar.edit", "更换组织标志", "更新组织标志和头像资源。", "展示", commander)
                 ]),
             new("成员加入与管理", "处理加入申请和成员移除。",

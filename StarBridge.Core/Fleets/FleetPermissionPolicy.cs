@@ -4,6 +4,7 @@ public static class FleetPermissionPolicy
 {
     public const string EditFleetProfile = "fleet.profile.edit";
     public const string ManageAnnouncements = "announcements.manage";
+    public const string PublishBroadcasts = "broadcasts.publish";
     public const string AnnouncementPermissionSchemaMarker = "schema.announcements-manage.v1";
     public const string RetiredInviteMembers = "members.invite";
 

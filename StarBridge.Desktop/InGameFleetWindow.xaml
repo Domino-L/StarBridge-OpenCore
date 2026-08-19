@@ -608,6 +608,7 @@
                             <ColumnDefinition Width="1.15*" />
                             <ColumnDefinition Width="0.78*" />
                             <ColumnDefinition Width="1.25*" />
+                            <ColumnDefinition Width="120" />
                             <ColumnDefinition Width="138" />
                         </Grid.ColumnDefinitions>
                         <Grid Width="54"
@@ -686,7 +687,17 @@
                                            ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                             </StackPanel>
                         </Border>
-                        <Button Grid.Column="4"
+                        <Button x:Name="FleetBroadcastButton"
+                                Grid.Column="4"
+                                Content="舰队广播"
+                                MinWidth="106"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BridgeDirectorySecondaryButtonStyle}"
+                                Click="OpenBroadcastButton_Click" />
+                        <Button Grid.Column="5"
                                 Content="组织通讯"
                                 MinWidth="120"
                                 Height="32"

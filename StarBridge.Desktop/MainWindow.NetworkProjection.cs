@@ -472,7 +472,9 @@ public partial class MainWindow
                 publishServerInfo ? _gameServerRegion : null,
                 privacyProjection.LiveStatus,
                 _accountId,
-                _fleetJoinedAtUtc)
+                _fleetJoinedAtUtc,
+                publishLocation && local?.ArrivalPendingConfirmation == true,
+                publishLocation ? local?.ArrivalTargetCode : null)
         ];
     }
 

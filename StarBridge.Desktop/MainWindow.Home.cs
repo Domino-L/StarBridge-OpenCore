@@ -148,17 +148,31 @@ public partial class MainWindow
 
         var rawLocation = local?.Location;
         var hasLocation = hasServerSession && !IsHomeUnknown(rawLocation);
-        HomeJourneyLocationText.Text = PlayerSessionStatePresentation.ResolveLocation(
+        HomeJourneyLocationText.Text = LocationArrivalPresentation.ResolveLocation(
             _localPresence,
             hasServerSession,
-            hasLocation ? FormatLocationForUser(rawLocation) : null);
-        HomeJourneyLocationEvidenceText.Text = hasLocation
-            ? $"识别可信度：{FormatHomeConfidence(local?.LocationConfidence)}"
+            hasLocation ? LocationNameLocalizer.Breadcrumb(rawLocation, _language) : null,
+            local?.ArrivalPendingConfirmation == true);
+        HomeJourneyLocationEvidenceText.Text = local?.ArrivalPendingConfirmation == true
+            ? string.IsNullOrWhiteSpace(local.ArrivalTargetCode)
+                ? LocationArrivalPresentation.PendingBadge
+                : $"{LocationArrivalPresentation.PendingBadge} · {FormatLocationForUser(local.ArrivalTargetCode)}"
+            : hasLocation && local?.IsLocationStale == true
+                ? "显示最后确认地点，等待新的地点日志"
+                : hasLocation
+                    ? $"识别可信度：{FormatHomeConfidence(local?.LocationConfidence)}"
             : !gameRunning
                 ? "启动游戏后开始识别"
                 : hasServerSession
                     ? "正在等待地点信号"
                     : "进入服务器后开始识别";
+        HomeJourneyLocationEvidenceText.ToolTip = LocationArrivalPresentation.ResolveDetail(
+            local?.ArrivalPendingConfirmation == true,
+            _localPresence,
+            hasServerSession,
+            rawLocation,
+            local?.ArrivalTargetCode,
+            _language);
 
         HomeJourneyServerText.Text = IsGameServerRegionCurrent()
             ? GetGameServerRegionDisplay()

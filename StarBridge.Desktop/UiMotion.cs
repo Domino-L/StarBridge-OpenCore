@@ -365,7 +365,11 @@ public static class UiMotion
             HoldNavigationSelectionValue(edgeScale, ScaleTransform.ScaleXProperty, startScaleX);
         }
 
-        button.Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+        // Let the composition clock complete its current render tick before the
+        // reveal clocks are created. Starting at Render priority can attach the
+        // clocks to the pre-stall tick, so the first sampled frame appears
+        // almost complete after a busy UI thread resumes.
+        button.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             if ((int)button.GetValue(NavigationSelectionVersionProperty) != transitionVersion ||
                 button.IsChecked != true)

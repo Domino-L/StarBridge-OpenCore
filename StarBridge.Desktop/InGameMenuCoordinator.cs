@@ -96,6 +96,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
     internal event EventHandler<InGameMenuClosedEventArgs>? Closed;
     internal event EventHandler? FleetRefreshRequested;
     internal event EventHandler? FleetCommunicationRequested;
+    internal event EventHandler? FleetBroadcastRequested;
     internal event EventHandler<InGameFleetMemberActionRequestedEventArgs>? FleetMemberActionRequested;
     internal event EventHandler<InGameFleetShipImageReportRequestedEventArgs>? FleetShipImageReportRequested;
     internal event EventHandler? SocialRefreshRequested;
@@ -467,6 +468,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
         fleet.ToolHidden += FleetWindow_Hidden;
         fleet.RefreshRequested += FleetWindow_RefreshRequested;
         fleet.CommunicationRequested += FleetWindow_CommunicationRequested;
+        fleet.BroadcastRequested += FleetWindow_BroadcastRequested;
         fleet.MemberActionRequested += FleetWindow_MemberActionRequested;
         fleet.ShipImageReportRequested += FleetWindow_ShipImageReportRequested;
         fleet.ShipImagePreviewRequested += FleetWindow_ShipImagePreviewRequested;
@@ -1123,6 +1125,11 @@ internal sealed class InGameMenuCoordinator : IDisposable
         FleetCommunicationRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void FleetWindow_BroadcastRequested(object? sender, EventArgs e)
+    {
+        FleetBroadcastRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private void FleetWindow_MemberActionRequested(
         object? sender,
         InGameFleetMemberActionRequestedEventArgs e)
@@ -1361,6 +1368,7 @@ internal sealed class InGameMenuCoordinator : IDisposable
             fleet.ToolHidden -= FleetWindow_Hidden;
             fleet.RefreshRequested -= FleetWindow_RefreshRequested;
             fleet.CommunicationRequested -= FleetWindow_CommunicationRequested;
+            fleet.BroadcastRequested -= FleetWindow_BroadcastRequested;
             fleet.MemberActionRequested -= FleetWindow_MemberActionRequested;
             fleet.ShipImageReportRequested -= FleetWindow_ShipImageReportRequested;
             fleet.ShipImagePreviewRequested -= FleetWindow_ShipImagePreviewRequested;

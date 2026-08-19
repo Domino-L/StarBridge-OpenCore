@@ -1778,8 +1778,9 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 FormatMemberName(player, _rosterDisplaySettings.MemberNameMode),
                 player.SharedPresenceText,
                 player.SharedShipDisplayText,
-                player.SharedLocationDisplayText,
-                online ? StatusPalette.SuccessBrush : StatusPalette.DisabledBrush));
+                player.SharedLocationCompactDisplayText,
+                online ? StatusPalette.SuccessBrush : StatusPalette.DisabledBrush,
+                player.SharedLocationToolTip));
         }
 
         if (projection.ShowOverflowSummary)
@@ -1792,7 +1793,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 : zh
                     ? $"另有 {projection.HiddenOnlineCount} 人在线"
                     : $"{projection.HiddenOnlineCount} more online";
-            Members.Add(new OverlayMemberRow(summary, "", "", "", MutedBrush));
+            Members.Add(new OverlayMemberRow(summary, "", "", "", MutedBrush, ""));
         }
 
         if (Members.Count == 0)
@@ -1802,7 +1803,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 "",
                 "",
                 "",
-                MutedBrush));
+                MutedBrush,
+                ""));
         }
 
         // DirectComposition observes the view model rather than the collection.
@@ -3574,15 +3576,19 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             return localRegion;
         }
 
+        var shardRegion = GameServerRegionPresentation.ResolveRegion(player.ServerShard);
+        if (!string.IsNullOrWhiteSpace(shardRegion))
+        {
+            return shardRegion;
+        }
+
+        // Preserve an already-presented region string when there is no concrete
+        // shard evidence. This keeps the event language stable while still
+        // allowing a real APSE2 shard to correct a stale ASIA value.
         var syncedRegion = NormalizeOverlayServerRegion(player.ServerRegion);
         if (!string.IsNullOrWhiteSpace(syncedRegion))
         {
             return syncedRegion;
-        }
-
-        if (!string.IsNullOrWhiteSpace(player.ServerShard))
-        {
-            return NormalizeOverlayServerRegion(MapOverlayGameServerRegion(player.ServerShard));
         }
 
         return TryExtractOverlayServerRegion(player.RawLocation) ??
@@ -3613,43 +3619,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             return null;
         }
 
-        var normalized = text.ToLowerInvariant();
-        if (text.Contains("美服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("us east") ||
-            normalized.Contains("us west") ||
-            normalized.Contains("usa"))
-        {
-            return "美服";
-        }
-
-        if (text.Contains("欧服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("europe") ||
-            normalized.Contains(" eu "))
-        {
-            return "欧服";
-        }
-
-        if (text.Contains("澳服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("australia") ||
-            normalized.Contains("oceania"))
-        {
-            return "澳服";
-        }
-
-        if (text.Contains("亚服", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("asia") ||
-            normalized.Contains("singapore") ||
-            normalized.Contains("hong kong") ||
-            normalized.Contains("japan"))
-        {
-            return "亚服";
-        }
-
-        return normalized.Contains("pub_") ||
-               normalized.Contains("shard") ||
-               normalized.Contains("server")
-            ? NormalizeOverlayServerRegion(MapOverlayGameServerRegion(normalized))
-            : null;
+        return GameServerRegionPresentation.ResolveRegion(text);
     }
 
     private static string? NormalizeOverlayServerRegion(string? region)
@@ -3660,46 +3630,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             : region.Trim();
     }
 
-    private static string MapOverlayGameServerRegion(string? shard)
-    {
-        if (string.IsNullOrWhiteSpace(shard))
-        {
-            return "未知";
-        }
-
-        var normalized = shard.ToLowerInvariant();
-        if (normalized.Contains("use") ||
-            normalized.Contains("usw") ||
-            normalized.Contains("_us") ||
-            normalized.Contains("pub_us"))
-        {
-            return "美服";
-        }
-
-        if (normalized.Contains("eu"))
-        {
-            return "欧服";
-        }
-
-        if (normalized.Contains("aus") ||
-            normalized.Contains("_au") ||
-            normalized.Contains("oce"))
-        {
-            return "澳服";
-        }
-
-        if (normalized.Contains("asia") ||
-            normalized.Contains("apse") ||
-            normalized.Contains("_ap") ||
-            normalized.Contains("sg") ||
-            normalized.Contains("jp") ||
-            normalized.Contains("hk"))
-        {
-            return "亚服";
-        }
-
-        return "未知";
-    }
+    private static string MapOverlayGameServerRegion(string? shard) =>
+        GameServerRegionPresentation.ResolveRegion(shard) ?? "未知";
 
     private void OnChanged(string propertyName)
     {
@@ -3764,7 +3696,8 @@ public sealed record OverlayMemberRow(
     string Status,
     string Ship,
     string Location,
-    System.Windows.Media.Brush StatusBrush);
+    System.Windows.Media.Brush StatusBrush,
+    string LocationToolTip);
 
 internal enum OverlayLocationMergePhase
 {

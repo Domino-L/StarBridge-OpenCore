@@ -94,7 +94,9 @@ public static class FleetPassiveRefreshPolicy
             AppendFingerprintValue(builder, member.LiveStatus);
             AppendFingerprintValue(builder, member.Ship);
             AppendFingerprintValue(builder, member.Location);
-            AppendFingerprintValue(builder, member.LocationConfidence);
+        AppendFingerprintValue(builder, member.LocationConfidence);
+        AppendFingerprintValue(builder, member.ArrivalPendingConfirmation ? "arrival-pending" : "arrival-confirmed");
+        AppendFingerprintValue(builder, member.ArrivalTargetCode);
             AppendFingerprintValue(builder, member.ServerRegion);
             AppendFingerprintValue(builder, member.ServerShard);
         }

@@ -23,6 +23,11 @@ public sealed class FleetPlayer
     public DateTimeOffset? LastLocationEvidenceAt { get; set; }
     public DateTimeOffset? LastLocationScoreUpdatedAt { get; set; }
     public string? LastKnownLocation { get; set; }
+    public string ConfirmedLocationCode { get; set; } = "Unknown";
+    public DateTimeOffset? ConfirmedAtUtc { get; set; }
+    public bool ArrivalPendingConfirmation { get; set; }
+    public string? ArrivalTargetCode { get; set; }
+    public bool IsLocationStale { get; set; }
     public string NavigationTarget { get; set; } = "None";
     public DateTimeOffset? NavigationTargetSelectedAt { get; set; }
     public string? NavigationOriginLocation { get; set; }

@@ -11,7 +11,6 @@ public sealed class FleetState
     private const double PostControlSeatExitDecayPerMinute = 10;
     private const int MaxLocationInferenceScore = 100;
     private const double LocationScoreDecayPerMinute = 4;
-    private static readonly TimeSpan RecentConfirmedLocationProtectionWindow = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PostQuantumArrivalShipRetentionWindow = TimeSpan.FromSeconds(15);
     private readonly Dictionary<string, FleetPlayer> _players = new(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyCollection<FleetPlayer> Players => _players.Values
@@ -116,23 +115,15 @@ public sealed class FleetState
                 var quantumArrivalTarget = HasKnownNavigationTarget(fleetEvent.NavigationTarget)
                     ? fleetEvent.NavigationTarget
                     : player.NavigationTarget;
-                if (isQuantumArrival && HasKnownNavigationTarget(quantumArrivalTarget))
+                if (isQuantumArrival)
                 {
-                    location = quantumArrivalTarget;
-                    locationScore = Math.Max(locationScore, 65);
-                    locationEvidence = "Quantum arrival target (unconfirmed)";
+                    player.ArrivalPendingConfirmation = true;
+                    player.ArrivalTargetCode = HasKnownNavigationTarget(quantumArrivalTarget)
+                        ? quantumArrivalTarget!.Trim()
+                        : null;
+                    player.LastQuantumArrivalAt = timestamp;
                 }
-
-                var navigationSelectedAt = fleetEvent.NavigationTargetSelectedAt ?? player.NavigationTargetSelectedAt;
-                var navigationOrigin = HasKnownNavigationTarget(fleetEvent.NavigationOriginLocation)
-                    ? fleetEvent.NavigationOriginLocation
-                    : player.NavigationOriginLocation;
-                if (!isQuantumArrival ||
-                    !HasRecentJourneyDestinationConfirmation(
-                        player,
-                        timestamp,
-                        navigationSelectedAt,
-                        navigationOrigin))
+                else
                 {
                     AddLocationEvidence(
                         player,
@@ -141,12 +132,8 @@ public sealed class FleetState
                         locationEvidence,
                         timestamp);
                 }
-                if (isQuantumArrival)
-                {
-                    player.LastQuantumArrivalAt = timestamp;
-                    ClearNavigationJourney(player);
-                }
-                else if (isLocationInventoryContext)
+
+                if (!isQuantumArrival && isLocationInventoryContext)
                 {
                     if (!retainShipForQuantumArrival)
                     {
@@ -259,42 +246,6 @@ public sealed class FleetState
                !navigationTarget.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool HasRecentJourneyDestinationConfirmation(
-        FleetPlayer player,
-        DateTimeOffset arrivalAt,
-        DateTimeOffset? navigationSelectedAt,
-        string? navigationOrigin)
-    {
-        if (player.Location.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ||
-            player.LastLocationEvidenceAt is null ||
-            !IsConfirmedLocationEvidence(player.LocationEvidence))
-        {
-            return false;
-        }
-
-        var evidenceAt = player.LastLocationEvidenceAt.Value;
-        if (arrivalAt - evidenceAt > RecentConfirmedLocationProtectionWindow)
-        {
-            return false;
-        }
-
-        // Legacy/recovered arrivals without journey timing retain the conservative recent-region rule.
-        if (navigationSelectedAt is null)
-        {
-            return true;
-        }
-
-        // A region observed before this target was selected belongs to the journey origin.
-        if (evidenceAt < navigationSelectedAt.Value)
-        {
-            return false;
-        }
-
-        // Inventory refreshes can repeat the origin after target selection but before departure.
-        return string.IsNullOrWhiteSpace(navigationOrigin) ||
-               !player.Location.Equals(navigationOrigin, StringComparison.OrdinalIgnoreCase);
-    }
-
     private static void ObserveNavigationJourney(
         FleetPlayer player,
         FleetEvent fleetEvent,
@@ -326,12 +277,6 @@ public sealed class FleetState
         player.NavigationTarget = "None";
         player.NavigationTargetSelectedAt = null;
         player.NavigationOriginLocation = null;
-    }
-
-    private static bool IsConfirmedLocationEvidence(string? evidence)
-    {
-        return evidence?.Equals("Location inventory context", StringComparison.OrdinalIgnoreCase) == true ||
-               evidence?.Equals("Explicit player location", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static bool AddShipEvidence(
@@ -552,16 +497,6 @@ public sealed class FleetState
             player.LastShipScoreUpdatedAt = timestamp;
         }
 
-        if (player.Location.Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(player.LastKnownLocation))
-        {
-            player.Location = player.LastKnownLocation;
-            player.LocationInferenceScore = 15;
-            player.LocationConfidence = "Low";
-            player.LocationEvidence = "Restored after reconnect";
-            player.LastLocationEvidenceAt = timestamp;
-            player.LastLocationScoreUpdatedAt = timestamp;
-        }
     }
 
     private static void ClearLocationInference(FleetPlayer player, string evidence)
@@ -572,6 +507,11 @@ public sealed class FleetState
         player.LocationInferenceScore = 0;
         player.LastLocationEvidenceAt = null;
         player.LastLocationScoreUpdatedAt = null;
+        player.ConfirmedLocationCode = "Unknown";
+        player.ConfirmedAtUtc = null;
+        player.ArrivalPendingConfirmation = false;
+        player.ArrivalTargetCode = null;
+        player.IsLocationStale = false;
     }
 
     private static void DecayShipInference(FleetPlayer player, DateTimeOffset now)
@@ -670,6 +610,15 @@ public sealed class FleetState
         player.LocationEvidence = evidence;
         player.LastLocationEvidenceAt = timestamp;
         player.LastLocationScoreUpdatedAt = timestamp;
+        player.ConfirmedLocationCode = location;
+        player.ConfirmedAtUtc = timestamp;
+        player.IsLocationStale = false;
+        if (player.ArrivalPendingConfirmation)
+        {
+            player.ArrivalPendingConfirmation = false;
+            player.ArrivalTargetCode = null;
+            ClearNavigationJourney(player);
+        }
     }
 
     private static void DecayLocationInference(FleetPlayer player, DateTimeOffset now)
@@ -688,8 +637,10 @@ public sealed class FleetState
 
         if (player.LocationConfidence.Equals("None", StringComparison.OrdinalIgnoreCase))
         {
-            player.Location = "Unknown";
-            player.LocationEvidence = "Location evidence expired";
+            // Game.log has no reliable leave-region event. Preserve the last confirmed
+            // location and lower only its trust state until an explicit session boundary.
+            player.LocationConfidence = "Low";
+            player.IsLocationStale = true;
         }
     }
 

@@ -17,7 +17,9 @@ public static class NetworkPlayerSnapshotChangeDetector
             Append(builder, player.Ship);
             Append(builder, player.ShipConfidence);
             Append(builder, player.Location);
-            Append(builder, player.LocationConfidence);
+        Append(builder, player.LocationConfidence);
+        Append(builder, player.ArrivalPendingConfirmation ? "arrival-pending" : "arrival-confirmed");
+        Append(builder, player.ArrivalTargetCode);
             Append(builder, player.VisibilityScope);
             Append(builder, player.PersonalHangarSharedWithFleet ? "1" : "0");
             Append(builder, player.ServerShard);

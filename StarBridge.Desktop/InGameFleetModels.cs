@@ -146,6 +146,7 @@ internal sealed record InGameFleetSnapshot(
     InGameFleetMemberRow[] Members,
     InGameFleetShipRow[] Ships,
     string StatusText,
+    bool CanPublishBroadcast,
     string Fingerprint)
 {
     internal static InGameFleetSnapshot Unavailable(string statusText) =>
@@ -176,7 +177,8 @@ internal static class InGameFleetProjection
         string announcementContent,
         IEnumerable<InGameFleetMemberRow> members,
         IEnumerable<InGameFleetShipRow> ships,
-        string statusText)
+        string statusText,
+        bool canPublishBroadcast = false)
     {
         var memberRows = members
             .OrderBy(CoordinationRank)
@@ -205,7 +207,8 @@ internal static class InGameFleetProjection
             announcementContent,
             memberRows,
             shipRows,
-            statusText);
+            statusText,
+            canPublishBroadcast);
 
         return new InGameFleetSnapshot(
             isAvailable,
@@ -224,6 +227,7 @@ internal static class InGameFleetProjection
             memberRows,
             shipRows,
             statusText,
+            canPublishBroadcast,
             fingerprint);
     }
 
@@ -263,7 +267,8 @@ internal static class InGameFleetProjection
         string announcementContent,
         IEnumerable<InGameFleetMemberRow> members,
         IEnumerable<InGameFleetShipRow> ships,
-        string statusText)
+        string statusText,
+        bool canPublishBroadcast)
     {
         var value = new HashCode();
         value.Add(isAvailable);
@@ -275,6 +280,7 @@ internal static class InGameFleetProjection
         AddText(ref value, announcementTitle);
         AddText(ref value, announcementContent);
         AddText(ref value, statusText);
+        value.Add(canPublishBroadcast);
         foreach (var member in members)
         {
             AddText(ref value, member.AccountId);

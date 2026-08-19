@@ -4283,6 +4283,11 @@
                                             Content="舰船"
                                             Style="{StaticResource FleetSectionNavigationButtonStyle}"
                                             Click="FleetRailButton_Click" />
+                                    <Button x:Name="FleetBroadcastRailButton"
+                                            Content="广播"
+                                            Style="{StaticResource FleetSectionNavigationButtonStyle}"
+                                            ToolTip="向所有正在游戏中的舰队成员发送醒目广播"
+                                            Click="FleetRailButton_Click" />
                                     <Button x:Name="ManageFleetRailButton"
                                             Content="管理"
                                             Style="{StaticResource FleetSectionNavigationButtonStyle}"
@@ -4755,11 +4760,27 @@
                                                                            Style="{StaticResource FleetMemberValueText}"
                                                                            ToolTip="{Binding SharedShipDisplayText}" />
 
-                                                                <TextBlock Grid.Column="6"
-                                                                           Margin="0,0,10,0"
-                                                                           Text="{Binding SharedLocationDisplayText}"
-                                                                           Style="{StaticResource FleetMemberValueText}"
-                                                                           ToolTip="{Binding SharedLocationDisplayText}" />
+                                                                <StackPanel Grid.Column="6"
+                                                                            Margin="0,0,10,0"
+                                                                            Orientation="Horizontal"
+                                                                            VerticalAlignment="Center"
+                                                                            ToolTip="{Binding SharedLocationToolTip}">
+                                                                    <TextBlock Text="{Binding SharedLocationDisplayText}"
+                                                                               Style="{StaticResource FleetMemberValueText}"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <Border Margin="6,0,0,0"
+                                                                            Padding="5,1"
+                                                                            Background="{StaticResource StatusWarningSurfaceBrush}"
+                                                                            BorderBrush="{StaticResource StatusWarningBrush}"
+                                                                            BorderThickness="1"
+                                                                            Visibility="{Binding LocationArrivalBadgeVisibility}">
+                                                                        <TextBlock Text="{Binding LocationArrivalBadgeText}"
+                                                                                   Foreground="{StaticResource StatusWarningBrush}"
+                                                                                   FontFamily="{StaticResource BridgeCjkFont}"
+                                                                                   FontSize="9"
+                                                                                   FontWeight="SemiBold" />
+                                                                    </Border>
+                                                                </StackPanel>
 
                                                                 <TextBlock Grid.Column="7"
                                                                            Margin="0,0,8,0"
@@ -7795,6 +7816,174 @@
                                     </Border>
                                 </Grid>
                             </Border>
+                        </TabItem>
+                        <TabItem x:Name="FleetBroadcastTab"
+                                 Header="广播"
+                                 Visibility="Collapsed">
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.15*" />
+                                    <ColumnDefinition Width="0.85*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        Margin="0,0,12,0"
+                                        Padding="22"
+                                        Background="{DynamicResource BridgePanel}"
+                                        BorderBrush="{DynamicResource BridgeHairline}"
+                                        BorderThickness="1">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="舰队广播"
+                                                       Foreground="{DynamicResource BridgeInk}"
+                                                       FontSize="24"
+                                                       FontWeight="Bold" />
+                                            <TextBlock Margin="0,6,0,0"
+                                                       Text="广播会强制显示给所有正在游戏中的舰队成员；无需开启信息浮层，也不能被接收方屏蔽。"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource BridgeInk3}" />
+                                        </StackPanel>
+                                        <TextBox x:Name="FleetBroadcastMessageBox"
+                                                 Grid.Row="1"
+                                                 Margin="0,22,0,0"
+                                                 Height="112"
+                                                 Padding="12"
+                                                 MaxLength="180"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 ToolTip="最多 180 个字符" />
+                                        <Grid Grid.Row="2" Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="FleetBroadcastPermissionText"
+                                                       VerticalAlignment="Center"
+                                                       Text="正在确认广播权限…"
+                                                       Foreground="{DynamicResource BridgeInk3}" />
+                                            <Button x:Name="FleetBroadcastSendButton"
+                                                    Grid.Column="1"
+                                                    MinWidth="128"
+                                                    Content="发送广播"
+                                                    Style="{StaticResource PrimaryButton}"
+                                                    Click="FleetBroadcastSendButton_Click" />
+                                        </Grid>
+                                        <TextBlock x:Name="FleetBroadcastStatusText"
+                                                   Grid.Row="3"
+                                                   Margin="0,10,0,0"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource BridgeInk3}" />
+                                        <Grid Grid.Row="4" Margin="0,20,0,0">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="本次会话中的广播"
+                                                       Foreground="{DynamicResource BridgeInk}"
+                                                       FontSize="16"
+                                                       FontWeight="SemiBold" />
+                                            <ListBox x:Name="FleetBroadcastHistoryList"
+                                                     Grid.Row="1"
+                                                     Margin="0,10,0,0"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Margin="0,0,0,8"
+                                                                Padding="12"
+                                                                Background="{DynamicResource BridgePanelRaised}"
+                                                                BorderBrush="{Binding AccentBrush}"
+                                                                BorderThickness="3,0,0,0">
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Message}"
+                                                                           TextWrapping="Wrap"
+                                                                           Foreground="{DynamicResource BridgeInk}"
+                                                                           FontWeight="SemiBold" />
+                                                                <TextBlock Margin="0,6,0,0"
+                                                                           Text="{Binding MetaText}"
+                                                                           Foreground="{DynamicResource BridgeInk3}"
+                                                                           FontSize="11" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Padding="22"
+                                        Background="{DynamicResource BridgePanel}"
+                                        BorderBrush="{DynamicResource BridgeHairline}"
+                                        BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock Text="我的广播样式"
+                                                   Foreground="{DynamicResource BridgeInk}"
+                                                   FontSize="20"
+                                                   FontWeight="Bold" />
+                                        <TextBlock Margin="0,6,0,18"
+                                                   Text="这些设置只属于当前发送账号，并随每条广播发送；不跟随接收方的浮层外观。"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource BridgeInk3}" />
+                                        <TextBlock Text="颜色主题" Foreground="{DynamicResource BridgeInk2}" />
+                                        <ComboBox x:Name="FleetBroadcastPresetBox"
+                                                  Margin="0,6,0,14"
+                                                  SelectionChanged="FleetBroadcastAppearanceBox_SelectionChanged">
+                                            <ComboBoxItem Content="紧急红" Tag="emergency" />
+                                            <ComboBoxItem Content="指挥蓝" Tag="command" />
+                                            <ComboBoxItem Content="集结黄" Tag="rally" />
+                                            <ComboBoxItem Content="医疗绿" Tag="medical" />
+                                        </ComboBox>
+                                        <TextBlock Text="单次显示时间" Foreground="{DynamicResource BridgeInk2}" />
+                                        <ComboBox x:Name="FleetBroadcastDurationBox"
+                                                  Margin="0,6,0,14"
+                                                  SelectionChanged="FleetBroadcastAppearanceBox_SelectionChanged">
+                                            <ComboBoxItem Content="8 秒" Tag="8" />
+                                            <ComboBoxItem Content="10 秒" Tag="10" />
+                                            <ComboBoxItem Content="14 秒" Tag="14" />
+                                            <ComboBoxItem Content="18 秒" Tag="18" />
+                                        </ComboBox>
+                                        <TextBlock Text="重复次数" Foreground="{DynamicResource BridgeInk2}" />
+                                        <ComboBox x:Name="FleetBroadcastRepeatBox"
+                                                  Margin="0,6,0,14"
+                                                  SelectionChanged="FleetBroadcastAppearanceBox_SelectionChanged">
+                                            <ComboBoxItem Content="1 次" Tag="1" />
+                                            <ComboBoxItem Content="2 次" Tag="2" />
+                                            <ComboBoxItem Content="3 次" Tag="3" />
+                                        </ComboBox>
+                                        <TextBlock Text="文字大小" Foreground="{DynamicResource BridgeInk2}" />
+                                        <ComboBox x:Name="FleetBroadcastFontScaleBox"
+                                                  Margin="0,6,0,20"
+                                                  SelectionChanged="FleetBroadcastAppearanceBox_SelectionChanged">
+                                            <ComboBoxItem Content="标准" Tag="1" />
+                                            <ComboBoxItem Content="醒目" Tag="1.2" />
+                                            <ComboBoxItem Content="最大" Tag="1.45" />
+                                        </ComboBox>
+                                        <Border x:Name="FleetBroadcastPreviewBorder"
+                                                Padding="14"
+                                                Background="{DynamicResource BridgePanelRaised}"
+                                                BorderBrush="{DynamicResource BridgeStatusBad}"
+                                                BorderThickness="1">
+                                            <TextBlock x:Name="FleetBroadcastPreviewText"
+                                                       Text="舰队广播预览 · 所有游戏内成员可见"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource BridgeInk}"
+                                                       FontWeight="Bold"
+                                                       FontSize="17" />
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
                         </TabItem>
                         <TabItem x:Name="ManageFleetTab"
                                  Header="管理"

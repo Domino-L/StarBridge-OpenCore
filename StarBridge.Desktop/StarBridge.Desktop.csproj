@@ -73,6 +73,7 @@
     <Content Include="Assets\systems\pyro.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\pyro.png')" />
     <Content Include="Assets\systems\nyx.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('Assets\systems\nyx.png')" />
     <Content Include="Data\location-names-zh.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
+    <Content Include="Data\starbridge_location_catalog.json" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
     <Content Include="config\overlay.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

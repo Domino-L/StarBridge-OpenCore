@@ -544,7 +544,9 @@ public partial class MainWindow
                 LiveStatus: member.LiveStatus,
                 AccountId: publicProfileId,
                 SharedEventTypes: previousMemberSnapshot?.SharedEventTypes ?? (int)PlayerSharedEventTypes.All,
-                SharedEvents: previousMemberSnapshot?.SharedEvents);
+                SharedEvents: previousMemberSnapshot?.SharedEvents,
+                ArrivalPendingConfirmation: member.ArrivalPendingConfirmation,
+                ArrivalTargetCode: member.ArrivalTargetCode);
             memberSnapshotKey = GetNetworkSnapshotKey(memberSnapshot);
             _networkSnapshots[memberSnapshotKey] = memberSnapshot;
             ApplyFleetMemberSnapshotToState(memberSnapshot);
@@ -625,6 +627,8 @@ public partial class MainWindow
                 LocationEvidence: "Fleet member sync",
                 Timestamp: timestamp));
         }
+
+        ApplyArrivalPendingSnapshot(snapshotKey, snapshot, timestamp);
     }
 
     private void MergeFleetEventLogs(NetworkFleetEventLogSnapshot[]? eventLogs)
@@ -788,6 +792,27 @@ public partial class MainWindow
                 LocationEvidence: "Network relay",
                 Timestamp: snapshot.LastUpdated));
         }
+
+        ApplyArrivalPendingSnapshot(snapshotKey, snapshot, snapshot.LastUpdated);
+    }
+
+    private void ApplyArrivalPendingSnapshot(
+        string snapshotKey,
+        NetworkPlayerSnapshot snapshot,
+        DateTimeOffset timestamp)
+    {
+        if (!snapshot.ArrivalPendingConfirmation)
+        {
+            return;
+        }
+
+        _fleetState.Apply(new FleetEvent(
+            FleetEventType.PlayerLocationChanged,
+            snapshotKey,
+            Location: "Arrived - awaiting location confirmation",
+            NavigationTarget: snapshot.ArrivalTargetCode,
+            LocationEvidence: "Network arrival pending confirmation",
+            Timestamp: timestamp));
     }
 
     private void QueueSharedLifeEventNotification(

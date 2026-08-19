@@ -199,7 +199,9 @@ public partial class MainWindow
             FleetMembersCanView: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetMembersCanView : null,
             FleetVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.FleetVisibilityGroupIds : null,
             RoomMembersCanView: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomMembersCanView : null,
-            RoomVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomVisibilityGroupIds : null);
+            RoomVisibilityGroupIds: dualAxisWire.UsesDualAxisWire ? dualAxisWire.RoomVisibilityGroupIds : null,
+            ArrivalPendingConfirmation: publishLocation && local?.ArrivalPendingConfirmation == true,
+            ArrivalTargetCode: publishLocation ? local?.ArrivalTargetCode : null);
 
         try
         {

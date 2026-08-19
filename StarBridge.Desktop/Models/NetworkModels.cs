@@ -38,7 +38,9 @@ public sealed record NetworkPlayerSnapshot(
     bool? FleetMembersCanView = null,
     string[]? FleetVisibilityGroupIds = null,
     bool? RoomMembersCanView = null,
-    string[]? RoomVisibilityGroupIds = null);
+    string[]? RoomVisibilityGroupIds = null,
+    bool ArrivalPendingConfirmation = false,
+    string? ArrivalTargetCode = null);
 
 public sealed record PlayerPresenceHeartbeatRequest(
     bool Online,
@@ -201,7 +203,9 @@ public sealed record NetworkFleetMemberSnapshot(
     string? ServerRegion = null,
     string? LiveStatus = null,
     string? AccountId = null,
-    DateTimeOffset JoinedAt = default);
+    DateTimeOffset JoinedAt = default,
+    bool ArrivalPendingConfirmation = false,
+    string? ArrivalTargetCode = null);
 
 public sealed record NetworkFleetShipSnapshot(
     string Code,

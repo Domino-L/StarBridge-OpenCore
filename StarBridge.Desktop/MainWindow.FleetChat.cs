@@ -87,6 +87,7 @@ public partial class MainWindow
     private void InitializeFleetChat()
     {
         InitializeFleetAnnouncements();
+        InitializeFleetBroadcasts();
         FleetChatMessageList.ItemsSource = _fleetChatMessages;
         ChatHistoryViewport.EnableSmoothScrolling(FleetChatMessageList);
         FleetChatMessageList.AddHandler(

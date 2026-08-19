@@ -1,6 +1,7 @@
 using StarBridge.Core.Events;
 using StarBridge.Core.Chat;
 using StarBridge.Core.Fleets;
+using StarBridge.Core.FleetBroadcasts;
 using StarBridge.Core.Identity;
 using StarBridge.Core.Parsing;
 using StarBridge.Core.Presence;
@@ -54,7 +55,7 @@ var tests = new (string Name, Action Test)[]
     ("Unconfirmed game identity requires binding", UnconfirmedGameIdentityRequiresBinding),
     ("Confirmed matching game identity allows synchronization", ConfirmedMatchingGameIdentityAllowsSynchronization),
     ("Confirmed mismatched game identity blocks synchronization", ConfirmedMismatchedGameIdentityBlocksSynchronization),
-    ("Quantum arrival uses recovered navigation target", QuantumArrivalUsesRecoveredNavigationTarget),
+    ("Quantum arrival retains recovered target without replacing confirmed location", QuantumArrivalUsesRecoveredNavigationTarget),
     ("Quantum context follows local player identity change", QuantumContextFollowsLocalPlayerIdentityChange),
     ("Quantum arrival parser retains ship identity", QuantumArrivalParserRetainsShipIdentity),
     ("Quantum arrival and confirmed location preserve current ship", QuantumArrivalAndConfirmedLocationPreserveCurrentShip),
@@ -64,10 +65,13 @@ var tests = new (string Name, Action Test)[]
     ("Recent confirmed region wins over quantum arrival", RecentConfirmedRegionWinsOverQuantumArrival),
     ("Recent journey origin yields to beacon arrival", RecentJourneyOriginYieldsToBeaconArrival),
     ("Post-target region confirmation wins over beacon arrival", PostTargetRegionConfirmationWinsOverBeaconArrival),
-    ("Old confirmed region yields to quantum arrival", OldConfirmedRegionYieldsToQuantumArrival),
+    ("Old confirmed region remains while quantum arrival awaits confirmation", OldConfirmedRegionYieldsToQuantumArrival),
+    ("Location silence keeps the last confirmed location as stale", LocationSilenceKeepsConfirmedLocationStale),
+    ("Offline session boundary clears active location state", OfflineSessionBoundaryClearsActiveLocationState),
     ("Chat history pager loads newest then older pages without overlap", ChatHistoryPagerLoadsNewestThenOlderPages),
     ("Chat history pager separates live messages from older history", ChatHistoryPagerSeparatesLiveMessagesFromOlderHistory),
     ("Legacy fleet profile managers retain announcement permission once", LegacyFleetProfileManagersRetainAnnouncementPermissionOnce),
+    ("Fleet broadcast policy normalizes sender appearance and content", FleetBroadcastPolicyNormalizesSenderInput),
     ("Fleet invitation policies default to every member and respect restrictions", FleetInvitationPoliciesRespectRestrictions)
 };
 
@@ -132,6 +136,26 @@ static void FleetInvitationPoliciesRespectRestrictions()
     AssertEqual(true, FleetInvitationAccessPolicy.Allows(FleetInvitationAccessPolicy.Commander, true, true, false), "commander passes commander policy");
 }
 
+static void FleetBroadcastPolicyNormalizesSenderInput()
+{
+    var message = FleetBroadcastPolicy.NormalizeMessage("  全员立即集合  ");
+    AssertEqual("全员立即集合", message.Message, "message trimmed");
+    AssertEqual<string?>(null, message.Error, "valid message accepted");
+
+    var appearance = FleetBroadcastPolicy.NormalizeAppearance(new FleetBroadcastAppearanceContract(
+        "not-a-color",
+        "#11223344",
+        "#ABCDEF",
+        99,
+        9,
+        0.1));
+    AssertEqual(FleetBroadcastPolicy.DefaultAppearance.AccentColor, appearance.AccentColor, "invalid accent falls back");
+    AssertEqual("#11223344", appearance.BackgroundColor, "valid ARGB color retained");
+    AssertEqual(20d, appearance.DurationSeconds, "duration clamped");
+    AssertEqual(3, appearance.RepeatCount, "repeat clamped");
+    AssertEqual(0.9d, appearance.FontScale, "font scale clamped");
+}
+
 static void QuantumArrivalUsesRecoveredNavigationTarget()
 {
     var state = new FleetState();
@@ -147,9 +171,10 @@ static void QuantumArrivalUsesRecoveredNavigationTarget()
         LocationEvidence: "Quantum arrival"));
 
     var player = SinglePlayer(state);
-    AssertEqual("rs_ext_pyro-nyx_jp", player.Location, "resolved arrival location");
-    AssertEqual("Medium", player.LocationConfidence, "arrival location confidence");
-    AssertEqual("Quantum arrival target (unconfirmed)", player.LocationEvidence, "arrival remains provisional without region confirmation");
+    AssertEqual("Unknown", player.Location, "arrival target is not promoted to current location");
+    AssertEqual("None", player.LocationConfidence, "arrival without confirmation has no location confidence");
+    AssertEqual(true, player.ArrivalPendingConfirmation, "arrival waits for location confirmation");
+    AssertEqual("rs_ext_pyro-nyx_jp", player.ArrivalTargetCode, "recovered arrival target is retained separately");
 }
 
 static void QuantumContextFollowsLocalPlayerIdentityChange()
@@ -223,6 +248,8 @@ static void QuantumArrivalAndConfirmedLocationPreserveCurrentShip()
 
     var player = SinglePlayer(state);
     AssertEqual("Stanton4_NewBabbage", player.Location, "confirmed location");
+    AssertEqual("Stanton4_NewBabbage", player.ConfirmedLocationCode, "explicit confirmed location code");
+    AssertEqual(false, player.ArrivalPendingConfirmation, "confirmed location completes pending arrival");
     AssertEqual("ANVL_Arrow", player.Ship, "current ship survives location arrival");
     AssertEqual("High", player.ShipConfidence, "ship confidence survives location arrival");
 }
@@ -325,6 +352,8 @@ static void RecentConfirmedRegionWinsOverQuantumArrival()
     var player = SinglePlayer(state);
     AssertEqual("RR_P2_L4", player.Location, "recent confirmed region");
     AssertEqual("Location inventory context", player.LocationEvidence, "confirmed evidence remains authoritative");
+    AssertEqual(true, player.ArrivalPendingConfirmation, "arrival remains pending after recent confirmed region");
+    AssertEqual("rs_ext_pyro2_l4", player.ArrivalTargetCode, "arrival target remains separate");
 }
 
 static void OldConfirmedRegionYieldsToQuantumArrival()
@@ -349,9 +378,10 @@ static void OldConfirmedRegionYieldsToQuantumArrival()
         LocationEvidence: "Quantum arrival"));
 
     var player = SinglePlayer(state);
-    AssertEqual("rs_ext_pyro2_l4", player.Location, "quantum target after protection window");
-    AssertEqual("Medium", player.LocationConfidence, "unconfirmed quantum target confidence");
-    AssertEqual("Quantum arrival target (unconfirmed)", player.LocationEvidence, "quantum evidence replaces stale confirmation provisionally");
+    AssertEqual("RR_P2_L4", player.Location, "old confirmed region is retained");
+    AssertEqual("High", player.LocationConfidence, "arrival does not weaken confirmed location immediately");
+    AssertEqual(true, player.ArrivalPendingConfirmation, "arrival is pending confirmation");
+    AssertEqual("rs_ext_pyro2_l4", player.ArrivalTargetCode, "quantum target is retained separately");
 }
 
 static void RecentJourneyOriginYieldsToBeaconArrival()
@@ -386,8 +416,9 @@ static void RecentJourneyOriginYieldsToBeaconArrival()
         LocationEvidence: "Quantum arrival"));
 
     var player = SinglePlayer(state);
-    AssertEqual("MISSION_QT_BEACON_720566824111", player.Location, "beacon arrival replaces the journey origin provisionally");
-    AssertEqual("Medium", player.LocationConfidence, "beacon arrival remains provisional");
+    AssertEqual("RR_P2_L4", player.Location, "beacon arrival does not replace the journey origin");
+    AssertEqual(true, player.ArrivalPendingConfirmation, "beacon arrival remains pending");
+    AssertEqual("MISSION_QT_BEACON_720566824111", player.ArrivalTargetCode, "beacon target is retained separately");
 }
 
 static void PostTargetRegionConfirmationWinsOverBeaconArrival()
@@ -424,6 +455,55 @@ static void PostTargetRegionConfirmationWinsOverBeaconArrival()
     var player = SinglePlayer(state);
     AssertEqual("Stanton4_NewBabbage", player.Location, "post-target region confirmation remains authoritative");
     AssertEqual("High", player.LocationConfidence, "confirmed region confidence");
+    AssertEqual(true, player.ArrivalPendingConfirmation, "later arrival still requires a following confirmation");
+}
+
+static void LocationSilenceKeepsConfirmedLocationStale()
+{
+    var state = new FleetState();
+    var confirmedAt = DateTimeOffset.Parse("2026-07-19T05:10:00Z");
+    state.Apply(new FleetEvent(
+        FleetEventType.PlayerLocationChanged,
+        "Pilot",
+        Location: "Stanton4_NewBabbage",
+        Timestamp: confirmedAt,
+        LocationEvidenceScore: 95,
+        LocationEvidence: "Location inventory context"));
+
+    state.RefreshShipInferences(confirmedAt.AddHours(1));
+
+    var player = SinglePlayer(state);
+    AssertEqual("Stanton4_NewBabbage", player.Location, "stale location remains visible");
+    AssertEqual("Stanton4_NewBabbage", player.ConfirmedLocationCode, "confirmed location remains recorded");
+    AssertEqual("Low", player.LocationConfidence, "stale location has low confidence");
+    AssertEqual(true, player.IsLocationStale, "stale state is explicit");
+}
+
+static void OfflineSessionBoundaryClearsActiveLocationState()
+{
+    var state = new FleetState();
+    var confirmedAt = DateTimeOffset.Parse("2026-07-19T05:10:00Z");
+    state.Apply(new FleetEvent(
+        FleetEventType.PlayerLocationChanged,
+        "Pilot",
+        Location: "Stanton4_NewBabbage",
+        Timestamp: confirmedAt,
+        LocationEvidenceScore: 95,
+        LocationEvidence: "Location inventory context"));
+    state.Apply(new FleetEvent(
+        FleetEventType.PlayerOffline,
+        "Pilot",
+        Timestamp: confirmedAt.AddMinutes(1)));
+    state.Apply(new FleetEvent(
+        FleetEventType.PlayerOnline,
+        "Pilot",
+        Timestamp: confirmedAt.AddMinutes(2)));
+
+    var player = SinglePlayer(state);
+    AssertEqual("Unknown", player.Location, "offline boundary clears current location");
+    AssertEqual("Unknown", player.ConfirmedLocationCode, "offline boundary clears confirmed location");
+    AssertEqual<DateTimeOffset?>(null, player.ConfirmedAtUtc, "offline boundary clears confirmation time");
+    AssertEqual(false, player.ArrivalPendingConfirmation, "offline boundary clears pending arrival");
 }
 
 static void WeakOldShipSignalDoesNotReplaceNewerShipChannelJoin()

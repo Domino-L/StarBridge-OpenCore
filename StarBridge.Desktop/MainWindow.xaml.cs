@@ -911,6 +911,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     private string _activeOverlayPreset = OverlayPresetDefault;
     private string _language = "zh";
     private bool _isGameProcessRunning;
+    private DateTimeOffset? _gameProcessMissingSinceUtc;
     private PlayerPresenceKind _localPresence = PlayerPresenceKind.Offline;
     private DateTimeOffset _lastAppInteractionAtUtc = DateTimeOffset.UtcNow;
     private DateTimeOffset _lastAppInteractionSampleAtUtc = DateTimeOffset.MinValue;
@@ -990,6 +991,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         _inGameMenuCoordinator.Closed += InGameMenuCoordinator_Closed;
         _inGameMenuCoordinator.FleetRefreshRequested += InGameMenuCoordinator_FleetRefreshRequested;
         _inGameMenuCoordinator.FleetCommunicationRequested += InGameMenuCoordinator_FleetCommunicationRequested;
+        _inGameMenuCoordinator.FleetBroadcastRequested += InGameMenuCoordinator_FleetBroadcastRequested;
         _inGameMenuCoordinator.FleetMemberActionRequested += InGameMenuCoordinator_FleetMemberActionRequested;
         _inGameMenuCoordinator.FleetShipImageReportRequested += InGameMenuCoordinator_FleetShipImageReportRequested;
         _inGameMenuCoordinator.SocialRefreshRequested += InGameMenuCoordinator_SocialRefreshRequested;
@@ -1145,7 +1147,7 @@ public partial class MainWindow : Window, IAppUpdateUi
             RefreshStartupDataGatePresentation();
         }
         RefreshAccountPanel();
-        RenderCachedIdentity();
+        RenderCachedIdentity(initializeOfflineState: true);
         EnsureAvatarStoredAsUserAsset();
         LoadAvatarPreview();
         LoadOwnedShips();
@@ -4075,13 +4077,12 @@ public partial class MainWindow : Window, IAppUpdateUi
             refreshUi: false,
             queueNetworkPush: false);
         var localSharedPresence = GetLocalFleetPresencePrivacyProjection();
-        if (!string.IsNullOrWhiteSpace(_localPlayer))
-        {
-            _fleetState.SetPlayerOnlineState(
-                _localPlayer,
-                PlayerPresence.IsOnline(_localPresence),
-                DateTimeOffset.Now);
-        }
+        LocalGameSessionStatePolicy.MarkActiveIfRunning(
+            _fleetState,
+            _localPlayer,
+            _isGameProcessRunning,
+            _localPresence,
+            DateTimeOffset.Now);
 
         _fleetState.RefreshShipInferences(DateTimeOffset.Now);
         var nextPlayers = new List<PlayerRow>();
@@ -4118,6 +4119,8 @@ public partial class MainWindow : Window, IAppUpdateUi
             var shipConfidence = player.ShipConfidence;
             var locationConfidence = player.LocationConfidence;
             var rawLocation = FormatRawLocation(player.Location, player.NavigationTarget);
+            var arrivalPendingConfirmation = player.ArrivalPendingConfirmation;
+            var arrivalTargetCode = player.ArrivalTargetCode;
             if (!isLocalPlayer && networkSnapshot is not null)
             {
                 rawShip = ShipNameLocalizer.ResolveCode(networkSnapshot.Ship);
@@ -4130,6 +4133,8 @@ public partial class MainWindow : Window, IAppUpdateUi
                 rawLocation = !string.IsNullOrWhiteSpace(networkSnapshot.Location)
                     ? FormatRawLocation(networkSnapshot.Location!, "")
                     : rawLocation;
+                arrivalPendingConfirmation = networkSnapshot.ArrivalPendingConfirmation;
+                arrivalTargetCode = networkSnapshot.ArrivalTargetCode;
             }
 
             var playerCallsign = isLocalPlayer
@@ -4214,7 +4219,9 @@ public partial class MainWindow : Window, IAppUpdateUi
                 isFleetCommander,
                 GetFleetConfiguredRoleColorBrush(displayPlayerName, playerCallsign, isFleetCommander),
                 HasFleetPosition: isFleetCommander ||
-                                  GetFleetPermission(displayPlayerName, playerCallsign)?.PermissionEnabled == true)
+                                  GetFleetPermission(displayPlayerName, playerCallsign)?.PermissionEnabled == true,
+                ArrivalPendingConfirmation: arrivalPendingConfirmation,
+                ArrivalTargetCode: arrivalTargetCode)
             {
                 ResolvedServerRelationship = serverRelationship
             });
@@ -4481,6 +4488,11 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool CanCurrentUserManageAnnouncements()
     {
         return HasCurrentUserFleetPermissionId(FleetPermissionPolicy.ManageAnnouncements);
+    }
+
+    private bool CanCurrentUserPublishFleetBroadcasts()
+    {
+        return HasCurrentUserFleetPermissionId(FleetPermissionPolicy.PublishBroadcasts);
     }
 
     private bool CanCurrentUserEditFleetAvatar()
@@ -4865,10 +4877,13 @@ public partial class MainWindow : Window, IAppUpdateUi
         var location = fleetEvent.Location;
         if (IsQuantumArrivalPlaceholder(location))
         {
-            location = _fleetState.Players
-                .FirstOrDefault(candidate => candidate.Name.Equals(fleetEvent.Player, StringComparison.OrdinalIgnoreCase))
-                ?.Location;
-            return $"{player} 抵达：{FormatLocationForUser(location)}";
+            var playerState = _fleetState.Players
+                .FirstOrDefault(candidate => candidate.Name.Equals(fleetEvent.Player, StringComparison.OrdinalIgnoreCase));
+            var target = playerState?.ArrivalTargetCode ?? fleetEvent.NavigationTarget;
+            var targetName = FormatLocationForUser(target);
+            return targetName.Equals("未知", StringComparison.OrdinalIgnoreCase)
+                ? $"{player} 已结束量子航行，等待当前位置确认"
+                : $"{player} 已抵达导航目标：{targetName}，等待当前位置确认";
         }
 
         return $"{player} 位置更新：{FormatLocationForUser(location)}";

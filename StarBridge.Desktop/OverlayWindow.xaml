@@ -461,7 +461,8 @@
                                                FontSize="10"
                                                TextTrimming="CharacterEllipsis"
                                                HorizontalAlignment="Stretch"
-                                               TextAlignment="Right" />
+                                               TextAlignment="Right"
+                                               ToolTip="{Binding LocationToolTip}" />
                                     <TextBlock Grid.Row="1"
                                                Grid.ColumnSpan="3"
                                                Text="{Binding Ship}"
