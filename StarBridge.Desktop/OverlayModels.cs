@@ -73,7 +73,8 @@ public enum OverlaySkin
     Default,
     NightShadow,
     LagrangeWeave,
-    Verdict
+    Verdict,
+    Minimal
 }
 
 internal enum OverlaySkinRenderKind
@@ -81,7 +82,8 @@ internal enum OverlaySkinRenderKind
     Default,
     NightShadow,
     LagrangeWeave,
-    Verdict
+    Verdict,
+    Minimal
 }
 
 public enum OverlayCrosshairMode

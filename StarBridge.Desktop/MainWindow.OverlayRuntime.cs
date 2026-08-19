@@ -128,14 +128,8 @@ public partial class MainWindow
     {
         if (WindowState == WindowState.Minimized)
         {
-            if (!_overlaySettings.EnableTrayMode && IsOverlayRunning && _overlayWindow is not null)
-            {
-                _overlayHiddenForMainWindowMinimize = true;
-                _overlayWindow.SetVisible(false);
-                RefreshPersonalIdentityConsole();
-                RefreshOverlayOverviewSummary();
-            }
-
+            // The information overlay has its own explicit running state. Minimizing
+            // the configuration window must not implicitly hide or stop it.
             return;
         }
 
@@ -276,6 +270,7 @@ public partial class MainWindow
         if (_overlayHiddenForMainWindowMinimize && _overlayWindow is not null)
         {
             CloseOverlayWindow();
+            DesktopAppConfig.SaveOverlayRunningState(false);
             RefreshPersonalIdentityConsole();
             RefreshOverlayOverviewSummary();
             return;
@@ -284,6 +279,7 @@ public partial class MainWindow
         if (_overlayWindow is { IsVisible: true })
         {
             CloseOverlayWindow();
+            DesktopAppConfig.SaveOverlayRunningState(false);
             RefreshPersonalIdentityConsole();
             RefreshOverlayOverviewSummary();
             return;
@@ -293,11 +289,30 @@ public partial class MainWindow
             GetEffectiveOverlaySettings(),
             StarCitizenProcessProbe.IsForeground());
         var opened = OpenOverlayWindow(overlaySettings);
+        if (opened)
+        {
+            DesktopAppConfig.SaveOverlayRunningState(true);
+        }
         if (opened && focusGameWindow && overlaySettings.AutoFocusGameWindowOnOpen)
         {
             ScheduleGameFocusAfterOverlayStartup(overlaySettings);
         }
 
+        RefreshPersonalIdentityConsole();
+        RefreshOverlayOverviewSummary();
+    }
+
+    private void RestoreOverlayRunningState()
+    {
+        if (!DesktopAppConfig.LoadOverlayRunningState() || IsOverlayRunning)
+        {
+            return;
+        }
+
+        var overlaySettings = OverlayStartupTransitionPolicy.ResolveForOpen(
+            GetEffectiveOverlaySettings(),
+            StarCitizenProcessProbe.IsForeground());
+        OpenOverlayWindow(overlaySettings);
         RefreshPersonalIdentityConsole();
         RefreshOverlayOverviewSummary();
     }

@@ -99,7 +99,7 @@ internal sealed partial class OverlayCompositionHudWindow
                 HudColor.FromRgb(3, 5, 10));
         }
 
-        return new OverlayHudPalette(
+        var palette = new OverlayHudPalette(
             FromBrush(_viewModel.PanelBackgroundBrush, HudColor.FromRgb(5, 10, 17, 176)),
             FromBrush(_viewModel.PanelBorderBrush, HudColor.FromRgb(69, 174, 255)),
             FromBrush(_viewModel.TitleBrush, HudColor.FromRgb(83, 190, 255)),
@@ -111,9 +111,23 @@ internal sealed partial class OverlayCompositionHudWindow
             FromBrush(_viewModel.CrosshairBrush, HudColor.FromRgb(235, 247, 255, 215)),
             FromBrush(_viewModel.CrosshairAlertBrush, HudColor.FromRgb(255, 240, 0, 225)),
             HudColor.FromRgb(4, 16, 28));
+
+        return _settings.Skin == OverlaySkin.Minimal
+            ? palette with
+            {
+                Title = Brighten(palette.Title, 0.72f),
+                Text = Brighten(palette.Text, 0.30f),
+                Muted = Brighten(palette.Muted, 0.58f),
+                Alert = Brighten(palette.Alert, 0.18f),
+                Online = Brighten(palette.Online, 0.18f),
+                Offline = Brighten(palette.Offline, 0.18f)
+            }
+            : palette;
     }
 
-    private static IReadOnlyList<OverlayCompositionMemberRow> SnapshotMembers(ObservableCollection<OverlayMemberRow> rows)
+    private static IReadOnlyList<OverlayCompositionMemberRow> SnapshotMembers(
+        ObservableCollection<OverlayMemberRow> rows,
+        bool brightenText)
     {
         return rows
             .Select(row => new OverlayCompositionMemberRow(
@@ -121,11 +135,15 @@ internal sealed partial class OverlayCompositionHudWindow
                 row.Status,
                 row.Ship,
                 row.Location,
-                FromBrush(row.StatusBrush, HudColor.FromRgb(142, 187, 220))))
+                BrightenIfNeeded(
+                    FromBrush(row.StatusBrush, HudColor.FromRgb(142, 187, 220)),
+                    brightenText)))
             .ToArray();
     }
 
-    private static IReadOnlyList<OverlayCompositionEventRow> SnapshotEvents(ObservableCollection<OverlayEventNotificationRow> rows)
+    private static IReadOnlyList<OverlayCompositionEventRow> SnapshotEvents(
+        ObservableCollection<OverlayEventNotificationRow> rows,
+        bool brightenText)
     {
         return rows
             .Select(row => new OverlayCompositionEventRow(
@@ -141,8 +159,23 @@ internal sealed partial class OverlayCompositionHudWindow
                 row.BarrageDurationSeconds,
                 row.BarrageLane,
                 row.IsBarrageActive,
-                FromBrush(row.AccentBrush, HudColor.FromRgb(83, 190, 255))))
+                BrightenIfNeeded(
+                    FromBrush(row.AccentBrush, HudColor.FromRgb(83, 190, 255)),
+                    brightenText)))
             .ToArray();
+    }
+
+    private static HudColor BrightenIfNeeded(HudColor color, bool brighten) =>
+        brighten ? Brighten(color, 0.24f) : color;
+
+    private static HudColor Brighten(HudColor color, float amount)
+    {
+        var normalizedAmount = Math.Clamp(amount, 0f, 1f);
+        return new HudColor(
+            (byte)Math.Round(color.R + (255 - color.R) * normalizedAmount),
+            (byte)Math.Round(color.G + (255 - color.G) * normalizedAmount),
+            (byte)Math.Round(color.B + (255 - color.B) * normalizedAmount),
+            color.A);
     }
 
     private static HudColor FromBrush(System.Windows.Media.Brush brush, HudColor fallback)

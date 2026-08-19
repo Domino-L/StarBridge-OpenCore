@@ -291,7 +291,12 @@ internal sealed partial class OverlayCompositionHudWindow
                     textOpacity);
                 if (!state.HideMemberStatus)
                 {
-                    DrawText(target, member.Status, _centerFormat, left + nameWidth, rowY, statusWidth, 18, member.StatusColor, textOpacity);
+                    var statusText = state.MinimalStyle && member.Status.Equals("应用在线", StringComparison.Ordinal)
+                        ? "应用\n在线"
+                        : member.Status;
+                    var statusTop = rowY;
+                    var statusHeight = state.MinimalStyle && statusText.Contains('\n') ? 30f : 18f;
+                    DrawText(target, statusText, _centerFormat, left + nameWidth, statusTop, statusWidth, statusHeight, member.StatusColor, textOpacity);
                 }
 
                 DrawText(target, member.Location, _mutedRightFormat, left + nameWidth + statusWidth, rowY + 1, locationWidth, 16, state.Palette.Muted, textOpacity);

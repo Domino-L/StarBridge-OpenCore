@@ -81,6 +81,12 @@ public partial class MainWindow
             return true;
         }
 
+        if (OnboardingState.IsDeferred())
+        {
+            await InitializeLoginAndNetworkAsync();
+            return true;
+        }
+
         await InitializeLoginAndNetworkAsync();
         if (!IsLoggedIn)
         {

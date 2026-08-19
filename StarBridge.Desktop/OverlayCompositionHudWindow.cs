@@ -155,6 +155,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private IDWriteTextFormat? _centerFormat;
     private IDWriteTextFormat? _eventTitleFormat;
     private IDWriteTextFormat? _eventDetailFormat;
+    private bool _minimalHudTextFormats;
     private IDWriteTextFormat? _chatBarrageTitleFormat;
     private IDWriteTextFormat? _chatBarrageTextFormat;
     private IDWriteTextFormat? _chatBarrageTimestampFormat;
@@ -795,31 +796,59 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     }
 
 
-    private void CreateTextFormats()
+    private void CreateTextFormats(bool minimalStyle = false)
     {
         _textWidthCache.Clear();
-        _titleFormat = CreateTextFormat("Segoe UI Semibold", 13, DWriteFontWeight.SemiBold, DWriteTextAlignment.Leading);
-        _textFormat = CreateTextFormat("Segoe UI", 12, DWriteFontWeight.Normal, DWriteTextAlignment.Leading);
-        _textRightFormat = CreateTextFormat("Segoe UI", 12, DWriteFontWeight.Normal, DWriteTextAlignment.Trailing);
-        _mutedFormat = CreateTextFormat("Segoe UI", 10, DWriteFontWeight.Normal, DWriteTextAlignment.Leading);
-        _mutedRightFormat = CreateTextFormat("Segoe UI", 10, DWriteFontWeight.Normal, DWriteTextAlignment.Trailing);
-        _tinyFormat = CreateTextFormat("Segoe UI Semibold", 9, DWriteFontWeight.SemiBold, DWriteTextAlignment.Leading);
-        _tinyCenterFormat = CreateTextFormat("Segoe UI Semibold", 8, DWriteFontWeight.SemiBold, DWriteTextAlignment.Center);
-        _centerFormat = CreateTextFormat("Segoe UI", 10, DWriteFontWeight.Normal, DWriteTextAlignment.Center);
+        _eventDetailFormat?.Dispose();
+        _eventTitleFormat?.Dispose();
+        _centerFormat?.Dispose();
+        _tinyCenterFormat?.Dispose();
+        _tinyFormat?.Dispose();
+        _mutedRightFormat?.Dispose();
+        _mutedFormat?.Dispose();
+        _textRightFormat?.Dispose();
+        _textFormat?.Dispose();
+        _titleFormat?.Dispose();
+
+        var titleSize = minimalStyle ? 14f : 13f;
+        var textSize = minimalStyle ? 13f : 12f;
+        var mutedSize = minimalStyle ? 11f : 10f;
+        var tinySize = minimalStyle ? 10f : 9f;
+        var tinyCenterSize = minimalStyle ? 9f : 8f;
+
+        _titleFormat = CreateTextFormat("Segoe UI Semibold", titleSize, DWriteFontWeight.SemiBold, DWriteTextAlignment.Leading);
+        _textFormat = CreateTextFormat("Segoe UI", textSize, DWriteFontWeight.Normal, DWriteTextAlignment.Leading);
+        _textRightFormat = CreateTextFormat("Segoe UI", textSize, DWriteFontWeight.Normal, DWriteTextAlignment.Trailing);
+        _mutedFormat = CreateTextFormat("Segoe UI", mutedSize, DWriteFontWeight.Normal, DWriteTextAlignment.Leading);
+        _mutedRightFormat = CreateTextFormat("Segoe UI", mutedSize, DWriteFontWeight.Normal, DWriteTextAlignment.Trailing);
+        _tinyFormat = CreateTextFormat("Segoe UI Semibold", tinySize, DWriteFontWeight.SemiBold, DWriteTextAlignment.Leading);
+        _tinyCenterFormat = CreateTextFormat("Segoe UI Semibold", tinyCenterSize, DWriteFontWeight.SemiBold, DWriteTextAlignment.Center);
+        _centerFormat = CreateTextFormat("Segoe UI", mutedSize, DWriteFontWeight.Normal, DWriteTextAlignment.Center);
         _eventTitleFormat = CreateTextFormat(
             "Segoe UI Semibold",
-            12,
+            minimalStyle ? 13f : 12f,
             DWriteFontWeight.SemiBold,
             DWriteTextAlignment.Leading,
             WordWrapping.Wrap,
             ParagraphAlignment.Near);
         _eventDetailFormat = CreateTextFormat(
             "Segoe UI",
-            11,
+            minimalStyle ? 12f : 11f,
             DWriteFontWeight.Normal,
             DWriteTextAlignment.Leading,
             WordWrapping.Wrap,
             ParagraphAlignment.Near);
+        _minimalHudTextFormats = minimalStyle;
+    }
+
+    private void EnsureHudTextFormats(bool minimalStyle)
+    {
+        if (_titleFormat is not null && _minimalHudTextFormats == minimalStyle)
+        {
+            return;
+        }
+
+        CreateTextFormats(minimalStyle);
     }
 
     private void EnsureChatBarrageTextFormats(float fontSize)
@@ -1000,7 +1029,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             overviewTopLocations,
             overviewLocationLayout,
             _viewModel.MembersTitle,
-            SnapshotMembers(_viewModel.Members),
+            SnapshotMembers(_viewModel.Members, _settings.Skin == OverlaySkin.Minimal),
             _viewModel.ChatTitle,
             _viewModel.ChatDisplayMode,
             _viewModel.ChatSide,
@@ -1009,7 +1038,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             OverlayDisplaySettings.NormalizeChatBarrageDensity(_settings.ChatBarrageDensity),
             _settings.ChatBarrageAvoidCenter,
             OverlayDisplaySettings.NormalizeChatTextEdgeStrength(_settings.ChatTextEdgeStrength),
-            SnapshotEvents(_viewModel.ChatMessages),
+            SnapshotEvents(_viewModel.ChatMessages, _settings.Skin == OverlaySkin.Minimal),
             _viewModel.ChatPulse,
             _settings.AnimationFrameRate != OverlayAnimationFrameRate.Off,
             _settings.EffectiveHideMemberOnlineStatus,
@@ -1024,7 +1053,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             OverlayDisplaySettings.NormalizeCrosshairGap(_settings.CrosshairGap),
             OverlayDisplaySettings.NormalizeCrosshairOutlineOpacity(_settings.CrosshairOutlineOpacity),
             OverlayDisplaySettings.ResolveEventNotificationAnimationScale(_settings.EventNotificationAnimationSpeed),
-            SnapshotEvents(_viewModel.EventNotifications),
+            SnapshotEvents(_viewModel.EventNotifications, _settings.Skin == OverlaySkin.Minimal),
             _viewModel.EventNotificationPulse,
             _settings.StartupTransitionFrameRate,
             _settings.AnimationFrameRate);
@@ -1710,6 +1739,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         public bool LagrangeWeaveStyle => RenderKind == OverlaySkinRenderKind.LagrangeWeave;
 
         public bool VerdictStyle => RenderKind == OverlaySkinRenderKind.Verdict;
+
+        public bool MinimalStyle => RenderKind == OverlaySkinRenderKind.Minimal;
     }
 
     private sealed record OverlayCompositionMemberRow(
