@@ -46,7 +46,10 @@ $serverPayloadPattern =
 
 Push-Location $Root
 try {
-    $trackedFiles = @(& git ls-files)
+    # Keep non-ASCII paths as real filesystem paths under both PowerShell 7 and
+    # Windows PowerShell 5. Git's default quoted-path output turns them into
+    # C-style octal escape sequences that Test-Path cannot inspect safely.
+    $trackedFiles = @(& git -c core.quotepath=false ls-files)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not enumerate tracked files."
     }
