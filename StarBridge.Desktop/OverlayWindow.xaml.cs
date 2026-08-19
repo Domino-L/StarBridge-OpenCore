@@ -817,10 +817,12 @@ public partial class OverlayWindow : Window, IOverlayHost
     {
         if (panel is Border border)
         {
-            border.Background = CloneBrushWithOpacity(_viewModel.PanelBackgroundBrush, item.BackgroundOpacity);
+            border.Background = CloneBrushWithOpacity(
+                _viewModel.PanelBackgroundBrush,
+                item.BackgroundOpacity * _settings.BackgroundOpacity);
         }
 
-        ApplyTextOpacity(panel, item.TextOpacity);
+        ApplyTextOpacity(panel, item.TextOpacity * _settings.TextOpacity);
     }
 
     private static Brush CloneBrushWithOpacity(Brush source, double opacity)
@@ -1684,9 +1686,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             _timer.Stop();
             OnChanged(nameof(NotificationVisibility));
         }
-        OverlayOpacity = settings.Opacity;
-        EventNotificationTextOpacity = OverlayLayoutItem.NormalizeTextOpacity(settings.EventNotificationTextOpacity);
-        EventNotificationBackgroundOpacity = OverlayLayoutItem.NormalizeBackgroundOpacity(settings.EventNotificationBackgroundOpacity);
+        EventNotificationTextOpacity = OverlayLayoutItem.NormalizeTextOpacity(
+            settings.EventNotificationTextOpacity * settings.TextOpacity);
+        EventNotificationBackgroundOpacity = OverlayLayoutItem.NormalizeBackgroundOpacity(
+            settings.EventNotificationBackgroundOpacity * settings.BackgroundOpacity);
         ApplyTheme(settings.Theme);
         ApplyCrosshairSettings(settings);
         CrosshairVisibility = settings.ShowCrosshair ? Visibility.Visible : Visibility.Collapsed;

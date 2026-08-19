@@ -24,7 +24,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var cx = (float)(state.Width * 0.5);
         var cy = (float)(state.Height * 0.5);
         var size = (float)state.CrosshairSize;
-        var alpha = (float)state.CrosshairOpacity * state.Opacity;
+        var alpha = (float)state.CrosshairOpacity;
         var outlineAlpha = alpha * (float)state.CrosshairOutlineOpacity;
         var outlineColor = HudColor.FromRgb(2, 7, 12, 240);
         var mode = OverlayDisplaySettings.NormalizeCrosshairMode(state.CrosshairMode);
@@ -142,18 +142,18 @@ internal sealed partial class OverlayCompositionHudWindow
                 w,
                 h,
                 state.Palette.PanelBackground,
-                state.Opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity),
-                state.Opacity);
+                state.BackgroundOpacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity),
+                state.BackgroundOpacity);
 
             var minimalInset = Math.Min(PanelChromeInset, Math.Max(0, Math.Min(w, h) * 0.22f));
             var minimalHeight = Math.Max(1, h - minimalInset * 2);
             var minimalLeftEndY = Math.Max(leftScanStart, Math.Min(minimalHeight - 8, leftScanEnd));
-            DrawLine(target, x + minimalInset, y + minimalInset + leftScanStart, x + minimalInset, y + minimalInset + minimalLeftEndY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
+            DrawLine(target, x + minimalInset, y + minimalInset + leftScanStart, x + minimalInset, y + minimalInset + minimalLeftEndY, state.Palette.PanelBorder, 0.32f * state.BackgroundOpacity, 1);
             return;
         }
 
 
-        FillRect(target, x, y, w, h, state.Palette.PanelBackground, state.Opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
+        FillRect(target, x, y, w, h, state.Palette.PanelBackground, state.BackgroundOpacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
 
         var frameX = x + PanelFrameInset;
         var frameY = y + PanelFrameInset;
@@ -166,10 +166,10 @@ internal sealed partial class OverlayCompositionHudWindow
         var chromeHeight = Math.Max(1, frameHeight - chromeInset * 2);
         var topScanEndX = Math.Max(topScanStart, Math.Min(chromeWidth - 8, topScanEnd));
         var leftScanEndY = Math.Max(leftScanStart, Math.Min(chromeHeight - 8, leftScanEnd));
-        DrawRectangle(target, frameX, frameY, frameWidth, frameHeight, state.Palette.PanelBorder, state.Opacity, 1);
-        DrawLine(target, chromeX + topScanStart, chromeY, chromeX + topScanEndX, chromeY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
-        DrawLine(target, chromeX, chromeY + leftScanStart, chromeX, chromeY + leftScanEndY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
-        DrawCorners(target, chromeX, chromeY, chromeWidth, chromeHeight, state.Palette.Title, state.Opacity);
+        DrawRectangle(target, frameX, frameY, frameWidth, frameHeight, state.Palette.PanelBorder, state.BackgroundOpacity, 1);
+        DrawLine(target, chromeX + topScanStart, chromeY, chromeX + topScanEndX, chromeY, state.Palette.PanelBorder, 0.32f * state.BackgroundOpacity, 1);
+        DrawLine(target, chromeX, chromeY + leftScanStart, chromeX, chromeY + leftScanEndY, state.Palette.PanelBorder, 0.32f * state.BackgroundOpacity, 1);
+        DrawCorners(target, chromeX, chromeY, chromeWidth, chromeHeight, state.Palette.Title, state.BackgroundOpacity);
     }
 
     private void DrawMinimalFrame(

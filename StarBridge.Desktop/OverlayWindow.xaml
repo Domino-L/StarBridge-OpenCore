@@ -118,7 +118,7 @@
         </DataTemplate>
     </Window.Resources>
 
-    <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False" Opacity="{Binding OverlayOpacity}">
+    <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False">
         <Border x:Name="NoticePanel"
                 Style="{StaticResource OverlayPanel}"
                 Visibility="{Binding NotificationVisibility}">

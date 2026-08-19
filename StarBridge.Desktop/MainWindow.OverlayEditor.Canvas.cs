@@ -351,7 +351,8 @@ public partial class MainWindow
         var usesCustomChrome = isLagrangeWeave || previewsVerdictAppearance;
         var mirrorChrome = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left;
         var backgroundAlpha = (byte)Math.Round(
-            204 * OverlayLayoutItem.NormalizeBackgroundOpacity(_overlaySettings.EventNotificationBackgroundOpacity));
+            204 * OverlayLayoutItem.NormalizeBackgroundOpacity(
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity));
         var panel = new Border
         {
             Tag = "EventNotifications",
@@ -386,7 +387,7 @@ public partial class MainWindow
                 var glowChrome = new LagrangeWeaveEditorChrome(
                     "Event",
                     LagrangePanelJoin.None,
-                    _overlaySettings.EventNotificationBackgroundOpacity,
+                    _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity,
                     glowOnly: true,
                     mirror: mirrorChrome,
                     showEventRail: true)
@@ -404,7 +405,7 @@ public partial class MainWindow
             var chrome = new LagrangeWeaveEditorChrome(
                 "Event",
                 LagrangePanelJoin.None,
-                _overlaySettings.EventNotificationBackgroundOpacity,
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity,
                 mirror: mirrorChrome,
                 showEventRail: true);
             Grid.SetColumnSpan(chrome, 3);
@@ -418,7 +419,8 @@ public partial class MainWindow
 
         var content = new StackPanel
         {
-            Opacity = OverlayLayoutItem.NormalizeTextOpacity(_overlaySettings.EventNotificationTextOpacity),
+            Opacity = OverlayLayoutItem.NormalizeTextOpacity(
+                _overlaySettings.EventNotificationTextOpacity * effectiveSettings.TextOpacity),
             Margin = isLagrangeWeave
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(18, 10, 38, 8)

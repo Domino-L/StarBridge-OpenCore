@@ -22,9 +22,9 @@ internal sealed partial class OverlayCompositionHudWindow
             var itemHeight = Math.Max(64, 10 + titleHeight + 6 + detailHeight + 10);
             var fade = Math.Clamp(row.Opacity, 0, 1);
             var x = (float)rect.X + row.SlideOffsetX;
-            var backgroundAlpha = state.Opacity * state.EventStyle.BackgroundOpacity * fade;
-            var textAlpha = state.Opacity * state.EventStyle.TextOpacity * fade;
-            var chromeAlpha = state.Opacity * fade;
+            var backgroundAlpha = state.BackgroundOpacity * state.EventStyle.BackgroundOpacity * fade;
+            var textAlpha = state.TextOpacity * state.EventStyle.TextOpacity * fade;
+            var chromeAlpha = state.BackgroundOpacity * fade;
             if (state.MinimalStyle)
             {
                 DrawMinimalFrame(

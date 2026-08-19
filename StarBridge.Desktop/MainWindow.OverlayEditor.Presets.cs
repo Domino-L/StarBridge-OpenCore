@@ -279,6 +279,8 @@ public partial class MainWindow
                 HideOfflineMembers = true,
                 HideSquadIcons = true,
                 Opacity = 0.78,
+                TextOpacity = 0.78,
+                BackgroundOpacity = 0.78,
                 ShowNotice = true,
                 ShowSquads = true,
                 ShowMission = false,
@@ -290,6 +292,8 @@ public partial class MainWindow
                 HideOfflineMembers = false,
                 HideSquadIcons = false,
                 Opacity = 0.9,
+                TextOpacity = 0.9,
+                BackgroundOpacity = 0.9,
                 ShowNotice = true,
                 ShowSquads = true,
                 ShowMission = false,
@@ -520,8 +524,10 @@ public partial class MainWindow
             OverlayVisualTheme.Gatac => 12,
             _ => 0
         };
-        OverlayOpacitySlider.Value = Math.Clamp(_overlaySettings.Opacity, 0.15, 1.0) * 100.0;
-        OverlayOpacityValueText.Text = $"{Math.Round(OverlayOpacitySlider.Value)}%";
+        OverlayTextOpacitySlider.Value = OverlayDisplaySettings.NormalizeOverallOpacity(_overlaySettings.TextOpacity) * 100.0;
+        OverlayTextOpacityValueText.Text = $"{Math.Round(OverlayTextOpacitySlider.Value)}%";
+        OverlayBackgroundOpacitySlider.Value = OverlayDisplaySettings.NormalizeOverallOpacity(_overlaySettings.BackgroundOpacity) * 100.0;
+        OverlayBackgroundOpacityValueText.Text = $"{Math.Round(OverlayBackgroundOpacitySlider.Value)}%";
         OverlayTransitionEnabledCheck.IsChecked = _overlaySettings.EnableStartupTransition;
         OverlaySkipTransitionInGameCheck.IsChecked = _overlaySettings.SkipStartupTransitionWhenGameForeground;
         OverlayAutoFocusGameWindowCheck.IsChecked = _overlaySettings.AutoFocusGameWindowOnOpen;
