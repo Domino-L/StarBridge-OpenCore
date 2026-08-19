@@ -128,8 +128,14 @@ public partial class MainWindow
     {
         if (WindowState == WindowState.Minimized)
         {
-            // The information overlay has its own explicit running state. Minimizing
-            // the configuration window must not implicitly hide or stop it.
+            if (!_overlaySettings.EnableTrayMode && IsOverlayRunning && _overlayWindow is not null)
+            {
+                _overlayHiddenForMainWindowMinimize = true;
+                _overlayWindow.SetVisible(false);
+                RefreshPersonalIdentityConsole();
+                RefreshOverlayOverviewSummary();
+            }
+
             return;
         }
 
