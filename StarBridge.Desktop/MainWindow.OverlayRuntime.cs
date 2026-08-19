@@ -611,6 +611,12 @@ public partial class MainWindow
 
     private IntPtr MainWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == WmNcHitTest && TryResolveMainWindowResizeHit(hwnd, lParam, out var resizeHit))
+        {
+            handled = true;
+            return new IntPtr(resizeHit);
+        }
+
         if (msg == WmGetMinMaxInfo)
         {
             AdjustMaximizedWindowBounds(hwnd, lParam);
@@ -639,6 +645,42 @@ public partial class MainWindow
         }
 
         return IntPtr.Zero;
+    }
+
+    private bool TryResolveMainWindowResizeHit(IntPtr hwnd, IntPtr lParam, out int hit)
+    {
+        hit = 0;
+        if (WindowState != WindowState.Normal ||
+            ResizeMode is not (ResizeMode.CanResize or ResizeMode.CanResizeWithGrip) ||
+            _isOverlayEditorFullScreen ||
+            !GetWindowRect(hwnd, out var windowRect))
+        {
+            return false;
+        }
+
+        var packedPoint = lParam.ToInt64();
+        var pointerX = unchecked((short)(packedPoint & 0xFFFF));
+        var pointerY = unchecked((short)((packedPoint >> 16) & 0xFFFF));
+        var dpi = Math.Max(96u, GetDpiForWindow(hwnd));
+        var resizeBorder = Math.Max(6, (int)Math.Ceiling(8d * dpi / 96d));
+        var onLeft = pointerX >= windowRect.Left && pointerX < windowRect.Left + resizeBorder;
+        var onRight = pointerX <= windowRect.Right && pointerX > windowRect.Right - resizeBorder;
+        var onTop = pointerY >= windowRect.Top && pointerY < windowRect.Top + resizeBorder;
+        var onBottom = pointerY <= windowRect.Bottom && pointerY > windowRect.Bottom - resizeBorder;
+
+        hit = (onLeft, onRight, onTop, onBottom) switch
+        {
+            (true, _, true, _) => HitTopLeft,
+            (_, true, true, _) => HitTopRight,
+            (true, _, _, true) => HitBottomLeft,
+            (_, true, _, true) => HitBottomRight,
+            (true, _, _, _) => HitLeft,
+            (_, true, _, _) => HitRight,
+            (_, _, true, _) => HitTop,
+            (_, _, _, true) => HitBottom,
+            _ => 0
+        };
+        return hit != 0;
     }
 
     private void HandleOverlayHotkeyTrigger(string source)
@@ -958,6 +1000,9 @@ public partial class MainWindow
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr handle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(IntPtr handle, out RectInfo rect);
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr handle, int command);
