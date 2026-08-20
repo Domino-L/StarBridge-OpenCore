@@ -73,7 +73,8 @@ public enum OverlaySkin
     Default,
     NightShadow,
     LagrangeWeave,
-    Verdict
+    Verdict,
+    Minimal
 }
 
 internal enum OverlaySkinRenderKind
@@ -81,7 +82,8 @@ internal enum OverlaySkinRenderKind
     Default,
     NightShadow,
     LagrangeWeave,
-    Verdict
+    Verdict,
+    Minimal
 }
 
 public enum OverlayCrosshairMode
@@ -486,7 +488,7 @@ public sealed record OverlayDisplaySettings(
 {
     private const int CurrentEventNotificationSchemaVersion = 3;
     private const int EventNotificationSchemaVersionIndex = 49;
-    public const double MemberStatusColumnPixelWidth = 40;
+    public const double MemberStatusColumnPixelWidth = 48;
     public const int MinEventNotificationCount = 1;
     public const int MaxEventNotificationCount = 5;
     public const int MinChatVisibleCount = 1;

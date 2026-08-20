@@ -48,6 +48,27 @@ internal sealed record OverlaySkinProfile(
     public bool IsReleased => PublicationState == OverlaySkinPublicationState.Released;
 
     public bool IsArchived => PublicationState == OverlaySkinPublicationState.Archived;
+
+    public double TitleFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TitleFontSize : 13;
+
+    public double TextFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TextFontSize : 12;
+
+    public double MutedFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.MutedFontSize : 10;
+
+    public double TinyFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TinyFontSize : 9;
+
+    public double TinyCenterFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TinyCenterFontSize : 8;
+
+    public double EventTitleFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.EventTitleFontSize : 12;
+
+    public double EventDetailFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.EventDetailFontSize : 11;
 }
 
 internal sealed record OverlaySkinResolution(
@@ -84,6 +105,26 @@ internal static partial class OverlaySkinCatalog
                 "Crisp rails and dense fleet information with optional manufacturer color matching.",
                 ["厂商配色", "精密导轨", "高信息密度"],
                 ["Manufacturer colors", "Precision rails", "Dense information"],
+                "#081722",
+                "#29AFFF",
+                "#69CCFF"),
+            OverlaySkinPublicationState.Released),
+            new(
+            OverlaySkin.Minimal,
+            "简洁",
+            "Minimal",
+            OverlayVisualTheme.Default,
+            LocksTheme: false,
+            OverlayStartupTransitionStyle.BridgeTerminal,
+            Entitlement: null,
+            SupportsBloom: false,
+            OverlaySkinRenderKind.Minimal,
+            OverlaySkin.Default,
+            new OverlaySkinPresentation(
+                "倒角轮廓与居中断线减少重复装饰，保留清晰导轨与高密度信息。",
+                "Chamfered, center-gapped outlines reduce visual noise while preserving crisp rails and dense information.",
+                ["倒角轮廓", "居中断线", "低装饰密度"],
+                ["Chamfered outline", "Centered gaps", "Low visual noise"],
                 "#081722",
                 "#29AFFF",
                 "#69CCFF"),

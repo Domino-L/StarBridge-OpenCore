@@ -70,6 +70,8 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private void DrawScene(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
+        EnsureHudTextFormats(_settings.Skin);
+
         var handled = false;
         TryDrawExtendedAppearanceScene(target, state, ref handled);
         if (handled)
@@ -140,7 +142,7 @@ internal sealed partial class OverlayCompositionHudWindow
                 target,
                 state,
                 key,
-                state.Opacity * reveal.Opacity,
+                reveal.Opacity,
                 reveal.OffsetY);
         }
 
@@ -159,7 +161,7 @@ internal sealed partial class OverlayCompositionHudWindow
         ID2D1RenderTarget target,
         OverlayCompositionFrameState state,
         string key,
-        double opacity,
+        double revealOpacity,
         float offsetY)
     {
         switch (key)
@@ -167,28 +169,32 @@ internal sealed partial class OverlayCompositionHudWindow
             case "Notice":
                 DrawNoticePanel(target, state with
                 {
-                    Opacity = opacity,
+                    TextOpacity = state.TextOpacity * revealOpacity,
+                    BackgroundOpacity = state.BackgroundOpacity * revealOpacity,
                     NoticeRect = OffsetRect(state.NoticeRect, offsetY)
                 });
                 break;
             case "Squads":
                 DrawSquadsPanel(target, state with
                 {
-                    Opacity = opacity,
+                    TextOpacity = state.TextOpacity * revealOpacity,
+                    BackgroundOpacity = state.BackgroundOpacity * revealOpacity,
                     SquadsRect = OffsetRect(state.SquadsRect, offsetY)
                 });
                 break;
             case "Members":
                 DrawMembersPanel(target, state with
                 {
-                    Opacity = opacity,
+                    TextOpacity = state.TextOpacity * revealOpacity,
+                    BackgroundOpacity = state.BackgroundOpacity * revealOpacity,
                     MembersRect = OffsetRect(state.MembersRect, offsetY)
                 });
                 break;
             case "Chat":
                 DrawChatPanel(target, state with
                 {
-                    Opacity = opacity,
+                    TextOpacity = state.TextOpacity * revealOpacity,
+                    BackgroundOpacity = state.BackgroundOpacity * revealOpacity,
                     ChatRect = OffsetRect(state.ChatRect, offsetY)
                 });
                 break;

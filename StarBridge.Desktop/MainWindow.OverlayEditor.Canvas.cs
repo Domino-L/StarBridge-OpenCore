@@ -345,13 +345,16 @@ public partial class MainWindow
         var accent = GetOverlayEventNotificationPreviewBrush();
         var isSelected = _isOverlayEventNotificationSelected;
         var effectiveSettings = GetEffectiveOverlaySettings();
+        var skinProfile = OverlaySkinCatalog.Get(effectiveSettings.Skin);
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
+        var isMinimal = effectiveSettings.Skin == OverlaySkin.Minimal;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
         const bool previewsVerdictAppearance = false;
-        var usesCustomChrome = isLagrangeWeave || previewsVerdictAppearance;
+        var usesCustomChrome = isLagrangeWeave || isMinimal || previewsVerdictAppearance;
         var mirrorChrome = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left;
         var backgroundAlpha = (byte)Math.Round(
-            204 * OverlayLayoutItem.NormalizeBackgroundOpacity(_overlaySettings.EventNotificationBackgroundOpacity));
+            204 * OverlayLayoutItem.NormalizeBackgroundOpacity(
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity));
         var panel = new Border
         {
             Tag = "EventNotifications",
@@ -366,7 +369,7 @@ public partial class MainWindow
                     ? Brushes.Transparent
                     : accent,
             BorderThickness = new Thickness(isSelected ? 2 : usesCustomChrome ? 0 : 1),
-            Padding = usesCustomChrome ? new Thickness(0) : new Thickness(12),
+            Padding = usesCustomChrome && !isMinimal ? new Thickness(0) : new Thickness(12),
             Cursor = _isOverlayLayoutLocked ? Cursors.Arrow : Cursors.SizeAll,
             IsHitTestVisible = true,
             ToolTip = _language == "zh" ? "上下拖动调整事件通知栏位置" : "Drag vertically to move the event rail"
@@ -386,7 +389,7 @@ public partial class MainWindow
                 var glowChrome = new LagrangeWeaveEditorChrome(
                     "Event",
                     LagrangePanelJoin.None,
-                    _overlaySettings.EventNotificationBackgroundOpacity,
+                    _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity,
                     glowOnly: true,
                     mirror: mirrorChrome,
                     showEventRail: true)
@@ -404,9 +407,17 @@ public partial class MainWindow
             var chrome = new LagrangeWeaveEditorChrome(
                 "Event",
                 LagrangePanelJoin.None,
-                _overlaySettings.EventNotificationBackgroundOpacity,
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity,
                 mirror: mirrorChrome,
                 showEventRail: true);
+            Grid.SetColumnSpan(chrome, 3);
+            grid.Children.Add(chrome);
+        }
+        else if (isMinimal)
+        {
+            var chrome = new MinimalEditorChrome(
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity,
+                showLeftRail: true);
             Grid.SetColumnSpan(chrome, 3);
             grid.Children.Add(chrome);
         }
@@ -418,7 +429,8 @@ public partial class MainWindow
 
         var content = new StackPanel
         {
-            Opacity = OverlayLayoutItem.NormalizeTextOpacity(_overlaySettings.EventNotificationTextOpacity),
+            Opacity = OverlayLayoutItem.NormalizeTextOpacity(
+                _overlaySettings.EventNotificationTextOpacity * effectiveSettings.Opacity),
             Margin = isLagrangeWeave
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(18, 10, 38, 8)
@@ -435,7 +447,7 @@ public partial class MainWindow
             Text = _language == "zh" ? "事件通知栏预览" : "EVENT RAIL PREVIEW",
             Foreground = previewsVerdictAppearance ? Brushes.FloralWhite : accent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = 15,
+            FontSize = skinProfile.EventTitleFontSize,
             Margin = previewsVerdictAppearance
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(52, 0, 0, 8)
@@ -446,7 +458,7 @@ public partial class MainWindow
         {
             Text = _language == "zh" ? "成员上线 / 从吸附侧弹出" : "Member online / snaps from side",
             Foreground = Brushes.AliceBlue,
-            FontSize = 13,
+            FontSize = skinProfile.EventDetailFontSize,
             Margin = new Thickness(0, 6, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis
         });
@@ -454,7 +466,7 @@ public partial class MainWindow
         {
             Text = $"{_overlaySettings.EventNotificationDurationSeconds:0.#}s",
             Foreground = Brushes.LightSlateGray,
-            FontSize = 11,
+            FontSize = skinProfile.MutedFontSize,
             Margin = new Thickness(0, 4, 0, 0)
         });
         grid.Children.Add(content);
@@ -1073,7 +1085,7 @@ public partial class MainWindow
         var settings = GetEffectiveOverlaySettings();
         var previewTheme =
             settings.Skin == OverlaySkin.NightShadow ? OverlayVisualTheme.Default : settings.Theme;
-        return ResolveOverlayEditorPreviewPalette(previewTheme).Title;
+        return ResolveOverlayEditorPreviewPalette(settings with { Theme = previewTheme }).Title;
     }
 
     private static void AddLine(Canvas canvas, double x1, double y1, double x2, double y2, System.Windows.Media.Brush brush, double thickness)

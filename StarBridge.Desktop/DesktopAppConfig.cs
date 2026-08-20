@@ -29,6 +29,7 @@ internal sealed record DesktopAppConfig(
     private static readonly string OverlaySettingsPath = Path.Combine(ConfigDirectory, "overlay.settings");
     private static readonly string OverlayLayoutPath = Path.Combine(ConfigDirectory, "overlay.layout");
     private static readonly string OverlayRenderModePath = Path.Combine(ConfigDirectory, "overlay.render-mode");
+    private static readonly string OverlayRunningStatePath = Path.Combine(ConfigDirectory, "overlay.running");
     private static readonly string ActiveOverlayPresetPath = Path.Combine(ConfigDirectory, "overlay.active-preset");
     private static readonly string OverlayPresetManifestPath = Path.Combine(ConfigDirectory, "overlay.presets");
     private static readonly string EntitlementNoticeStatePath = Path.Combine(ConfigDirectory, "entitlement.notices");
@@ -37,6 +38,7 @@ internal sealed record DesktopAppConfig(
     private static readonly string FallbackOverlaySettingsPath = Path.Combine(FallbackConfigDirectory, "overlay.settings");
     private static readonly string FallbackOverlayLayoutPath = Path.Combine(FallbackConfigDirectory, "overlay.layout");
     private static readonly string FallbackOverlayRenderModePath = Path.Combine(FallbackConfigDirectory, "overlay.render-mode");
+    private static readonly string FallbackOverlayRunningStatePath = Path.Combine(FallbackConfigDirectory, "overlay.running");
     private static readonly string FallbackActiveOverlayPresetPath = Path.Combine(FallbackConfigDirectory, "overlay.active-preset");
     private static readonly string FallbackOverlayPresetManifestPath = Path.Combine(FallbackConfigDirectory, "overlay.presets");
     private static readonly string FallbackEntitlementNoticeStatePath = Path.Combine(FallbackConfigDirectory, "entitlement.notices");
@@ -149,6 +151,21 @@ internal sealed record DesktopAppConfig(
     public static void SaveOverlayRenderMode(string value)
     {
         WriteTextWithFallback(OverlayRenderModePath, FallbackOverlayRenderModePath, value);
+    }
+
+    public static bool LoadOverlayRunningState()
+    {
+        var value = ReadOptionalText(OverlayRunningStatePath) ??
+                    ReadOptionalText(FallbackOverlayRunningStatePath);
+        return bool.TryParse(value, out var running) && running;
+    }
+
+    public static void SaveOverlayRunningState(bool running)
+    {
+        WriteTextWithFallback(
+            OverlayRunningStatePath,
+            FallbackOverlayRunningStatePath,
+            running.ToString());
     }
 
     public static string? LoadActiveOverlayPreset()

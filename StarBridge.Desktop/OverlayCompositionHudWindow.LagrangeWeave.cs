@@ -50,7 +50,7 @@ internal sealed partial class OverlayCompositionHudWindow
                     target,
                     state,
                     key,
-                    state.Opacity * reveal.Opacity,
+                    reveal.Opacity,
                     reveal.OffsetY);
             }
         }

@@ -24,7 +24,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var cx = (float)(state.Width * 0.5);
         var cy = (float)(state.Height * 0.5);
         var size = (float)state.CrosshairSize;
-        var alpha = (float)state.CrosshairOpacity * state.Opacity;
+        var alpha = (float)state.CrosshairOpacity;
         var outlineAlpha = alpha * (float)state.CrosshairOutlineOpacity;
         var outlineColor = HudColor.FromRgb(2, 7, 12, 240);
         var mode = OverlayDisplaySettings.NormalizeCrosshairMode(state.CrosshairMode);
@@ -133,8 +133,27 @@ internal sealed partial class OverlayCompositionHudWindow
             return;
         }
 
+        if (state.MinimalStyle)
+        {
+            DrawMinimalFrame(
+                target,
+                x,
+                y,
+                w,
+                h,
+                state.Palette.PanelBackground,
+                state.BackgroundOpacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity),
+                state.BackgroundOpacity);
 
-        FillRect(target, x, y, w, h, state.Palette.PanelBackground, state.Opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
+            var minimalInset = Math.Min(PanelChromeInset, Math.Max(0, Math.Min(w, h) * 0.22f));
+            var minimalHeight = Math.Max(1, h - minimalInset * 2);
+            var minimalLeftEndY = Math.Max(leftScanStart, Math.Min(minimalHeight - 8, leftScanEnd));
+            DrawLine(target, x + minimalInset, y + minimalInset + leftScanStart, x + minimalInset, y + minimalInset + minimalLeftEndY, state.Palette.PanelBorder, MinimalOverlaySkinStyle.GuideOpacity * state.BackgroundOpacity, (float)MinimalOverlaySkinStyle.BorderThickness);
+            return;
+        }
+
+
+        FillRect(target, x, y, w, h, state.Palette.PanelBackground, state.BackgroundOpacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
 
         var frameX = x + PanelFrameInset;
         var frameY = y + PanelFrameInset;
@@ -147,10 +166,79 @@ internal sealed partial class OverlayCompositionHudWindow
         var chromeHeight = Math.Max(1, frameHeight - chromeInset * 2);
         var topScanEndX = Math.Max(topScanStart, Math.Min(chromeWidth - 8, topScanEnd));
         var leftScanEndY = Math.Max(leftScanStart, Math.Min(chromeHeight - 8, leftScanEnd));
-        DrawRectangle(target, frameX, frameY, frameWidth, frameHeight, state.Palette.PanelBorder, state.Opacity, 1);
-        DrawLine(target, chromeX + topScanStart, chromeY, chromeX + topScanEndX, chromeY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
-        DrawLine(target, chromeX, chromeY + leftScanStart, chromeX, chromeY + leftScanEndY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
-        DrawCorners(target, chromeX, chromeY, chromeWidth, chromeHeight, state.Palette.Title, state.Opacity);
+        DrawRectangle(target, frameX, frameY, frameWidth, frameHeight, state.Palette.PanelBorder, state.BackgroundOpacity, 1);
+        DrawLine(target, chromeX + topScanStart, chromeY, chromeX + topScanEndX, chromeY, state.Palette.PanelBorder, 0.32f * state.BackgroundOpacity, 1);
+        DrawLine(target, chromeX, chromeY + leftScanStart, chromeX, chromeY + leftScanEndY, state.Palette.PanelBorder, 0.32f * state.BackgroundOpacity, 1);
+        DrawCorners(target, chromeX, chromeY, chromeWidth, chromeHeight, state.Palette.Title, state.BackgroundOpacity);
+    }
+
+    private void DrawMinimalFrame(
+        ID2D1RenderTarget target,
+        float x,
+        float y,
+        float width,
+        float height,
+        HudColor fillColor,
+        double fillOpacity,
+        double borderOpacity)
+    {
+        if (_d2dFactory is null || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var metrics = MinimalOverlaySkinStyle.ResolveFrame(width, height);
+        var chamfer = (float)metrics.Chamfer;
+        FillPolygon(
+            target,
+            fillColor,
+            fillOpacity,
+            new Vector2(x + chamfer, y),
+            new Vector2(x + width - chamfer, y),
+            new Vector2(x + width, y + chamfer),
+            new Vector2(x + width, y + height - chamfer),
+            new Vector2(x + width - chamfer, y + height),
+            new Vector2(x + chamfer, y + height),
+            new Vector2(x, y + height - chamfer),
+            new Vector2(x, y + chamfer));
+
+        var horizontalGap = (float)metrics.HorizontalGap;
+        var verticalGap = (float)metrics.VerticalGap;
+        var horizontalGapStart = x + width * 0.5f - horizontalGap * 0.5f;
+        var horizontalGapEnd = horizontalGapStart + horizontalGap;
+        var verticalGapStart = y + height * 0.5f - verticalGap * 0.5f;
+        var verticalGapEnd = verticalGapStart + verticalGap;
+
+        using var geometry = _d2dFactory.CreatePathGeometry();
+        using (var sink = geometry.Open())
+        {
+            AddCornerLine(sink, x, y + chamfer, x + chamfer, y);
+            AddCornerLine(sink, x + width - chamfer, y, x + width, y + chamfer);
+            AddCornerLine(sink, x + width, y + height - chamfer, x + width - chamfer, y + height);
+            AddCornerLine(sink, x + chamfer, y + height, x, y + height - chamfer);
+
+            AddCornerLine(sink, x + chamfer, y, horizontalGapStart, y);
+            AddCornerLine(sink, horizontalGapEnd, y, x + width - chamfer, y);
+            AddCornerLine(sink, x + chamfer, y + height, horizontalGapStart, y + height);
+            AddCornerLine(sink, horizontalGapEnd, y + height, x + width - chamfer, y + height);
+            AddCornerLine(sink, x, y + chamfer, x, verticalGapStart);
+            AddCornerLine(sink, x, verticalGapEnd, x, y + height - chamfer);
+            AddCornerLine(sink, x + width, y + chamfer, x + width, verticalGapStart);
+            AddCornerLine(sink, x + width, verticalGapEnd, x + width, y + height - chamfer);
+            sink.Close();
+        }
+
+        target.DrawGeometry(
+            geometry,
+            GetBrush(
+                target,
+                new HudColor(
+                    MinimalOverlaySkinStyle.BorderRed,
+                    MinimalOverlaySkinStyle.BorderGreen,
+                    MinimalOverlaySkinStyle.BorderBlue,
+                    byte.MaxValue),
+                borderOpacity),
+            (float)MinimalOverlaySkinStyle.BorderThickness);
     }
 
 

@@ -922,6 +922,7 @@ public partial class MainWindow
         _overlayEditorFullScreenSnapshot = CreateOverlayEditorFullScreenSnapshot();
         _overlayInspectorWasOpenBeforeFullScreen = OverlayInspectorPanel?.Visibility == Visibility.Visible;
         _isOverlayEditorFullScreen = true;
+        SuspendOverlayForFullScreenEditor();
         SetOverlayEditorLivePreviewEnabled(true);
         _isOverlayFullScreenToolsOpen = true;
         ApplyOverlayEditorWindowFullScreenState();
@@ -966,6 +967,7 @@ public partial class MainWindow
         finally
         {
             RestoreOverlayEditorWindowState();
+            RestoreOverlayAfterFullScreenEditor();
         }
     }
 
@@ -1557,7 +1559,10 @@ public partial class MainWindow
     private static SolidColorBrush CreateOverlayEditorPanelBackground(bool isSelected, double backgroundOpacity)
     {
         var baseAlpha = isSelected ? 222 : 204;
-        var alpha = (byte)Math.Round(baseAlpha * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
+        var alpha = (byte)Math.Clamp(
+            Math.Round(baseAlpha * Math.Max(0, backgroundOpacity)),
+            byte.MinValue,
+            byte.MaxValue);
         return new SolidColorBrush(Color.FromArgb(alpha, 5, 18, 28));
     }
 
@@ -1567,10 +1572,12 @@ public partial class MainWindow
             _selectedOverlayInspectorItem?.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase) == true;
         var selectedBrush = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
         var effectiveSettings = GetEffectiveOverlaySettings();
+        var skinProfile = OverlaySkinCatalog.Get(effectiveSettings.Skin);
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
+        var isMinimal = effectiveSettings.Skin == OverlaySkin.Minimal;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
         const bool previewsVerdictAppearance = false;
-        var usesCustomChrome = isLagrangeWeave || previewsVerdictAppearance;
+        var usesCustomChrome = isLagrangeWeave || isMinimal || previewsVerdictAppearance;
         var isPositionLocked = _isOverlayLayoutLocked || item.IsLocked;
         var isFullScreenChatBarrage = IsOverlayChatBarrage(item);
         isPositionLocked |= isFullScreenChatBarrage;
@@ -1579,7 +1586,9 @@ public partial class MainWindow
             Tag = item,
             Background = usesCustomChrome
                 ? Brushes.Transparent
-                : CreateOverlayEditorPanelBackground(isSelected, item.BackgroundOpacity),
+                : CreateOverlayEditorPanelBackground(
+                    isSelected,
+                    item.BackgroundOpacity * effectiveSettings.Opacity),
             BorderBrush = isSelected
                 ? selectedBrush
                 : usesCustomChrome
@@ -1594,9 +1603,11 @@ public partial class MainWindow
         };
 
         var showLivePreview = ShouldShowOverlayEditorLivePreview();
-        var livePreviewPalette = ResolveOverlayEditorPreviewPalette(effectiveSettings.Theme);
+        var livePreviewPalette = ResolveOverlayEditorPreviewPalette(effectiveSettings);
         var contentAccent = isLagrangeWeave
             ? livePreviewPalette.Alert
+            : isMinimal
+                ? livePreviewPalette.Title
             : previewsVerdictAppearance
                 ? livePreviewPalette.Title
                 : item.Brush;
@@ -1630,7 +1641,7 @@ public partial class MainWindow
             Text = ResolveOverlayEditorPanelTitle(item),
             Foreground = showLivePreview ? livePreviewPalette.Title : contentAccent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = 15,
+            FontSize = skinProfile.TitleFontSize,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = previewsVerdictAppearance ? new Thickness(52, 0, 0, 18) : new Thickness(0)
         };
@@ -1652,7 +1663,7 @@ public partial class MainWindow
         var content = new StackPanel
         {
             ClipToBounds = true,
-            Opacity = OverlayLayoutItem.NormalizeTextOpacity(item.TextOpacity)
+            Opacity = OverlayLayoutItem.NormalizeTextOpacity(item.TextOpacity * effectiveSettings.Opacity)
         };
         Grid.SetColumn(content, showLivePreview ? 0 : 2);
         content.Children.Add(title);
@@ -1733,6 +1744,12 @@ public partial class MainWindow
                 join,
                 item.BackgroundOpacity));
         }
+        else if (isMinimal)
+        {
+            wrapper.Children.Add(new MinimalEditorChrome(
+                item.BackgroundOpacity * effectiveSettings.Opacity,
+                showLeftRail: true));
+        }
 
         wrapper.Children.Add(shell);
 
@@ -1797,6 +1814,122 @@ public partial class MainWindow
         key.Equals("Squads", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("Members", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("Chat", StringComparison.OrdinalIgnoreCase);
+
+
+    private sealed class MinimalEditorChrome : FrameworkElement
+    {
+        private readonly double _backgroundOpacity;
+        private readonly bool _showLeftRail;
+
+        public MinimalEditorChrome(double backgroundOpacity, bool showLeftRail = false)
+        {
+            _backgroundOpacity = Math.Max(0, double.IsFinite(backgroundOpacity) ? backgroundOpacity : 0);
+            _showLeftRail = showLeftRail;
+            IsHitTestVisible = false;
+            SnapsToDevicePixels = true;
+        }
+
+        protected override void OnRender(DrawingContext drawingContext)
+        {
+            base.OnRender(drawingContext);
+            var width = Math.Max(4, ActualWidth);
+            var height = Math.Max(4, ActualHeight);
+            var rect = new Rect(0.5, 0.5, Math.Max(1, width - 1), Math.Max(1, height - 1));
+            var metrics = MinimalOverlaySkinStyle.ResolveFrame(rect.Width, rect.Height);
+            var chamfer = metrics.Chamfer;
+            var fillAlpha = (byte)Math.Clamp(
+                Math.Round(MinimalOverlaySkinStyle.PreviewFillAlpha * _backgroundOpacity),
+                byte.MinValue,
+                byte.MaxValue);
+            var fill = new SolidColorBrush(Color.FromArgb(
+                fillAlpha,
+                MinimalOverlaySkinStyle.PreviewFillRed,
+                MinimalOverlaySkinStyle.PreviewFillGreen,
+                MinimalOverlaySkinStyle.PreviewFillBlue));
+            fill.Freeze();
+            drawingContext.DrawGeometry(fill, null, CreateChamferedGeometry(rect, chamfer));
+
+            var borderOpacity = Math.Clamp(_backgroundOpacity, 0, 1);
+            var borderColor = Color.FromRgb(
+                MinimalOverlaySkinStyle.BorderRed,
+                MinimalOverlaySkinStyle.BorderGreen,
+                MinimalOverlaySkinStyle.BorderBlue);
+            var outline = new Pen(
+                CreateOpacityBrush(borderColor, borderOpacity),
+                MinimalOverlaySkinStyle.BorderThickness);
+            outline.Freeze();
+            var horizontalGap = metrics.HorizontalGap;
+            var verticalGap = metrics.VerticalGap;
+            var horizontalStart = rect.Left + rect.Width * 0.5 - horizontalGap * 0.5;
+            var horizontalEnd = horizontalStart + horizontalGap;
+            var verticalStart = rect.Top + rect.Height * 0.5 - verticalGap * 0.5;
+            var verticalEnd = verticalStart + verticalGap;
+
+            DrawSegment(drawingContext, outline, rect.Left, rect.Top + chamfer, rect.Left + chamfer, rect.Top);
+            DrawSegment(drawingContext, outline, rect.Right - chamfer, rect.Top, rect.Right, rect.Top + chamfer);
+            DrawSegment(drawingContext, outline, rect.Right, rect.Bottom - chamfer, rect.Right - chamfer, rect.Bottom);
+            DrawSegment(drawingContext, outline, rect.Left + chamfer, rect.Bottom, rect.Left, rect.Bottom - chamfer);
+            DrawSegment(drawingContext, outline, rect.Left + chamfer, rect.Top, horizontalStart, rect.Top);
+            DrawSegment(drawingContext, outline, horizontalEnd, rect.Top, rect.Right - chamfer, rect.Top);
+            DrawSegment(drawingContext, outline, rect.Left + chamfer, rect.Bottom, horizontalStart, rect.Bottom);
+            DrawSegment(drawingContext, outline, horizontalEnd, rect.Bottom, rect.Right - chamfer, rect.Bottom);
+            DrawSegment(drawingContext, outline, rect.Left, rect.Top + chamfer, rect.Left, verticalStart);
+            DrawSegment(drawingContext, outline, rect.Left, verticalEnd, rect.Left, rect.Bottom - chamfer);
+            DrawSegment(drawingContext, outline, rect.Right, rect.Top + chamfer, rect.Right, verticalStart);
+            DrawSegment(drawingContext, outline, rect.Right, verticalEnd, rect.Right, rect.Bottom - chamfer);
+
+            if (_showLeftRail)
+            {
+                var rail = new Pen(
+                    CreateOpacityBrush(borderColor, borderOpacity * MinimalOverlaySkinStyle.GuideOpacity),
+                    MinimalOverlaySkinStyle.BorderThickness);
+                rail.Freeze();
+                var railStart = rect.Top + Math.Max(
+                    chamfer + MinimalOverlaySkinStyle.GuideEndPadding,
+                    rect.Height * MinimalOverlaySkinStyle.GuideStartRatio);
+                var railEnd = rect.Top + Math.Min(
+                    rect.Height - chamfer - MinimalOverlaySkinStyle.GuideEndPadding,
+                    rect.Height * MinimalOverlaySkinStyle.GuideEndRatio);
+                var railX = rect.Left + MinimalOverlaySkinStyle.GuideInset;
+                DrawSegment(drawingContext, rail, railX, railStart, railX, railEnd);
+            }
+        }
+
+        private static StreamGeometry CreateChamferedGeometry(Rect rect, double chamfer)
+        {
+            var geometry = new StreamGeometry();
+            using (var context = geometry.Open())
+            {
+                context.BeginFigure(new Point(rect.Left + chamfer, rect.Top), true, true);
+                context.LineTo(new Point(rect.Right - chamfer, rect.Top), true, false);
+                context.LineTo(new Point(rect.Right, rect.Top + chamfer), true, false);
+                context.LineTo(new Point(rect.Right, rect.Bottom - chamfer), true, false);
+                context.LineTo(new Point(rect.Right - chamfer, rect.Bottom), true, false);
+                context.LineTo(new Point(rect.Left + chamfer, rect.Bottom), true, false);
+                context.LineTo(new Point(rect.Left, rect.Bottom - chamfer), true, false);
+                context.LineTo(new Point(rect.Left, rect.Top + chamfer), true, false);
+            }
+
+            geometry.Freeze();
+            return geometry;
+        }
+
+        private static void DrawSegment(
+            DrawingContext drawingContext,
+            Pen pen,
+            double x1,
+            double y1,
+            double x2,
+            double y2) =>
+            drawingContext.DrawLine(pen, new Point(x1, y1), new Point(x2, y2));
+
+        private static SolidColorBrush CreateOpacityBrush(Color color, double opacity)
+        {
+            var brush = new SolidColorBrush(color) { Opacity = Math.Clamp(opacity, 0, 1) };
+            brush.Freeze();
+            return brush;
+        }
+    }
 
 
     private sealed class LagrangeWeaveEditorChrome : FrameworkElement
@@ -2030,14 +2163,16 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> CreateOverlayEditorLivePreviewLines(OverlayLayoutItem item)
     {
-        var palette = ResolveOverlayEditorPreviewPalette(GetEffectiveOverlaySettings().Theme);
+        var settings = GetEffectiveOverlaySettings();
+        var palette = ResolveOverlayEditorPreviewPalette(settings);
+        var skinProfile = OverlaySkinCatalog.Get(settings.Skin);
         var elements = item.Key switch
         {
-            "Notice" => BuildOverlayEditorNoticePreview(palette),
+            "Notice" => BuildOverlayEditorNoticePreview(palette, skinProfile),
             // The persisted key remains "Squads" so existing layouts keep their slot.
-            "Squads" => BuildOverlayEditorOverviewPreview(item, palette),
-            "Members" => BuildOverlayEditorMemberPreview(item, palette),
-            "Chat" => BuildOverlayEditorChatPreview(item, palette),
+            "Squads" => BuildOverlayEditorOverviewPreview(item, palette, skinProfile),
+            "Members" => BuildOverlayEditorMemberPreview(item, palette, skinProfile),
+            "Chat" => BuildOverlayEditorChatPreview(item, palette, skinProfile),
             _ => Enumerable.Empty<UIElement>()
         };
 
@@ -2098,7 +2233,9 @@ public partial class MainWindow
             : "COMMUNICATION EVENT";
     }
 
-    private IEnumerable<UIElement> BuildOverlayEditorNoticePreview(OverlayEditorPreviewPalette palette)
+    private IEnumerable<UIElement> BuildOverlayEditorNoticePreview(
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var scene = ResolveCurrentOverlayScene();
         var noticeText = scene.Context.Kind == OverlaySceneKind.PartyRoom
@@ -2115,13 +2252,13 @@ public partial class MainWindow
         grid.Children.Add(CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(noticeText, 58),
             palette.Text,
-            11.2,
+            skinProfile.TextFontSize,
             TextAlignment.Left,
             HorizontalAlignment.Stretch));
         var timer = CreateOverlayEditorPreviewText(
             $"{OverlayDisplaySettings.NormalizeCommunicationEventDuration(_overlaySettings.CommunicationEventDurationSeconds):0.#}s",
             palette.Alert,
-            11,
+            skinProfile.TextFontSize,
             TextAlignment.Right,
             HorizontalAlignment.Right,
             FontWeights.SemiBold);
@@ -2132,7 +2269,8 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> BuildOverlayEditorOverviewPreview(
         OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var scene = ResolveCurrentOverlayScene();
         var authorizedRoster = ResolveOverlayAuthorizedRoster(scene);
@@ -2154,9 +2292,9 @@ public partial class MainWindow
             projection.StatusBrush,
             palette.Text,
             palette.Alert,
-            13,
-            12,
-            11,
+            skinProfile.TextFontSize,
+            skinProfile.TextFontSize,
+            skinProfile.MutedFontSize,
             new Thickness(0, 9, 0, 0),
             statusLayout);
 
@@ -2167,7 +2305,7 @@ public partial class MainWindow
                 yield return CreateOverlayEditorPreviewText(
                     CompactOverlayEditorText(projection.Focus, 56),
                     palette.Muted,
-                    10,
+                    skinProfile.MutedFontSize,
                     TextAlignment.Left,
                     HorizontalAlignment.Stretch,
                     FontWeights.Normal,
@@ -2185,7 +2323,8 @@ public partial class MainWindow
                     yield return CreateOverlayEditorOverviewLocationRow(
                         locationLayout.VisibleItems,
                         palette.Text,
-                        palette.Muted);
+                        palette.Muted,
+                        skinProfile.MutedFontSize);
                 }
                 else
                 {
@@ -2194,7 +2333,8 @@ public partial class MainWindow
                         yield return CreateOverlayEditorOverviewLocationRow(
                             [location],
                             palette.Text,
-                            palette.Muted);
+                            palette.Muted,
+                            skinProfile.MutedFontSize);
                     }
                 }
             }
@@ -2208,7 +2348,8 @@ public partial class MainWindow
                         0,
                         projection.LocationPlaceholderMetric)],
                     palette.Text,
-                    palette.Muted);
+                    palette.Muted,
+                    skinProfile.MutedFontSize);
             }
 
             yield break;
@@ -2224,7 +2365,7 @@ public partial class MainWindow
                 yield return CreateOverlayEditorPreviewText(
                     CompactOverlayEditorText(detail, 56),
                     palette.Muted,
-                    10,
+                    skinProfile.MutedFontSize,
                     TextAlignment.Left,
                     HorizontalAlignment.Stretch,
                     FontWeights.Normal,
@@ -2236,7 +2377,8 @@ public partial class MainWindow
     private static Grid CreateOverlayEditorOverviewLocationRow(
         IReadOnlyList<OverlayOverviewLocationCount> locations,
         System.Windows.Media.Brush nameBrush,
-        System.Windows.Media.Brush metricBrush)
+        System.Windows.Media.Brush metricBrush,
+        double fontSize)
     {
         var grid = new Grid
         {
@@ -2266,7 +2408,7 @@ public partial class MainWindow
             var name = CreateOverlayEditorPreviewText(
                 locations[index].DisplayName,
                 nameBrush,
-                10,
+                fontSize,
                 TextAlignment.Left,
                 HorizontalAlignment.Stretch,
                 FontWeights.Normal,
@@ -2274,7 +2416,7 @@ public partial class MainWindow
             var metric = CreateOverlayEditorPreviewText(
                 locations[index].DisplayMetricText,
                 metricBrush,
-                10,
+                fontSize,
                 TextAlignment.Right,
                 HorizontalAlignment.Stretch,
                 FontWeights.Normal,
@@ -2291,7 +2433,8 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> BuildOverlayEditorChatPreview(
         OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var sceneKind = ResolveCurrentOverlayScene().Context.Kind;
         var projectedHeight = ResolveOverlayEditorItemDisplayRect(item).Height;
@@ -2333,14 +2476,19 @@ public partial class MainWindow
             var sender = CreateOverlayEditorPreviewText(
                 _overlaySettings.ChatShowSender ? CompactOverlayEditorText(sample.SenderDisplay, 24) : "通讯消息",
                 palette.Title,
-                11,
+                skinProfile.EventTitleFontSize,
                 TextAlignment.Left,
                 HorizontalAlignment.Stretch,
                 FontWeights.SemiBold);
             header.Children.Add(sender);
             if (_overlaySettings.ChatShowTimestamp)
             {
-                var time = CreateOverlayEditorPreviewText(sample.TimeText, palette.Muted, 9, TextAlignment.Right, HorizontalAlignment.Right);
+                var time = CreateOverlayEditorPreviewText(
+                    sample.TimeText,
+                    palette.Muted,
+                    skinProfile.TinyFontSize,
+                    TextAlignment.Right,
+                    HorizontalAlignment.Right);
                 Grid.SetColumn(time, 1);
                 header.Children.Add(time);
             }
@@ -2350,7 +2498,7 @@ public partial class MainWindow
             {
                 Text = sample.Text,
                 Foreground = palette.Text,
-                FontSize = 10,
+                FontSize = skinProfile.EventDetailFontSize,
                 TextWrapping = TextWrapping.Wrap,
                 MaxHeight = 32,
                 Margin = new Thickness(0, 3, 0, 0)
@@ -2371,7 +2519,8 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> BuildOverlayEditorMemberPreview(
         OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var scene = ResolveCurrentOverlayScene();
         var authorizedRoster = ResolveOverlayAuthorizedRoster(scene);
@@ -2393,7 +2542,8 @@ public partial class MainWindow
         {
             yield return CreateOverlayEditorMemberPreviewRow(
                 ProjectOverlayEditorMemberPreviewRow(player, palette),
-                palette);
+                palette,
+                skinProfile);
         }
 
         if (projection.ShowOverflowSummary)
@@ -2408,7 +2558,8 @@ public partial class MainWindow
                     : $"{projection.HiddenOnlineCount} more online";
             yield return CreateOverlayEditorMemberPreviewRow(
                 new OverlayEditorMemberPreviewRow(summary, "", "", "", palette.Muted),
-                palette);
+                palette,
+                skinProfile);
         }
         else if (projection.VisibleSourceIndices.Count == 0)
         {
@@ -2419,7 +2570,8 @@ public partial class MainWindow
                     "",
                     "",
                     palette.Muted),
-                palette);
+                palette,
+                skinProfile);
         }
     }
 
@@ -2534,7 +2686,8 @@ public partial class MainWindow
 
     private UIElement CreateOverlayEditorMemberPreviewRow(
         OverlayEditorMemberPreviewRow player,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var hideStatus = _overlaySettings.EffectiveHideMemberOnlineStatus;
         var grid = new Grid
@@ -2550,7 +2703,7 @@ public partial class MainWindow
         grid.Children.Add(CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(player.DisplayName, hideStatus ? 28 : 24),
             palette.Text,
-            12,
+            skinProfile.TextFontSize,
             TextAlignment.Left,
             HorizontalAlignment.Stretch));
 
@@ -2566,7 +2719,7 @@ public partial class MainWindow
             var status = CreateOverlayEditorPreviewText(
                 CompactOverlayEditorText(player.Status, 12),
                 player.StatusBrush,
-                11,
+                skinProfile.TinyCenterFontSize,
                 TextAlignment.Center,
                 HorizontalAlignment.Center);
             Grid.SetColumn(status, 1);
@@ -2576,7 +2729,7 @@ public partial class MainWindow
         var location = CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(player.Location, hideStatus ? 34 : 24),
             palette.Muted,
-            10,
+            skinProfile.MutedFontSize,
             TextAlignment.Right,
             HorizontalAlignment.Stretch);
         Grid.SetColumn(location, hideStatus ? 1 : 2);
@@ -2585,7 +2738,7 @@ public partial class MainWindow
         var ship = CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(player.Ship, 62),
             palette.Muted,
-            10,
+            skinProfile.MutedFontSize,
             TextAlignment.Left,
             HorizontalAlignment.Stretch,
             FontWeights.Normal,
@@ -2718,9 +2871,9 @@ public partial class MainWindow
         return text;
     }
 
-    private static OverlayEditorPreviewPalette ResolveOverlayEditorPreviewPalette(OverlayVisualTheme theme)
+    private static OverlayEditorPreviewPalette ResolveOverlayEditorPreviewPalette(OverlayDisplaySettings settings)
     {
-        return theme switch
+        var palette = settings.Theme switch
         {
             OverlayVisualTheme.Anvil => OverlayPalette(
                 Color.FromRgb(78, 255, 171),
@@ -2821,6 +2974,33 @@ public partial class MainWindow
                 Color.FromRgb(121, 255, 158),
                 Color.FromRgb(255, 105, 105))
         };
+        return settings.Skin == OverlaySkin.Minimal
+            ? BrightenMinimalOverlayEditorPalette(palette)
+            : palette;
+    }
+
+    private static OverlayEditorPreviewPalette BrightenMinimalOverlayEditorPalette(
+        OverlayEditorPreviewPalette palette) =>
+        palette with
+        {
+            Title = BrightenOverlayEditorBrush(palette.Title, MinimalOverlaySkinStyle.TitleBrightness),
+            Text = BrightenOverlayEditorBrush(palette.Text, MinimalOverlaySkinStyle.TextBrightness),
+            Muted = BrightenOverlayEditorBrush(palette.Muted, MinimalOverlaySkinStyle.MutedBrightness),
+            Alert = BrightenOverlayEditorBrush(palette.Alert, MinimalOverlaySkinStyle.AccentBrightness),
+            Online = BrightenOverlayEditorBrush(palette.Online, MinimalOverlaySkinStyle.AccentBrightness),
+            Offline = BrightenOverlayEditorBrush(palette.Offline, MinimalOverlaySkinStyle.AccentBrightness)
+        };
+
+    private static SolidColorBrush BrightenOverlayEditorBrush(
+        System.Windows.Media.Brush brush,
+        double amount)
+    {
+        var color = brush is SolidColorBrush solid ? solid.Color : Colors.White;
+        return OverlayEditorBrush(Color.FromArgb(
+            color.A,
+            MinimalOverlaySkinStyle.Brighten(color.R, amount),
+            MinimalOverlaySkinStyle.Brighten(color.G, amount),
+            MinimalOverlaySkinStyle.Brighten(color.B, amount)));
     }
 
     private static OverlayEditorPreviewPalette OverlayPalette(

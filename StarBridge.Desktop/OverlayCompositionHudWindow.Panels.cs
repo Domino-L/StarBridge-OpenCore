@@ -29,7 +29,7 @@ internal sealed partial class OverlayCompositionHudWindow
         OverlayCompositionFrameState state,
         WpfRect rect)
     {
-        var textOpacity = state.Opacity * state.NoticeStyle.TextOpacity;
+        var textOpacity = state.TextOpacity * state.NoticeStyle.TextOpacity;
         var x = (float)rect.X + 20;
         var titleX = (float)rect.X + 20;
         var y = (float)rect.Y + 16;
@@ -59,7 +59,7 @@ internal sealed partial class OverlayCompositionHudWindow
     {
         var rect = state.SquadsRect;
         var style = state.SquadsStyle;
-        var textOpacity = state.Opacity * style.TextOpacity;
+        var textOpacity = state.TextOpacity * style.TextOpacity;
         var nightShadowJoin = NightShadowPanelJoin.None;
         const bool useNightShadowLayout = false;
         DrawPanelFrame(target, rect, state, 30, 120, 34, 120, style.BackgroundOpacity, nightShadowJoin, "Squads");
@@ -248,7 +248,7 @@ internal sealed partial class OverlayCompositionHudWindow
     {
         var rect = state.MembersRect;
         var style = state.MembersStyle;
-        var textOpacity = state.Opacity * style.TextOpacity;
+        var textOpacity = state.TextOpacity * style.TextOpacity;
         var nightShadowJoin = NightShadowPanelJoin.None;
         const bool useNightShadowLayout = false;
         DrawPanelFrame(target, rect, state, 36, 150, 32, 110, style.BackgroundOpacity, nightShadowJoin, "Members");
@@ -270,7 +270,9 @@ internal sealed partial class OverlayCompositionHudWindow
             22,
             state.Palette.Title,
             textOpacity);
-        var statusWidth = state.HideMemberStatus ? 0 : 40f;
+        var statusWidth = state.HideMemberStatus
+            ? 0
+            : (float)OverlayDisplaySettings.MemberStatusColumnPixelWidth;
         var remaining = Math.Max(40, contentWidth - statusWidth);
         var nameWidth = (float)(remaining * state.MemberNameRatio);
         var locationWidth = Math.Max(40, remaining - nameWidth);
@@ -315,7 +317,7 @@ internal sealed partial class OverlayCompositionHudWindow
 
         var rect = state.ChatRect;
         var style = state.ChatStyle;
-        var textOpacity = state.Opacity * style.TextOpacity;
+        var textOpacity = state.TextOpacity * style.TextOpacity;
         var nightShadowJoin = NightShadowPanelJoin.None;
         const bool useNightShadowLayout = false;
         DrawPanelFrame(target, rect, state, 28, 142, 28, 126, style.BackgroundOpacity, nightShadowJoin, "Chat");
@@ -406,7 +408,7 @@ internal sealed partial class OverlayCompositionHudWindow
             _ => 9
         };
         var laneCount = Math.Clamp((int)Math.Floor((safeBottom - safeTop) / laneSpacing) + 1, 1, maximumLanes);
-        var textOpacity = state.Opacity * style.TextOpacity;
+        var textOpacity = state.TextOpacity * style.TextOpacity;
         var now = _frameNowUtc;
         var fontScale = (float)(state.ChatBarrageFontSize / 16d);
         foreach (var row in state.ChatRows)
