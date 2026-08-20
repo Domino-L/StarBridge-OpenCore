@@ -270,7 +270,9 @@ internal sealed partial class OverlayCompositionHudWindow
             22,
             state.Palette.Title,
             textOpacity);
-        var statusWidth = state.HideMemberStatus ? 0 : 40f;
+        var statusWidth = state.HideMemberStatus
+            ? 0
+            : (float)OverlayDisplaySettings.MemberStatusColumnPixelWidth;
         var remaining = Math.Max(40, contentWidth - statusWidth);
         var nameWidth = (float)(remaining * state.MemberNameRatio);
         var locationWidth = Math.Max(40, remaining - nameWidth);
@@ -291,12 +293,7 @@ internal sealed partial class OverlayCompositionHudWindow
                     textOpacity);
                 if (!state.HideMemberStatus)
                 {
-                    var statusText = state.MinimalStyle && member.Status.Equals("应用在线", StringComparison.Ordinal)
-                        ? "应用\n在线"
-                        : member.Status;
-                    var statusTop = rowY;
-                    var statusHeight = state.MinimalStyle && statusText.Contains('\n') ? 30f : 18f;
-                    DrawText(target, statusText, _centerFormat, left + nameWidth, statusTop, statusWidth, statusHeight, member.StatusColor, textOpacity);
+                    DrawText(target, member.Status, _centerFormat, left + nameWidth, rowY, statusWidth, 18, member.StatusColor, textOpacity);
                 }
 
                 DrawText(target, member.Location, _mutedRightFormat, left + nameWidth + statusWidth, rowY + 1, locationWidth, 16, state.Palette.Muted, textOpacity);
