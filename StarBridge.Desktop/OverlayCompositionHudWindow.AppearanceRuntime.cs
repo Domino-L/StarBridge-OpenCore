@@ -70,7 +70,7 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private void DrawScene(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
-        EnsureHudTextFormats(state.MinimalStyle);
+        EnsureHudTextFormats(_settings.Skin);
 
         var handled = false;
         TryDrawExtendedAppearanceScene(target, state, ref handled);

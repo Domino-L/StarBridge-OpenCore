@@ -345,6 +345,7 @@ public partial class MainWindow
         var accent = GetOverlayEventNotificationPreviewBrush();
         var isSelected = _isOverlayEventNotificationSelected;
         var effectiveSettings = GetEffectiveOverlaySettings();
+        var skinProfile = OverlaySkinCatalog.Get(effectiveSettings.Skin);
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
         var isMinimal = effectiveSettings.Skin == OverlaySkin.Minimal;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
@@ -449,7 +450,7 @@ public partial class MainWindow
             Text = _language == "zh" ? "事件通知栏预览" : "EVENT RAIL PREVIEW",
             Foreground = previewsVerdictAppearance ? Brushes.FloralWhite : accent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = isMinimal ? MinimalOverlaySkinStyle.TitleFontSize : 15,
+            FontSize = skinProfile.EventTitleFontSize,
             Margin = previewsVerdictAppearance
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(52, 0, 0, 8)
@@ -460,7 +461,7 @@ public partial class MainWindow
         {
             Text = _language == "zh" ? "成员上线 / 从吸附侧弹出" : "Member online / snaps from side",
             Foreground = Brushes.AliceBlue,
-            FontSize = 13,
+            FontSize = skinProfile.EventDetailFontSize,
             Margin = new Thickness(0, 6, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis
         });
@@ -468,7 +469,7 @@ public partial class MainWindow
         {
             Text = $"{_overlaySettings.EventNotificationDurationSeconds:0.#}s",
             Foreground = Brushes.LightSlateGray,
-            FontSize = 11,
+            FontSize = skinProfile.MutedFontSize,
             Margin = new Thickness(0, 4, 0, 0)
         });
         grid.Children.Add(content);

@@ -155,7 +155,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private IDWriteTextFormat? _centerFormat;
     private IDWriteTextFormat? _eventTitleFormat;
     private IDWriteTextFormat? _eventDetailFormat;
-    private bool _minimalHudTextFormats;
+    private OverlaySkin? _hudTextFormatSkin;
     private IDWriteTextFormat? _chatBarrageTitleFormat;
     private IDWriteTextFormat? _chatBarrageTextFormat;
     private IDWriteTextFormat? _chatBarrageTimestampFormat;
@@ -796,7 +796,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     }
 
 
-    private void CreateTextFormats(bool minimalStyle = false)
+    private void CreateTextFormats(OverlaySkin? skin = null)
     {
         _textWidthCache.Clear();
         _eventDetailFormat?.Dispose();
@@ -810,11 +810,13 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _textFormat?.Dispose();
         _titleFormat?.Dispose();
 
-        var titleSize = minimalStyle ? (float)MinimalOverlaySkinStyle.TitleFontSize : 13f;
-        var textSize = minimalStyle ? (float)MinimalOverlaySkinStyle.TextFontSize : 12f;
-        var mutedSize = minimalStyle ? (float)MinimalOverlaySkinStyle.MutedFontSize : 10f;
-        var tinySize = minimalStyle ? (float)MinimalOverlaySkinStyle.TinyFontSize : 9f;
-        var tinyCenterSize = minimalStyle ? (float)MinimalOverlaySkinStyle.TinyCenterFontSize : 8f;
+        var effectiveSkin = skin ?? _settings.Skin;
+        var skinProfile = OverlaySkinCatalog.Get(effectiveSkin);
+        var titleSize = (float)skinProfile.TitleFontSize;
+        var textSize = (float)skinProfile.TextFontSize;
+        var mutedSize = (float)skinProfile.MutedFontSize;
+        var tinySize = (float)skinProfile.TinyFontSize;
+        var tinyCenterSize = (float)skinProfile.TinyCenterFontSize;
 
         _titleFormat = CreateTextFormat("Segoe UI Semibold", titleSize, DWriteFontWeight.SemiBold, DWriteTextAlignment.Leading);
         _textFormat = CreateTextFormat("Segoe UI", textSize, DWriteFontWeight.Normal, DWriteTextAlignment.Leading);
@@ -826,29 +828,29 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _centerFormat = CreateTextFormat("Segoe UI", mutedSize, DWriteFontWeight.Normal, DWriteTextAlignment.Center);
         _eventTitleFormat = CreateTextFormat(
             "Segoe UI Semibold",
-            minimalStyle ? (float)MinimalOverlaySkinStyle.EventTitleFontSize : 12f,
+            (float)skinProfile.EventTitleFontSize,
             DWriteFontWeight.SemiBold,
             DWriteTextAlignment.Leading,
             WordWrapping.Wrap,
             ParagraphAlignment.Near);
         _eventDetailFormat = CreateTextFormat(
             "Segoe UI",
-            minimalStyle ? (float)MinimalOverlaySkinStyle.EventDetailFontSize : 11f,
+            (float)skinProfile.EventDetailFontSize,
             DWriteFontWeight.Normal,
             DWriteTextAlignment.Leading,
             WordWrapping.Wrap,
             ParagraphAlignment.Near);
-        _minimalHudTextFormats = minimalStyle;
+        _hudTextFormatSkin = effectiveSkin;
     }
 
-    private void EnsureHudTextFormats(bool minimalStyle)
+    private void EnsureHudTextFormats(OverlaySkin skin)
     {
-        if (_titleFormat is not null && _minimalHudTextFormats == minimalStyle)
+        if (_titleFormat is not null && _hudTextFormatSkin == skin)
         {
             return;
         }
 
-        CreateTextFormats(minimalStyle);
+        CreateTextFormats(skin);
     }
 
     private void EnsureChatBarrageTextFormats(float fontSize)

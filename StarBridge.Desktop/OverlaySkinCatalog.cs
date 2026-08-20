@@ -48,6 +48,27 @@ internal sealed record OverlaySkinProfile(
     public bool IsReleased => PublicationState == OverlaySkinPublicationState.Released;
 
     public bool IsArchived => PublicationState == OverlaySkinPublicationState.Archived;
+
+    public double TitleFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TitleFontSize : 13;
+
+    public double TextFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TextFontSize : 12;
+
+    public double MutedFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.MutedFontSize : 10;
+
+    public double TinyFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TinyFontSize : 9;
+
+    public double TinyCenterFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.TinyCenterFontSize : 8;
+
+    public double EventTitleFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.EventTitleFontSize : 12;
+
+    public double EventDetailFontSize =>
+        RenderKind == OverlaySkinRenderKind.Minimal ? MinimalOverlaySkinStyle.EventDetailFontSize : 11;
 }
 
 internal sealed record OverlaySkinResolution(

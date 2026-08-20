@@ -1572,6 +1572,7 @@ public partial class MainWindow
             _selectedOverlayInspectorItem?.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase) == true;
         var selectedBrush = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
         var effectiveSettings = GetEffectiveOverlaySettings();
+        var skinProfile = OverlaySkinCatalog.Get(effectiveSettings.Skin);
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
         var isMinimal = effectiveSettings.Skin == OverlaySkin.Minimal;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
@@ -1640,7 +1641,7 @@ public partial class MainWindow
             Text = ResolveOverlayEditorPanelTitle(item),
             Foreground = showLivePreview ? livePreviewPalette.Title : contentAccent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = isMinimal ? MinimalOverlaySkinStyle.TitleFontSize : 15,
+            FontSize = skinProfile.TitleFontSize,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = previewsVerdictAppearance ? new Thickness(52, 0, 0, 18) : new Thickness(0)
         };
@@ -2162,14 +2163,16 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> CreateOverlayEditorLivePreviewLines(OverlayLayoutItem item)
     {
-        var palette = ResolveOverlayEditorPreviewPalette(GetEffectiveOverlaySettings());
+        var settings = GetEffectiveOverlaySettings();
+        var palette = ResolveOverlayEditorPreviewPalette(settings);
+        var skinProfile = OverlaySkinCatalog.Get(settings.Skin);
         var elements = item.Key switch
         {
-            "Notice" => BuildOverlayEditorNoticePreview(palette),
+            "Notice" => BuildOverlayEditorNoticePreview(palette, skinProfile),
             // The persisted key remains "Squads" so existing layouts keep their slot.
-            "Squads" => BuildOverlayEditorOverviewPreview(item, palette),
-            "Members" => BuildOverlayEditorMemberPreview(item, palette),
-            "Chat" => BuildOverlayEditorChatPreview(item, palette),
+            "Squads" => BuildOverlayEditorOverviewPreview(item, palette, skinProfile),
+            "Members" => BuildOverlayEditorMemberPreview(item, palette, skinProfile),
+            "Chat" => BuildOverlayEditorChatPreview(item, palette, skinProfile),
             _ => Enumerable.Empty<UIElement>()
         };
 
@@ -2230,7 +2233,9 @@ public partial class MainWindow
             : "COMMUNICATION EVENT";
     }
 
-    private IEnumerable<UIElement> BuildOverlayEditorNoticePreview(OverlayEditorPreviewPalette palette)
+    private IEnumerable<UIElement> BuildOverlayEditorNoticePreview(
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var scene = ResolveCurrentOverlayScene();
         var noticeText = scene.Context.Kind == OverlaySceneKind.PartyRoom
@@ -2247,13 +2252,13 @@ public partial class MainWindow
         grid.Children.Add(CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(noticeText, 58),
             palette.Text,
-            11.2,
+            skinProfile.TextFontSize,
             TextAlignment.Left,
             HorizontalAlignment.Stretch));
         var timer = CreateOverlayEditorPreviewText(
             $"{OverlayDisplaySettings.NormalizeCommunicationEventDuration(_overlaySettings.CommunicationEventDurationSeconds):0.#}s",
             palette.Alert,
-            11,
+            skinProfile.TextFontSize,
             TextAlignment.Right,
             HorizontalAlignment.Right,
             FontWeights.SemiBold);
@@ -2264,7 +2269,8 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> BuildOverlayEditorOverviewPreview(
         OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var scene = ResolveCurrentOverlayScene();
         var authorizedRoster = ResolveOverlayAuthorizedRoster(scene);
@@ -2286,9 +2292,9 @@ public partial class MainWindow
             projection.StatusBrush,
             palette.Text,
             palette.Alert,
-            13,
-            12,
-            11,
+            skinProfile.TextFontSize,
+            skinProfile.TextFontSize,
+            skinProfile.MutedFontSize,
             new Thickness(0, 9, 0, 0),
             statusLayout);
 
@@ -2299,7 +2305,7 @@ public partial class MainWindow
                 yield return CreateOverlayEditorPreviewText(
                     CompactOverlayEditorText(projection.Focus, 56),
                     palette.Muted,
-                    10,
+                    skinProfile.MutedFontSize,
                     TextAlignment.Left,
                     HorizontalAlignment.Stretch,
                     FontWeights.Normal,
@@ -2317,7 +2323,8 @@ public partial class MainWindow
                     yield return CreateOverlayEditorOverviewLocationRow(
                         locationLayout.VisibleItems,
                         palette.Text,
-                        palette.Muted);
+                        palette.Muted,
+                        skinProfile.MutedFontSize);
                 }
                 else
                 {
@@ -2326,7 +2333,8 @@ public partial class MainWindow
                         yield return CreateOverlayEditorOverviewLocationRow(
                             [location],
                             palette.Text,
-                            palette.Muted);
+                            palette.Muted,
+                            skinProfile.MutedFontSize);
                     }
                 }
             }
@@ -2340,7 +2348,8 @@ public partial class MainWindow
                         0,
                         projection.LocationPlaceholderMetric)],
                     palette.Text,
-                    palette.Muted);
+                    palette.Muted,
+                    skinProfile.MutedFontSize);
             }
 
             yield break;
@@ -2356,7 +2365,7 @@ public partial class MainWindow
                 yield return CreateOverlayEditorPreviewText(
                     CompactOverlayEditorText(detail, 56),
                     palette.Muted,
-                    10,
+                    skinProfile.MutedFontSize,
                     TextAlignment.Left,
                     HorizontalAlignment.Stretch,
                     FontWeights.Normal,
@@ -2368,7 +2377,8 @@ public partial class MainWindow
     private static Grid CreateOverlayEditorOverviewLocationRow(
         IReadOnlyList<OverlayOverviewLocationCount> locations,
         System.Windows.Media.Brush nameBrush,
-        System.Windows.Media.Brush metricBrush)
+        System.Windows.Media.Brush metricBrush,
+        double fontSize)
     {
         var grid = new Grid
         {
@@ -2398,7 +2408,7 @@ public partial class MainWindow
             var name = CreateOverlayEditorPreviewText(
                 locations[index].DisplayName,
                 nameBrush,
-                10,
+                fontSize,
                 TextAlignment.Left,
                 HorizontalAlignment.Stretch,
                 FontWeights.Normal,
@@ -2406,7 +2416,7 @@ public partial class MainWindow
             var metric = CreateOverlayEditorPreviewText(
                 locations[index].DisplayMetricText,
                 metricBrush,
-                10,
+                fontSize,
                 TextAlignment.Right,
                 HorizontalAlignment.Stretch,
                 FontWeights.Normal,
@@ -2423,7 +2433,8 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> BuildOverlayEditorChatPreview(
         OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var sceneKind = ResolveCurrentOverlayScene().Context.Kind;
         var projectedHeight = ResolveOverlayEditorItemDisplayRect(item).Height;
@@ -2465,14 +2476,19 @@ public partial class MainWindow
             var sender = CreateOverlayEditorPreviewText(
                 _overlaySettings.ChatShowSender ? CompactOverlayEditorText(sample.SenderDisplay, 24) : "通讯消息",
                 palette.Title,
-                11,
+                skinProfile.EventTitleFontSize,
                 TextAlignment.Left,
                 HorizontalAlignment.Stretch,
                 FontWeights.SemiBold);
             header.Children.Add(sender);
             if (_overlaySettings.ChatShowTimestamp)
             {
-                var time = CreateOverlayEditorPreviewText(sample.TimeText, palette.Muted, 9, TextAlignment.Right, HorizontalAlignment.Right);
+                var time = CreateOverlayEditorPreviewText(
+                    sample.TimeText,
+                    palette.Muted,
+                    skinProfile.TinyFontSize,
+                    TextAlignment.Right,
+                    HorizontalAlignment.Right);
                 Grid.SetColumn(time, 1);
                 header.Children.Add(time);
             }
@@ -2482,7 +2498,7 @@ public partial class MainWindow
             {
                 Text = sample.Text,
                 Foreground = palette.Text,
-                FontSize = 10,
+                FontSize = skinProfile.EventDetailFontSize,
                 TextWrapping = TextWrapping.Wrap,
                 MaxHeight = 32,
                 Margin = new Thickness(0, 3, 0, 0)
@@ -2503,7 +2519,8 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> BuildOverlayEditorMemberPreview(
         OverlayLayoutItem item,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var scene = ResolveCurrentOverlayScene();
         var authorizedRoster = ResolveOverlayAuthorizedRoster(scene);
@@ -2525,7 +2542,8 @@ public partial class MainWindow
         {
             yield return CreateOverlayEditorMemberPreviewRow(
                 ProjectOverlayEditorMemberPreviewRow(player, palette),
-                palette);
+                palette,
+                skinProfile);
         }
 
         if (projection.ShowOverflowSummary)
@@ -2540,7 +2558,8 @@ public partial class MainWindow
                     : $"{projection.HiddenOnlineCount} more online";
             yield return CreateOverlayEditorMemberPreviewRow(
                 new OverlayEditorMemberPreviewRow(summary, "", "", "", palette.Muted),
-                palette);
+                palette,
+                skinProfile);
         }
         else if (projection.VisibleSourceIndices.Count == 0)
         {
@@ -2551,7 +2570,8 @@ public partial class MainWindow
                     "",
                     "",
                     palette.Muted),
-                palette);
+                palette,
+                skinProfile);
         }
     }
 
@@ -2666,7 +2686,8 @@ public partial class MainWindow
 
     private UIElement CreateOverlayEditorMemberPreviewRow(
         OverlayEditorMemberPreviewRow player,
-        OverlayEditorPreviewPalette palette)
+        OverlayEditorPreviewPalette palette,
+        OverlaySkinProfile skinProfile)
     {
         var hideStatus = _overlaySettings.EffectiveHideMemberOnlineStatus;
         var grid = new Grid
@@ -2682,7 +2703,7 @@ public partial class MainWindow
         grid.Children.Add(CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(player.DisplayName, hideStatus ? 28 : 24),
             palette.Text,
-            12,
+            skinProfile.TextFontSize,
             TextAlignment.Left,
             HorizontalAlignment.Stretch));
 
@@ -2698,7 +2719,7 @@ public partial class MainWindow
             var status = CreateOverlayEditorPreviewText(
                 CompactOverlayEditorText(player.Status, 12),
                 player.StatusBrush,
-                11,
+                skinProfile.TinyCenterFontSize,
                 TextAlignment.Center,
                 HorizontalAlignment.Center);
             Grid.SetColumn(status, 1);
@@ -2708,7 +2729,7 @@ public partial class MainWindow
         var location = CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(player.Location, hideStatus ? 34 : 24),
             palette.Muted,
-            10,
+            skinProfile.MutedFontSize,
             TextAlignment.Right,
             HorizontalAlignment.Stretch);
         Grid.SetColumn(location, hideStatus ? 1 : 2);
@@ -2717,7 +2738,7 @@ public partial class MainWindow
         var ship = CreateOverlayEditorPreviewText(
             CompactOverlayEditorText(player.Ship, 62),
             palette.Muted,
-            10,
+            skinProfile.MutedFontSize,
             TextAlignment.Left,
             HorizontalAlignment.Stretch,
             FontWeights.Normal,
