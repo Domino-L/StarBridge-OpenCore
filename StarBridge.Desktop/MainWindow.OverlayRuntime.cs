@@ -30,6 +30,8 @@ public partial class MainWindow
     private const int ErrorHotkeyAlreadyRegistered = 1409;
     private OverlayHotkeyRegistrationState _overlayHotkeyRegistrationState = OverlayHotkeyRegistrationState.Disabled;
     private bool _applyingOverlayHotkeySettings;
+    private bool _restoreOverlayWhenContentAvailable;
+    private bool _overlayOpenedFromRestoredState;
 
     private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
@@ -267,6 +269,9 @@ public partial class MainWindow
 
     private void ToggleOverlayWindow(bool focusGameWindow = true)
     {
+        _restoreOverlayWhenContentAvailable = false;
+        _overlayOpenedFromRestoredState = false;
+
         if (_inGameMenuCoordinator.IsOpen)
         {
             _inGameMenuCoordinator.Close(InGameMenuExitMode.SwitchToInformationOverlay);
@@ -310,15 +315,52 @@ public partial class MainWindow
 
     private void RestoreOverlayRunningState()
     {
-        if (!DesktopAppConfig.LoadOverlayRunningState() || IsOverlayRunning)
+        if (!DesktopAppConfig.LoadOverlayRunningState())
         {
             return;
         }
 
-        var overlaySettings = OverlayStartupTransitionPolicy.ResolveForOpen(
-            GetEffectiveOverlaySettings(),
+        _restoreOverlayWhenContentAvailable = true;
+        ReconcileRestoredOverlayRunningState();
+    }
+
+    private void ReconcileRestoredOverlayRunningState()
+    {
+        if (!_restoreOverlayWhenContentAvailable)
+        {
+            return;
+        }
+
+        var overlaySettings = GetEffectiveOverlaySettings();
+        var projection = BuildOverlayAccessProjection(
+            overlaySettings,
+            BuildOverlayCommandState());
+        var canShowRestoredOverlay =
+            IsLoggedIn &&
+            !_isAccountTransition &&
+            projection.Scene.HasContent;
+        if (!canShowRestoredOverlay)
+        {
+            if (_overlayOpenedFromRestoredState)
+            {
+                CloseOverlayWindow();
+                _overlayOpenedFromRestoredState = false;
+                RefreshPersonalIdentityConsole();
+                RefreshOverlayOverviewSummary();
+            }
+
+            return;
+        }
+
+        if (IsOverlayRunning)
+        {
+            return;
+        }
+
+        overlaySettings = OverlayStartupTransitionPolicy.ResolveForOpen(
+            overlaySettings,
             StarCitizenProcessProbe.IsForeground());
-        OpenOverlayWindow(overlaySettings);
+        _overlayOpenedFromRestoredState = OpenOverlayWindow(overlaySettings);
         RefreshPersonalIdentityConsole();
         RefreshOverlayOverviewSummary();
     }
@@ -1075,6 +1117,7 @@ public partial class MainWindow
     private void RefreshOverlayWindow()
     {
         RefreshInGameMenu();
+        ReconcileRestoredOverlayRunningState();
         if (_overlayWindow is not { IsVisible: true })
         {
             return;
