@@ -1834,22 +1834,31 @@ public partial class MainWindow
             var width = Math.Max(4, ActualWidth);
             var height = Math.Max(4, ActualHeight);
             var rect = new Rect(0.5, 0.5, Math.Max(1, width - 1), Math.Max(1, height - 1));
-            var chamfer = Math.Clamp(Math.Min(rect.Width, rect.Height) * 0.04, 3, 8);
+            var metrics = MinimalOverlaySkinStyle.ResolveFrame(rect.Width, rect.Height);
+            var chamfer = metrics.Chamfer;
             var fillAlpha = (byte)Math.Clamp(
-                Math.Round(204 * _backgroundOpacity),
+                Math.Round(MinimalOverlaySkinStyle.PreviewFillAlpha * _backgroundOpacity),
                 byte.MinValue,
                 byte.MaxValue);
-            var fill = new SolidColorBrush(Color.FromArgb(fillAlpha, 5, 18, 28));
+            var fill = new SolidColorBrush(Color.FromArgb(
+                fillAlpha,
+                MinimalOverlaySkinStyle.PreviewFillRed,
+                MinimalOverlaySkinStyle.PreviewFillGreen,
+                MinimalOverlaySkinStyle.PreviewFillBlue));
             fill.Freeze();
             drawingContext.DrawGeometry(fill, null, CreateChamferedGeometry(rect, chamfer));
 
             var borderOpacity = Math.Clamp(_backgroundOpacity, 0, 1);
-            var outline = new Pen(CreateOpacityBrush(Colors.White, borderOpacity), 1);
+            var borderColor = Color.FromRgb(
+                MinimalOverlaySkinStyle.BorderRed,
+                MinimalOverlaySkinStyle.BorderGreen,
+                MinimalOverlaySkinStyle.BorderBlue);
+            var outline = new Pen(
+                CreateOpacityBrush(borderColor, borderOpacity),
+                MinimalOverlaySkinStyle.BorderThickness);
             outline.Freeze();
-            var horizontalSpan = Math.Max(1, rect.Width - chamfer * 2);
-            var verticalSpan = Math.Max(1, rect.Height - chamfer * 2);
-            var horizontalGap = horizontalSpan * 0.60;
-            var verticalGap = verticalSpan * 0.60;
+            var horizontalGap = metrics.HorizontalGap;
+            var verticalGap = metrics.VerticalGap;
             var horizontalStart = rect.Left + rect.Width * 0.5 - horizontalGap * 0.5;
             var horizontalEnd = horizontalStart + horizontalGap;
             var verticalStart = rect.Top + rect.Height * 0.5 - verticalGap * 0.5;
@@ -1870,11 +1879,18 @@ public partial class MainWindow
 
             if (_showLeftRail)
             {
-                var rail = new Pen(CreateOpacityBrush(Colors.White, borderOpacity * 0.32), 1);
+                var rail = new Pen(
+                    CreateOpacityBrush(borderColor, borderOpacity * MinimalOverlaySkinStyle.GuideOpacity),
+                    MinimalOverlaySkinStyle.BorderThickness);
                 rail.Freeze();
-                var railStart = rect.Top + Math.Max(chamfer + 8, rect.Height * 0.20);
-                var railEnd = rect.Top + Math.Min(rect.Height - chamfer - 8, rect.Height * 0.42);
-                DrawSegment(drawingContext, rail, rect.Left + 5, railStart, rect.Left + 5, railEnd);
+                var railStart = rect.Top + Math.Max(
+                    chamfer + MinimalOverlaySkinStyle.GuideEndPadding,
+                    rect.Height * MinimalOverlaySkinStyle.GuideStartRatio);
+                var railEnd = rect.Top + Math.Min(
+                    rect.Height - chamfer - MinimalOverlaySkinStyle.GuideEndPadding,
+                    rect.Height * MinimalOverlaySkinStyle.GuideEndRatio);
+                var railX = rect.Left + MinimalOverlaySkinStyle.GuideInset;
+                DrawSegment(drawingContext, rail, railX, railStart, railX, railEnd);
             }
         }
 
