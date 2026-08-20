@@ -24,6 +24,18 @@ internal static class MinimalOverlaySkinStyle
     public const byte PreviewFillRed = 5;
     public const byte PreviewFillGreen = 18;
     public const byte PreviewFillBlue = 28;
+    public const double TitleBrightness = 0.72;
+    public const double TextBrightness = 0.30;
+    public const double MutedBrightness = 0.58;
+    public const double AccentBrightness = 0.18;
+    public const double RowAccentBrightness = 0.24;
+    public const double TitleFontSize = 14;
+    public const double TextFontSize = 13;
+    public const double MutedFontSize = 11;
+    public const double TinyFontSize = 10;
+    public const double TinyCenterFontSize = 9;
+    public const double EventTitleFontSize = 13;
+    public const double EventDetailFontSize = 12;
 
     public static MinimalOverlayFrameMetrics ResolveFrame(double width, double height)
     {
@@ -37,5 +49,11 @@ internal static class MinimalOverlaySkinStyle
             chamfer,
             Math.Max(1, normalizedWidth - chamfer * 2) * CenterGapRatio,
             Math.Max(1, normalizedHeight - chamfer * 2) * CenterGapRatio);
+    }
+
+    public static byte Brighten(byte channel, double amount)
+    {
+        var normalizedAmount = Math.Clamp(amount, 0, 1);
+        return (byte)Math.Round(channel + (byte.MaxValue - channel) * normalizedAmount);
     }
 }

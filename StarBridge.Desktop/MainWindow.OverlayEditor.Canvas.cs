@@ -449,7 +449,7 @@ public partial class MainWindow
             Text = _language == "zh" ? "事件通知栏预览" : "EVENT RAIL PREVIEW",
             Foreground = previewsVerdictAppearance ? Brushes.FloralWhite : accent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = isMinimal ? 16 : 15,
+            FontSize = isMinimal ? MinimalOverlaySkinStyle.TitleFontSize : 15,
             Margin = previewsVerdictAppearance
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(52, 0, 0, 8)
@@ -1087,7 +1087,7 @@ public partial class MainWindow
         var settings = GetEffectiveOverlaySettings();
         var previewTheme =
             settings.Skin == OverlaySkin.NightShadow ? OverlayVisualTheme.Default : settings.Theme;
-        return ResolveOverlayEditorPreviewPalette(previewTheme).Title;
+        return ResolveOverlayEditorPreviewPalette(settings with { Theme = previewTheme }).Title;
     }
 
     private static void AddLine(Canvas canvas, double x1, double y1, double x2, double y2, System.Windows.Media.Brush brush, double thickness)

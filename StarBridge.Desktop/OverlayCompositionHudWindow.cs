@@ -810,11 +810,11 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _textFormat?.Dispose();
         _titleFormat?.Dispose();
 
-        var titleSize = minimalStyle ? 14f : 13f;
-        var textSize = minimalStyle ? 13f : 12f;
-        var mutedSize = minimalStyle ? 11f : 10f;
-        var tinySize = minimalStyle ? 10f : 9f;
-        var tinyCenterSize = minimalStyle ? 9f : 8f;
+        var titleSize = minimalStyle ? (float)MinimalOverlaySkinStyle.TitleFontSize : 13f;
+        var textSize = minimalStyle ? (float)MinimalOverlaySkinStyle.TextFontSize : 12f;
+        var mutedSize = minimalStyle ? (float)MinimalOverlaySkinStyle.MutedFontSize : 10f;
+        var tinySize = minimalStyle ? (float)MinimalOverlaySkinStyle.TinyFontSize : 9f;
+        var tinyCenterSize = minimalStyle ? (float)MinimalOverlaySkinStyle.TinyCenterFontSize : 8f;
 
         _titleFormat = CreateTextFormat("Segoe UI Semibold", titleSize, DWriteFontWeight.SemiBold, DWriteTextAlignment.Leading);
         _textFormat = CreateTextFormat("Segoe UI", textSize, DWriteFontWeight.Normal, DWriteTextAlignment.Leading);
@@ -826,14 +826,14 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _centerFormat = CreateTextFormat("Segoe UI", mutedSize, DWriteFontWeight.Normal, DWriteTextAlignment.Center);
         _eventTitleFormat = CreateTextFormat(
             "Segoe UI Semibold",
-            minimalStyle ? 13f : 12f,
+            minimalStyle ? (float)MinimalOverlaySkinStyle.EventTitleFontSize : 12f,
             DWriteFontWeight.SemiBold,
             DWriteTextAlignment.Leading,
             WordWrapping.Wrap,
             ParagraphAlignment.Near);
         _eventDetailFormat = CreateTextFormat(
             "Segoe UI",
-            minimalStyle ? 12f : 11f,
+            minimalStyle ? (float)MinimalOverlaySkinStyle.EventDetailFontSize : 11f,
             DWriteFontWeight.Normal,
             DWriteTextAlignment.Leading,
             WordWrapping.Wrap,

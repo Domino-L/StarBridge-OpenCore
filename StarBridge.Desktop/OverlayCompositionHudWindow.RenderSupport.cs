@@ -115,12 +115,12 @@ internal sealed partial class OverlayCompositionHudWindow
         return _settings.Skin == OverlaySkin.Minimal
             ? palette with
             {
-                Title = Brighten(palette.Title, 0.72f),
-                Text = Brighten(palette.Text, 0.30f),
-                Muted = Brighten(palette.Muted, 0.58f),
-                Alert = Brighten(palette.Alert, 0.18f),
-                Online = Brighten(palette.Online, 0.18f),
-                Offline = Brighten(palette.Offline, 0.18f)
+                Title = Brighten(palette.Title, MinimalOverlaySkinStyle.TitleBrightness),
+                Text = Brighten(palette.Text, MinimalOverlaySkinStyle.TextBrightness),
+                Muted = Brighten(palette.Muted, MinimalOverlaySkinStyle.MutedBrightness),
+                Alert = Brighten(palette.Alert, MinimalOverlaySkinStyle.AccentBrightness),
+                Online = Brighten(palette.Online, MinimalOverlaySkinStyle.AccentBrightness),
+                Offline = Brighten(palette.Offline, MinimalOverlaySkinStyle.AccentBrightness)
             }
             : palette;
     }
@@ -166,15 +166,14 @@ internal sealed partial class OverlayCompositionHudWindow
     }
 
     private static HudColor BrightenIfNeeded(HudColor color, bool brighten) =>
-        brighten ? Brighten(color, 0.24f) : color;
+        brighten ? Brighten(color, MinimalOverlaySkinStyle.RowAccentBrightness) : color;
 
-    private static HudColor Brighten(HudColor color, float amount)
+    private static HudColor Brighten(HudColor color, double amount)
     {
-        var normalizedAmount = Math.Clamp(amount, 0f, 1f);
         return new HudColor(
-            (byte)Math.Round(color.R + (255 - color.R) * normalizedAmount),
-            (byte)Math.Round(color.G + (255 - color.G) * normalizedAmount),
-            (byte)Math.Round(color.B + (255 - color.B) * normalizedAmount),
+            MinimalOverlaySkinStyle.Brighten(color.R, amount),
+            MinimalOverlaySkinStyle.Brighten(color.G, amount),
+            MinimalOverlaySkinStyle.Brighten(color.B, amount),
             color.A);
     }
 

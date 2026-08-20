@@ -1602,7 +1602,7 @@ public partial class MainWindow
         };
 
         var showLivePreview = ShouldShowOverlayEditorLivePreview();
-        var livePreviewPalette = ResolveOverlayEditorPreviewPalette(effectiveSettings.Theme);
+        var livePreviewPalette = ResolveOverlayEditorPreviewPalette(effectiveSettings);
         var contentAccent = isLagrangeWeave
             ? livePreviewPalette.Alert
             : isMinimal
@@ -1640,7 +1640,7 @@ public partial class MainWindow
             Text = ResolveOverlayEditorPanelTitle(item),
             Foreground = showLivePreview ? livePreviewPalette.Title : contentAccent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = isMinimal ? 16 : 15,
+            FontSize = isMinimal ? MinimalOverlaySkinStyle.TitleFontSize : 15,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = previewsVerdictAppearance ? new Thickness(52, 0, 0, 18) : new Thickness(0)
         };
@@ -2162,7 +2162,7 @@ public partial class MainWindow
 
     private IEnumerable<UIElement> CreateOverlayEditorLivePreviewLines(OverlayLayoutItem item)
     {
-        var palette = ResolveOverlayEditorPreviewPalette(GetEffectiveOverlaySettings().Theme);
+        var palette = ResolveOverlayEditorPreviewPalette(GetEffectiveOverlaySettings());
         var elements = item.Key switch
         {
             "Notice" => BuildOverlayEditorNoticePreview(palette),
@@ -2850,9 +2850,9 @@ public partial class MainWindow
         return text;
     }
 
-    private static OverlayEditorPreviewPalette ResolveOverlayEditorPreviewPalette(OverlayVisualTheme theme)
+    private static OverlayEditorPreviewPalette ResolveOverlayEditorPreviewPalette(OverlayDisplaySettings settings)
     {
-        return theme switch
+        var palette = settings.Theme switch
         {
             OverlayVisualTheme.Anvil => OverlayPalette(
                 Color.FromRgb(78, 255, 171),
@@ -2953,6 +2953,33 @@ public partial class MainWindow
                 Color.FromRgb(121, 255, 158),
                 Color.FromRgb(255, 105, 105))
         };
+        return settings.Skin == OverlaySkin.Minimal
+            ? BrightenMinimalOverlayEditorPalette(palette)
+            : palette;
+    }
+
+    private static OverlayEditorPreviewPalette BrightenMinimalOverlayEditorPalette(
+        OverlayEditorPreviewPalette palette) =>
+        palette with
+        {
+            Title = BrightenOverlayEditorBrush(palette.Title, MinimalOverlaySkinStyle.TitleBrightness),
+            Text = BrightenOverlayEditorBrush(palette.Text, MinimalOverlaySkinStyle.TextBrightness),
+            Muted = BrightenOverlayEditorBrush(palette.Muted, MinimalOverlaySkinStyle.MutedBrightness),
+            Alert = BrightenOverlayEditorBrush(palette.Alert, MinimalOverlaySkinStyle.AccentBrightness),
+            Online = BrightenOverlayEditorBrush(palette.Online, MinimalOverlaySkinStyle.AccentBrightness),
+            Offline = BrightenOverlayEditorBrush(palette.Offline, MinimalOverlaySkinStyle.AccentBrightness)
+        };
+
+    private static SolidColorBrush BrightenOverlayEditorBrush(
+        System.Windows.Media.Brush brush,
+        double amount)
+    {
+        var color = brush is SolidColorBrush solid ? solid.Color : Colors.White;
+        return OverlayEditorBrush(Color.FromArgb(
+            color.A,
+            MinimalOverlaySkinStyle.Brighten(color.R, amount),
+            MinimalOverlaySkinStyle.Brighten(color.G, amount),
+            MinimalOverlaySkinStyle.Brighten(color.B, amount)));
     }
 
     private static OverlayEditorPreviewPalette OverlayPalette(
