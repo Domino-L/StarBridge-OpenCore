@@ -1571,9 +1571,10 @@ public partial class MainWindow
         var selectedBrush = BridgeTokenBrushes.GetRequired(this, BridgeBrushToken.Ink);
         var effectiveSettings = GetEffectiveOverlaySettings();
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
+        var isMinimal = effectiveSettings.Skin == OverlaySkin.Minimal;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
         const bool previewsVerdictAppearance = false;
-        var usesCustomChrome = isLagrangeWeave || previewsVerdictAppearance;
+        var usesCustomChrome = isLagrangeWeave || isMinimal || previewsVerdictAppearance;
         var isPositionLocked = _isOverlayLayoutLocked || item.IsLocked;
         var isFullScreenChatBarrage = IsOverlayChatBarrage(item);
         isPositionLocked |= isFullScreenChatBarrage;
@@ -1602,6 +1603,8 @@ public partial class MainWindow
         var livePreviewPalette = ResolveOverlayEditorPreviewPalette(effectiveSettings.Theme);
         var contentAccent = isLagrangeWeave
             ? livePreviewPalette.Alert
+            : isMinimal
+                ? livePreviewPalette.Title
             : previewsVerdictAppearance
                 ? livePreviewPalette.Title
                 : item.Brush;
@@ -1635,7 +1638,7 @@ public partial class MainWindow
             Text = ResolveOverlayEditorPanelTitle(item),
             Foreground = showLivePreview ? livePreviewPalette.Title : contentAccent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = 15,
+            FontSize = isMinimal ? 16 : 15,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = previewsVerdictAppearance ? new Thickness(52, 0, 0, 18) : new Thickness(0)
         };
@@ -1738,6 +1741,12 @@ public partial class MainWindow
                 join,
                 item.BackgroundOpacity));
         }
+        else if (isMinimal)
+        {
+            wrapper.Children.Add(new MinimalEditorChrome(
+                item.BackgroundOpacity * effectiveSettings.BackgroundOpacity,
+                showLeftRail: true));
+        }
 
         wrapper.Children.Add(shell);
 
@@ -1802,6 +1811,106 @@ public partial class MainWindow
         key.Equals("Squads", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("Members", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("Chat", StringComparison.OrdinalIgnoreCase);
+
+
+    private sealed class MinimalEditorChrome : FrameworkElement
+    {
+        private readonly double _backgroundOpacity;
+        private readonly bool _showLeftRail;
+
+        public MinimalEditorChrome(double backgroundOpacity, bool showLeftRail = false)
+        {
+            _backgroundOpacity = Math.Max(0, double.IsFinite(backgroundOpacity) ? backgroundOpacity : 0);
+            _showLeftRail = showLeftRail;
+            IsHitTestVisible = false;
+            SnapsToDevicePixels = true;
+        }
+
+        protected override void OnRender(DrawingContext drawingContext)
+        {
+            base.OnRender(drawingContext);
+            var width = Math.Max(4, ActualWidth);
+            var height = Math.Max(4, ActualHeight);
+            var rect = new Rect(0.5, 0.5, Math.Max(1, width - 1), Math.Max(1, height - 1));
+            var chamfer = Math.Clamp(Math.Min(rect.Width, rect.Height) * 0.04, 3, 8);
+            var fillAlpha = (byte)Math.Clamp(
+                Math.Round(204 * _backgroundOpacity),
+                byte.MinValue,
+                byte.MaxValue);
+            var fill = new SolidColorBrush(Color.FromArgb(fillAlpha, 5, 18, 28));
+            fill.Freeze();
+            drawingContext.DrawGeometry(fill, null, CreateChamferedGeometry(rect, chamfer));
+
+            var borderOpacity = Math.Clamp(_backgroundOpacity, 0, 1);
+            var outline = new Pen(CreateOpacityBrush(Colors.White, borderOpacity), 1);
+            outline.Freeze();
+            var horizontalSpan = Math.Max(1, rect.Width - chamfer * 2);
+            var verticalSpan = Math.Max(1, rect.Height - chamfer * 2);
+            var horizontalGap = horizontalSpan * 0.60;
+            var verticalGap = verticalSpan * 0.60;
+            var horizontalStart = rect.Left + rect.Width * 0.5 - horizontalGap * 0.5;
+            var horizontalEnd = horizontalStart + horizontalGap;
+            var verticalStart = rect.Top + rect.Height * 0.5 - verticalGap * 0.5;
+            var verticalEnd = verticalStart + verticalGap;
+
+            DrawSegment(drawingContext, outline, rect.Left, rect.Top + chamfer, rect.Left + chamfer, rect.Top);
+            DrawSegment(drawingContext, outline, rect.Right - chamfer, rect.Top, rect.Right, rect.Top + chamfer);
+            DrawSegment(drawingContext, outline, rect.Right, rect.Bottom - chamfer, rect.Right - chamfer, rect.Bottom);
+            DrawSegment(drawingContext, outline, rect.Left + chamfer, rect.Bottom, rect.Left, rect.Bottom - chamfer);
+            DrawSegment(drawingContext, outline, rect.Left + chamfer, rect.Top, horizontalStart, rect.Top);
+            DrawSegment(drawingContext, outline, horizontalEnd, rect.Top, rect.Right - chamfer, rect.Top);
+            DrawSegment(drawingContext, outline, rect.Left + chamfer, rect.Bottom, horizontalStart, rect.Bottom);
+            DrawSegment(drawingContext, outline, horizontalEnd, rect.Bottom, rect.Right - chamfer, rect.Bottom);
+            DrawSegment(drawingContext, outline, rect.Left, rect.Top + chamfer, rect.Left, verticalStart);
+            DrawSegment(drawingContext, outline, rect.Left, verticalEnd, rect.Left, rect.Bottom - chamfer);
+            DrawSegment(drawingContext, outline, rect.Right, rect.Top + chamfer, rect.Right, verticalStart);
+            DrawSegment(drawingContext, outline, rect.Right, verticalEnd, rect.Right, rect.Bottom - chamfer);
+
+            if (_showLeftRail)
+            {
+                var rail = new Pen(CreateOpacityBrush(Colors.White, borderOpacity * 0.32), 1);
+                rail.Freeze();
+                var railStart = rect.Top + Math.Max(chamfer + 8, rect.Height * 0.20);
+                var railEnd = rect.Top + Math.Min(rect.Height - chamfer - 8, rect.Height * 0.42);
+                DrawSegment(drawingContext, rail, rect.Left + 5, railStart, rect.Left + 5, railEnd);
+            }
+        }
+
+        private static StreamGeometry CreateChamferedGeometry(Rect rect, double chamfer)
+        {
+            var geometry = new StreamGeometry();
+            using (var context = geometry.Open())
+            {
+                context.BeginFigure(new Point(rect.Left + chamfer, rect.Top), true, true);
+                context.LineTo(new Point(rect.Right - chamfer, rect.Top), true, false);
+                context.LineTo(new Point(rect.Right, rect.Top + chamfer), true, false);
+                context.LineTo(new Point(rect.Right, rect.Bottom - chamfer), true, false);
+                context.LineTo(new Point(rect.Right - chamfer, rect.Bottom), true, false);
+                context.LineTo(new Point(rect.Left + chamfer, rect.Bottom), true, false);
+                context.LineTo(new Point(rect.Left, rect.Bottom - chamfer), true, false);
+                context.LineTo(new Point(rect.Left, rect.Top + chamfer), true, false);
+            }
+
+            geometry.Freeze();
+            return geometry;
+        }
+
+        private static void DrawSegment(
+            DrawingContext drawingContext,
+            Pen pen,
+            double x1,
+            double y1,
+            double x2,
+            double y2) =>
+            drawingContext.DrawLine(pen, new Point(x1, y1), new Point(x2, y2));
+
+        private static SolidColorBrush CreateOpacityBrush(Color color, double opacity)
+        {
+            var brush = new SolidColorBrush(color) { Opacity = Math.Clamp(opacity, 0, 1) };
+            brush.Freeze();
+            return brush;
+        }
+    }
 
 
     private sealed class LagrangeWeaveEditorChrome : FrameworkElement

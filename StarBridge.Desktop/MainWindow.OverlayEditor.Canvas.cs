@@ -346,9 +346,10 @@ public partial class MainWindow
         var isSelected = _isOverlayEventNotificationSelected;
         var effectiveSettings = GetEffectiveOverlaySettings();
         var isLagrangeWeave = effectiveSettings.Skin == OverlaySkin.LagrangeWeave;
+        var isMinimal = effectiveSettings.Skin == OverlaySkin.Minimal;
         var isVerdict = effectiveSettings.Skin == OverlaySkin.Verdict;
         const bool previewsVerdictAppearance = false;
-        var usesCustomChrome = isLagrangeWeave || previewsVerdictAppearance;
+        var usesCustomChrome = isLagrangeWeave || isMinimal || previewsVerdictAppearance;
         var mirrorChrome = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left;
         var backgroundAlpha = (byte)Math.Clamp(
             Math.Round(204 * Math.Max(
@@ -370,7 +371,7 @@ public partial class MainWindow
                     ? Brushes.Transparent
                     : accent,
             BorderThickness = new Thickness(isSelected ? 2 : usesCustomChrome ? 0 : 1),
-            Padding = usesCustomChrome ? new Thickness(0) : new Thickness(12),
+            Padding = usesCustomChrome && !isMinimal ? new Thickness(0) : new Thickness(12),
             Cursor = _isOverlayLayoutLocked ? Cursors.Arrow : Cursors.SizeAll,
             IsHitTestVisible = true,
             ToolTip = _language == "zh" ? "上下拖动调整事件通知栏位置" : "Drag vertically to move the event rail"
@@ -414,6 +415,14 @@ public partial class MainWindow
             Grid.SetColumnSpan(chrome, 3);
             grid.Children.Add(chrome);
         }
+        else if (isMinimal)
+        {
+            var chrome = new MinimalEditorChrome(
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity,
+                showLeftRail: true);
+            Grid.SetColumnSpan(chrome, 3);
+            grid.Children.Add(chrome);
+        }
         else
         {
             var stripe = new Border { Background = accent, Opacity = 0.9 };
@@ -440,7 +449,7 @@ public partial class MainWindow
             Text = _language == "zh" ? "事件通知栏预览" : "EVENT RAIL PREVIEW",
             Foreground = previewsVerdictAppearance ? Brushes.FloralWhite : accent,
             FontWeight = FontWeights.SemiBold,
-            FontSize = 15,
+            FontSize = isMinimal ? 16 : 15,
             Margin = previewsVerdictAppearance
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(52, 0, 0, 8)
