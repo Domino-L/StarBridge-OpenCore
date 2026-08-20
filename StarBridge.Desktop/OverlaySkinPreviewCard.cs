@@ -35,7 +35,7 @@ internal sealed class OverlaySkinPreviewCard : FrameworkElement
 
     internal static bool Supports(OverlaySkinRenderKind renderKind)
     {
-        if (renderKind is OverlaySkinRenderKind.Default or OverlaySkinRenderKind.LagrangeWeave or OverlaySkinRenderKind.Minimal)
+        if (renderKind is OverlaySkinRenderKind.Default or OverlaySkinRenderKind.LagrangeWeave)
         {
             return true;
         }
@@ -66,9 +66,6 @@ internal sealed class OverlaySkinPreviewCard : FrameworkElement
         {
             case OverlaySkinRenderKind.LagrangeWeave:
                 DrawLagrangeScene(drawingContext);
-                break;
-            case OverlaySkinRenderKind.Minimal:
-                DrawMinimalScene(drawingContext);
                 break;
             default:
                 DrawFleetStandardScene(drawingContext);
@@ -116,25 +113,6 @@ internal sealed class OverlaySkinPreviewCard : FrameworkElement
         DrawCrosshair(dc, new Point(219, 108), "#DCE4E9", false);
 
         DrawText(dc, "SC-FC // STANDARD LINK", new Point(175, 161), 6.4, "#7193A7", DataTypeface);
-        DrawText(dc, "120 FPS", new Point(351, 161), 6.2, "#29AFFF", DataTypeface);
-    }
-
-    private void DrawMinimalScene(DrawingContext dc)
-    {
-        dc.DrawRectangle(Brush("#07131C"), null, new Rect(0, 0, 400, 180));
-        DrawGrid(dc, "#173446", 20, 0.32);
-        DrawCalibrationCorners(dc, "#4C8AA8");
-
-        DrawMinimalPanel(dc, new Rect(12, 43, 146, 42), "FLEET OVERVIEW", ["ONLINE  04 / 04", "SAME SERVER  03"], true);
-        DrawMinimalPanel(dc, new Rect(12, 85, 146, 48), "MEMBER STATUS", ["TEST ALPHA    ONLINE", "DOMINO_CN     BAJINI"], false);
-        DrawMinimalPanel(dc, new Rect(12, 133, 146, 35), "COMMS", ["RELAY  CONNECTED"], true);
-        DrawMinimalPanel(dc, new Rect(174, 13, 213, 38), "FLEET NOTICE", ["BRIDGE CHANNEL SYNCHRONIZED"], true);
-
-        DrawMinimalEvent(dc, new Rect(280, 67, 108, 31), "NAV UPDATE", "BAJINI POINT");
-        DrawMinimalEvent(dc, new Rect(280, 104, 108, 31), "MEMBER ONLINE", "TEST ALPHA");
-        DrawCrosshair(dc, new Point(219, 108), "#DCE4E9", false);
-
-        DrawText(dc, "SC-FC // MINIMAL LINK", new Point(175, 161), 6.4, "#7193A7", DataTypeface);
         DrawText(dc, "120 FPS", new Point(351, 161), 6.2, "#29AFFF", DataTypeface);
     }
 
@@ -196,83 +174,6 @@ internal sealed class OverlaySkinPreviewCard : FrameworkElement
             new Point(rect.Right - 6, rect.Top + 14));
         DrawText(dc, title, new Point(rect.Left + 7, rect.Top + 4), 6.3, "#DDE8ED", DisplayTypeface);
         DrawText(dc, detail, new Point(rect.Left + 7, rect.Top + 18), 5.7, "#83A1B1", DataTypeface);
-    }
-
-    private void DrawMinimalPanel(
-        DrawingContext dc,
-        Rect rect,
-        string title,
-        IReadOnlyList<string> rows,
-        bool emphasizeFirstRow)
-    {
-        DrawMinimalSurface(dc, rect, "#C9081722");
-        DrawText(dc, title, new Point(rect.Left + 9, rect.Top + 4), 6.8, "#DCE9F0", DisplayTypeface);
-        for (var index = 0; index < rows.Count; index++)
-        {
-            DrawText(
-                dc,
-                rows[index],
-                new Point(rect.Left + 9, rect.Top + 20 + index * 10),
-                5.9,
-                emphasizeFirstRow && index == 0 ? "#69CCFF" : "#9FB4C0",
-                DataTypeface);
-        }
-    }
-
-    private void DrawMinimalEvent(DrawingContext dc, Rect rect, string title, string detail)
-    {
-        DrawMinimalSurface(dc, rect, "#DB081722");
-        DrawText(dc, title, new Point(rect.Left + 7, rect.Top + 4), 6.3, "#DDE8ED", DisplayTypeface);
-        DrawText(dc, detail, new Point(rect.Left + 7, rect.Top + 18), 5.7, "#83A1B1", DataTypeface);
-    }
-
-    private static void DrawMinimalSurface(DrawingContext dc, Rect rect, string fill)
-    {
-        var chamfer = Math.Clamp(Math.Min(rect.Width, rect.Height) * 0.04, 1.5, 3.5);
-        var surface = CreateChamferedGeometry(rect, chamfer);
-        dc.DrawGeometry(Brush(fill), null, surface);
-
-        var horizontalSpan = Math.Max(1, rect.Width - chamfer * 2);
-        var verticalSpan = Math.Max(1, rect.Height - chamfer * 2);
-        var horizontalGap = horizontalSpan * 0.60;
-        var verticalGap = verticalSpan * 0.60;
-        var horizontalStart = rect.Left + rect.Width * 0.5 - horizontalGap * 0.5;
-        var horizontalEnd = horizontalStart + horizontalGap;
-        var verticalStart = rect.Top + rect.Height * 0.5 - verticalGap * 0.5;
-        var verticalEnd = verticalStart + verticalGap;
-        var outlinePen = Pen("#FFFFFF", 0.85, 0.9);
-
-        dc.DrawLine(outlinePen, new Point(rect.Left, rect.Top + chamfer), new Point(rect.Left + chamfer, rect.Top));
-        dc.DrawLine(outlinePen, new Point(rect.Right - chamfer, rect.Top), new Point(rect.Right, rect.Top + chamfer));
-        dc.DrawLine(outlinePen, new Point(rect.Right, rect.Bottom - chamfer), new Point(rect.Right - chamfer, rect.Bottom));
-        dc.DrawLine(outlinePen, new Point(rect.Left + chamfer, rect.Bottom), new Point(rect.Left, rect.Bottom - chamfer));
-        dc.DrawLine(outlinePen, new Point(rect.Left + chamfer, rect.Top), new Point(horizontalStart, rect.Top));
-        dc.DrawLine(outlinePen, new Point(horizontalEnd, rect.Top), new Point(rect.Right - chamfer, rect.Top));
-        dc.DrawLine(outlinePen, new Point(rect.Left + chamfer, rect.Bottom), new Point(horizontalStart, rect.Bottom));
-        dc.DrawLine(outlinePen, new Point(horizontalEnd, rect.Bottom), new Point(rect.Right - chamfer, rect.Bottom));
-        dc.DrawLine(outlinePen, new Point(rect.Left, rect.Top + chamfer), new Point(rect.Left, verticalStart));
-        dc.DrawLine(outlinePen, new Point(rect.Left, verticalEnd), new Point(rect.Left, rect.Bottom - chamfer));
-        dc.DrawLine(outlinePen, new Point(rect.Right, rect.Top + chamfer), new Point(rect.Right, verticalStart));
-        dc.DrawLine(outlinePen, new Point(rect.Right, verticalEnd), new Point(rect.Right, rect.Bottom - chamfer));
-    }
-
-    private static StreamGeometry CreateChamferedGeometry(Rect rect, double chamfer)
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
-        {
-            context.BeginFigure(new Point(rect.Left + chamfer, rect.Top), true, true);
-            context.LineTo(new Point(rect.Right - chamfer, rect.Top), true, false);
-            context.LineTo(new Point(rect.Right, rect.Top + chamfer), true, false);
-            context.LineTo(new Point(rect.Right, rect.Bottom - chamfer), true, false);
-            context.LineTo(new Point(rect.Right - chamfer, rect.Bottom), true, false);
-            context.LineTo(new Point(rect.Left + chamfer, rect.Bottom), true, false);
-            context.LineTo(new Point(rect.Left, rect.Bottom - chamfer), true, false);
-            context.LineTo(new Point(rect.Left, rect.Top + chamfer), true, false);
-        }
-
-        geometry.Freeze();
-        return geometry;
     }
 
 
