@@ -40,11 +40,7 @@ internal sealed partial class OverlayCompositionHudWindow
                 DrawLagrangePanelFrame(
                     target,
                     OffsetRect(rect, reveal.OffsetY),
-                    state with
-                    {
-                        TextOpacity = state.TextOpacity * reveal.Opacity,
-                        BackgroundOpacity = state.BackgroundOpacity * reveal.Opacity
-                    },
+                    state with { Opacity = state.Opacity * reveal.Opacity },
                     ResolveLagrangeModuleStyle(state, key).BackgroundOpacity,
                     key);
             }
@@ -146,7 +142,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var height = (float)rect.Height;
         var join = ResolveLagrangePanelJoin(state, moduleKey);
         var (plan, geometry) = ResolveLagrangePanelGeometry(moduleKey, width, height, join);
-        var opacity = state.BackgroundOpacity;
+        var opacity = state.Opacity;
 
         if (!_lagrangeGlowMaskOnly)
         {
@@ -238,7 +234,7 @@ internal sealed partial class OverlayCompositionHudWindow
         OverlayCompositionFrameState state,
         LagrangePanelJoin join)
     {
-        var opacity = state.BackgroundOpacity;
+        var opacity = state.Opacity;
         var right = x + width - 3;
         var center = y + height * 0.5f;
         for (var index = -2; index <= 2; index++)
@@ -333,7 +329,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var active = IsLagrangeStartupActive() || IsEventSlideActive();
         if (_lagrangeGlowMaskOnly)
         {
-            FillEllipse(target, saddleX, saddleY, active ? 3.4f : 2.2f, active ? 3.4f : 2.2f, state.Palette.Alert, state.BackgroundOpacity * (active ? 0.74 : 0.36));
+            FillEllipse(target, saddleX, saddleY, active ? 3.4f : 2.2f, active ? 3.4f : 2.2f, state.Palette.Alert, state.Opacity * (active ? 0.74 : 0.36));
             return;
         }
 
@@ -341,15 +337,15 @@ internal sealed partial class OverlayCompositionHudWindow
         FillPolygon(
             target,
             state.Palette.Background,
-            state.BackgroundOpacity * 0.92,
+            state.Opacity * 0.92,
             new Vector2(saddleX, saddleY - radius),
             new Vector2(saddleX + radius, saddleY),
             new Vector2(saddleX, saddleY + radius),
             new Vector2(saddleX - radius, saddleY));
-        DrawLine(target, saddleX, saddleY - radius, saddleX + radius, saddleY, state.Palette.Alert, state.BackgroundOpacity * 0.74, 0.88f);
-        DrawLine(target, saddleX + radius, saddleY, saddleX, saddleY + radius, state.Palette.Alert, state.BackgroundOpacity * 0.74, 0.88f);
-        DrawLine(target, saddleX, saddleY + radius, saddleX - radius, saddleY, state.Palette.PanelBorder, state.BackgroundOpacity * 0.64, 0.76f);
-        DrawLine(target, saddleX - radius, saddleY, saddleX, saddleY - radius, state.Palette.PanelBorder, state.BackgroundOpacity * 0.64, 0.76f);
+        DrawLine(target, saddleX, saddleY - radius, saddleX + radius, saddleY, state.Palette.Alert, state.Opacity * 0.74, 0.88f);
+        DrawLine(target, saddleX + radius, saddleY, saddleX, saddleY + radius, state.Palette.Alert, state.Opacity * 0.74, 0.88f);
+        DrawLine(target, saddleX, saddleY + radius, saddleX - radius, saddleY, state.Palette.PanelBorder, state.Opacity * 0.64, 0.76f);
+        DrawLine(target, saddleX - radius, saddleY, saddleX, saddleY - radius, state.Palette.PanelBorder, state.Opacity * 0.64, 0.76f);
 
         DrawLagrangeFusionAdapter(target, state, upper, lower, saddleX, saddleY, true);
         DrawLagrangeFusionAdapter(target, state, upper, lower, saddleX, saddleY, false);
@@ -377,13 +373,13 @@ internal sealed partial class OverlayCompositionHudWindow
             new Vector2(upperEdge + direction * 8, saddleY + 1),
             new Vector2(lowerEdge + direction * 8, saddleY - 1),
             new Vector2(lowerEdge, saddleY + 1));
-        DrawLagrangeCurve(target, curve, 0, 0, state.Palette.PanelBorder, state.BackgroundOpacity * 0.38, 0.72f, 14);
+        DrawLagrangeCurve(target, curve, 0, 0, state.Palette.PanelBorder, state.Opacity * 0.38, 0.72f, 14);
         var inner = new LagrangeCubicCurve(
             new Vector2(saddleX + direction * 7, saddleY),
             new Vector2((saddleX + upperEdge) * 0.5f, saddleY - 5),
             new Vector2((saddleX + lowerEdge) * 0.5f, saddleY + 5),
             new Vector2(lowerEdge, saddleY + 1));
-        DrawLagrangeCurve(target, inner, 0, 0, state.Palette.Alert, state.BackgroundOpacity * 0.16, 0.56f, 14);
+        DrawLagrangeCurve(target, inner, 0, 0, state.Palette.Alert, state.Opacity * 0.16, 0.56f, 14);
     }
 
     private LagrangePanelJoin ResolveLagrangePanelJoin(
@@ -497,7 +493,7 @@ internal sealed partial class OverlayCompositionHudWindow
 
             if (!_lagrangeGlowMaskOnly)
             {
-                var backgroundAlpha = state.BackgroundOpacity * state.EventStyle.BackgroundOpacity * fade;
+                var backgroundAlpha = state.Opacity * state.EventStyle.BackgroundOpacity * fade;
                 FillLagrangePanelShape(
                     target,
                     geometry,
@@ -506,7 +502,7 @@ internal sealed partial class OverlayCompositionHudWindow
                     (float)rect.Width,
                     mirror,
                     HudColor.FromRgb(0, 1, 4, 255),
-                    state.BackgroundOpacity * fade * 0.30);
+                    state.Opacity * fade * 0.30);
                 FillLagrangePanelShape(
                     target,
                     geometry,
@@ -518,21 +514,21 @@ internal sealed partial class OverlayCompositionHudWindow
                     backgroundAlpha);
                 foreach (var curve in plan.ShellCurves)
                 {
-                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Background, state.BackgroundOpacity * fade * 0.92, 3.0f, 18, mirror, (float)rect.Width);
-                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Title, state.BackgroundOpacity * fade * 0.88, 1.12f, 18, mirror, (float)rect.Width);
+                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Background, state.Opacity * fade * 0.92, 3.0f, 18, mirror, (float)rect.Width);
+                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Title, state.Opacity * fade * 0.88, 1.12f, 18, mirror, (float)rect.Width);
                 }
                 foreach (var curve in plan.FieldCurves)
                 {
-                    DrawLagrangeCurve(target, curve, x, y, row.AccentColor, state.BackgroundOpacity * fade * 0.18, 0.64f, 14, mirror, (float)rect.Width);
+                    DrawLagrangeCurve(target, curve, x, y, row.AccentColor, state.Opacity * fade * 0.18, 0.64f, 14, mirror, (float)rect.Width);
                 }
 
                 var contentLeft = railOnRight ? x + 18 : x + 32;
-                DrawWrappedText(target, row.Title, _eventTitleFormat, contentLeft, y + 9, contentWidth, 34, row.AccentColor, state.TextOpacity * state.EventStyle.TextOpacity * fade);
-                DrawWrappedText(target, row.Detail, _eventDetailFormat, contentLeft, y + 12 + titleHeight + 5, contentWidth, 48, state.Palette.Text, state.TextOpacity * state.EventStyle.TextOpacity * fade);
-                DrawText(target, row.Timestamp, _mutedRightFormat, x + (float)rect.Width - 58, y + 9, 44, 16, state.Palette.Muted, state.TextOpacity * state.EventStyle.TextOpacity * fade);
+                DrawWrappedText(target, row.Title, _eventTitleFormat, contentLeft, y + 9, contentWidth, 34, row.AccentColor, state.Opacity * state.EventStyle.TextOpacity * fade);
+                DrawWrappedText(target, row.Detail, _eventDetailFormat, contentLeft, y + 12 + titleHeight + 5, contentWidth, 48, state.Palette.Text, state.Opacity * state.EventStyle.TextOpacity * fade);
+                DrawText(target, row.Timestamp, _mutedRightFormat, x + (float)rect.Width - 58, y + 9, 44, 16, state.Palette.Muted, state.Opacity * state.EventStyle.TextOpacity * fade);
             }
 
-            DrawLagrangeMassAnchor(target, anchor.X, anchor.Y, state, state.BackgroundOpacity * fade, active);
+            DrawLagrangeMassAnchor(target, anchor.X, anchor.Y, state, state.Opacity * fade, active);
             DrawLagrangeCaptureCurve(target, state, anchor, new Vector2(railX, centerY), row.AccentColor, fade, active);
             railBottom = y + itemHeight;
             y += itemHeight + 7;
@@ -541,12 +537,12 @@ internal sealed partial class OverlayCompositionHudWindow
 
         if (!_lagrangeGlowMaskOnly)
         {
-            DrawLine(target, railX, (float)rect.Y - 12, railX, railBottom + 12, state.Palette.PanelBorder, state.BackgroundOpacity * 0.34, 0.82f);
+            DrawLine(target, railX, (float)rect.Y - 12, railX, railBottom + 12, state.Palette.PanelBorder, state.Opacity * 0.34, 0.82f);
             for (var index = 0; index < 4; index++)
             {
                 var tickY = (float)rect.Y - 5 + index * 6;
                 var direction = railOnRight ? -1 : 1;
-                DrawLine(target, railX, tickY, railX + direction * (index == 0 ? 8 : 4), tickY, state.Palette.Alert, state.BackgroundOpacity * 0.34, 0.66f);
+                DrawLine(target, railX, tickY, railX + direction * (index == 0 ? 8 : 4), tickY, state.Palette.Alert, state.Opacity * 0.34, 0.66f);
             }
         }
     }
@@ -568,12 +564,12 @@ internal sealed partial class OverlayCompositionHudWindow
             railAnchor);
         if (!_lagrangeGlowMaskOnly)
         {
-            DrawLagrangeCurve(target, curve, 0, 0, color, state.BackgroundOpacity * fade * (active ? 0.34 : 0.16), active ? 1.0f : 0.62f, 16);
+            DrawLagrangeCurve(target, curve, 0, 0, color, state.Opacity * fade * (active ? 0.34 : 0.16), active ? 1.0f : 0.62f, 16);
         }
         else if (active)
         {
-            DrawLagrangeCurve(target, curve, 0, 0, color, state.BackgroundOpacity * fade * 0.76, 1.4f, 18);
-            FillEllipse(target, railAnchor.X, railAnchor.Y, 3.1f, 3.1f, color, state.BackgroundOpacity * fade * 0.92);
+            DrawLagrangeCurve(target, curve, 0, 0, color, state.Opacity * fade * 0.76, 1.4f, 18);
+            FillEllipse(target, railAnchor.X, railAnchor.Y, 3.1f, 3.1f, color, state.Opacity * fade * 0.92);
         }
     }
 
@@ -632,14 +628,14 @@ internal sealed partial class OverlayCompositionHudWindow
             var radius = 7f * equilibriumProgress;
             if (_lagrangeGlowMaskOnly)
             {
-                FillEllipse(target, center.X, center.Y, 3.8f * equilibriumProgress, 3.8f * equilibriumProgress, state.Palette.Alert, state.BackgroundOpacity * layerOpacity * equilibriumProgress);
+                FillEllipse(target, center.X, center.Y, 3.8f * equilibriumProgress, 3.8f * equilibriumProgress, state.Palette.Alert, state.Opacity * layerOpacity * equilibriumProgress);
             }
             else
             {
-                DrawLine(target, center.X, center.Y - radius, center.X + radius, center.Y, state.Palette.Alert, state.BackgroundOpacity * layerOpacity * equilibriumProgress, 1.0f);
-                DrawLine(target, center.X + radius, center.Y, center.X, center.Y + radius, state.Palette.Alert, state.BackgroundOpacity * layerOpacity * equilibriumProgress, 1.0f);
-                DrawLine(target, center.X, center.Y + radius, center.X - radius, center.Y, state.Palette.Title, state.BackgroundOpacity * layerOpacity * equilibriumProgress, 0.82f);
-                DrawLine(target, center.X - radius, center.Y, center.X, center.Y - radius, state.Palette.Title, state.BackgroundOpacity * layerOpacity * equilibriumProgress, 0.82f);
+                DrawLine(target, center.X, center.Y - radius, center.X + radius, center.Y, state.Palette.Alert, state.Opacity * layerOpacity * equilibriumProgress, 1.0f);
+                DrawLine(target, center.X + radius, center.Y, center.X, center.Y + radius, state.Palette.Alert, state.Opacity * layerOpacity * equilibriumProgress, 1.0f);
+                DrawLine(target, center.X, center.Y + radius, center.X - radius, center.Y, state.Palette.Title, state.Opacity * layerOpacity * equilibriumProgress, 0.82f);
+                DrawLine(target, center.X - radius, center.Y, center.X, center.Y - radius, state.Palette.Title, state.Opacity * layerOpacity * equilibriumProgress, 0.82f);
             }
         }
     }
@@ -668,7 +664,7 @@ internal sealed partial class OverlayCompositionHudWindow
             curve,
             progress,
             state.Palette.Title,
-            state.BackgroundOpacity * opacity * (_lagrangeGlowMaskOnly ? 0.68 : 0.28),
+            state.Opacity * opacity * (_lagrangeGlowMaskOnly ? 0.68 : 0.28),
             _lagrangeGlowMaskOnly ? 1.25f : 0.78f,
             32);
     }
@@ -688,12 +684,12 @@ internal sealed partial class OverlayCompositionHudWindow
         var radius = 2.2f + progress * 4.8f;
         if (_lagrangeGlowMaskOnly)
         {
-            FillEllipse(target, anchor.X, anchor.Y, radius * 0.62f, radius * 0.62f, state.Palette.Alert, state.BackgroundOpacity * opacity * progress);
+            FillEllipse(target, anchor.X, anchor.Y, radius * 0.62f, radius * 0.62f, state.Palette.Alert, state.Opacity * opacity * progress);
         }
         else
         {
-            DrawEllipse(target, anchor.X, anchor.Y, radius, radius, state.Palette.Alert, state.BackgroundOpacity * opacity * progress * 0.66, 0.92f);
-            FillEllipse(target, anchor.X, anchor.Y, 2.1f * progress, 2.1f * progress, state.Palette.CrosshairAlert, state.BackgroundOpacity * opacity * progress);
+            DrawEllipse(target, anchor.X, anchor.Y, radius, radius, state.Palette.Alert, state.Opacity * opacity * progress * 0.66, 0.92f);
+            FillEllipse(target, anchor.X, anchor.Y, 2.1f * progress, 2.1f * progress, state.Palette.CrosshairAlert, state.Opacity * opacity * progress);
         }
     }
 

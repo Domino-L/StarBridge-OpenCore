@@ -1738,6 +1738,16 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         OverlayStartupTransitionFrameRate StartupTransitionFrameRate,
         OverlayAnimationFrameRate AnimationFrameRate)
     {
+        public double Opacity
+        {
+            get => TextOpacity;
+            init
+            {
+                TextOpacity = value;
+                BackgroundOpacity = value;
+            }
+        }
+
         public bool NightShadowStyle => RenderKind == OverlaySkinRenderKind.NightShadow;
 
         public bool LagrangeWeaveStyle => RenderKind == OverlaySkinRenderKind.LagrangeWeave;
