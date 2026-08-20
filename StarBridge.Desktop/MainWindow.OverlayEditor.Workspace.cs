@@ -922,6 +922,7 @@ public partial class MainWindow
         _overlayEditorFullScreenSnapshot = CreateOverlayEditorFullScreenSnapshot();
         _overlayInspectorWasOpenBeforeFullScreen = OverlayInspectorPanel?.Visibility == Visibility.Visible;
         _isOverlayEditorFullScreen = true;
+        SuspendOverlayForFullScreenEditor();
         SetOverlayEditorLivePreviewEnabled(true);
         _isOverlayFullScreenToolsOpen = true;
         ApplyOverlayEditorWindowFullScreenState();
@@ -966,6 +967,7 @@ public partial class MainWindow
         finally
         {
             RestoreOverlayEditorWindowState();
+            RestoreOverlayAfterFullScreenEditor();
         }
     }
 

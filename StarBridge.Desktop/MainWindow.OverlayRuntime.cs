@@ -32,6 +32,7 @@ public partial class MainWindow
     private bool _applyingOverlayHotkeySettings;
     private bool _restoreOverlayWhenContentAvailable;
     private bool _overlayOpenedFromRestoredState;
+    private bool _overlayHiddenForFullScreenEditor;
 
     private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
@@ -269,6 +270,11 @@ public partial class MainWindow
 
     private void ToggleOverlayWindow(bool focusGameWindow = true)
     {
+        if (_isOverlayEditorFullScreen)
+        {
+            return;
+        }
+
         _restoreOverlayWhenContentAvailable = false;
         _overlayOpenedFromRestoredState = false;
 
@@ -326,7 +332,7 @@ public partial class MainWindow
 
     private void ReconcileRestoredOverlayRunningState()
     {
-        if (!_restoreOverlayWhenContentAvailable)
+        if (!_restoreOverlayWhenContentAvailable || _isOverlayEditorFullScreen)
         {
             return;
         }
@@ -1117,6 +1123,11 @@ public partial class MainWindow
     private void RefreshOverlayWindow()
     {
         RefreshInGameMenu();
+        if (_isOverlayEditorFullScreen)
+        {
+            return;
+        }
+
         ReconcileRestoredOverlayRunningState();
         if (_overlayWindow is not { IsVisible: true })
         {
@@ -1148,6 +1159,43 @@ public partial class MainWindow
         {
             LogOverlayPerformance("refresh-overlay", stopwatch);
         }
+    }
+
+    private void SuspendOverlayForFullScreenEditor()
+    {
+        _overlayHiddenForFullScreenEditor = _overlayWindow is { IsVisible: true };
+        if (!_overlayHiddenForFullScreenEditor)
+        {
+            return;
+        }
+
+        CancelPendingOverlayGameFocus();
+        _overlayWindow!.SetVisible(false);
+        RefreshPersonalIdentityConsole();
+        RefreshOverlayOverviewSummary();
+    }
+
+    private void RestoreOverlayAfterFullScreenEditor()
+    {
+        if (!_overlayHiddenForFullScreenEditor)
+        {
+            ReconcileRestoredOverlayRunningState();
+            return;
+        }
+
+        _overlayHiddenForFullScreenEditor = false;
+        if (_overlayWindow is not null)
+        {
+            _overlayWindow.SetVisible(true);
+            RefreshOverlayWindow();
+        }
+        else
+        {
+            ReconcileRestoredOverlayRunningState();
+        }
+
+        RefreshPersonalIdentityConsole();
+        RefreshOverlayOverviewSummary();
     }
 
     private Rect ResolveOverlayTargetSurfaceBounds()
