@@ -352,12 +352,9 @@ public partial class MainWindow
         const bool previewsVerdictAppearance = false;
         var usesCustomChrome = isLagrangeWeave || isMinimal || previewsVerdictAppearance;
         var mirrorChrome = _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Left;
-        var backgroundAlpha = (byte)Math.Clamp(
-            Math.Round(204 * Math.Max(
-                0,
-                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity)),
-            byte.MinValue,
-            byte.MaxValue);
+        var backgroundAlpha = (byte)Math.Round(
+            204 * OverlayLayoutItem.NormalizeBackgroundOpacity(
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity));
         var panel = new Border
         {
             Tag = "EventNotifications",
@@ -392,7 +389,7 @@ public partial class MainWindow
                 var glowChrome = new LagrangeWeaveEditorChrome(
                     "Event",
                     LagrangePanelJoin.None,
-                    _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity,
+                    _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity,
                     glowOnly: true,
                     mirror: mirrorChrome,
                     showEventRail: true)
@@ -410,7 +407,7 @@ public partial class MainWindow
             var chrome = new LagrangeWeaveEditorChrome(
                 "Event",
                 LagrangePanelJoin.None,
-                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity,
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity,
                 mirror: mirrorChrome,
                 showEventRail: true);
             Grid.SetColumnSpan(chrome, 3);
@@ -419,7 +416,7 @@ public partial class MainWindow
         else if (isMinimal)
         {
             var chrome = new MinimalEditorChrome(
-                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.BackgroundOpacity,
+                _overlaySettings.EventNotificationBackgroundOpacity * effectiveSettings.Opacity,
                 showLeftRail: true);
             Grid.SetColumnSpan(chrome, 3);
             grid.Children.Add(chrome);
@@ -433,7 +430,7 @@ public partial class MainWindow
         var content = new StackPanel
         {
             Opacity = OverlayLayoutItem.NormalizeTextOpacity(
-                _overlaySettings.EventNotificationTextOpacity * effectiveSettings.TextOpacity),
+                _overlaySettings.EventNotificationTextOpacity * effectiveSettings.Opacity),
             Margin = isLagrangeWeave
                 ? _overlaySettings.EventNotificationSide == OverlayEventNotificationSide.Right
                     ? new Thickness(18, 10, 38, 8)

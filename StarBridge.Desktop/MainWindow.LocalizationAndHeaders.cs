@@ -505,8 +505,7 @@ public partial class MainWindow
             ? "固定配色由当前风格决定"
             : "The fixed palette is defined by the current style";
         AutoThemeByShipCheck.Content = zh ? "自动切换至当前飞船厂商风格" : "Auto switch to current ship manufacturer style";
-        OverlayTextOpacityLabel.Text = zh ? "字体不透明度" : "TEXT OPACITY";
-        OverlayBackgroundOpacityLabel.Text = zh ? "背景不透明度" : "BACKGROUND OPACITY";
+        OverlayOpacityLabel.Text = zh ? "整体不透明度" : "OVERALL OPACITY";
         if (OverlayThemeBox.Items.Count >= 13)
         {
             ((ComboBoxItem)OverlayThemeBox.Items[0]).Content = zh ? "默认" : "Default";

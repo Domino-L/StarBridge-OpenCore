@@ -1588,7 +1588,7 @@ public partial class MainWindow
                 ? Brushes.Transparent
                 : CreateOverlayEditorPanelBackground(
                     isSelected,
-                    item.BackgroundOpacity * effectiveSettings.BackgroundOpacity),
+                    item.BackgroundOpacity * effectiveSettings.Opacity),
             BorderBrush = isSelected
                 ? selectedBrush
                 : usesCustomChrome
@@ -1663,7 +1663,7 @@ public partial class MainWindow
         var content = new StackPanel
         {
             ClipToBounds = true,
-            Opacity = OverlayLayoutItem.NormalizeTextOpacity(item.TextOpacity * effectiveSettings.TextOpacity)
+            Opacity = OverlayLayoutItem.NormalizeTextOpacity(item.TextOpacity * effectiveSettings.Opacity)
         };
         Grid.SetColumn(content, showLivePreview ? 0 : 2);
         content.Children.Add(title);
@@ -1747,7 +1747,7 @@ public partial class MainWindow
         else if (isMinimal)
         {
             wrapper.Children.Add(new MinimalEditorChrome(
-                item.BackgroundOpacity * effectiveSettings.BackgroundOpacity,
+                item.BackgroundOpacity * effectiveSettings.Opacity,
                 showLeftRail: true));
         }
 

@@ -484,9 +484,7 @@ public sealed record OverlayDisplaySettings(
     double EventNotificationTextOpacity,
     double EventNotificationBackgroundOpacity,
     bool SkipStartupTransitionWhenGameForeground,
-    OverlaySkin RequestedSkin,
-    double TextOpacity,
-    double BackgroundOpacity)
+    OverlaySkin RequestedSkin)
 {
     private const int CurrentEventNotificationSchemaVersion = 3;
     private const int EventNotificationSchemaVersionIndex = 49;
@@ -570,9 +568,7 @@ public sealed record OverlayDisplaySettings(
         EventNotificationTextOpacity: 1.0,
         EventNotificationBackgroundOpacity: 1.0,
         SkipStartupTransitionWhenGameForeground: false,
-        RequestedSkin: OverlaySkin.Default,
-        TextOpacity: 0.85,
-        BackgroundOpacity: 0.85);
+        RequestedSkin: OverlaySkin.Default);
 
     public bool EffectiveHideMemberOnlineStatus => HideOfflineMembers && HideMemberOnlineStatus;
 
@@ -665,9 +661,7 @@ public sealed record OverlayDisplaySettings(
             OverlayLayoutItem.NormalizeTextOpacity(EventNotificationTextOpacity).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             OverlayLayoutItem.NormalizeBackgroundOpacity(EventNotificationBackgroundOpacity).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             SkipStartupTransitionWhenGameForeground ? "1" : "0",
-            EffectiveRequestedSkin,
-            NormalizeTextOpacity(TextOpacity).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
-            NormalizeBackgroundOpacity(BackgroundOpacity).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            EffectiveRequestedSkin);
     }
 
     public static OverlayDisplaySettings Parse(string? value)
@@ -839,29 +833,7 @@ public sealed record OverlayDisplaySettings(
                 ? requestedSkin
                 : parts.Length > 43 && Enum.TryParse<OverlaySkin>(parts[43], out var legacyRequestedSkin)
                     ? legacyRequestedSkin
-                    : Default.RequestedSkin,
-            ParseOverallOpacity(parts, 73, 5, Default.TextOpacity, NormalizeTextOpacity),
-            ParseOverallOpacity(parts, 74, 5, Default.BackgroundOpacity, NormalizeBackgroundOpacity));
-    }
-
-    public static double NormalizeTextOpacity(double value) =>
-        Math.Clamp(double.IsFinite(value) ? value : 0.85, 0.15, 1.0);
-
-    public static double NormalizeBackgroundOpacity(double value) =>
-        Math.Clamp(double.IsFinite(value) ? value : 0.85, 0.15, 2.0);
-
-    private static double ParseOverallOpacity(
-        string[] parts,
-        int index,
-        int legacyIndex,
-        double fallback,
-        Func<double, double> normalize)
-    {
-        var sourceIndex = parts.Length > index ? index : legacyIndex;
-        return parts.Length > sourceIndex &&
-               double.TryParse(parts[sourceIndex], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
-            ? normalize(value)
-            : fallback;
+                    : Default.RequestedSkin);
     }
 
     public static int NormalizeChatVisibleCount(int value) =>

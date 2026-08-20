@@ -624,8 +624,7 @@ public partial class MainWindow
         }
 
         if (TrayModeCheck is null ||
-            OverlayTextOpacitySlider is null ||
-            OverlayBackgroundOpacitySlider is null ||
+            OverlayOpacitySlider is null ||
             ShowNoticePanelCheck is null ||
             ShowSquadsPanelCheck is null ||
             ShowMembersPanelCheck is null ||
@@ -689,7 +688,7 @@ public partial class MainWindow
             hideOfflineMembers,
             _overlaySettings.HideSquadIcons,
             TrayModeCheck.IsChecked == true,
-            _overlaySettings.Opacity,
+            Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.15, 1.0),
             ShowNoticePanelCheck.IsChecked == true,
             ShowSquadsPanelCheck.IsChecked == true,
             false,
@@ -776,9 +775,7 @@ public partial class MainWindow
             _overlaySettings.EventNotificationTextOpacity,
             _overlaySettings.EventNotificationBackgroundOpacity,
             OverlaySkipTransitionInGameCheck.IsChecked == true,
-            overlaySkin,
-            OverlayDisplaySettings.NormalizeTextOpacity(OverlayTextOpacitySlider.Value / 100.0),
-            OverlayDisplaySettings.NormalizeBackgroundOpacity(OverlayBackgroundOpacitySlider.Value / 100.0)));
+            overlaySkin));
 
         RefreshCrosshairSettingLabels();
         RefreshOverlayTransitionControls();
@@ -1375,14 +1372,9 @@ public partial class MainWindow
 
     private void OverlayOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (OverlayTextOpacityValueText is not null && OverlayTextOpacitySlider is not null)
+        if (OverlayOpacityValueText is not null)
         {
-            OverlayTextOpacityValueText.Text = $"{Math.Round(OverlayTextOpacitySlider.Value)}%";
-        }
-
-        if (OverlayBackgroundOpacityValueText is not null && OverlayBackgroundOpacitySlider is not null)
-        {
-            OverlayBackgroundOpacityValueText.Text = $"{Math.Round(OverlayBackgroundOpacitySlider.Value)}%";
+            OverlayOpacityValueText.Text = $"{Math.Round(OverlayOpacitySlider.Value)}%";
         }
 
         if (_isLoadingSettings)

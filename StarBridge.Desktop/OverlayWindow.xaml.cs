@@ -819,32 +819,16 @@ public partial class OverlayWindow : Window, IOverlayHost
         {
             border.Background = CloneBrushWithOpacity(
                 _viewModel.PanelBackgroundBrush,
-                item.BackgroundOpacity * _settings.BackgroundOpacity);
+                item.BackgroundOpacity * _settings.Opacity);
         }
 
-        ApplyTextOpacity(panel, item.TextOpacity * _settings.TextOpacity);
+        ApplyTextOpacity(panel, item.TextOpacity * _settings.Opacity);
     }
 
     private static Brush CloneBrushWithOpacity(Brush source, double opacity)
     {
         var brush = source.CloneCurrentValue();
-        var multiplier = Math.Max(0, double.IsFinite(opacity) ? opacity : 0);
-        if (brush is SolidColorBrush solidColorBrush)
-        {
-            var color = solidColorBrush.Color;
-            solidColorBrush.Color = Color.FromArgb(
-                (byte)Math.Clamp(
-                    Math.Round(color.A * multiplier),
-                    byte.MinValue,
-                    byte.MaxValue),
-                color.R,
-                color.G,
-                color.B);
-        }
-        else
-        {
-            brush.Opacity = Math.Clamp(brush.Opacity * multiplier, 0, 1);
-        }
+        brush.Opacity = Math.Clamp(brush.Opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(opacity), 0, 1);
         if (brush.CanFreeze)
         {
             brush.Freeze();
@@ -1702,10 +1686,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             _timer.Stop();
             OnChanged(nameof(NotificationVisibility));
         }
+        OverlayOpacity = settings.Opacity;
         EventNotificationTextOpacity = OverlayLayoutItem.NormalizeTextOpacity(
-            settings.EventNotificationTextOpacity * settings.TextOpacity);
+            settings.EventNotificationTextOpacity * settings.Opacity);
         EventNotificationBackgroundOpacity = OverlayLayoutItem.NormalizeBackgroundOpacity(
-            settings.EventNotificationBackgroundOpacity * settings.BackgroundOpacity);
+            settings.EventNotificationBackgroundOpacity * settings.Opacity);
         ApplyTheme(settings.Theme);
         ApplyCrosshairSettings(settings);
         CrosshairVisibility = settings.ShowCrosshair ? Visibility.Visible : Visibility.Collapsed;
