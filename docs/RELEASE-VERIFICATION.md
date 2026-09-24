@@ -1,11 +1,13 @@
 # 核验 StarBridge Release
 
+当前桥梁版本为 0.6.6.1；它只负责引导到 Flutter 0.7.0，不替换旧 WPF 更新包。
+
 请只运行来自 [StarBridge-OpenCore Releases](https://github.com/Domino-L/StarBridge-OpenCore/releases)
 或 [星海舰桥官网](https://scstarbridge.com/) 的安装器。相同文件名不能证明文件可信。
 
-## 0.6.6 的签名状态
+## 0.6.6.1 的签名状态
 
-0.6.6 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
+0.6.6.1 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
 签名和时间戳。如果 Windows 显示“未知发布者”，或 `Get-AuthenticodeSignature`
 不是 `Valid`，请不要安装或运行该文件。
 
@@ -15,7 +17,7 @@
 
 ```powershell
 $repo = "Domino-L/StarBridge-OpenCore"
-$tag = "v0.6.6"
+$tag = "v0.6.6.1"
 
 gh release verify $tag --repo $repo
 gh release download $tag --repo $repo --dir ".\release"

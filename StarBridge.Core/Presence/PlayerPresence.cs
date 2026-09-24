@@ -11,9 +11,10 @@ public enum PlayerPresenceKind
 
 public enum PlayerPresenceVisibilityMode
 {
-    Online,
-    Invisible,
-    Offline
+    Online = 0,
+    Invisible = 1,
+    Offline = 2,
+    InGame = 3
 }
 
 public readonly record struct PlayerPresenceSharingDecision(
@@ -84,6 +85,10 @@ public static class PlayerPresence
         PlayerPresenceVisibilityMode visibilityMode) =>
         visibilityMode switch
         {
+            PlayerPresenceVisibilityMode.InGame => new(
+                PlayerPresenceKind.InGame,
+                CanPublishRealtime: true,
+                CanReceiveRealtime: true),
             PlayerPresenceVisibilityMode.Invisible => new(
                 PlayerPresenceKind.Offline,
                 CanPublishRealtime: false,

@@ -284,7 +284,7 @@ public partial class MainWindow
     {
         if (_isLocationDataContributionSyncing ||
             !_locationDataContributionRecorder.IsAllowed ||
-            !CanSynchronizeUserData ||
+            !CanUseIdentitySensitiveNetworkWrites ||
             _syncPrivacySettings.PresenceVisibilityMode != StarBridge.Core.Presence.PlayerPresenceVisibilityMode.Online)
         {
             return;

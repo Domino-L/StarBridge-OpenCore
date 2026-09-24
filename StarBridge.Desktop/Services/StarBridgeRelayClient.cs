@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
+using StarBridge.HostRuntime.Auth;
 
 namespace StarBridge.Desktop;
 
@@ -31,7 +32,7 @@ public sealed class StarBridgeRelayClient
         var baseUrl = _baseUrlProvider().Trim();
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            baseUrl = "https://api.scstarbridge.com";
+            baseUrl = ScmEnvironmentSettings.Load().RelayBaseUri.AbsoluteUri;
         }
 
         if (!baseUrl.EndsWith("/", StringComparison.Ordinal))
@@ -39,7 +40,14 @@ public sealed class StarBridgeRelayClient
             baseUrl += "/";
         }
 
-        return new Uri(new Uri(baseUrl), path);
+        var uri = new Uri(new Uri(baseUrl), path);
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && !uri.IsLoopback)
+        {
+            throw new InvalidOperationException(
+                "StarBridge 联机会话必须使用 HTTPS 加密连接。请检查服务器地址。");
+        }
+
+        return uri;
     }
 
     public async Task<T?> GetFromJsonAsync<T>(string path)
@@ -80,6 +88,13 @@ public sealed class StarBridgeRelayClient
 
     private void AddAuthHeaders(HttpRequestMessage request)
     {
+        if (!request.Headers.Contains(ScmAuthDiagnostics.CorrelationHeader))
+        {
+            request.Headers.TryAddWithoutValidation(
+                ScmAuthDiagnostics.CorrelationHeader,
+                ScmAuthDiagnostics.NewCorrelationId());
+        }
+
         var key = _relayKeyProvider()?.Trim();
         if (!string.IsNullOrWhiteSpace(key))
         {

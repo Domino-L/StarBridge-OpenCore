@@ -5,6 +5,8 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using StarBridge.Desktop.FlutterHost;
+using StarBridge.HostRuntime.Auth;
 using MessageBox = System.Windows.MessageBox;
 using WinForms = System.Windows.Forms;
 
@@ -22,15 +24,19 @@ public partial class App : System.Windows.Application
     private Thread? _singleInstanceActivationThread;
     private volatile bool _singleInstanceActivationStopping;
     private WinForms.NotifyIcon? _trayIcon;
+    private SmallApplicationIcons? _smallApplicationIcons;
     private TrayQuickPanel? _trayQuickPanel;
     private bool _exitRequested;
     private bool _updateRestartRequested;
     private bool _dataRootRestartRequested;
+    private readonly AccountRuntimeStore _accountRuntimeStore = new();
+    private DesktopUiOwnerCoordinator? _uiOwnerCoordinator;
 
-    static App()
+    public App()
     {
         // SceneState is a DispatcherObject. Construct its singleton on the UI
-        // thread so later async refresh work cannot accidentally claim ownership.
+        // thread when the application is constructed. Static diagnostic logging
+        // can run on a native worker before startup and must not claim ownership.
         _ = Theming.SceneState.Current;
     }
 
@@ -95,6 +101,12 @@ public partial class App : System.Windows.Application
         }
 
         BehaviorSettings = ApplicationBehaviorSettingsStore.Load().Normalize();
+        var uiOwnerStartup = DesktopUiOwnerStartupOptions.Parse(e.Args);
+        if (uiOwnerStartup.FailureCode is not null)
+        {
+            WriteDiagnosticLog($"UI owner startup ignored: {uiOwnerStartup.FailureCode}");
+        }
+        StarBridgeDotEnv.Load();
         if (!ApplicationInstallationMaintenance.IsReadOnlyPreviewBuild &&
             !WindowsStartupRegistration.TrySetEnabled(BehaviorSettings.LaunchAtStartup, out var startupError))
         {
@@ -104,10 +116,33 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnMainWindowClose;
 
-        var mainWindow = new MainWindow();
+        _smallApplicationIcons = new SmallApplicationIcons(Dispatcher);
+        _smallApplicationIcons.Changed += RefreshTrayIconTheme;
+
+        var mainWindow = new MainWindow(_accountRuntimeStore);
         MainWindow = mainWindow;
+        var flutterExecutable = FlutterUiExecutableLocator.Resolve(
+            uiOwnerStartup.FlutterExecutablePath,
+            AppContext.BaseDirectory);
+        _uiOwnerCoordinator = new DesktopUiOwnerCoordinator(
+            new WpfDesktopUiSurface(mainWindow),
+            new FlutterUiProcessAdapter(
+                flutterExecutable,
+                Environment.ProcessId),
+            WriteDiagnosticLog);
         PortableUpdateStartupSignal.Attach(mainWindow);
         UpdateTrayIconVisibility();
+
+        if (uiOwnerStartup.PreferredOwner == DesktopUiOwner.Flutter)
+        {
+            EventHandler? switchAfterHostInitialization = null;
+            switchAfterHostInitialization = async (_, _) =>
+            {
+                mainWindow.ContentRendered -= switchAfterHostInitialization;
+                await SwitchToFlutterUiOwnerAsync();
+            };
+            mainWindow.ContentRendered += switchAfterHostInitialization;
+        }
 
         if (WindowsStartupRegistration.ShouldStartInBackground(e.Args, BehaviorSettings))
         {
@@ -128,7 +163,10 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         var restartForDataRoot = _dataRootRestartRequested;
+        DisposeUiOwnerCoordinator();
         DisposeTrayIcon();
+        _smallApplicationIcons?.Dispose();
+        _smallApplicationIcons = null;
         _singleInstanceActivationStopping = true;
         try
         {
@@ -235,6 +273,12 @@ public partial class App : System.Windows.Application
     internal void ShowMainWindowFromBackground()
     {
         CloseTrayQuickPanel();
+        if (_uiOwnerCoordinator?.Current.Owner == DesktopUiOwner.Flutter)
+        {
+            _ = ActivateCurrentUiOwnerAsync();
+            return;
+        }
+
         if (MainWindow is null)
         {
             return;
@@ -303,6 +347,7 @@ public partial class App : System.Windows.Application
     private void RequestExitCore()
     {
         _exitRequested = true;
+        DisposeUiOwnerCoordinator();
         CloseTrayQuickPanel();
         if (_trayIcon is not null)
         {
@@ -389,6 +434,12 @@ public partial class App : System.Windows.Application
 
     private void ActivateExistingMainWindow()
     {
+        if (_uiOwnerCoordinator?.Current.Owner == DesktopUiOwner.Flutter)
+        {
+            _ = ActivateCurrentUiOwnerAsync();
+            return;
+        }
+
         if (MainWindow is null)
         {
             return;
@@ -417,6 +468,63 @@ public partial class App : System.Windows.Application
         MainWindow.Topmost = true;
         MainWindow.Topmost = false;
         MainWindow.Focus();
+    }
+
+    private async Task SwitchToFlutterUiOwnerAsync()
+    {
+        var coordinator = _uiOwnerCoordinator;
+        if (coordinator is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await coordinator.SwitchAsync(DesktopUiOwner.Flutter);
+            if (!result.Succeeded)
+            {
+                WriteDiagnosticLog(
+                    $"Flutter UI owner was not activated: {result.Snapshot.FailureCode ?? "unknown"}");
+            }
+        }
+        catch (Exception exception)
+        {
+            WriteDiagnosticLog($"Flutter UI owner transition failed: {exception.GetType().Name}");
+        }
+    }
+
+    private async Task ActivateCurrentUiOwnerAsync()
+    {
+        try
+        {
+            if (_uiOwnerCoordinator is not null)
+            {
+                await _uiOwnerCoordinator.ActivateAsync();
+            }
+        }
+        catch (Exception exception)
+        {
+            WriteDiagnosticLog($"UI owner activation failed: {exception.GetType().Name}");
+        }
+    }
+
+    private void DisposeUiOwnerCoordinator()
+    {
+        var coordinator = _uiOwnerCoordinator;
+        _uiOwnerCoordinator = null;
+        if (coordinator is null)
+        {
+            return;
+        }
+
+        try
+        {
+            coordinator.Dispose();
+        }
+        catch (Exception exception)
+        {
+            WriteDiagnosticLog($"UI owner shutdown failed: {exception.GetType().Name}");
+        }
     }
 
     private void UpdateTrayIconVisibility()
@@ -449,7 +557,8 @@ public partial class App : System.Windows.Application
         _trayIcon = new WinForms.NotifyIcon
         {
             Text = "星海舰桥",
-            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? ""),
+            Icon = _smallApplicationIcons?.CreateTrayIcon() ??
+                System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? ""),
             Visible = false
         };
         _trayIcon.MouseUp += (_, args) =>
@@ -459,6 +568,14 @@ public partial class App : System.Windows.Application
                 Dispatcher.BeginInvoke(ShowTrayQuickPanel);
             }
         };
+    }
+
+    private void RefreshTrayIconTheme()
+    {
+        if (_trayIcon is null || _smallApplicationIcons is null) return;
+        var previous = _trayIcon.Icon;
+        _trayIcon.Icon = _smallApplicationIcons.CreateTrayIcon();
+        previous?.Dispose();
     }
 
     private void ShowTrayQuickPanel()

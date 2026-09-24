@@ -633,7 +633,8 @@
                             <Border x:Name="EventNotificationChrome"
                                     Background="Transparent"
                                     BorderBrush="{Binding DataContext.PanelBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    BorderThickness="1" />
+                                    BorderThickness="1"
+                                    Opacity="{Binding DataContext.EventNotificationDecorationOpacity, RelativeSource={RelativeSource AncestorType=Window}}" />
                             <Grid Margin="12"
                                   Opacity="{Binding DataContext.EventNotificationTextOpacity, RelativeSource={RelativeSource AncestorType=Window}}">
                                 <Grid.ColumnDefinitions>

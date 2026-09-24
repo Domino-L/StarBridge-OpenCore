@@ -56,18 +56,10 @@ public static class PlayerSharedStateAudienceProjectionPolicy
                 IsFleetPrivacyAdmin: true)),
             Resolve(publication, new PlayerSharedStateViewerFacts(
                 IsFleetMember: true)),
-            hasSelectedFleetGroups
-                ? Resolve(publication, new PlayerSharedStateViewerFacts(
-                    IsFleetMember: true,
-                    IsSelectedFleetVisibilityGroupMember: true))
-                : default,
+            default, // Retired groups cannot be presented as an active audience.
             Resolve(publication, new PlayerSharedStateViewerFacts(
                 IsRoomMember: true)),
-            hasSelectedRoomGroups
-                ? Resolve(publication, new PlayerSharedStateViewerFacts(
-                    IsRoomMember: true,
-                    IsSelectedRoomVisibilityGroupMember: true))
-                : default,
+            default,
             Resolve(publication, new PlayerSharedStateViewerFacts(
                 IsAcceptedFriend: true)));
 

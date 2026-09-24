@@ -144,7 +144,7 @@ public static class ChatAttachmentPolicy
                    TryGetProperty(root, "settings", out var settings) && !string.IsNullOrWhiteSpace(settings.GetString()) &&
                    TryGetProperty(root, "layout", out var layout) && !string.IsNullOrWhiteSpace(layout.GetString());
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
             return false;
         }

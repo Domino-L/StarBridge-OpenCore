@@ -7,7 +7,5 @@ internal static class PartyRoomPresencePolicy
     internal static PlayerPresenceKind Resolve(
         PlayerPresenceKind localPresence,
         PlayerPresenceVisibilityMode visibilityMode) =>
-        visibilityMode == PlayerPresenceVisibilityMode.Online
-            ? localPresence
-            : PlayerPresenceKind.Offline;
+        PlayerPresence.DecideSharing(localPresence, visibilityMode).PublicPresence;
 }

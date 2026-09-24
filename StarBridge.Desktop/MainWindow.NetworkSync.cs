@@ -1,5 +1,6 @@
 using StarBridge.Core.Events;
 using StarBridge.Core.Presence;
+using StarBridge.HostRuntime.Auth;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
@@ -57,7 +58,9 @@ public partial class MainWindow
             ResetAccountScopedState("登录后即可查看组织通讯。");
             ResetAccountAvatarState();
             _authToken = null;
+            _scmLegacyRelayAuthenticated = false;
             _accountId = null;
+            BindGameplayStatisticsOwner();
             ReloadDualAxisPrivacySettings();
             _gameIdVisibilityPreference = GameIdVisibilityPolicy.Normalize(null, _localPlayer, null);
             ApplyGameIdVisibilityToEditor();
@@ -76,6 +79,7 @@ public partial class MainWindow
         finally
         {
             _isAccountTransition = false;
+            UpdateAccountRuntimeState();
         }
     }
 
@@ -109,7 +113,20 @@ public partial class MainWindow
     }
 
     private void LogoutButton_Click(object sender, RoutedEventArgs e)
+        => LogoutScmSession(revokeRemoteSession: true);
+
+    private void LogoutScmSession(bool revokeRemoteSession)
     {
+        var scmSession = _scmOAuthSession;
+        _scmRealtimeClient?.Stop();
+        _scmRuntimeRecoveryCoordinator.Retire();
+        _scmOAuthSession = null;
+        _scmBootstrapSnapshot = null;
+        _scmProfile = null;
+        _scmProfileLoadedFromCache = false;
+        _legacyIdentityLinked = null;
+        _legacyIdentityLinkProjection = null;
+        _scmLegacyRelayAuthenticated = false;
         _authenticationExpired = false;
         StopNetworkSyncTimers();
         ClearAuthenticatedLocalState();
@@ -120,6 +137,23 @@ public partial class MainWindow
         LoginStatusText.Text = "已退出登录，当前为浏览模式";
         NetworkStatusText.Text = "浏览模式：同步已关闭";
         RefreshHeaderStatusBar();
+
+        if (revokeRemoteSession && scmSession is not null)
+        {
+            _ = RevokeScmSessionAfterLocalLogoutAsync(scmSession);
+        }
+    }
+
+    private async Task RevokeScmSessionAfterLocalLogoutAsync(ScmOAuthSession session)
+    {
+        try
+        {
+            await _scmOAuthClient.RevokeAsync(session, CancellationToken.None);
+        }
+        catch (HttpRequestException)
+        {
+            // RevokeAsync still removes the local refresh token when SCM is unavailable.
+        }
     }
 
     private async void NetworkPushButton_Click(object sender, RoutedEventArgs e)
@@ -333,16 +367,6 @@ public partial class MainWindow
             StopNetworkDataSyncTimers();
         }
 
-        if (CanPublishPresenceHeartbeat())
-        {
-            _presenceHeartbeatTimer.Start();
-            _ = SendPresenceHeartbeatAsync();
-        }
-        else
-        {
-            _presenceHeartbeatTimer.Stop();
-        }
-
         RefreshBridgeSceneBandStatus();
     }
 
@@ -358,8 +382,6 @@ public partial class MainWindow
     private void StopNetworkSyncTimers()
     {
         StopNetworkDataSyncTimers();
-        _presenceHeartbeatTimer.Stop();
-        ClearPresenceHeartbeatFailure();
         RefreshBridgeSceneBandStatus();
     }
 
@@ -376,108 +398,6 @@ public partial class MainWindow
 
     private bool CanPublishRealtimePlayerSync() =>
         CanReceiveRealtimePlayerSync() && GetPresenceSharingDecision().CanPublishRealtime;
-
-    private bool CanPublishPresenceHeartbeat()
-    {
-        return IsLoggedIn &&
-               !_isAccountTransition &&
-               _syncPrivacySettings.SyncEnabled &&
-               GetPresenceSharingDecision().CanPublishRealtime;
-    }
-
-    private async Task SendPresenceHeartbeatAsync()
-    {
-        if (_isPresenceHeartbeatRunning)
-        {
-            return;
-        }
-
-        if (!CanPublishPresenceHeartbeat())
-        {
-            return;
-        }
-
-        _isPresenceHeartbeatRunning = true;
-        try
-        {
-            var projection = GetLocalFleetPresencePrivacyProjection();
-            using var response = await PostNetworkJsonAsync(
-                "api/players/heartbeat",
-                new PlayerPresenceHeartbeatRequest(projection.Online, projection.LiveStatus));
-
-            if (HandleAuthorizationFailure(response.StatusCode, "在线状态同步", silent: true))
-            {
-                return;
-            }
-
-            if (response.StatusCode == HttpStatusCode.NotFound)
-            {
-                var restored = await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
-                if (restored)
-                {
-                    ClearPresenceHeartbeatFailure();
-                }
-                else
-                {
-                    RegisterPresenceHeartbeatFailure();
-                }
-
-                return;
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                RegisterPresenceHeartbeatFailure();
-                return;
-            }
-
-            ClearPresenceHeartbeatFailure();
-        }
-        catch (Exception ex)
-        {
-            if (!HandleAuthorizationFailure(ex, "在线状态同步", silent: true))
-            {
-                RegisterPresenceHeartbeatFailure();
-            }
-        }
-        finally
-        {
-            _isPresenceHeartbeatRunning = false;
-        }
-    }
-
-    private void RegisterPresenceHeartbeatFailure()
-    {
-        _presenceHeartbeatFailureCount = Math.Min(_presenceHeartbeatFailureCount + 1, 3);
-        if (_presenceHeartbeatFailureCount < 2)
-        {
-            return;
-        }
-
-        _presenceHeartbeatTopNotice = new TopStatusNotice(
-            "在线状态同步中断",
-            "其他玩家可能暂时看到你处于离线状态；应用会自动重试，也可立即重试。",
-            SyncStatusOverlayTone.Warning,
-            ShowRetry: true);
-        NetworkStatusText.Text = "在线状态同步中断，正在自动重试";
-        RenderTopStatusNotice();
-        RefreshHeaderStatusBar();
-    }
-
-    private void ClearPresenceHeartbeatFailure()
-    {
-        var wasInterrupted = _presenceHeartbeatTopNotice is not null;
-        _presenceHeartbeatFailureCount = 0;
-        _presenceHeartbeatTopNotice = null;
-        if (!wasInterrupted)
-        {
-            return;
-        }
-
-        NetworkStatusText.Text = "在线状态同步已恢复";
-        RenderTopStatusNotice();
-        RefreshHeaderStatusBar();
-    }
 
     private async Task NetworkPlayerRealtimePullAsync()
     {
@@ -764,7 +684,6 @@ public partial class MainWindow
     private TopStatusNotice? _syncTopNotice;
     private TopStatusNotice? _relayHealthTopNotice;
     private TopStatusNotice? _relayRecoveryTopNotice;
-    private TopStatusNotice? _presenceHeartbeatTopNotice;
 
     private static SolidColorBrush CreateOverlayBrush(string hex)
     {
@@ -850,6 +769,10 @@ public partial class MainWindow
         }
 
         SetRelayServiceHealthState(decision.State);
+        if (result.IsConnected && _scmOAuthSession is { } session)
+        {
+            ScheduleScmRuntimeRecovery(session, "relay-health-restored");
+        }
     }
 
     private void SetRelayServiceHealthState(RelayServiceHealthState state)
@@ -954,7 +877,6 @@ public partial class MainWindow
         }
 
         var notice = _relayHealthTopNotice ??
-                     _presenceHeartbeatTopNotice ??
                      _syncTopNotice ??
                      _relayRecoveryTopNotice;
         if (notice is null)

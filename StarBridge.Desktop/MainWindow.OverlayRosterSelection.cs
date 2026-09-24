@@ -28,15 +28,33 @@ public partial class MainWindow
     private void ClearOverlayRosterAuthorizedIdentityKeys() =>
         _overlayRosterAuthorizedIdentityKeys.Clear();
 
+    private string? GetOverlayRosterSelectionAccountIdentity()
+    {
+        var routeIdentity = CurrentAccountRouteIdentity;
+        if (routeIdentity.IsAuthenticated && _legacyIdentityLinked == true)
+        {
+            if (_legacyIdentityLinkProjection?.LegacyAccountId is { Length: > 0 } legacyAccountId)
+            {
+                OverlayRosterSelectionSettingsStore.PromoteLegacyAccountIdentity(
+                    legacyAccountId,
+                    routeIdentity.CacheNamespace);
+            }
+
+            return routeIdentity.CacheNamespace;
+        }
+
+        return _accountId;
+    }
+
     private OverlayRosterSelectionSettings GetOverlayRosterSelectionSettings()
         => _overlayRosterSelectionSettingsCache.Load(
-            _accountId,
+            GetOverlayRosterSelectionAccountIdentity(),
             OverlayRosterSelectionSettingsStore.Load);
 
     private void SaveOverlayRosterSelectionSettings(OverlayRosterSelectionSettings settings)
     {
         _overlayRosterSelectionSettingsCache.Save(
-            _accountId,
+            GetOverlayRosterSelectionAccountIdentity(),
             settings,
             OverlayRosterSelectionSettingsStore.Save);
         RefreshOverlayWindow();
@@ -49,7 +67,7 @@ public partial class MainWindow
         var settings = GetOverlayRosterSelectionSettings();
         _overlayRosterSelectionEditLease = OverlayRosterSelectionEditLease.Capture(
             _accountSessionCoordinator,
-            _accountId);
+            GetOverlayRosterSelectionAccountIdentity());
         _overlayRosterSelectionEditSettings = settings;
         var authorizedRoster = ResolveOverlayAuthorizedRoster(ResolveCurrentOverlayScene());
         _overlayRosterPreferenceRows.Clear();
@@ -86,7 +104,7 @@ public partial class MainWindow
         System.Windows.RoutedEventArgs e)
     {
         if (_overlayRosterSelectionEditLease is not { } editLease ||
-            !editLease.IsCurrent(_accountSessionCoordinator, _accountId))
+            !editLease.IsCurrent(_accountSessionCoordinator, GetOverlayRosterSelectionAccountIdentity()))
         {
             ResetOverlayRosterSelectionAccountSession();
             StarBridgeMessageBox.Show(

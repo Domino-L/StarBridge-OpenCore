@@ -9,6 +9,26 @@ using StarBridge.Core.State;
 
 var tests = new (string Name, Action Test)[]
 {
+    ("Migration hangar preview retains duplicates and unknown sources without merging", StarBridge.Core.Tests.HangarMigrationPreviewTests.RunAll),
+    ("Friend sharing six fields remain independent and fail closed", StarBridge.Core.Tests.FriendSharingPolicyTests.RunAll),
+    ("Event choices remain independent, membership bound and fail closed", StarBridge.Core.Tests.SharedEventPreferencesTests.RunAll),
+    ("Community member exceptions override defaults within the organization field ceiling", StarBridge.Core.Tests.CommunityMemberFieldOverrideTests.RunAll),
+    ("Information overlay source priority and explicit target isolation", StarBridge.Core.Tests.InformationOverlaySourcePolicyTests.RunAll),
+    ("Community realtime scopes bind membership and exclude inventory/events", StarBridge.Core.Tests.CommunityRealtimeScopeTests.RunAll),
+    ("Community profile explicit edit limits and independent tag quotas", StarBridge.Core.Tests.CommunityProfileEditingRulesTests.RunAll),
+    ("Chat attachment malformed JSON fields fail without throwing", StarBridge.Core.Tests.ChatAttachmentPolicyTests.RunAll),
+    ("Event stack animates new lower rows, old upper exits and survivor reflow", StarBridge.Core.Tests.OverlayEventStackLayoutTests.RunAll),
+    ("Information overlay layout geometry matches the shared cross-client samples", StarBridge.Core.Tests.InformationOverlayLayoutGeometryTests.RunAll),
+    ("Gameplay history import eligibility preserves migrated and unknown evidence", StarBridge.Core.Tests.GameplayHistoryImportPolicyTests.RunAll),
+    ("Ship presentation uses exact catalog names and explicit combat size only", StarBridge.Core.Tests.ShipPresentationCatalogTests.RunAll),
+    ("Ship names localize only unambiguous catalog matches and preserve model variants", StarBridge.Core.Tests.ShipNameIndexTests.RunAll),
+    ("SCM profile contracts separate public, private, patch, and offline cache fields", StarBridge.Core.Tests.ScmProfileContractTests.RunAll),
+    ("SCM profile time zones preserve IANA and map safely on Windows", StarBridge.Core.Tests.ProfileTimeZoneContractTests.RunAll),
+    ("Identity link completion resumes the guarded startup synchronization lane", StarBridge.Core.Tests.IdentityLinkSyncContractTests.RunAll),
+    ("SCM RSI identity policy fails closed for identity-sensitive writes", StarBridge.Core.Tests.RsiIdentityPolicyTests.RunAll),
+    ("Hangar identity matches only an unambiguous verified account Handle", StarBridge.Core.Tests.RsiHangarIdentityPolicyTests.RunAll),
+    ("Hangar scans require stable complete pages and preserve every ship occurrence", StarBridge.Core.Tests.HangarScanSessionTests.RunAll),
+    ("Hangar automatic navigation only permits unfiltered sequential pages and first-page recheck", StarBridge.Core.Tests.RsiHangarNavigationPolicyTests.RunAll),
     ("Weak old ship signal does not replace a newer ship channel join", WeakOldShipSignalDoesNotReplaceNewerShipChannelJoin),
     ("Stale exit for previous ship does not clear current ship", StaleExitForPreviousShipDoesNotClearCurrentShip),
     ("Exit for current ship clears current ship", ExitForCurrentShipClearsCurrentShip),
@@ -37,6 +57,7 @@ var tests = new (string Name, Action Test)[]
     ("Running game overrides inactive app presence", RunningGameOverridesInactiveAppPresence),
     ("Presence wire values normalize old and new clients", PresenceWireValuesNormalizeOldAndNewClients),
     ("Invisible presence receives but never publishes realtime state", InvisiblePresenceReceivesWithoutPublishing),
+    ("In-game presence publishes game state", InGamePresencePublishesGameState),
     ("Offline presence disables realtime state in both directions", OfflinePresenceDisablesRealtimeState),
     ("Missing visibility scope preserves the fleet default", MissingVisibilityScopePreservesFleetDefault),
     ("Known visibility scopes preserve their policies", KnownVisibilityScopesPreserveTheirPolicies),
@@ -44,8 +65,8 @@ var tests = new (string Name, Action Test)[]
     ("Legacy shared-state payload keeps fleet access and closes the room axis", LegacySharedStatePayloadKeepsFleetAndClosesRoomAxis),
     ("Room visibility recognizes only the room-member scope", RoomVisibilityRecognizesOnlyRoomMemberScope),
     ("Fleet and room grants combine per shared-state field", FleetAndRoomGrantsCombinePerSharedStateField),
-    ("Private visibility groups require their current axis relationship", PrivateVisibilityGroupsRequireCurrentAxisRelationship),
-    ("Legacy specified members migrate to equivalent administrator and private-group sources", LegacySpecifiedMembersMigrateToEquivalentAudienceSources),
+    ("Retired private visibility groups never authorize fields", PrivateVisibilityGroupsRequireCurrentAxisRelationship),
+    ("Retired group migration preserves only independent administrator grants", LegacySpecifiedMembersMigrateToEquivalentAudienceSources),
     ("Audience summaries project the real policy without mixing event delivery into visible state", AudienceSummariesProjectTheRealPolicy),
     ("Game ID visibility is configurable only when a distinct callsign can replace it", GameIdVisibilityRequiresADistinctCallsign),
     ("Accepted friends receive online presence but not fleet or room state", AcceptedFriendsReceivePresenceOnly),
@@ -944,6 +965,17 @@ static void InvisiblePresenceReceivesWithoutPublishing()
     AssertEqual(true, decision.CanReceiveRealtime, "invisible receiving");
 }
 
+static void InGamePresencePublishesGameState()
+{
+    var decision = PlayerPresence.DecideSharing(
+        PlayerPresenceKind.AppOnline,
+        PlayerPresenceVisibilityMode.InGame);
+
+    AssertEqual(PlayerPresenceKind.InGame, decision.PublicPresence, "in-game public state");
+    AssertEqual(true, decision.CanPublishRealtime, "in-game publishing");
+    AssertEqual(true, decision.CanReceiveRealtime, "in-game receiving");
+}
+
 static void OfflinePresenceDisablesRealtimeState()
 {
     var decision = PlayerPresence.DecideSharing(
@@ -1143,13 +1175,13 @@ static void PrivateVisibilityGroupsRequireCurrentAxisRelationship()
         RoomMembersCanView: false);
 
     AssertEqual(
-        PlayerSharedStateFields.Presence | PlayerSharedStateFields.Location,
+        PlayerSharedStateFields.None,
         PlayerSharedStateAudiencePolicy.Resolve(
             policy,
             new PlayerSharedStateViewerFacts(
                 IsFleetMember: true,
                 IsSelectedFleetVisibilityGroupMember: true)),
-        "a selected private group grants only the configured fleet-axis fields to a current fleet member");
+        "retired fleet groups grant no fields even to current members");
     AssertEqual(
         PlayerSharedStateFields.None,
         PlayerSharedStateAudiencePolicy.Resolve(
@@ -1158,13 +1190,13 @@ static void PrivateVisibilityGroupsRequireCurrentAxisRelationship()
         "remaining in a private group cannot outlive fleet membership");
 
     AssertEqual(
-        PlayerSharedStateFields.Ship | PlayerSharedStateFields.Server,
+        PlayerSharedStateFields.None,
         PlayerSharedStateAudiencePolicy.Resolve(
             policy,
             new PlayerSharedStateViewerFacts(
                 IsRoomMember: true,
                 IsSelectedRoomVisibilityGroupMember: true)),
-        "a selected private group grants only the configured room-axis fields to a current room member");
+        "retired room groups grant no fields even to current members");
     AssertEqual(
         PlayerSharedStateFields.None,
         PlayerSharedStateAudiencePolicy.Resolve(
@@ -1173,7 +1205,7 @@ static void PrivateVisibilityGroupsRequireCurrentAxisRelationship()
         "remaining in a private group cannot outlive room membership");
 
     AssertEqual(
-        PlayerSharedStateFields.All & ~PlayerSharedStateFields.PersonalHangar,
+        PlayerSharedStateFields.None,
         PlayerSharedStateAudiencePolicy.Resolve(
             policy with
             {
@@ -1186,7 +1218,7 @@ static void PrivateVisibilityGroupsRequireCurrentAxisRelationship()
                 IsSelectedFleetVisibilityGroupMember: true,
                 IsRoomMember: true,
                 IsSelectedRoomVisibilityGroupMember: true)),
-        "fleet and room private-group grants union per field");
+        "combining two retired groups cannot restore any grant");
 }
 
 static void LegacySpecifiedMembersMigrateToEquivalentAudienceSources()
@@ -1226,9 +1258,9 @@ static void LegacySpecifiedMembersMigrateToEquivalentAudienceSources()
                 IsSelectedFleetVisibilityGroupMember: viewer.IsSpecified));
 
         AssertEqual(
-            legacy,
+            viewer.IsAdmin ? legacy : PlayerSharedStateFields.None,
             migrated,
-            $"legacy and migrated audiences match for admin={viewer.IsAdmin}, specified={viewer.IsSpecified}");
+            $"retired groups preserve only the independent admin audience: admin={viewer.IsAdmin}, specified={viewer.IsSpecified}");
     }
 }
 
@@ -1263,9 +1295,9 @@ static void AudienceSummariesProjectTheRealPolicy()
     AssertEqual(PlayerSharedStateFields.None, projection.FleetMembers.StatusFields,
         "an ordinary fleet member is not described as visible when only administrators are selected");
     AssertEqual(
-        PlayerSharedStateFields.Location | PlayerSharedStateFields.Server,
+        PlayerSharedStateFields.None,
         projection.SelectedRoomGroupMembers.StatusFields,
-        "the selected same-room audience is projected through the room relationship gate");
+        "retired room groups are not advertised as an active audience");
     AssertEqual(PlayerSharedStateFields.None, projection.RoomMembers.StatusFields,
         "unselected same-room members remain closed");
     AssertEqual(

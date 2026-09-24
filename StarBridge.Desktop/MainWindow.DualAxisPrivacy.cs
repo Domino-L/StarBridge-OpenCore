@@ -12,18 +12,29 @@ public partial class MainWindow
 {
     private bool _dualAxisPrivacySavePending;
 
-    private string? CurrentDualAxisPrivacyAccountIdentity =>
-        string.IsNullOrWhiteSpace(_authToken)
-            ? null
-            : !string.IsNullOrWhiteSpace(_accountId)
-                ? _accountId
-                : _accountName;
+    private string? CurrentDualAxisPrivacyAccountIdentity
+    {
+        get
+        {
+            var routeIdentity = CurrentAccountRouteIdentity;
+            return routeIdentity.IsAuthenticated && _legacyIdentityLinked == true
+                ? routeIdentity.CacheNamespace
+                : null;
+        }
+    }
 
     private void ReloadDualAxisPrivacySettings()
     {
+        var accountIdentity = CurrentDualAxisPrivacyAccountIdentity;
+        if (accountIdentity is not null &&
+            _legacyIdentityLinkProjection?.LegacyAccountId is { Length: > 0 } legacyAccountId)
+        {
+            _dualAxisPrivacySettingsStore.PromoteLegacyAccountIdentity(legacyAccountId, accountIdentity);
+        }
+
         _dualAxisPrivacySettings = DualAxisPrivacyTakeover.WithoutRoomGroupReferences(
             _dualAxisPrivacySettingsStore.LoadOrMigrate(
-                CurrentDualAxisPrivacyAccountIdentity,
+                accountIdentity,
                 _syncPrivacySettings,
                 _playerEventSharingSettings,
                 SyncPrivacySettings.HasStoredSettings));
@@ -40,8 +51,7 @@ public partial class MainWindow
         DualAxisPrivacyEditor.SetGroups(_privateVisibilityGroups);
         DualAxisPrivacyEditor.SettingsChanged += DualAxisPrivacyEditor_SettingsChanged;
         DualAxisPrivacyEditor.GameIdVisibilityChanged += DualAxisPrivacyEditor_GameIdVisibilityChanged;
-        DualAxisPrivacyEditor.CreateGroupRequested += (_, _) => OpenVisibilityGroupEditor(null);
-        DualAxisPrivacyEditor.EditGroupRequested += (_, group) => OpenVisibilityGroupEditor(group);
+        // Private visibility groups are retired; no editor/mutation entry remains.
     }
 
     private async void DualAxisPrivacyEditor_GameIdVisibilityChanged(object? sender, EventArgs e)
@@ -276,49 +286,12 @@ public partial class MainWindow
         }
     }
 
-    private async Task<DualAxisPrivacySettings?> MaterializePendingVisibilityGroupsAsync(
+    private Task<DualAxisPrivacySettings?> MaterializePendingVisibilityGroupsAsync(
         DualAxisPrivacySettings settings)
     {
-        if (settings.PendingGroupMigrations.Length == 0)
-        {
-            return settings;
-        }
-
-        if (_privateVisibilityGroupClient is null || _privateVisibilityGroupMutationGate is null)
-        {
-            throw new InvalidOperationException("可见性分组服务尚未就绪。");
-        }
-
-        return await _privateVisibilityGroupMutationGate.RunLatestAsync(
-            async cancellationToken =>
-            {
-                var current = settings;
-                foreach (var pending in settings.PendingGroupMigrations)
-                {
-                    var existing = _privateVisibilityGroups.FirstOrDefault(group =>
-                        !group.IsPendingMigration &&
-                        group.Name.Equals(pending.Name, StringComparison.Ordinal) &&
-                        group.MemberAccountIds.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                            .SetEquals(pending.MemberAccountIds));
-                    var groupId = existing?.GroupId;
-                    if (string.IsNullOrWhiteSpace(groupId))
-                    {
-                        var saved = await _privateVisibilityGroupClient.SaveAsync(
-                            null,
-                            pending.Name,
-                            pending.MemberAccountIds,
-                            cancellationToken);
-                        groupId = saved.GroupId;
-                    }
-
-                    current = DualAxisPrivacyTakeover.ReplaceGroupReference(
-                        current,
-                        pending.LocalReferenceId,
-                        groupId);
-                }
-
-                return current;
-            });
+        // Preserve historical conversion evidence locally. Retired groups are
+        // never created, and cannot block saving unrelated room/default choices.
+        return Task.FromResult<DualAxisPrivacySettings?>(settings);
     }
 
     private void MirrorLegacyPrivacySettingsFromDualAxis(bool friendsCanViewPresence)
@@ -371,66 +344,19 @@ public partial class MainWindow
         }
     }
 
-    private async Task RefreshPrivateVisibilityGroupsAsync()
+    private Task RefreshPrivateVisibilityGroupsAsync()
     {
-        if (DualAxisPrivacyEditor is null)
-        {
-            return;
-        }
-
-        PrivateVisibilityGroupContract[] remoteGroups = [];
-        if (CanSynchronizeUserData && _privateVisibilityGroupLoader is not null)
-        {
-            try
-            {
-                DualAxisPrivacyEditor.SetGroupStatus("正在读取私有分组…");
-                var loaded = await _privateVisibilityGroupLoader.LoadLatestAsync();
-                if (loaded is null)
-                {
-                    return;
-                }
-
-                remoteGroups = loaded;
-            }
-            catch (Exception exception)
-            {
-                DualAxisPrivacyEditor.SetGroupStatus($"分组读取失败：{exception.Message}");
-                return;
-            }
-        }
-
-        var fleetIds = (_dualAxisPrivacySettings.Fleet.VisibilityGroupIds ?? [])
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         _privateVisibilityGroups.Clear();
-        foreach (var group in remoteGroups.OrderBy(group => group.Name, StringComparer.CurrentCultureIgnoreCase))
+        if (DualAxisPrivacyEditor is not null)
         {
-            _privateVisibilityGroups.Add(new PrivateVisibilityGroupRow
-            {
-                GroupId = group.GroupId,
-                Name = group.Name,
-                MemberAccountIds = group.MemberAccountIds,
-                FleetSelected = fleetIds.Contains(group.GroupId)
-            });
+            DualAxisPrivacyEditor.SetGroups(_privateVisibilityGroups);
+            DualAxisPrivacyEditor.SetGroupStatus(
+                _dualAxisPrivacySettings.PendingGroupMigrations.Length > 0 ||
+                _dualAxisPrivacySettings.Fleet.VisibilityGroupIds is { Length: > 0 }
+                    ? "私有可见组已停用，旧记录已保留；请在新版客户端调整成员可见度。"
+                    : null);
         }
-
-        foreach (var pending in _dualAxisPrivacySettings.PendingGroupMigrations)
-        {
-            _privateVisibilityGroups.Add(new PrivateVisibilityGroupRow
-            {
-                GroupId = pending.LocalReferenceId,
-                Name = pending.Name,
-                MemberAccountIds = pending.MemberAccountIds,
-                IsPendingMigration = true,
-                FleetSelected = fleetIds.Contains(pending.LocalReferenceId)
-            });
-        }
-
-        DualAxisPrivacyEditor.SetGroups(_privateVisibilityGroups);
-        DualAxisPrivacyEditor.SetGroupStatus(!CanSynchronizeUserData
-            ? "登录并完成身份验证后可管理私有分组。"
-            : _dualAxisPrivacySettings.PendingGroupMigrations.Length > 0
-                ? "旧“指定成员”将在首次保存时等价转换为私有分组。"
-                : $"{_privateVisibilityGroups.Count} / {DualAxisPrivacySettings.MaxVisibilityGroups} 个私有分组");
+        return Task.CompletedTask;
     }
 
     private void RefreshPrivateVisibilityGroupSelections()

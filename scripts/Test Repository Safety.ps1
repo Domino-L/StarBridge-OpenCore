@@ -96,7 +96,15 @@ try {
         }
 
         if (-not $isThirdPartyLegalAttributionFile) {
-            foreach ($match in [regex]::Matches($text, $emailPattern)) {
+            # Inno Setup imports join a function and DLL with an at-sign. Mask
+            # only a complete import declaration for the email check; comments,
+            # adjacent text and all other sensitive-content checks remain intact.
+            $emailText = $text
+            if ($extension -eq '.iss') {
+                $emailText = [regex]::Replace($text,
+                    '(?im)^[ \t]*external[ \t]+''[A-Z_][A-Z0-9_]*@[A-Z0-9_\-]+\.dll[ \t]+(?:stdcall|cdecl)[ \t]*''[ \t]*;', '')
+            }
+            foreach ($match in [regex]::Matches($emailText, $emailPattern)) {
                 $email = $match.Value.ToLowerInvariant()
                 if ($email -notmatch '@example\.(?:com|org|net)$' -and
                     $email -notmatch '@example\.invalid$') {

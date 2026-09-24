@@ -1,4 +1,5 @@
 using StarBridge.Core.Presence;
+using StarBridge.HostRuntime.Auth;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -357,20 +358,149 @@ public partial class MainWindow
         await HandleOnboardingActionAsync(OnboardingNextAction.Overlay);
     }
 
-    private Task InitializeLoginAndNetworkAsync()
+    private async Task InitializeLoginAndNetworkAsync()
     {
-        if (IsLoggedIn)
+        if (!IsScmLoggedIn)
         {
-            return AutoConnectNetworkAsync();
+            _scmSessionRestoreOutcome = ScmSessionRestoreOutcome.NotAttempted;
+            _scmSessionRestoreInProgress = true;
+            LoginStatusText.Text = "正在恢复 SCM 登录状态...";
+            RefreshAccountPanel();
+            RefreshAuthenticationRequiredViews();
+            RefreshHeaderStatusBar();
+            try
+            {
+                await EnsureScmRegionResolvedAsync(CancellationToken.None);
+                var scmSession = await _scmOAuthClient.TryRestoreSessionAsync(CancellationToken.None);
+                if (scmSession is not null)
+                {
+                    ApplyScmOAuthSession(scmSession);
+                    if (!await RefreshScmBootstrapAsync(scmSession, CancellationToken.None))
+                    {
+                        await RefreshLegacyIdentityLinkStateAsync(scmSession);
+                    }
+                }
+            }
+            catch (HttpRequestException)
+            {
+                LoginStatusText.Text = "SCM 暂时不可用，登录凭据已保留";
+                NetworkStatusText.Text = "SCM 离线 · 可稍后重试";
+            }
+            catch (Exception) when (
+                _scmOAuthClient.LastSessionRestoreOutcome == ScmSessionRestoreOutcome.ReauthorizationRequired)
+            {
+                LoginStatusText.Text = "SCM 登录已失效，请重新授权";
+                NetworkStatusText.Text = "SCM 会话需要重新登录";
+            }
+            finally
+            {
+                _scmSessionRestoreOutcome = _scmOAuthClient.LastSessionRestoreOutcome;
+                _scmSessionRestoreInProgress = false;
+                RefreshAuthenticationRequiredViews();
+            }
+
+            if (_scmOAuthSession is { } restoredSession)
+            {
+                ScheduleScmRuntimeRecovery(restoredSession, "session-restore");
+            }
         }
 
-        LoginStatusText.Text = _authenticationExpired ? "登录已失效" : "未登录";
+        if (IsLoggedIn)
+        {
+            await AutoConnectNetworkAsync();
+            return;
+        }
+
+        if (IsScmLoggedIn)
+        {
+            RefreshAccountPanel();
+            RefreshHeaderStatusBar();
+            return;
+        }
+
+        _authenticationExpired =
+            _scmSessionRestoreOutcome == ScmSessionRestoreOutcome.ReauthorizationRequired;
         RefreshAccountPanel();
+        NetworkStatusText.Text = _scmSessionRestoreOutcome switch
+        {
+            ScmSessionRestoreOutcome.ReauthorizationRequired =>
+                "SCM 登录已失效 · 未自动切换旧账号",
+            ScmSessionRestoreOutcome.CredentialTemporarilyUnavailable =>
+                "SCM 暂时不可用 · 登录凭据已保留",
+            _ => "等待 SCM 登录"
+        };
         RefreshHeaderStatusBar();
-        return Task.CompletedTask;
     }
 
+    private string GetSignedOutScmLoginStatusText()
+    {
+        if (_scmSessionRestoreInProgress)
+        {
+            return "正在恢复 SCM 登录状态...";
+        }
+
+        return _scmSessionRestoreOutcome switch
+        {
+            ScmSessionRestoreOutcome.ReauthorizationRequired => "SCM 登录已失效，请重新授权",
+            ScmSessionRestoreOutcome.CredentialTemporarilyUnavailable =>
+                "SCM 暂时不可用，登录凭据已保留",
+            _ => "未登录 SCM"
+        };
+    }
+
+    private string GetSignedOutScmStatusText() => _scmSessionRestoreInProgress
+        ? "正在安全恢复 SCM 登录状态..."
+        : _scmSessionRestoreOutcome switch
+        {
+            ScmSessionRestoreOutcome.ReauthorizationRequired => "SCM 登录已失效 · 请重新授权",
+            ScmSessionRestoreOutcome.CredentialTemporarilyUnavailable =>
+                "SCM 暂时不可用 · 凭据已保留",
+            _ => "浏览模式 · 可登录 SCM 或配置 Game.log"
+        };
+
+    private string GetSignedOutScmAccountModeText() => _scmSessionRestoreOutcome switch
+    {
+        ScmSessionRestoreOutcome.ReauthorizationRequired =>
+            "SCM 登录已失效；旧账号不会被自动启用，重新授权后恢复同步",
+        ScmSessionRestoreOutcome.CredentialTemporarilyUnavailable =>
+            "SCM 暂时不可用；登录凭据已保留，旧账号不会被自动启用",
+        _ => "登录 SCM 后可同步或管理舰队；Game.log 可在登录前配置"
+    };
+
     private async Task AutoConnectNetworkAsync()
+    {
+        Task operation;
+        lock (_startupDataSyncLock)
+        {
+            if (_startupDataSyncTask is { IsCompleted: false } active &&
+                _startupDataSyncCts?.IsCancellationRequested != true)
+            {
+                operation = active;
+            }
+            else
+            {
+                operation = AutoConnectNetworkCoreAsync();
+                _startupDataSyncTask = operation;
+            }
+        }
+
+        try
+        {
+            await operation;
+        }
+        finally
+        {
+            lock (_startupDataSyncLock)
+            {
+                if (ReferenceEquals(_startupDataSyncTask, operation) && operation.IsCompleted)
+                {
+                    _startupDataSyncTask = null;
+                }
+            }
+        }
+    }
+
+    private async Task AutoConnectNetworkCoreAsync()
     {
         if (!IsLoggedIn && string.IsNullOrWhiteSpace(NetworkServerKeyBox.Password))
         {
@@ -393,18 +523,22 @@ public partial class MainWindow
             return;
         }
 
-        if (IsLoggedIn &&
-            _identityBindingSupported &&
-            !_identityBindingAssessment.CanSynchronize)
+        var startupIdentityDecision = ResolveStartupIdentityGateDecision();
+        if (IsLoggedIn && startupIdentityDecision != StartupIdentityGateDecision.Allow)
         {
-            // A fresh local-data directory has no Game.log identity yet. This
-            // is an intentional privacy gate, not a relay failure.
+            // Either the legacy binding or the authoritative SCM game identity
+            // is still unavailable (or SCM conflicts with Game.log). This is
+            // an intentional privacy gate, not a relay failure.
             ReevaluateIdentityBinding(showPrompt: true);
             CompleteStartupDataGate(
                 attempt,
-                StartupSyncOutcome.IdentityRequired,
+                startupIdentityDecision == StartupIdentityGateDecision.IdentityMismatch
+                    ? StartupSyncOutcome.IdentityMismatch
+                    : StartupSyncOutcome.IdentityRequired,
                 Stopwatch.StartNew());
-            NetworkStatusText.Text = "等待游戏身份 · 多人同步未启动";
+            NetworkStatusText.Text = startupIdentityDecision == StartupIdentityGateDecision.IdentityMismatch
+                ? "游戏身份不相同 · 用户数据同步已暂停"
+                : "等待游戏身份 · 多人同步未启动";
             RefreshHeaderStatusBar();
             HideSyncStatusOverlay();
             return;
@@ -564,12 +698,18 @@ public partial class MainWindow
             return true;
         }
 
+        if (IsScmLoggedIn && _scmOAuthSession is { } scmSession)
+        {
+            // SCM owns the authenticated account/profile facts. Validate the
+            // compatibility projection with the read-only session endpoint;
+            // never turn startup validation into a legacy profile write.
+            return await RefreshScmLegacyRelaySessionAsync(scmSession, CancellationToken.None);
+        }
+
         var session = _accountSessionCoordinator.Capture();
         try
         {
-            var response = await PostNetworkJsonAsync(
-                "api/auth/profile",
-                new ProfileUpdateRequest(_callsign, _allowEmailNotifications));
+            using var response = await _relayClient.GetAsync("api/auth/session");
             if (!_accountSessionCoordinator.IsCurrent(session))
             {
                 return false;
@@ -612,22 +752,34 @@ public partial class MainWindow
 
         _isLoginDialogOpen = true;
         var dialog = new LoginWindow(_accountName) { Owner = this };
-        dialog.SendVerificationCodeAsync = RequestVerificationCodeAsync;
         dialog.SendPasswordResetCodeAsync = RequestPasswordResetCodeAsync;
         dialog.ResetPasswordAsync = ResetPasswordAsync;
+        dialog.AuthenticateWithScmAsync = async cancellationToken =>
+        {
+            try
+            {
+                var session = await _scmOAuthClient.SignInAsync(
+                    cancellationToken,
+                    dialog.ReportScmLoginProgress);
+                return new LoginWindowScmAuthResult(true, "SCM 授权成功。", session);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                return new LoginWindowScmAuthResult(
+                    false,
+                    UserFacingError.Describe(exception, "SCM 登录未完成，请稍后重试。"));
+            }
+        };
         dialog.AuthenticateAsync = async request =>
         {
-            var path = request.IsRegister ? "api/auth/register" : "api/auth/login";
-            var actionName = request.IsRegister ? "注册" : "登录";
             var error = await AuthenticateAsync(
-                path,
-                actionName,
                 request.Email,
-                request.Password,
-                request.Email,
-                request.VerificationCode,
-                request.Callsign);
-            return new LoginWindowAuthResult(error is null, error ?? $"{actionName}成功");
+                request.Password);
+            return new LoginWindowAuthResult(error is null, error ?? "登录成功");
         };
         try
         {
@@ -644,6 +796,17 @@ public partial class MainWindow
                 RefreshAccountPanel();
                 return;
             }
+
+            if (dialog.ScmSession is not null)
+            {
+                ApplyScmOAuthSession(dialog.ScmSession);
+                if (!await RefreshScmBootstrapAsync(dialog.ScmSession, CancellationToken.None))
+                {
+                    await RefreshLegacyIdentityLinkStateAsync(dialog.ScmSession);
+                }
+
+                ScheduleScmRuntimeRecovery(dialog.ScmSession, "interactive-login");
+            }
         }
         finally
         {
@@ -653,6 +816,18 @@ public partial class MainWindow
         if (IsLoggedIn)
         {
             await EnsureSyncConsentAsync();
+            if (_scmOAuthSession is not null)
+            {
+                if (_legacyIdentityLinked is null)
+                {
+                    await RefreshLegacyIdentityLinkStateAsync(_scmOAuthSession);
+                }
+
+                if (_legacyIdentityLinked == false)
+                {
+                    await ChooseLegacyIdentityPathAsync();
+                }
+            }
         }
 
         if (IsLoggedIn &&
@@ -669,7 +844,7 @@ public partial class MainWindow
                 _onboardingDialogOpen = false;
             }
 
-            if (!IsIdentityBindingVerified)
+            if (!IsScmLoggedIn && !IsIdentityBindingVerified)
             {
                 ReevaluateIdentityBinding(showPrompt: true);
             }
@@ -677,35 +852,6 @@ public partial class MainWindow
 
         UpdateFleetEntryPanels();
         SchedulePendingOverlayAppearanceUnlockNotice();
-    }
-
-    private async Task<string> RequestVerificationCodeAsync(string email)
-    {
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            return "请输入邮箱地址。";
-        }
-
-        try
-        {
-            var request = new EmailVerificationRequest(email.Trim());
-            var response = await _networkClient.PostAsJsonAsync(BuildAuthenticationUri("api/auth/send-code"), request);
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = await ReadResponseErrorAsync(response);
-                return FormatActionFailure("发送验证码", MapVerificationError(error));
-            }
-
-            return "验证码已发送，10 分钟内有效。";
-        }
-        catch (TaskCanceledException)
-        {
-            return "发送失败：连接服务器超时，请稍后再试。";
-        }
-        catch (Exception ex)
-        {
-            return $"发送失败：{MapNetworkException(ex)}";
-        }
     }
 
     private async Task<string> RequestPasswordResetCodeAsync(string email)
@@ -768,42 +914,27 @@ public partial class MainWindow
         }
     }
 
-    private async Task<string?> AuthenticateAsync(
-        string path,
-        string actionName,
-        string email,
-        string password,
-        string? authEmail,
-        string? verificationCode,
-        string? callsign)
+    private async Task<string?> AuthenticateAsync(string email, string password)
     {
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             return "请输入登录邮箱和密码。";
         }
 
-        if (path.EndsWith("register", StringComparison.OrdinalIgnoreCase) &&
-            (string.IsNullOrWhiteSpace(authEmail) ||
-             string.IsNullOrWhiteSpace(verificationCode) ||
-             string.IsNullOrWhiteSpace(callsign)))
-        {
-            return "注册需要登录邮箱、呼号和验证码。";
-        }
-
         try
         {
-            var request = new AuthRequest(email.Trim(), password, _localPlayer, authEmail?.Trim(), verificationCode?.Trim(), callsign?.Trim());
-            var response = await _networkClient.PostAsJsonAsync(BuildAuthenticationUri(path), request);
+            var request = new AuthRequest(email.Trim(), password, _localPlayer);
+            var response = await _networkClient.PostAsJsonAsync(BuildAuthenticationUri("api/auth/login"), request);
             if (!response.IsSuccessStatusCode)
             {
                 var serverError = await ReadResponseErrorAsync(response);
-                return MapAuthenticationError(response.StatusCode, serverError, path.EndsWith("register", StringComparison.OrdinalIgnoreCase));
+                return MapAuthenticationError(response.StatusCode, serverError);
             }
 
             var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
             if (auth is null || string.IsNullOrWhiteSpace(auth.Token))
             {
-                return $"暂时无法完成{actionName}，请稍后重试。";
+                return "暂时无法完成登录，请稍后重试。";
             }
 
             if (IsLoggedIn && AccountSessionCoordinator.HasChanged(
@@ -814,7 +945,8 @@ public partial class MainWindow
             }
 
             ApplyAuthResponse(auth);
-            LoginStatusText.Text = $"{actionName}成功：{_accountName}";
+            CaptureLegacyMigrationCredential(auth.AccountId, auth.Email ?? auth.UserName, auth.Token);
+            LoginStatusText.Text = $"登录成功：{_accountName}";
             NetworkStatusText.Text = "已登录并连接服务器";
             SaveCurrentConfig();
             RefreshAccountPanel();
@@ -829,10 +961,684 @@ public partial class MainWindow
         catch (Exception ex)
         {
             var message = MapNetworkException(ex);
-            LoginStatusText.Text = $"{actionName}失败：{message}";
-            NetworkStatusText.Text = $"{actionName}失败";
-            return $"{actionName}失败：{message}";
+            LoginStatusText.Text = $"登录失败：{message}";
+            NetworkStatusText.Text = "登录失败";
+            return $"登录失败：{message}";
         }
+    }
+
+    private void CaptureLegacyMigrationCredential(string? accountId, string? accountName, string? authToken)
+    {
+        if (string.IsNullOrWhiteSpace(accountId) || string.IsNullOrWhiteSpace(authToken))
+        {
+            return;
+        }
+
+        _legacyMigrationCredentialStore.Save(new LegacyMigrationCredential(
+            accountId.Trim(),
+            string.IsNullOrWhiteSpace(accountName) ? null : accountName.Trim(),
+            authToken,
+            DateTimeOffset.UtcNow));
+        _hasLegacyMigrationCredential = true;
+    }
+
+    private async void HeaderLegacyIdentityLinkMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_identityLinkInProgress)
+        {
+            _accountOperationStatusText = "正在取消兼容身份设置";
+            _identityLinkCancellation?.Cancel();
+            RefreshAccountPanel();
+            return;
+        }
+
+        await ChooseLegacyIdentityPathAsync();
+    }
+
+    private async Task ChooseLegacyIdentityPathAsync()
+    {
+        if (_identityLinkInProgress || _scmOAuthSession is null || _legacyIdentityLinked == true)
+        {
+            return;
+        }
+
+        var choice = IdentityLinkChoiceDialog.Show(this);
+        if (choice == IdentityLinkChoice.LinkExisting)
+        {
+            await LinkLegacyIdentityAsync();
+            return;
+        }
+
+        if (choice != IdentityLinkChoice.CreateCompatibilityAccount)
+        {
+            LoginStatusText.Text = "已暂缓设置 StarBridge 兼容身份";
+            return;
+        }
+
+        var confirmed = StarBridgeMessageBox.ShowAction(
+            this,
+            "仅当你从未使用过旧版 StarBridge、没有旧舰队、好友、聊天、房间或历史数据时创建兼容档案。创建后当前 SCM 账号将绑定一个新的内部 AccountId，不能再自行关联其他旧账号。",
+            "确认创建兼容档案",
+            "确认没有旧账号，创建",
+            "返回",
+            MessageBoxImage.Warning);
+        if (confirmed)
+        {
+            await ProvisionCompatibilityAccountAsync();
+        }
+    }
+
+    private async Task LinkLegacyIdentityAsync()
+    {
+        if (_identityLinkInProgress || _scmOAuthSession is null)
+        {
+            return;
+        }
+
+        var operationCancellation = new CancellationTokenSource();
+        using var operationTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+            operationCancellation.Token);
+        operationTimeout.CancelAfter(TimeSpan.FromMinutes(3));
+        _identityLinkCancellation = operationCancellation;
+        _identityLinkInProgress = true;
+        _accountOperationStatusText = "正在检查 SCM 账号关联状态";
+        var resumeRuntimeSynchronization = false;
+        string? finalStatus = null;
+        var finalStatusImage = MessageBoxImage.Information;
+        ScmOAuthSession? activeSession = null;
+        RefreshAccountPanel();
+        try
+        {
+            LoginStatusText.Text = "正在请求 SCM 旧账号关联授权...";
+            activeSession = await _scmOAuthClient.RefreshIdentityAsync(
+                _scmOAuthSession,
+                operationTimeout.Token);
+            ApplyScmOAuthSession(activeSession);
+            var result = await _identityLinkCoordinator.EnsureLinkedAsync(
+                activeSession,
+                operationTimeout.Token,
+                message => Dispatcher.Invoke(() => ReportAccountOperationProgress(message)),
+                _ => Task.FromResult(LegacyIdentityLinkCredentialDialog.Show(
+                    this,
+                    _legacyMigrationCredentialStore.Load()?.AccountName)));
+            switch (result.Outcome)
+            {
+                case IdentityLinkOutcome.Linked:
+                case IdentityLinkOutcome.AlreadyLinked:
+                    _hasLegacyMigrationCredential = false;
+                    _legacyIdentityLinkProjection = string.IsNullOrWhiteSpace(result.LegacyAccountId)
+                        ? null
+                        : new ScmIdentityLinkProjection("ACTIVE", result.LegacyAccountId);
+                    _legacyIdentityLinked = _legacyIdentityLinkProjection is not null;
+                    AdvanceAccountRouteIdentity();
+                    resumeRuntimeSynchronization = true;
+                    await RefreshScmLegacyRelaySessionAsync(activeSession, operationTimeout.Token);
+                    finalStatus = "旧 StarBridge 账号已关联到当前 SCM 账号";
+                    break;
+                case IdentityLinkOutcome.Conflict:
+                    finalStatus = "旧账号关联存在冲突，已保留迁移凭据，请稍后重试或联系支持";
+                    finalStatusImage = MessageBoxImage.Warning;
+                    break;
+                case IdentityLinkOutcome.ExistingLinkMismatch:
+                    _legacyIdentityLinkProjection = string.IsNullOrWhiteSpace(result.LegacyAccountId)
+                        ? null
+                        : new ScmIdentityLinkProjection("ACTIVE", result.LegacyAccountId);
+                    _legacyIdentityLinked = _legacyIdentityLinkProjection is not null;
+                    AdvanceAccountRouteIdentity();
+                    resumeRuntimeSynchronization = true;
+                    await RefreshScmLegacyRelaySessionAsync(activeSession, operationTimeout.Token);
+                    finalStatus = "当前 SCM 账号已关联其他旧账号，未修改现有关系";
+                    finalStatusImage = MessageBoxImage.Warning;
+                    break;
+                default:
+                    _hasLegacyMigrationCredential = false;
+                    finalStatus = "未找到可迁移的旧账号凭据";
+                    break;
+            }
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            finalStatus = "已取消旧账号关联";
+        }
+        catch (OperationCanceledException)
+        {
+            if (activeSession is not null && await TryReconcileLegacyIdentityLinkAsync(activeSession))
+            {
+                resumeRuntimeSynchronization = true;
+                finalStatus = "请求虽已超时，但已从 SCM 确认旧账号关联成功";
+            }
+            else
+            {
+                finalStatus = "旧账号关联等待超时，入口已解锁，请重试";
+                finalStatusImage = MessageBoxImage.Warning;
+            }
+        }
+        catch (LegacyIdentityLinkRateLimitException exception)
+        {
+            var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(exception.RetryAfter?.TotalSeconds ?? 30));
+            finalStatus = $"旧账号验证尝试过于频繁，请在 {retryAfterSeconds} 秒后重试";
+            finalStatusImage = MessageBoxImage.Warning;
+        }
+        catch (LegacyIdentityLinkAuthenticationException)
+        {
+            finalStatus = "旧账号名、邮箱或密码错误，请重新检查";
+            finalStatusImage = MessageBoxImage.Warning;
+        }
+        catch (HttpRequestException exception)
+        {
+            if (activeSession is not null && await TryReconcileLegacyIdentityLinkAsync(activeSession))
+            {
+                resumeRuntimeSynchronization = true;
+                finalStatus = "网络响应中断，但已从 SCM 确认旧账号关联成功";
+            }
+            else
+            {
+                finalStatus = UserFacingError.Describe(
+                    exception,
+                    "旧账号关联暂未完成，入口已解锁，请重试。");
+                finalStatusImage = MessageBoxImage.Warning;
+            }
+        }
+        catch (Exception exception)
+        {
+            finalStatus = UserFacingError.Describe(
+                exception,
+                "旧账号关联暂未完成，请稍后重试。");
+            finalStatusImage = MessageBoxImage.Warning;
+        }
+        finally
+        {
+            var resumeSynchronization = resumeRuntimeSynchronization &&
+                ReferenceEquals(_identityLinkCancellation, operationCancellation) &&
+                !operationCancellation.IsCancellationRequested;
+            if (ReferenceEquals(_identityLinkCancellation, operationCancellation))
+            {
+                _identityLinkCancellation = null;
+            }
+            operationCancellation.Dispose();
+            _identityLinkInProgress = false;
+            _accountOperationStatusText = null;
+            RefreshAccountPanel();
+            if (resumeSynchronization && activeSession is not null)
+            {
+                // Applying a Link changes the account namespace and resets the
+                // startup gate. Relay authentication alone does not reload it.
+                // Release the busy gate first, then use the existing leased,
+                // retrying recovery lane (including consent and identity gates).
+                ScheduleScmRuntimeRecovery(
+                    activeSession,
+                    "identity-link-completed",
+                    forceDependencyReplay: true);
+            }
+            if (!string.IsNullOrWhiteSpace(finalStatus))
+            {
+                LoginStatusText.Text = finalStatus;
+                StarBridgeMessageBox.Show(
+                    this,
+                    finalStatus,
+                    "旧账号关联",
+                    MessageBoxButton.OK,
+                    finalStatusImage);
+            }
+        }
+    }
+
+    private async Task ProvisionCompatibilityAccountAsync()
+    {
+        if (_identityLinkInProgress || _scmOAuthSession is null)
+        {
+            return;
+        }
+
+        var operationCancellation = new CancellationTokenSource();
+        using var operationTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+            operationCancellation.Token);
+        operationTimeout.CancelAfter(TimeSpan.FromMinutes(3));
+        _identityLinkCancellation = operationCancellation;
+        _identityLinkInProgress = true;
+        _accountOperationStatusText = "正在创建 StarBridge 兼容档案";
+        var resumeRuntimeSynchronization = false;
+        string? finalStatus = null;
+        var finalStatusImage = MessageBoxImage.Information;
+        ScmOAuthSession? activeSession = null;
+        RefreshAccountPanel();
+        try
+        {
+            activeSession = await _scmOAuthClient.RefreshIdentityAsync(
+                _scmOAuthSession,
+                operationTimeout.Token);
+            ApplyScmOAuthSession(activeSession);
+            var result = await _identityLinkCoordinator.ProvisionCompatibilityAccountAsync(
+                activeSession,
+                operationTimeout.Token,
+                message => Dispatcher.Invoke(() => ReportAccountOperationProgress(message)));
+            switch (result.Outcome)
+            {
+                case IdentityLinkOutcome.Linked:
+                case IdentityLinkOutcome.AlreadyLinked:
+                    _legacyIdentityLinkProjection = string.IsNullOrWhiteSpace(result.LegacyAccountId)
+                        ? null
+                        : new ScmIdentityLinkProjection("ACTIVE", result.LegacyAccountId);
+                    _legacyIdentityLinked = _legacyIdentityLinkProjection is not null;
+                    AdvanceAccountRouteIdentity();
+                    resumeRuntimeSynchronization = true;
+                    await RefreshScmLegacyRelaySessionAsync(activeSession, operationTimeout.Token);
+                    finalStatus = "StarBridge 兼容档案已创建并绑定到当前 SCM 账号";
+                    break;
+                case IdentityLinkOutcome.Conflict:
+                    finalStatus = "兼容档案创建存在身份冲突，未修改当前账号关系";
+                    finalStatusImage = MessageBoxImage.Warning;
+                    break;
+                default:
+                    finalStatus = "兼容档案创建未完成，请稍后重试";
+                    finalStatusImage = MessageBoxImage.Warning;
+                    break;
+            }
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            finalStatus = "已取消创建兼容档案";
+        }
+        catch (OperationCanceledException)
+        {
+            if (activeSession is not null && await TryReconcileLegacyIdentityLinkAsync(activeSession))
+            {
+                resumeRuntimeSynchronization = true;
+                finalStatus = "请求虽已超时，但已从 SCM 确认兼容档案创建成功";
+            }
+            else
+            {
+                finalStatus = "兼容档案创建等待超时，入口已解锁，请重试";
+                finalStatusImage = MessageBoxImage.Warning;
+            }
+        }
+        catch (HttpRequestException exception)
+        {
+            if (activeSession is not null && await TryReconcileLegacyIdentityLinkAsync(activeSession))
+            {
+                resumeRuntimeSynchronization = true;
+                finalStatus = "网络响应中断，但已从 SCM 确认兼容档案创建成功";
+            }
+            else
+            {
+                finalStatus = UserFacingError.Describe(
+                    exception,
+                    "兼容档案创建暂未完成，入口已解锁，请重试。");
+                finalStatusImage = MessageBoxImage.Warning;
+            }
+        }
+        catch (Exception exception)
+        {
+            finalStatus = UserFacingError.Describe(
+                exception,
+                "兼容档案创建暂未完成，请稍后重试。");
+            finalStatusImage = MessageBoxImage.Warning;
+        }
+        finally
+        {
+            var resumeSynchronization = resumeRuntimeSynchronization &&
+                ReferenceEquals(_identityLinkCancellation, operationCancellation) &&
+                !operationCancellation.IsCancellationRequested;
+            if (ReferenceEquals(_identityLinkCancellation, operationCancellation))
+            {
+                _identityLinkCancellation = null;
+            }
+            operationCancellation.Dispose();
+            _identityLinkInProgress = false;
+            _accountOperationStatusText = null;
+            RefreshAccountPanel();
+            if (resumeSynchronization && activeSession is not null)
+            {
+                // Applying a Link changes the account namespace and resets the
+                // startup gate. Relay authentication alone does not reload it.
+                // Release the busy gate first, then use the existing leased,
+                // retrying recovery lane (including consent and identity gates).
+                ScheduleScmRuntimeRecovery(
+                    activeSession,
+                    "identity-link-completed",
+                    forceDependencyReplay: true);
+            }
+            if (!string.IsNullOrWhiteSpace(finalStatus))
+            {
+                LoginStatusText.Text = finalStatus;
+                StarBridgeMessageBox.Show(
+                    this,
+                    finalStatus,
+                    "StarBridge 兼容身份",
+                    MessageBoxButton.OK,
+                    finalStatusImage);
+            }
+        }
+    }
+
+    private async Task RefreshLegacyIdentityLinkStateAsync(ScmOAuthSession session)
+    {
+        try
+        {
+            var projection = await _identityLinkCoordinator.ResolveAsync(session, CancellationToken.None);
+            if (_scmOAuthSession is not null &&
+                string.Equals(_scmOAuthSession.Subject, session.Subject, StringComparison.Ordinal) &&
+                string.Equals(_scmOAuthSession.AuthorityId, session.AuthorityId, StringComparison.Ordinal))
+            {
+                _legacyIdentityLinkProjection = projection;
+                _legacyIdentityLinked = projection is not null &&
+                                        string.Equals(projection.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase) &&
+                                        !string.IsNullOrWhiteSpace(projection.LegacyAccountId);
+                AdvanceAccountRouteIdentity();
+                if (_legacyIdentityLinked == true)
+                {
+                    await RefreshScmLegacyRelaySessionAsync(session, CancellationToken.None);
+                }
+                else
+                {
+                    _scmLegacyRelayAuthenticated = false;
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _legacyIdentityLinked = null;
+            _legacyIdentityLinkProjection = null;
+            _scmLegacyRelayAuthenticated = false;
+            AdvanceAccountRouteIdentity();
+        }
+        finally
+        {
+            RefreshAccountPanel();
+        }
+    }
+
+    private async Task<bool> TryReconcileLegacyIdentityLinkAsync(ScmOAuthSession session)
+    {
+        try
+        {
+            using var reconciliationTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var projection = await _identityLinkCoordinator.ResolveAsync(
+                session,
+                reconciliationTimeout.Token);
+            if (projection is null ||
+                !string.Equals(projection.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(projection.LegacyAccountId))
+            {
+                return false;
+            }
+
+            _legacyIdentityLinkProjection = projection;
+            _legacyIdentityLinked = true;
+            _hasLegacyMigrationCredential = false;
+            AdvanceAccountRouteIdentity();
+            try
+            {
+                await RefreshScmLegacyRelaySessionAsync(session, reconciliationTimeout.Token);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+            {
+                _scmLegacyRelayAuthenticated = false;
+                UpdateAccountRuntimeState();
+            }
+
+            return true;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> RefreshScmLegacyRelaySessionAsync(
+        ScmOAuthSession session,
+        CancellationToken cancellationToken,
+        ScmRuntimeRecoveryLease? recoveryLease = null)
+    {
+        if (!CanPublishScmRuntimeRecovery(session, recoveryLease))
+        {
+            return false;
+        }
+
+        var projection = _legacyIdentityLinkProjection;
+        if (projection is null ||
+            !string.Equals(projection.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(projection.LegacyAccountId))
+        {
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "relay-session",
+                "legacy-relay-session",
+                "skipped",
+                "activeLinkProjection=false");
+            _scmLegacyRelayAuthenticated = false;
+            UpdateAccountRuntimeState();
+            return false;
+        }
+
+        try
+        {
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "relay-session",
+                "legacy-relay-session",
+                "started",
+                "activeLinkProjection=true");
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                BuildAuthenticationUri("api/auth/session"));
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer",
+                session.AccessToken);
+            var relayKey = NetworkServerKeyBox.Password.Trim();
+            if (!string.IsNullOrWhiteSpace(relayKey))
+            {
+                request.Headers.Add("X-StarBridge-Key", relayKey);
+            }
+
+            using var response = await _networkClient.SendAsync(request, cancellationToken);
+            if (!CanPublishScmRuntimeRecovery(session, recoveryLease))
+            {
+                return false;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                ScmAuthDiagnostics.Write(
+                    session.CorrelationId ?? "relay-session",
+                    "legacy-relay-session",
+                    "rejected",
+                    $"status={(int)response.StatusCode}");
+                _scmLegacyRelayAuthenticated = false;
+                UpdateAccountRuntimeState();
+                return false;
+            }
+
+            var auth = await response.Content.ReadFromJsonAsync<AuthResponse>(cancellationToken);
+            if (!CanPublishScmRuntimeRecovery(session, recoveryLease))
+            {
+                return false;
+            }
+
+            if (auth is null ||
+                !string.Equals(auth.AccountId, projection.LegacyAccountId, StringComparison.OrdinalIgnoreCase))
+            {
+                ScmAuthDiagnostics.Write(
+                    session.CorrelationId ?? "relay-session",
+                    "legacy-relay-session",
+                    "rejected",
+                    "accountMatch=false");
+                _scmLegacyRelayAuthenticated = false;
+                UpdateAccountRuntimeState();
+                return false;
+            }
+
+            _scmLegacyRelayAuthenticated = true;
+            ApplyAuthResponse(auth with { Token = "" });
+            SaveCurrentConfig();
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "relay-session",
+                "legacy-relay-session",
+                "completed",
+                "accountMatch=true");
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or NotSupportedException)
+        {
+            if (!CanPublishScmRuntimeRecovery(session, recoveryLease))
+            {
+                return false;
+            }
+
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "relay-session",
+                "legacy-relay-session",
+                "degraded",
+                $"exceptionType={exception.GetType().Name}");
+            _scmLegacyRelayAuthenticated = false;
+            UpdateAccountRuntimeState();
+            return false;
+        }
+    }
+
+    private ScmRuntimeRecoveryIdentity CreateScmRuntimeRecoveryIdentity(ScmOAuthSession session) => new(
+        _scmOAuthOptions.ResourceServerBaseUri.AbsoluteUri,
+        session.AuthorityId,
+        session.Subject);
+
+    private bool IsCurrentScmSessionIdentity(ScmOAuthSession session) =>
+        _scmOAuthSession is { } current &&
+        string.Equals(current.Subject, session.Subject, StringComparison.Ordinal) &&
+        string.Equals(current.AuthorityId, session.AuthorityId, StringComparison.Ordinal);
+
+    private bool CanPublishScmRuntimeRecovery(
+        ScmOAuthSession session,
+        ScmRuntimeRecoveryLease? recoveryLease) =>
+        IsCurrentScmSessionIdentity(session) &&
+        (recoveryLease is null || _scmRuntimeRecoveryCoordinator.IsCurrent(recoveryLease.Value));
+
+    private bool NeedsScmRuntimeRecovery =>
+        _scmBootstrapSnapshot is null ||
+        _legacyIdentityLinked is null ||
+        (_legacyIdentityLinked == true && !_scmLegacyRelayAuthenticated) ||
+        (_scmLegacyRelayAuthenticated &&
+         _startupDataGate.Current.State == StartupDataGateState.Initial &&
+         _syncPrivacySettings.SyncConsentCompleted &&
+         _syncPrivacySettings.SyncConsentVersion >= CurrentSyncConsentVersion);
+
+    private void ScheduleScmRuntimeRecovery(
+        ScmOAuthSession session,
+        string trigger,
+        bool forceDependencyReplay = false)
+    {
+        if (_scmSessionRestoreInProgress ||
+            _identityLinkInProgress ||
+            !IsCurrentScmSessionIdentity(session) ||
+            (!forceDependencyReplay && !NeedsScmRuntimeRecovery))
+        {
+            return;
+        }
+
+        var identity = CreateScmRuntimeRecoveryIdentity(session);
+        var recovery = _scmRuntimeRecoveryCoordinator.RequestAsync(
+            identity,
+            (lease, cancellationToken) => RecoverScmRuntimeStateAsync(
+                session,
+                lease,
+                trigger,
+                cancellationToken));
+        _ = ObserveScmRuntimeRecoveryAsync(recovery, session, trigger);
+    }
+
+    private async Task<bool> RecoverScmRuntimeStateAsync(
+        ScmOAuthSession session,
+        ScmRuntimeRecoveryLease lease,
+        string trigger,
+        CancellationToken cancellationToken)
+    {
+        if (!CanPublishScmRuntimeRecovery(session, lease))
+        {
+            return true;
+        }
+
+        ScmAuthDiagnostics.Write(
+            session.CorrelationId ?? "runtime-recovery",
+            "runtime-recovery",
+            "started",
+            $"trigger={trigger} generation={lease.Generation}");
+
+        var bootstrapRecovered = await RefreshScmBootstrapAsync(
+            session,
+            cancellationToken,
+            lease);
+        if (!CanPublishScmRuntimeRecovery(session, lease))
+        {
+            return true;
+        }
+
+        if (!bootstrapRecovered ||
+            _legacyIdentityLinked is null ||
+            (_legacyIdentityLinked == true && !_scmLegacyRelayAuthenticated))
+        {
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "runtime-recovery",
+                "runtime-recovery",
+                "retrying",
+                $"trigger={trigger} generation={lease.Generation}");
+            return false;
+        }
+
+        RefreshAccountPanel();
+        RefreshAuthenticationRequiredViews();
+        RefreshHeaderStatusBar();
+
+        if (_scmLegacyRelayAuthenticated &&
+            _syncPrivacySettings.SyncConsentCompleted &&
+            _syncPrivacySettings.SyncConsentVersion >= CurrentSyncConsentVersion)
+        {
+            await AutoConnectNetworkAsync();
+        }
+
+        ScmAuthDiagnostics.Write(
+            session.CorrelationId ?? "runtime-recovery",
+            "runtime-recovery",
+            "completed",
+            $"trigger={trigger} generation={lease.Generation} relayAuthenticated={_scmLegacyRelayAuthenticated}");
+        return true;
+    }
+
+    private static async Task ObserveScmRuntimeRecoveryAsync(
+        Task recovery,
+        ScmOAuthSession session,
+        string trigger)
+    {
+        try
+        {
+            await recovery;
+        }
+        catch (Exception exception)
+        {
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "runtime-recovery",
+                "runtime-recovery",
+                "failed",
+                $"trigger={trigger} exceptionType={exception.GetType().Name}");
+        }
+    }
+
+    private void RestoreAndActivateMainWindow()
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+        Show();
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+
+    private void ReportAccountOperationProgress(string message)
+    {
+        RestoreAndActivateMainWindow();
+        _accountOperationStatusText = message.TrimEnd('.', '。');
+        LoginStatusText.Text = message;
+        RefreshAccountPanel();
     }
 
     private static string MapVerificationError(string serverError)
@@ -872,22 +1678,18 @@ public partial class MainWindow
         return NormalizeServerError(serverError, "重置密码");
     }
 
-    private static string MapAuthenticationError(HttpStatusCode statusCode, string serverError, bool isRegister)
+    private static string MapAuthenticationError(HttpStatusCode statusCode, string serverError)
     {
-        var actionName = isRegister ? "注册" : "登录";
-        var cleanedServerError = NormalizeServerError(serverError, actionName);
-        var normalized = serverError.ToLowerInvariant();
+        var cleanedServerError = NormalizeServerError(serverError, "登录");
         if (!string.IsNullOrWhiteSpace(cleanedServerError) &&
             ContainsUserFacingError(cleanedServerError))
         {
-            return FormatActionFailure(actionName, cleanedServerError);
+            return FormatActionFailure("登录", cleanedServerError);
         }
 
         if (statusCode == HttpStatusCode.Unauthorized)
         {
-            return isRegister
-                ? "注册信息未通过验证，请检查验证码后再试。"
-                : "邮箱未注册或密码错误。";
+            return "旧账号邮箱不存在或密码错误。";
         }
 
         if (statusCode == HttpStatusCode.NotFound)
@@ -895,32 +1697,7 @@ public partial class MainWindow
             return "当前服务器版本缺少登录接口，请联系管理员更新服务器。";
         }
 
-        if (statusCode == HttpStatusCode.Conflict || normalized.Contains("already registered"))
-        {
-            return "该邮箱已注册，请直接登录。";
-        }
-
-        if (normalized.Contains("verification code"))
-        {
-            return "验证码无效或已过期。";
-        }
-
-        if (normalized.Contains("password must"))
-        {
-            return "密码至少需要 8 个字符。";
-        }
-
-        if (normalized.Contains("callsign"))
-        {
-            return "呼号过长，请缩短后再试。";
-        }
-
-        if (normalized.Contains("email") && normalized.Contains("required"))
-        {
-            return "请输入登录邮箱和密码。";
-        }
-
-        return FormatActionFailure(actionName, cleanedServerError);
+        return FormatActionFailure("登录", cleanedServerError);
     }
 
     private static string FormatActionFailure(string actionName, string? reason)
@@ -986,8 +1763,12 @@ public partial class MainWindow
 
     private async Task UpdateProfileAsync(bool includeAvatarImage = false)
     {
-        if (!IsLoggedIn)
+        if (!IsLoggedIn ||
+            IsScmLoggedIn ||
+            string.IsNullOrWhiteSpace(_authToken))
         {
+            // The legacy profile endpoint is not an SCM profile authority.
+            // SCM-owned profile editing is introduced by the S2 migration.
             return;
         }
 

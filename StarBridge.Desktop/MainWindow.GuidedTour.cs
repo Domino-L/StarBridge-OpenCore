@@ -129,6 +129,7 @@ public partial class MainWindow
 
     private void ShowJourneyStage(OnboardingJourneyStage stage)
     {
+        _guideMode = GuideMode.Initial;
         _onboardingJourneyStage = stage;
         var step = stage.Chapter switch
         {
@@ -189,7 +190,7 @@ public partial class MainWindow
                 ConfigureClickStep(
                     PersonalQuickScanLogButton,
                     "先连接 Game.log",
-                    "无需登录即可扫描游戏日志。连接后，应用才能识别你的 Star Citizen 游戏 ID，并在注册后用一个明确步骤请你确认绑定。",
+                    "无需登录即可扫描游戏日志。连接后，应用才能识别你的 Star Citizen 游戏 ID，并在登录后用一个明确步骤请你确认绑定。",
                     "首次启航 · 游戏日志");
                 GuidedTourPrimaryButton.Content = "扫描日志";
                 GuidedTourPrimaryButton.IsEnabled = true;
@@ -201,7 +202,7 @@ public partial class MainWindow
                     "先登录你的账号",
                     "完整引导会在登录后开始。在此之前只介绍登录入口；如果现在不登录，后续章节不会出现。",
                     "首次启航 · 登录");
-                GuidedTourPrimaryButton.Content = "登录 / 注册";
+                GuidedTourPrimaryButton.Content = "登录账号";
                 GuidedTourPrimaryButton.IsEnabled = true;
                 GuidedTourPrimaryButton.Visibility = Visibility.Visible;
                 break;

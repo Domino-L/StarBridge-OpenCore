@@ -1,4 +1,8 @@
+#if STARBRIDGE_HOST_RUNTIME
+namespace StarBridge.HostRuntime.Notifications.Wpf;
+#else
 namespace StarBridge.Desktop;
+#endif
 
 using System.IO;
 using System.Text.Json;
@@ -74,6 +78,7 @@ internal sealed record NotificationSettings(
             : normalized;
     }
 
+#if !STARBRIDGE_HOST_RUNTIME
     private static readonly string SettingsPath = Path.Combine(
         DesktopAppConfig.ConfigDirectory,
         "notification.settings.json");
@@ -103,4 +108,5 @@ internal sealed record NotificationSettings(
             WriteIndented = true
         }));
     }
+#endif
 }

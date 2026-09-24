@@ -31,7 +31,7 @@ using WpfRect = System.Windows.Rect;
 
 namespace StarBridge.Desktop;
 
-internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
+internal sealed partial class OverlayCompositionStartupTransitionWindow : IDisposable
 {
     private const int WsPopup = unchecked((int)0x80000000);
     private const int WsVisible = 0x10000000;
@@ -70,17 +70,17 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
     private static readonly object ActiveWindowsLock = new();
     private static readonly PeripheralAnchor[] PeripheralAnchors =
     [
-        new("GAME.LOG", "SYNC", 1, 0.24f, 0.24f, 1),
-        new("IDENTITY", "OK", 2, 0.16f, 0.62f, 1),
-        new("RELAY", "READY", 3, 0.82f, 0.36f, -1),
-        new("HUD", "OK", 4, 0.70f, 0.78f, -1),
-        new("SURFACE", "ONLINE", 6, 0.52f, 0.86f, 1)
+        new(1, 0.24f, 0.24f, 1),
+        new(2, 0.16f, 0.62f, 1),
+        new(3, 0.82f, 0.36f, -1),
+        new(4, 0.70f, 0.78f, -1),
+        new(6, 0.52f, 0.86f, 1)
     ];
     private static readonly DiagnosticPanelSpec[] DiagnosticPanels =
     [
-        new(0, 0.163f, 0.285f, "SCAN"),
-        new(1, 0.256f, 0.365f, "WAIT"),
-        new(2, 0.349f, 0.395f, "STANDBY")
+        new(0, 0.163f, 0.285f),
+        new(1, 0.256f, 0.365f),
+        new(2, 0.349f, 0.395f)
     ];
 
     private readonly ManualResetEventSlim _started = new(false);
@@ -130,6 +130,7 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
     private int _mouseActivateDiagnosticsCount;
     private int _hitTraceDiagnosticsCount;
     private int _mouseInputDiagnosticsCount;
+    private string _language = "en";
 
     private OverlayCompositionStartupTransitionWindow()
     {
@@ -143,7 +144,6 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
         IReadOnlyList<WpfRect> revealTargets,
         out OverlayCompositionStartupTransitionWindow? transitionWindow)
     {
-        _ = language;
         transitionWindow = null;
         if (!settings.EnableStartupTransition ||
             settings.StartupTransitionStyle != OverlayStartupTransitionStyle.BridgeTerminal)
@@ -154,7 +154,12 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
         var window = new OverlayCompositionStartupTransitionWindow();
         try
         {
-            window.Start(ResolveDeviceBounds(owner), settings, context ?? OverlayStartupTransitionContext.Default, revealTargets);
+            window.Start(
+                ResolveDeviceBounds(owner),
+                settings,
+                language,
+                context ?? OverlayStartupTransitionContext.ForLanguage(language),
+                revealTargets);
             transitionWindow = window;
             lock (ActiveWindowsLock)
             {
@@ -181,7 +186,6 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
         IReadOnlyList<WpfRect> revealTargets,
         out OverlayCompositionStartupTransitionWindow? transitionWindow)
     {
-        _ = language;
         transitionWindow = null;
         if (!settings.EnableStartupTransition ||
             settings.StartupTransitionStyle != OverlayStartupTransitionStyle.BridgeTerminal)
@@ -197,7 +201,12 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
         var window = new OverlayCompositionStartupTransitionWindow();
         try
         {
-            window.Start(bounds, settings, context ?? OverlayStartupTransitionContext.Default, revealTargets);
+            window.Start(
+                bounds,
+                settings,
+                language,
+                context ?? OverlayStartupTransitionContext.ForLanguage(language),
+                revealTargets);
             transitionWindow = window;
             lock (ActiveWindowsLock)
             {
@@ -250,6 +259,7 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
     private void Start(
         (int X, int Y, int Width, int Height) bounds,
         OverlayDisplaySettings settings,
+        string language,
         OverlayStartupTransitionContext context,
         IReadOnlyList<WpfRect> revealTargets)
     {
@@ -266,6 +276,7 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
             _width = bounds.Width;
             _height = bounds.Height;
             _settings = settings;
+            _language = language;
             _context = context;
             _palette = ResolvePalette(settings);
             _revealTargets = revealTargets.ToArray();
@@ -489,11 +500,11 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
 
     private IReadOnlyList<OverlayStartupStatusStep> StatusSteps => _context.StatusSteps.Count >= 7
         ? _context.StatusSteps
-        : OverlayStartupTransitionContext.Default.StatusSteps;
+        : OverlayStartupTransitionContext.ForLanguage(_language).StatusSteps;
 
     private IReadOnlyList<string> TerminalLines => _context.TerminalLines.Count > 0
         ? _context.TerminalLines
-        : OverlayStartupTransitionContext.Default.TerminalLines;
+        : OverlayStartupTransitionContext.ForLanguage(_language).TerminalLines;
 
     private void DrawScene(ID2D1RenderTarget target, float p)
     {
@@ -815,7 +826,7 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
         var alpha = appear * layerOpacity;
         var slideX = x - (1 - appear) * 18;
         var step = StatusSteps[Math.Clamp(panel.StatusIndex, 0, StatusSteps.Count - 1)];
-        var state = done >= 0.96f ? step.DoneState : panel.PendingState;
+        var state = done >= 0.96f ? step.DoneState : step.PendingState;
         var stateColor = done >= 0.96f ? _palette.Success : done > 0.12f ? _palette.Primary : _palette.Warning;
 
         FillPanelGradient(target, slideX, y, width, height, 0.34f * alpha);
@@ -957,6 +968,7 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
 
         var progress = StatusProgress(t, anchor.StatusIndex);
         var pulse = StatusPulse(t, anchor.StatusIndex);
+        var step = StatusSteps[Math.Clamp(anchor.StatusIndex, 0, StatusSteps.Count - 1)];
         var alpha = active * layerOpacity;
         var targetPoint = new Vector2(_width * anchor.X, _height * anchor.Y);
         var endPoint = Vector2.Lerp(origin, targetPoint, 0.92f);
@@ -980,8 +992,8 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
         FillEllipse(target, targetPoint.X, targetPoint.Y, 3.0f + pulse * 2.2f, 3.0f + pulse * 2.2f, color, (0.30f + 0.38f * progress + 0.18f * pulse) * alpha);
 
         var textX = anchor.LabelSide > 0 ? labelX + 28 : labelX - 112;
-        var status = progress > 0.95f ? anchor.DoneState : "LINK";
-        DrawText(target, anchor.Label, _tinyFormat, textX, labelY, 96, 14, _palette.Muted, 0.74f * alpha);
+        var status = progress > 0.95f ? step.DoneState : step.PendingState;
+        DrawText(target, step.Label, _tinyFormat, textX, labelY, 96, 14, _palette.Muted, 0.74f * alpha);
         DrawText(target, status, anchor.LabelSide > 0 ? _tinyFormat : _tinyRightFormat, textX, labelY + 13, 96, 14, color, (0.58f + 0.28f * progress + 0.14f * pulse) * alpha);
     }
 
@@ -1434,7 +1446,7 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
 
     private static string NormalizeStatusLabel(string label)
     {
-        return label.Replace("CLICK-THROUGH", "CLICK THROUGH", StringComparison.OrdinalIgnoreCase);
+        return label;
     }
 
     private static string CompactStatusValue(string value)
@@ -1450,14 +1462,6 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
 
     private static string DiagnosticValue(OverlayStartupStatusStep step, DiagnosticPanelSpec panel, float done)
     {
-        if (panel.StatusIndex == 0 && done < 0.90f)
-        {
-            var value = string.IsNullOrWhiteSpace(step.Value) ? "StarCitizen.exe" : step.Value;
-            return value.StartsWith("waiting", StringComparison.OrdinalIgnoreCase)
-                ? value
-                : "waiting for " + value;
-        }
-
         return string.IsNullOrWhiteSpace(step.Value) ? step.Label : step.Value;
     }
 
@@ -1964,9 +1968,9 @@ internal sealed class OverlayCompositionStartupTransitionWindow : IDisposable
 
     private readonly record struct DataTick(float X, float Y, float Width, float Thickness, float Start);
 
-    private readonly record struct PeripheralAnchor(string Label, string DoneState, int StatusIndex, float X, float Y, int LabelSide);
+    private readonly record struct PeripheralAnchor(int StatusIndex, float X, float Y, int LabelSide);
 
-    private readonly record struct DiagnosticPanelSpec(int StatusIndex, float AppearStart, float DoneStart, string PendingState);
+    private readonly record struct DiagnosticPanelSpec(int StatusIndex, float AppearStart, float DoneStart);
 
     private readonly record struct ConsoleMetrics(float X, float Y, float Width, float Height, float Open, float Collapse);
 

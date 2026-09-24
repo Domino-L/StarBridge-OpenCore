@@ -30,7 +30,7 @@ public partial class OverlayWindow : Window, IOverlayHost
     private const double SteadyStateRegionPadding = 22;
     private const double SteadyStateRegionDelayMs = OverlayStartupTransitionLayer.DurationMs + 120;
 
-    private readonly IEnumerable<OverlayLayoutItem> _layout;
+    private IReadOnlyList<OverlayLayoutItem> _layout;
     private readonly OverlayViewModel _viewModel;
     private OverlayDisplaySettings _settings;
     private OverlayStartupTransitionContext _startupTransitionContext;
@@ -60,7 +60,7 @@ public partial class OverlayWindow : Window, IOverlayHost
     {
         InitializeComponent();
         ApplySurfaceBounds(surfaceBounds);
-        _layout = layout;
+        _layout = layout.ToArray();
         _settings = settings;
         _startupTransitionContext = startupTransitionContext;
         _viewModel = new OverlayViewModel(
@@ -136,6 +136,7 @@ public partial class OverlayWindow : Window, IOverlayHost
     public void Refresh(
         OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
+        IEnumerable<OverlayLayoutItem> layout,
         OverlayDisplaySettings settings,
         OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
@@ -148,6 +149,7 @@ public partial class OverlayWindow : Window, IOverlayHost
         OverlaySceneContext sceneContext)
     {
         ApplySurfaceBounds(surfaceBounds);
+        _layout = layout.ToArray();
         _settings = settings;
         _startupTransitionContext = startupTransitionContext;
         _viewModel.Refresh(
@@ -199,19 +201,23 @@ public partial class OverlayWindow : Window, IOverlayHost
         }
     }
 
+    public void QueueGameEventNotification(OverlayEventNotificationTypes eventType, string title, string detail,
+        bool important, bool positive) => QueueGameEventNotification(eventType, title, detail, important, positive, null);
+
     public void QueueGameEventNotification(
         OverlayEventNotificationTypes eventType,
         string title,
         string detail,
         bool important,
-        bool positive)
+        bool positive,
+        Func<bool>? isCurrent)
     {
         if (!_settings.ShowEventNotifications)
         {
             return;
         }
 
-        _viewModel.QueueGameEventNotification(eventType, title, detail, important, positive);
+        _viewModel.QueueGameEventNotification(eventType, title, detail, important, positive, isCurrent);
     }
 
     public void QueueCommunicationEvent(string title, string detail)
@@ -818,6 +824,7 @@ public partial class OverlayWindow : Window, IOverlayHost
         if (panel is Border border)
         {
             border.Background = CloneBrushWithOpacity(_viewModel.PanelBackgroundBrush, item.BackgroundOpacity);
+            border.BorderBrush = CloneBrushWithOpacity(_viewModel.PanelBorderBrush, item.DecorationOpacity);
         }
 
         ApplyTextOpacity(panel, item.TextOpacity);
@@ -913,6 +920,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private readonly OverlayRosterRotationCursor _rosterRotationCursor = new();
     private readonly DispatcherTimer _eventNotificationTimer = new(DispatcherPriority.Render) { Interval = EventNotificationIdleInterval };
     private readonly Queue<PendingOverlayEventNotification> _pendingEventNotifications = new();
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<OverlayEventNotificationRow, Func<bool>> _eventValidity = new();
     private readonly Queue<PendingCommunicationEvent> _pendingCommunicationEvents = new();
     private readonly Queue<OverlayChatMessage> _pendingChatMessages = new();
     private readonly Dictionary<string, OverlayGameEventPlayerState> _gameEventPlayerStates = new(StringComparer.OrdinalIgnoreCase);
@@ -928,6 +936,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private bool _eventNotificationPinImportant = OverlayDisplaySettings.Default.EventNotificationPinImportant;
     private OverlayEventNotificationSide _eventNotificationSide = OverlayDisplaySettings.Default.EventNotificationSide;
     private double _eventNotificationAnimationScale = 1;
+    private double _eventEnterDurationMs = 430;
+    private double _eventExitDurationMs = 320;
     private OverlayEventNotificationDurationOverrides _eventNotificationDurations = OverlayDisplaySettings.Default.EventNotificationDurations;
     private OverlayAnimationFrameRate _animationFrameRate = OverlayDisplaySettings.Default.AnimationFrameRate;
     private string _chatChannelId = "";
@@ -990,6 +1000,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private double _overlayOpacity = 0.85;
     private double _eventNotificationTextOpacity = 1.0;
     private double _eventNotificationBackgroundOpacity = 1.0;
+    private double _eventNotificationDecorationOpacity = 1.0;
     private Brush _panelBackgroundBrush = new SolidColorBrush(Color.FromArgb(176, 5, 10, 17));
     private Brush _panelBorderBrush = new SolidColorBrush(Color.FromRgb(69, 174, 255));
     private Brush _titleBrush = new SolidColorBrush(Color.FromRgb(83, 190, 255));
@@ -1294,6 +1305,12 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     {
         get => _eventNotificationBackgroundOpacity;
         private set => SetProperty(ref _eventNotificationBackgroundOpacity, value);
+    }
+
+    public double EventNotificationDecorationOpacity
+    {
+        get => _eventNotificationDecorationOpacity;
+        private set => SetProperty(ref _eventNotificationDecorationOpacity, value);
     }
 
     public Brush PanelBackgroundBrush
@@ -1671,7 +1688,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         IEnumerable<OverlayChatMessage>? chatMessages = null)
     {
         sceneContext ??= OverlaySceneContext.Fleet(settings.ScenePreference);
-        var zh = language.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
         var playerArray = players.ToArray();
         _showNotice = settings.ShowNotice;
         _communicationEventDurationSeconds = (int)Math.Ceiling(
@@ -1684,9 +1701,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             _timer.Stop();
             OnChanged(nameof(NotificationVisibility));
         }
-        OverlayOpacity = settings.Opacity;
+        OverlayOpacity = 1.0;
         EventNotificationTextOpacity = OverlayLayoutItem.NormalizeTextOpacity(settings.EventNotificationTextOpacity);
         EventNotificationBackgroundOpacity = OverlayLayoutItem.NormalizeBackgroundOpacity(settings.EventNotificationBackgroundOpacity);
+        EventNotificationDecorationOpacity = OverlayLayoutItem.NormalizeDecorationOpacity(settings.EventNotificationDecorationOpacity);
         ApplyTheme(settings.Theme);
         ApplyCrosshairSettings(settings);
         CrosshairVisibility = settings.ShowCrosshair ? Visibility.Visible : Visibility.Collapsed;
@@ -1713,7 +1731,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             localPresence,
             localShard,
             sceneContext);
-        RefreshGameEventNotifications(playerArray, settings, zh, hasFleet, localShard, sceneContext);
+        RefreshGameEventNotifications(playerArray, settings, language, hasFleet, localShard, sceneContext);
         RefreshChatMessages(chatMessages ?? [], settings, zh, sceneContext);
 
         var nextNoticeTitle = string.IsNullOrWhiteSpace(commandState.NoticeTitle)
@@ -1734,9 +1752,13 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         SquadsTitle = sceneContext.Kind == OverlaySceneKind.PartyRoom
             ? zh ? "房间概况" : "PARTY OVERVIEW"
+            : sceneContext.Kind == OverlaySceneKind.Community
+            ? zh ? "组织概况" : "ORGANIZATION OVERVIEW"
             : zh ? "舰队总览" : "FLEET OVERVIEW";
         MembersTitle = sceneContext.Kind == OverlaySceneKind.PartyRoom
             ? zh ? "房间成员" : "PARTY MEMBERS"
+            : sceneContext.Kind == OverlaySceneKind.Community
+            ? zh ? "组织成员" : "ORGANIZATION MEMBERS"
             : zh ? "成员状态" : "FLEET MEMBERS";
         HotkeyToggleLabel = zh ? "热键切换" : "HOTKEY TOGGLE";
         OnChanged(nameof(NotificationVisibility));
@@ -1843,8 +1865,31 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         ShowCommunicationEvent(pending);
     }
 
+    private Guid? _liveCommunicationEvent;
+
+    internal bool TryShowLiveCommunicationEvent(Guid id, string title, string detail)
+    {
+        // Do not queue a time-sensitive reminder behind older room/communication content.
+        if (!_showNotice || _noticeSecondsRemaining > 0 || _pendingCommunicationEvents.Count != 0) return false;
+        ShowCommunicationEvent(new PendingCommunicationEvent(title, detail));
+        _liveCommunicationEvent = id;
+        return true;
+    }
+
+    internal void ClearLiveCommunicationEvent(Guid id)
+    {
+        if (_liveCommunicationEvent != id) return;
+        _liveCommunicationEvent = null;
+        _noticeSecondsRemaining = 0;
+        FleetNoticeTitle = "";
+        FleetNotice = "";
+        OnChanged(nameof(NoticeTimerLabel));
+        OnChanged(nameof(NotificationVisibility));
+    }
+
     private void ShowCommunicationEvent(PendingCommunicationEvent communicationEvent)
     {
+        _liveCommunicationEvent = null;
         FleetNoticeTitle = communicationEvent.Title;
         FleetNotice = communicationEvent.Detail;
         _noticeSecondsRemaining = _communicationEventDurationSeconds;
@@ -2111,6 +2156,29 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         }
     }
 
+    internal void ClearAuthorizedContent()
+    {
+        _liveCommunicationEvent = null;
+        ResetChatState();
+        ClearEventNotifications();
+        _pendingCommunicationEvents.Clear();
+        _noticeSecondsRemaining = 0;
+        _lastCommandNoticeSignature = "";
+        FleetNoticeTitle = "";
+        FleetNotice = "";
+        _timer.Stop();
+        _gameEventSnapshotInitialized = false;
+        _gameEventSnapshotSceneKind = null;
+        _gameEventPlayerStates.Clear();
+        _gameEventFleetState = OverlayGameEventFleetState.Empty;
+        _lastGameEventLocalShard = "";
+        _authorizedRoster = new([]);
+        Members.Clear();
+        Squads.Clear();
+        CompactSquads.Clear();
+        OnChanged(nameof(NotificationVisibility));
+    }
+
     private void ResetChatState()
     {
         var changed = ChatMessages.Count > 0 || _pendingChatMessages.Count > 0 || _chatInitialized;
@@ -2160,16 +2228,20 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private void RefreshGameEventNotifications(
         IReadOnlyCollection<PlayerRow> players,
         OverlayDisplaySettings settings,
-        bool zh,
+        string language,
         bool hasFleet,
         string localShard,
         OverlaySceneContext sceneContext)
     {
+        var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
         _eventNotificationDurationSeconds = Math.Clamp(settings.EventNotificationDurationSeconds, 1, 12);
         _eventNotificationMaxVisibleCount = OverlayDisplaySettings.NormalizeEventNotificationMaxVisibleCount(settings.EventNotificationMaxVisibleCount);
         _eventNotificationPinImportant = settings.EventNotificationPinImportant;
         _eventNotificationSide = settings.EventNotificationSide;
         _eventNotificationAnimationScale = OverlayDisplaySettings.ResolveEventNotificationAnimationScale(settings.EventNotificationAnimationSpeed);
+        var eventAppearance = OverlaySkinCatalog.Get(settings.Skin);
+        _eventEnterDurationMs = eventAppearance.EventEnterDurationMs;
+        _eventExitDurationMs = eventAppearance.EventExitDurationMs;
         _eventNotificationDurations = settings.EventNotificationDurations;
         _animationFrameRate = settings.AnimationFrameRate;
         RefreshEventNotificationRetentionSettings();
@@ -2203,7 +2275,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         if (!sceneContext.IsLocalOnly)
         {
-            QueueEventReceiverConnectionIfNeeded(zh);
+            QueueEventReceiverConnectionIfNeeded(language);
         }
 
         if (!_gameEventSnapshotInitialized)
@@ -2626,17 +2698,21 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             : player.Callsign!;
     }
 
-    private void QueueEventReceiverConnectionIfNeeded(bool zh)
+    internal void QueueEventReceiverConnectionIfNeeded(string language)
     {
         if (_eventNotificationConnectionQueued)
         {
             return;
         }
 
+        var traditional = language.StartsWith("zh-Hant", StringComparison.OrdinalIgnoreCase) ||
+                          language.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ||
+                          language.Equals("zh-HK", StringComparison.OrdinalIgnoreCase);
+        var simplified = !traditional && language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
         _eventNotificationConnectionQueued = true;
         QueueSystemEventNotification(
-            zh ? "事件接收系统" : "Event receiver",
-            zh ? "已连接事件接收系统" : "Event receiver connected",
+            traditional ? "事件接收系統" : simplified ? "事件接收系统" : "Event receiver",
+            traditional ? "已連接事件接收系統" : simplified ? "已连接事件接收系统" : "Event receiver connected",
             TitleBrush);
     }
 
@@ -2662,7 +2738,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         string title,
         string detail,
         Brush accent,
-        bool important = false)
+        bool important = false,
+        Func<bool>? isCurrent = null)
     {
         QueueOrShowEventNotification(new PendingOverlayEventNotification(
             title,
@@ -2673,7 +2750,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             important,
             MergeKey: null,
             OverlayLocationMergePhase.None,
-            DateTimeOffset.Now));
+            DateTimeOffset.Now, isCurrent));
     }
 
     private void QueueMergeableLocationEventNotification(
@@ -2700,18 +2777,20 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         string title,
         string detail,
         bool important,
-        bool positive)
+        bool positive,
+        Func<bool>? isCurrent = null)
     {
         QueueEventNotification(
             eventType,
             title,
             detail,
             positive ? OnlineBrush : AlertBrush,
-            important);
+            important, isCurrent);
     }
 
     private void QueueOrShowEventNotification(PendingOverlayEventNotification notification)
     {
+        if (notification.IsCurrent?.Invoke() == false) return;
         if (TryMergeEventNotification(notification))
         {
             return;
@@ -2729,6 +2808,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void ShowEventNotification(PendingOverlayEventNotification notification, DateTimeOffset now)
     {
+        if (notification.IsCurrent?.Invoke() == false) return;
         var durationSeconds = ResolveEventNotificationDuration(notification.EventType);
         var expiresAt = notification.Important && _eventNotificationPinImportant
             ? DateTimeOffset.MaxValue
@@ -2741,6 +2821,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             expiresAt,
             notification.EventType);
         row.ConfigureMerge(notification.MergeKey, notification.MergePhase, notification.CreatedAt);
+        if (notification.IsCurrent is not null) _eventValidity.Add(row, notification.IsCurrent);
         if (_animationFrameRate != OverlayAnimationFrameRate.Off)
         {
             row.BeginEnter(now, ResolveEventNotificationSlideOffset());
@@ -2879,7 +2960,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         var slideOffset = ResolveEventNotificationSlideOffset();
         foreach (var notification in EventNotifications)
         {
-            if (!notification.IsExiting && notification.ExpiresAt <= now)
+            if (!notification.IsExiting && (notification.ExpiresAt <= now ||
+                _eventValidity.TryGetValue(notification, out var isCurrent) && !isCurrent()))
             {
                 if (_animationFrameRate == OverlayAnimationFrameRate.Off)
                 {
@@ -2896,7 +2978,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         var removed = false;
         for (var index = EventNotifications.Count - 1; index >= 0; index--)
         {
-            if (EventNotifications[index].AdvanceAnimation(now, _eventNotificationAnimationScale))
+            if (EventNotifications[index].AdvanceAnimation(now, _eventNotificationAnimationScale,
+                    _eventEnterDurationMs, _eventExitDurationMs))
             {
                 EventNotifications.RemoveAt(index);
                 removed = true;
@@ -3052,7 +3135,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         bool Important,
         string? MergeKey,
         OverlayLocationMergePhase MergePhase,
-        DateTimeOffset CreatedAt);
+        DateTimeOffset CreatedAt,
+        Func<bool>? IsCurrent = null);
 
     private sealed record PendingCommunicationEvent(string Title, string Detail);
 
@@ -3898,7 +3982,8 @@ public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyP
         return true;
     }
 
-    public bool AdvanceAnimation(DateTimeOffset now, double scale)
+    public bool AdvanceAnimation(DateTimeOffset now, double scale,
+        double enterDurationMs = EnterDurationMs, double exitDurationMs = ExitDurationMs)
     {
         if (_removeImmediately)
         {
@@ -3910,7 +3995,7 @@ public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyP
             return false;
         }
 
-        var durationMs = (_motion == OverlayEventNotificationMotion.Exiting ? ExitDurationMs : EnterDurationMs) *
+        var durationMs = Math.Clamp(_motion == OverlayEventNotificationMotion.Exiting ? exitDurationMs : enterDurationMs, 1, 2000) *
                          Math.Clamp(scale, 0.35, 2.0);
         var progress = durationMs <= 1
             ? 1

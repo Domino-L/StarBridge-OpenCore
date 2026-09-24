@@ -370,6 +370,33 @@ internal sealed class PersonalProfileRemoteRepository
             .ToLowerInvariant();
         return Path.Combine(DesktopAppConfig.ConfigDirectory, "personal-profile-cache", $"{hash}.json");
     }
+
+    internal static void PromoteLegacyAccountIdentity(
+        string legacyAccountIdentity,
+        string accountRouteIdentity)
+    {
+        if (string.IsNullOrWhiteSpace(legacyAccountIdentity) ||
+            string.IsNullOrWhiteSpace(accountRouteIdentity))
+        {
+            return;
+        }
+
+        var source = GetCachePath(legacyAccountIdentity);
+        var destination = GetCachePath(accountRouteIdentity);
+        if (source.Equals(destination, StringComparison.OrdinalIgnoreCase) || !File.Exists(source))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (File.Exists(destination))
+        {
+            File.Delete(source);
+            return;
+        }
+
+        File.Move(source, destination);
+    }
 }
 
 internal static class PersonalProfileContractMapper

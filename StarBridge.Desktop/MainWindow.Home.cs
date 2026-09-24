@@ -56,7 +56,11 @@ public partial class MainWindow
 
     private void RefreshHomeIdentity()
     {
-        var displayName = !string.IsNullOrWhiteSpace(_callsign)
+        var accountState = AccountState;
+        var displayName = accountState.ScmAuthenticated && !accountState.HasRelaySession &&
+                          !string.IsNullOrWhiteSpace(accountState.DisplayName)
+            ? accountState.DisplayName!
+            : !string.IsNullOrWhiteSpace(_callsign)
             ? _callsign!
             : !string.IsNullOrWhiteSpace(_localPlayer)
                 ? _localPlayer!
@@ -96,8 +100,12 @@ public partial class MainWindow
         ApplyHomeStatus(
             HomeAccountStatusDot,
             HomeAccountStatusText,
-            IsLoggedIn ? "账号已登录" : "账号未登录",
-            IsLoggedIn ? "StatusSuccessBrush" : "StatusDisabledBrush");
+            accountState.HasRelaySession
+                ? "账号已登录"
+                : accountState.ScmAuthenticated ? "SCM 账号已登录" : "账号未登录",
+            accountState.HasRelaySession
+                ? "StatusSuccessBrush"
+                : accountState.ScmAuthenticated ? "StatusWarningBrush" : "StatusDisabledBrush");
         ApplyHomeStatus(
             HomeGameStatusDot,
             HomeGameStatusText,
@@ -211,7 +219,7 @@ public partial class MainWindow
 
         if (!IsLoggedIn)
         {
-            Add("login", "登录或注册账号", "同步好友、组织、房间与个人资料", accent);
+            Add("login", "登录 SCM 账号", "同步好友、组织、房间与个人资料", accent);
         }
 
         if (string.IsNullOrWhiteSpace(_logPath) || !File.Exists(_logPath))
@@ -275,7 +283,8 @@ public partial class MainWindow
         var startupState = _startupDataGate.Current.State;
         if (startupState is StartupDataGateState.Loading or
             StartupDataGateState.Error or
-            StartupDataGateState.IdentityRequired ||
+            StartupDataGateState.IdentityRequired or
+            StartupDataGateState.IdentityMismatch ||
             (startupState == StartupDataGateState.Initial && IsLoggedIn))
         {
             HomeFleetTitleText.Text = "组织与通讯";
@@ -283,6 +292,7 @@ public partial class MainWindow
             {
                 StartupDataGateState.Error => "重试同步",
                 StartupDataGateState.IdentityRequired => "等待游戏身份",
+                StartupDataGateState.IdentityMismatch => "身份不相同",
                 _ => "正在同步"
             };
             HomeFleetActionButton.Tag = startupState == StartupDataGateState.Error
@@ -293,17 +303,22 @@ public partial class MainWindow
             {
                 StartupDataGateState.Error => "服务器数据暂不可用",
                 StartupDataGateState.IdentityRequired => "等待游戏身份",
+                StartupDataGateState.IdentityMismatch => "游戏身份不相同",
                 _ => "正在确认服务器数据"
             };
             HomeFleetAnnouncementDetailText.Text = startupState switch
             {
                 StartupDataGateState.Error => "当前没有可用缓存，请检查网络后重试。",
                 StartupDataGateState.IdentityRequired => "进入游戏后将从 Game.log 识别游戏 ID；完成绑定前不会同步用户数据。",
+                StartupDataGateState.IdentityMismatch => "SCM、兼容账号或 Game.log 中存在不一致的游戏 ID；同步已暂停。",
                 _ => "组织、权限、任务与成员状态到位前不会显示旧数据。"
             };
-            HomeFleetCommunicationText.Text = startupState == StartupDataGateState.IdentityRequired
-                ? "等待游戏身份"
-                : "等待服务器数据";
+            HomeFleetCommunicationText.Text = startupState switch
+            {
+                StartupDataGateState.IdentityRequired => "等待游戏身份",
+                StartupDataGateState.IdentityMismatch => "身份不相同",
+                _ => "等待服务器数据"
+            };
             HomeFleetUnreadText.Text = "";
             return;
         }
@@ -525,7 +540,7 @@ public partial class MainWindow
     {
         if (!IsLoggedIn)
         {
-            return ("login", "登录 / 注册");
+            return ("login", "登录账号");
         }
 
         if (string.IsNullOrWhiteSpace(_logPath) || !File.Exists(_logPath))

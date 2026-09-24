@@ -9,7 +9,8 @@ public enum StartupDataGateState
     Live,
     OfflineCache,
     Error,
-    IdentityRequired
+    IdentityRequired,
+    IdentityMismatch
 }
 
 public enum StartupSyncOutcome
@@ -17,7 +18,8 @@ public enum StartupSyncOutcome
     Succeeded,
     Failed,
     TimedOut,
-    IdentityRequired
+    IdentityRequired,
+    IdentityMismatch
 }
 
 public readonly record struct StartupDataGateAttempt(
@@ -82,11 +84,17 @@ public static class StartupDataGate
         bool syncSucceeded,
         bool syncFailed,
         bool timedOut,
-        bool identityRequired = false)
+        bool identityRequired = false,
+        bool identityMismatch = false)
     {
         if (syncSucceeded)
         {
             return StartupDataGateState.Live;
+        }
+
+        if (identityMismatch)
+        {
+            return StartupDataGateState.IdentityMismatch;
         }
 
         if (identityRequired)
@@ -105,6 +113,79 @@ public static class StartupDataGate
     }
 }
 
+public enum StartupIdentityGateDecision
+{
+    Allow,
+    IdentityRequired,
+    IdentityMismatch
+}
+
+public static class StartupIdentityGatePolicy
+{
+    public static StartupIdentityGateDecision Evaluate(
+        bool isScmLoggedIn,
+        bool isScmGameIdentityVerified,
+        string? scmGameIdentity,
+        bool legacyBindingSupported,
+        bool legacyCanSynchronize,
+        string? legacyBoundGameIdentity,
+        string? detectedGameIdentity)
+    {
+        if (isScmLoggedIn)
+        {
+            if (!isScmGameIdentityVerified)
+            {
+                return StartupIdentityGateDecision.IdentityRequired;
+            }
+
+            return HasConflictingIdentities(
+                    scmGameIdentity,
+                    legacyBoundGameIdentity,
+                    detectedGameIdentity)
+                ? StartupIdentityGateDecision.IdentityMismatch
+                : StartupIdentityGateDecision.Allow;
+        }
+
+        if (!legacyBindingSupported || legacyCanSynchronize)
+        {
+            return StartupIdentityGateDecision.Allow;
+        }
+
+        return HasConflictingIdentities(legacyBoundGameIdentity, detectedGameIdentity)
+            ? StartupIdentityGateDecision.IdentityMismatch
+            : StartupIdentityGateDecision.IdentityRequired;
+    }
+
+    private static bool HasConflictingIdentities(params string?[] candidates)
+    {
+        string? expected = null;
+        foreach (var candidate in candidates)
+        {
+            var normalized = Normalize(candidate);
+            if (normalized is null)
+            {
+                continue;
+            }
+
+            if (expected is null)
+            {
+                expected = normalized;
+                continue;
+            }
+
+            if (!expected.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}
+
 public static class StartupDataVisibilityPolicy
 {
     public static StartupDataVisibility Resolve(StartupDataGateState state)
@@ -115,7 +196,8 @@ public static class StartupDataVisibilityPolicy
             OnlineCountVisible: state == StartupDataGateState.Live,
             BlockingStateVisible: state is StartupDataGateState.Loading or
                 StartupDataGateState.Error or
-                StartupDataGateState.IdentityRequired,
+                StartupDataGateState.IdentityRequired or
+                StartupDataGateState.IdentityMismatch,
             OfflineCacheNoticeVisible: state == StartupDataGateState.OfflineCache,
             LocalPreferencesVisible: true,
             PersonalProfileVisible: true);
@@ -129,6 +211,37 @@ public static class StartupRetryPolicy
 
     public static bool OffersManualRetry(StartupSyncOutcome outcome) =>
         outcome is StartupSyncOutcome.Failed or StartupSyncOutcome.TimedOut;
+}
+
+public enum StartupDataRefreshAction
+{
+    RefreshDirectly,
+    RetryStartup,
+    WaitForStartup
+}
+
+public static class StartupDataRefreshPolicy
+{
+    public static StartupDataRefreshAction Resolve(
+        StartupDataGateState state,
+        bool canSynchronizeUserData)
+    {
+        if (state == StartupDataGateState.Loading)
+        {
+            return StartupDataRefreshAction.WaitForStartup;
+        }
+
+        if (state is StartupDataGateState.IdentityRequired or StartupDataGateState.IdentityMismatch)
+        {
+            return canSynchronizeUserData
+                ? StartupDataRefreshAction.RetryStartup
+                : StartupDataRefreshAction.WaitForStartup;
+        }
+
+        return state == StartupDataGateState.Live && canSynchronizeUserData
+            ? StartupDataRefreshAction.RefreshDirectly
+            : StartupDataRefreshAction.RetryStartup;
+    }
 }
 
 public sealed class StartupDataGateController
@@ -174,7 +287,8 @@ public sealed class StartupDataGateController
                 syncSucceeded: outcome == StartupSyncOutcome.Succeeded,
                 syncFailed: outcome == StartupSyncOutcome.Failed,
                 timedOut: outcome == StartupSyncOutcome.TimedOut,
-                identityRequired: outcome == StartupSyncOutcome.IdentityRequired),
+                identityRequired: outcome == StartupSyncOutcome.IdentityRequired,
+                identityMismatch: outcome == StartupSyncOutcome.IdentityMismatch),
             attempt.CacheWrittenAtUtc);
         return true;
     }

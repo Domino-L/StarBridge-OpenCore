@@ -62,9 +62,11 @@ internal sealed record SyncPrivacySettings(
             HideStatusBeforeGameStart = true,
             HideServerInfoBeforePu = true,
             StopSyncAfterGameExit = true,
-            PresenceVisibilityMode = Enum.IsDefined(PresenceVisibilityMode)
-                ? PresenceVisibilityMode
-                : PlayerPresenceVisibilityMode.Online
+            PresenceVisibilityMode = PresenceVisibilityMode is PlayerPresenceVisibilityMode.Online
+                or PlayerPresenceVisibilityMode.InGame
+                or PlayerPresenceVisibilityMode.Invisible
+                    ? PresenceVisibilityMode
+                    : PlayerPresenceVisibilityMode.Online
         };
     }
 

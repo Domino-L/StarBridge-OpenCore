@@ -1,18 +1,13 @@
 namespace StarBridge.Desktop;
 
+using StarBridge.Core.Overlay;
 using StarBridge.Core.Presence;
-
-public enum OverlayScenePreference
-{
-    Auto,
-    Fleet,
-    PartyRoom
-}
 
 public enum OverlaySceneKind
 {
     Fleet,
-    PartyRoom
+    PartyRoom,
+    Community
 }
 
 public sealed record OverlaySceneContext(
@@ -78,14 +73,15 @@ public static class OverlaySceneResolver
         string? localPlayer,
         string? localCallsign)
     {
-        var usePartyRoom = preference == OverlayScenePreference.PartyRoom ||
-                           preference == OverlayScenePreference.Auto && currentRoom is not null;
-        if (!usePartyRoom || currentRoom is null)
+        var selection = InformationOverlayRuntimeProjection.ResolveScene(
+            preference,
+            currentRoom is not null);
+        if (selection.Kind != InformationOverlaySceneKind.PartyRoom || currentRoom is null)
         {
             return new OverlaySceneSnapshot(
                 fleetPlayers.ToArray(),
                 hasFleet,
-                OverlaySceneContext.Fleet(preference, preference == OverlayScenePreference.PartyRoom));
+                OverlaySceneContext.Fleet(preference, selection.IsFallback));
         }
 
         var roomPlayers = currentRoom.Members
@@ -109,7 +105,7 @@ public static class OverlaySceneResolver
                 currentRoom.RoomId));
     }
 
-    private static PlayerRow CreateRoomPlayer(
+    internal static PlayerRow CreateRoomPlayer(
         PartyLobbyMemberPreview member,
         string? localPlayer,
         string? localCallsign)

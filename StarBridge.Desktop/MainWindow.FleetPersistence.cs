@@ -15,39 +15,43 @@ public partial class MainWindow
 
     private void RenderCachedIdentity(bool initializeOfflineState = false)
     {
-        if (!IsLoggedIn)
-        {
-            GameNameText.Text = "请登录后查看";
-            PlayerIdText.Text = "请登录后查看";
-            ProfileStatusText.Text = "浏览模式";
-            return;
-        }
-
         if (!string.IsNullOrWhiteSpace(_logPath))
         {
             LogPathBox.Text = _logPath;
         }
 
-        if (string.IsNullOrWhiteSpace(_localPlayer))
+        var presentation = AccountIdentityPresentation.Resolve(
+            AccountState,
+            IsScmGameIdentityVerified,
+            _scmOAuthSession?.GameIdentityHandle,
+            _localPlayer,
+            _localPlayerId,
+            _authenticationExpired,
+            _language);
+        GameNameText.Text = presentation.GameName;
+        PlayerIdText.Text = presentation.PlayerId;
+        ProfileStatusText.Text = presentation.Status;
+
+        if (!AccountState.IsAuthenticated && !_authenticationExpired)
         {
-            GameNameText.Text = _language == "zh" ? "等待游戏日志身份信息" : "Waiting for Game.log identity";
-            PlayerIdText.Text = "等待识别游戏 ID";
-            ProfileStatusText.Text = _language == "zh" ? "需要身份信息" : "Identity Required";
             return;
         }
 
-        GameNameText.Text = _localPlayer;
-        PlayerIdText.Text = string.IsNullOrWhiteSpace(_localPlayerId) ? "Unknown" : _localPlayerId;
-        ProfileStatusText.Text = _language == "zh" ? "已缓存身份" : "Cached Identity";
         if (initializeOfflineState)
         {
-            // Normalize persisted runtime state once during startup. Routine account
-            // panel refreshes are presentation-only and must never erase a location
-            // that Game.log confirmed during the active session.
-            _fleetState.Apply(new FleetEvent(FleetEventType.PlayerOffline, _localPlayer));
+            if (!string.IsNullOrWhiteSpace(_localPlayer))
+            {
+                // Normalize persisted runtime state once during startup. Routine account
+                // panel refreshes are presentation-only and must never erase a location
+                // that Game.log confirmed during the active session.
+                _fleetState.Apply(new FleetEvent(FleetEventType.PlayerOffline, _localPlayer));
+            }
         }
 
-        RenderState();
+        if (!string.IsNullOrWhiteSpace(_localPlayer))
+        {
+            RenderState();
+        }
     }
 
     private void SaveCurrentConfig(bool clearSavedSession = false)
@@ -91,6 +95,7 @@ public partial class MainWindow
             ? _savedOverlayPresetSnapshot
             : _activeOverlayPreset;
         var fleetStateJson = SerializeFleetState();
+        SaveFleetStateCacheForCurrentAccount(fleetStateJson);
         DesktopAppConfig.Save(new DesktopAppConfig(
             _logPath,
             _localPlayer,
@@ -105,7 +110,7 @@ public partial class MainWindow
             NetworkServerKeyBox.Password,
             persistedAccountName,
             persistedAuthToken,
-            fleetStateJson,
+            null,
             _allowEmailNotifications,
             OverlayGlobalHotkeyEnabledCheck.IsChecked == true,
             persistedAccountId,
@@ -116,6 +121,42 @@ public partial class MainWindow
         SaveOverlayPresetManifest();
         DesktopAppConfig.SaveOverlayPresetSettings(activeOverlayPreset, overlaySettings);
         DesktopAppConfig.SaveOverlayPresetLayout(activeOverlayPreset, overlayLayout);
+    }
+
+    private void SaveFleetStateCacheForCurrentAccount(string fleetStateJson)
+    {
+        var routeIdentity = CurrentAccountRouteIdentity;
+        if (!routeIdentity.IsAuthenticated || _legacyIdentityLinked != true)
+        {
+            return;
+        }
+
+        FleetStateCacheStore.SaveAccount(
+            routeIdentity.CacheNamespace,
+            fleetStateJson,
+            _fleetStateCachedAtUtc);
+    }
+
+    private void LoadFleetStateCacheForCurrentAccount()
+    {
+        var routeIdentity = CurrentAccountRouteIdentity;
+        var legacyAccountId = _legacyIdentityLinked == true
+            ? _legacyIdentityLinkProjection?.LegacyAccountId
+            : null;
+        if (!routeIdentity.IsAuthenticated || string.IsNullOrWhiteSpace(legacyAccountId))
+        {
+            return;
+        }
+
+        FleetStateCacheStore.PromoteLegacy(legacyAccountId, routeIdentity.CacheNamespace);
+        var cache = FleetStateCacheStore.LoadAccount(routeIdentity.CacheNamespace);
+        if (cache is null)
+        {
+            return;
+        }
+
+        _fleetStateCachedAtUtc = cache.CachedAtUtc;
+        LoadFleetState(cache.StateJson);
     }
 
     private string SerializeFleetState()

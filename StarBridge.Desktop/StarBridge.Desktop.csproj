@@ -1,7 +1,20 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Offline artwork tooling; absent from normal client builds. -->
+  <PropertyGroup Condition="'$(StarBridgeAppearanceCapture)' == 'true'">
+    <DefineConstants>$(DefineConstants);STARBRIDGE_APPEARANCE_CAPTURE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(StarBridgeAppearanceCapture)' == 'true'">
+    <Compile Include="..\tools\StarBridge.AppearanceCapture\OverlayCompositionHudWindow.Capture.cs" Link="OverlayCompositionHudWindow.Capture.cs" />
+    <Compile Include="..\tools\StarBridge.AppearanceCapture\OverlayCompositionStartupTransitionWindow.Capture.cs" Link="OverlayCompositionStartupTransitionWindow.Capture.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
+    <ProjectReference Include="..\StarBridge.HostRuntime\StarBridge.HostRuntime.csproj" />
+    <ProjectReference Include="..\StarBridge.NativeBridge\StarBridge.NativeBridge.csproj" />
+    <Using Include="StarBridge.HostRuntime.Account" />
+    <Using Include="StarBridge.Core.Overlay" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -23,18 +36,25 @@
     Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and Exists('..\StarBridge.CommercialAppearances\StarBridge.CommercialAppearances.projitems')" />
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.1.6" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
   </ItemGroup>
 
+  <!-- Optional private renderer; no source or preview eligibility in public builds. -->
+  <Import Project="$(StarBridgePrivateAppearanceRoot)\Runtime\StarBridge.PrivateAppearance.projitems"
+          Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and '$(StarBridgePrivateAppearanceRoot)' != '' and Exists('$(StarBridgePrivateAppearanceRoot)\Runtime\StarBridge.PrivateAppearance.projitems')" />
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>Star Bridge</AssemblyName>
     <Product>Star Bridge</Product>
-    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
-    <TargetPlatformVersion>10.0.22621.0</TargetPlatformVersion>
+    <TargetFramework Condition="'$(StarBridgeTargetPlatformVersion)' != ''">net8.0-windows$(StarBridgeTargetPlatformVersion)</TargetFramework>
+    <TargetFramework Condition="'$(StarBridgeTargetPlatformVersion)' == ''">net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformVersion Condition="'$(StarBridgeTargetPlatformVersion)' != ''">$(StarBridgeTargetPlatformVersion)</TargetPlatformVersion>
+    <TargetPlatformVersion Condition="'$(StarBridgeTargetPlatformVersion)' == ''">10.0.22621.0</TargetPlatformVersion>
     <TargetPlatformMoniker>Windows,Version=10.0</TargetPlatformMoniker>
     <TargetPlatformDisplayName>Windows</TargetPlatformDisplayName>
     <UseWPF>true</UseWPF>
@@ -49,8 +69,12 @@
 
   <ItemGroup>
     <Resource Include="Assets\Brand\StarBridge_logo.png" />
+    <Resource Include="..\StarBridge.Flutter\assets\brand\starbridge_mark_dark_surface.png" Link="Assets\Brand\notification_mark_dark.png" />
+    <Resource Include="..\StarBridge.Flutter\assets\brand\starbridge_mark_light_surface.png" Link="Assets\Brand\notification_mark_light.png" />
     <Resource Include="Assets\Brand\StarBridge_AppIcon.png" />
     <Resource Include="Assets\Brand\StarBridge_AppIcon.ico" />
+    <Resource Include="Assets\Brand\StarBridge_SmallIcon_dark_surface.ico" />
+    <Resource Include="Assets\Brand\StarBridge_SmallIcon_light_surface.ico" />
     <Resource Include="Assets\Navigation\MyFleet_Nav.png" />
     <Resource Include="Assets\Navigation\MySquad_Nav.png" />
   </ItemGroup>
@@ -63,7 +87,7 @@
              Link="OFFICIAL-BINARY-LICENSE.txt"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="Data\ship-name-pack.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\data\ship-names\ship-name-pack.json" Link="Data\ship-name-pack.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Data\ship-names-zh.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
     <Content Include="Data\ship-catalog.tsv" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />
     <Content Include="Data\ship-loaner-matrix.tsv" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true'" />

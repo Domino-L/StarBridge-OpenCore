@@ -101,8 +101,13 @@ public partial class MainWindow
         RefreshPersonalProfileContent();
     }
 
-    private string? GetPersonalProfileAccountIdentity() =>
-        !string.IsNullOrWhiteSpace(_accountId) ? _accountId : _accountName;
+    private string? GetPersonalProfileAccountIdentity()
+    {
+        var routeIdentity = CurrentAccountRouteIdentity;
+        return routeIdentity.IsAuthenticated
+            ? routeIdentity.CacheNamespace
+            : null;
+    }
 
     private void BeginPersonalProfileAccountSession(bool sameAccount)
     {
@@ -110,6 +115,12 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(accountIdentity))
         {
             return;
+        }
+
+        if (_legacyIdentityLinkProjection?.LegacyAccountId is { Length: > 0 } legacyAccountId)
+        {
+            PersonalProfileSettings.PromoteLegacyAccountIdentity(legacyAccountId, accountIdentity);
+            PersonalProfileRemoteRepository.PromoteLegacyAccountIdentity(legacyAccountId, accountIdentity);
         }
 
         var accountChanged = !sameAccount ||
@@ -159,7 +170,10 @@ public partial class MainWindow
     private async Task RefreshPersonalProfileFromServerAsync()
     {
         var accountIdentity = _activePersonalProfileAccountIdentity;
-        if (!CanSynchronizeUserData || string.IsNullOrWhiteSpace(accountIdentity) || _personalProfileRepository is null)
+        if (!AccountState.HasRelaySession ||
+            !CanSynchronizeUserData ||
+            string.IsNullOrWhiteSpace(accountIdentity) ||
+            _personalProfileRepository is null)
         {
             return;
         }
@@ -425,7 +439,7 @@ public partial class MainWindow
         SetActiveNav(PersonalNavButton);
         QueueMainPageReveal(previousTab);
 
-        if (_personalProfileRepository is null)
+        if (!AccountState.HasRelaySession || _personalProfileRepository is null)
         {
             ApplyPersonalProfileVisitorFailure(PersonalProfileVisitorLoadState.Unavailable);
             return;
@@ -750,7 +764,10 @@ public partial class MainWindow
         {
             candidate.Save(accountIdentity);
             savedLocally = true;
-            if (!CanSynchronizeUserData || string.IsNullOrWhiteSpace(accountIdentity) || _personalProfileRepository is null)
+            if (!AccountState.HasRelaySession ||
+                !CanSynchronizeUserData ||
+                string.IsNullOrWhiteSpace(accountIdentity) ||
+                _personalProfileRepository is null)
             {
                 _personalProfileSettings = candidate;
                 _personalProfileSavedSettings = candidate.Copy();
@@ -869,7 +886,8 @@ public partial class MainWindow
 
     private void SchedulePersonalProfileAutoSync()
     {
-        if (!CanSynchronizeUserData ||
+        if (!AccountState.HasRelaySession ||
+            !CanSynchronizeUserData ||
             string.IsNullOrWhiteSpace(_activePersonalProfileAccountIdentity) ||
             _personalProfileRepository is null)
         {
@@ -942,7 +960,7 @@ public partial class MainWindow
         string accountIdentity,
         CancellationToken cancellationToken)
     {
-        if (_personalProfileRepository is null)
+        if (!AccountState.HasRelaySession || _personalProfileRepository is null)
         {
             return Task.FromResult(new PersonalProfileSaveResult(
                 PersonalProfileSaveStatus.QueuedOffline,

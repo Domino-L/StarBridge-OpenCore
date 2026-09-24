@@ -108,11 +108,21 @@ public partial class MainWindow
 
     private void BindGameplayStatisticsOwner()
     {
-        var ownerKey = !string.IsNullOrWhiteSpace(_accountId)
+        var legacyOwnerKey = IsLoggedIn && !string.IsNullOrWhiteSpace(_accountId)
             ? _accountId
-            : !string.IsNullOrWhiteSpace(_accountName)
+            : IsLoggedIn && !string.IsNullOrWhiteSpace(_accountName)
                 ? _accountName
                 : _localPlayer;
+        var routeIdentity = CurrentAccountRouteIdentity;
+        var hasRouteOwner = routeIdentity.IsAuthenticated && _legacyIdentityLinked == true;
+        var routeOwnerKey = routeIdentity.CacheNamespace;
+        var ownerKey = hasRouteOwner ? routeOwnerKey : legacyOwnerKey;
+        if (hasRouteOwner &&
+            _legacyIdentityLinkProjection?.LegacyAccountId is { Length: > 0 } legacyAccountId)
+        {
+            _gameplayStatisticsRecorder.PromoteLegacyOwner(legacyAccountId, routeOwnerKey);
+        }
+
         _gameplayStatisticsRecorder.BindOwner(ownerKey);
         RefreshGameplayStatisticsPresentation();
     }
@@ -543,7 +553,7 @@ public partial class MainWindow
     private void QueueGameplayStatisticsSync(DateTimeOffset now)
     {
         if ((!_gameplayStatisticsRecorder.Consent.ShareOnProfile && !_gameplayStatisticsPrivacySyncPending) ||
-            _syncPrivacySettings.PresenceVisibilityMode != PlayerPresenceVisibilityMode.Online ||
+            !GetPresenceSharingDecision().CanPublishRealtime ||
             now - _lastGameplayStatisticsSyncAt < TimeSpan.FromMinutes(1))
         {
             return;
@@ -554,14 +564,17 @@ public partial class MainWindow
 
     private async Task SyncGameplayStatisticsAsync(bool allowPrivacyRevocationWhileOffline = false)
     {
-        if (_isGameplayStatisticsSyncing || !CanSynchronizeUserData || _personalProfileRepository is null)
+        if (_isGameplayStatisticsSyncing ||
+            !AccountState.HasRelaySession ||
+            !CanSynchronizeUserData ||
+            _personalProfileRepository is null)
         {
             return;
         }
 
         var shareOnProfile = _gameplayStatisticsRecorder.Consent.ShareOnProfile;
         if (!allowPrivacyRevocationWhileOffline &&
-            _syncPrivacySettings.PresenceVisibilityMode != PlayerPresenceVisibilityMode.Online)
+            !GetPresenceSharingDecision().CanPublishRealtime)
         {
             GameplayStatisticsShareStatusText.Text = shareOnProfile
                 ? "展示设置已保存在本机；恢复在线同步后生效。"

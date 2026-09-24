@@ -233,6 +233,41 @@ internal static class OverlayRosterSelectionSettingsStore
         File.Move(temporaryPath, SettingsPath, overwrite: true);
     }
 
+    internal static void PromoteLegacyAccountIdentity(
+        string legacyAccountId,
+        string accountRouteIdentity)
+    {
+        if (string.IsNullOrWhiteSpace(legacyAccountId) ||
+            string.IsNullOrWhiteSpace(accountRouteIdentity))
+        {
+            return;
+        }
+
+        var legacyKey = OverlayRosterSelectionProfileIdentity.Resolve(legacyAccountId);
+        var routeKey = OverlayRosterSelectionProfileIdentity.Resolve(accountRouteIdentity);
+        if (legacyKey.Equals(routeKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var document = LoadDocument();
+        if (!document.Accounts.TryGetValue(legacyKey, out var legacySettings))
+        {
+            return;
+        }
+
+        if (!document.Accounts.ContainsKey(routeKey))
+        {
+            document.Accounts[routeKey] = legacySettings.Normalize();
+        }
+
+        document.Accounts.Remove(legacyKey);
+        Directory.CreateDirectory(DesktopAppConfig.ConfigDirectory);
+        var temporaryPath = SettingsPath + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(document, JsonOptions));
+        File.Move(temporaryPath, SettingsPath, overwrite: true);
+    }
+
     private static SettingsDocument LoadDocument()
     {
         if (!File.Exists(SettingsPath))
@@ -469,6 +504,11 @@ internal static class OverlayRosterPlanner
             // An explicit pin overrides the default density preference, but it can
             // never revive a member absent from the authorized closed set.
             .Where(member => preferences.IncludeOfflineMembers ||
+                             // Self visibility is controlled by HideSelfMember
+                             // before this closed set reaches the planner. An
+                             // outbound offline/hidden status must not remove
+                             // the authorized local user's own row.
+                             member.Player.IsSelf ||
                              member.Online ||
                              member.PinnedIndex < int.MaxValue)
             .OrderBy(member => member.PinnedIndex < int.MaxValue ? 0 : 1)

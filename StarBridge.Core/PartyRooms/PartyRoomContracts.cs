@@ -81,7 +81,12 @@ public sealed record PartyRoomUpdateRequest(
 public sealed record PartyRoomChatSendRequest(
     string RoomId,
     string Text,
-    ChatAttachmentContract? Attachment = null);
+    ChatAttachmentContract? Attachment = null)
+{
+    public string? ClientMessageId { get; init; }
+    public DateTimeOffset? ClientRequestedAt { get; init; }
+    public bool ConfirmOnly { get; init; }
+}
 
 public sealed record PartyRoomChatMessageSnapshot(
     long Sequence,

@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
 using StarBridge.Core.Identity;
+using StarBridge.HostRuntime.Auth;
 
 public partial class MainWindow
 {
@@ -18,18 +19,49 @@ public partial class MainWindow
     private IdentityBindingAssessment _identityBindingAssessment =
         IdentityBindingPolicy.Evaluate(null, null, null);
     private bool _identityBindingRequestInProgress;
+    private bool _scmIdentityRefreshInProgress;
     private bool _onboardingDialogOpen;
+    private string? _lastScmIdentityDiagnosticState;
+
+    private StartupIdentityGateDecision ResolveStartupIdentityGateDecision() =>
+        StartupIdentityGatePolicy.Evaluate(
+            IsScmLoggedIn,
+            IsScmGameIdentityVerified,
+            CurrentScmGameIdentity.Handle,
+            _identityBindingSupported,
+            _identityBindingAssessment.CanSynchronize,
+            _boundGameName,
+            _localPlayer);
 
     private bool CanSynchronizeUserData =>
         IsLoggedIn &&
         !_isAccountTransition &&
-        (!_identityBindingSupported ||
-         _identityBindingAssessment.CanSynchronize);
+        ResolveStartupIdentityGateDecision() == StartupIdentityGateDecision.Allow;
+
+    private bool CanUseIdentitySensitiveNetworkWrites =>
+        IsLoggedIn &&
+        !_isAccountTransition &&
+        (IsScmLoggedIn
+            ? CurrentScmIdentityAssessment.CanUseIdentitySensitiveNetworkWrites
+            : _identityBindingAssessment.CanUseIdentitySensitiveNetworkWrites);
 
     private bool IsIdentityBindingVerified =>
         IsLoggedIn &&
         _identityBindingSupported &&
         _identityBindingAssessment.State == IdentityVerificationState.Verified;
+
+    private ScmGameIdentitySnapshot CurrentScmGameIdentity =>
+        _scmOAuthSession?.AuthoritativeGameIdentity ??
+        new ScmGameIdentitySnapshot(ScmGameIdentityStatus.Unknown, null, null);
+
+    private IdentityBindingAssessment CurrentScmIdentityAssessment =>
+        IdentityBindingPolicy.Evaluate(CurrentScmGameIdentity, _localPlayer);
+
+    private bool IsScmGameIdentityVerified =>
+        CurrentScmGameIdentity.Status == ScmGameIdentityStatus.Verified;
+
+    private bool IsScmGameIdentityMismatch =>
+        CurrentScmIdentityAssessment.State == IdentityVerificationState.Mismatch;
 
     private void UpdateIdentityBindingFromAuth(AuthResponse auth, bool showPrompt)
     {
@@ -89,7 +121,7 @@ public partial class MainWindow
             _friendOverlayNotificationTracker.Reset();
             ResetFleetOverlayChatProjection();
 
-            if (_syncPrivacySettings.SyncEnabled && !_presenceHeartbeatTimer.IsEnabled)
+            if (_syncPrivacySettings.SyncEnabled)
             {
                 StartNetworkSyncTimers();
             }
@@ -103,8 +135,9 @@ public partial class MainWindow
         RefreshHeaderStatusBar();
 
         if (IsLoggedIn &&
+            !IsScmLoggedIn &&
             _identityBindingSupported &&
-            !IsIdentityBindingVerified &&
+            !CanSynchronizeUserData &&
             IsLoaded &&
             !_isLoginDialogOpen)
         {
@@ -114,7 +147,7 @@ public partial class MainWindow
             return;
         }
 
-        if (IsIdentityBindingVerified && _guideMode == GuideMode.IdentityBinding)
+        if (CanSynchronizeUserData && _guideMode == GuideMode.IdentityBinding)
         {
             CompleteMandatoryIdentityBindingGuide();
             return;
@@ -125,6 +158,7 @@ public partial class MainWindow
 
     private void RefreshIdentityVerificationPresentation()
     {
+        RecordScmIdentityPolicyState();
         if (IdentityVerificationBanner is null || IdentityVerificationBannerActionButton is null)
         {
             return;
@@ -137,25 +171,15 @@ public partial class MainWindow
                 : "扫描日志";
         }
 
-        if (!IsLoggedIn)
+        if (!IsLoggedIn && !IsScmLoggedIn)
         {
             if (HasConnectedGameLog())
             {
                 IdentityVerificationBanner.Visibility = Visibility.Collapsed;
-                if (TopBannerReserveRow is not null)
-                {
-                    TopBannerReserveRow.Height = new GridLength(0);
-                }
-
                 return;
             }
 
             IdentityVerificationBanner.Visibility = Visibility.Visible;
-            if (TopBannerReserveRow is not null)
-            {
-                TopBannerReserveRow.Height = new GridLength(38);
-            }
-
             var informationBrush = FindBrush("StatusInfoBrush", Brushes.DeepSkyBlue);
             IdentityVerificationBannerTitleText.Text = "连接游戏日志";
             IdentityVerificationBannerDetailText.Text = "登录前也可以先扫描 Game.log，稍后将用它识别并绑定你的游戏 ID";
@@ -166,23 +190,75 @@ public partial class MainWindow
             return;
         }
 
+        if (IsScmLoggedIn)
+        {
+            IdentityVerificationBanner.Visibility = Visibility.Visible;
+            var identityDecision = ResolveStartupIdentityGateDecision();
+            var isMismatch = identityDecision == StartupIdentityGateDecision.IdentityMismatch;
+            var isVerified = IsScmGameIdentityVerified;
+            var identityState = CurrentScmIdentityAssessment.State;
+            var statusBrush = isMismatch
+                ? FindBrush("StatusDangerBrush", Brushes.IndianRed)
+                : isVerified
+                    ? FindBrush("StatusSuccessBrush", Brushes.SpringGreen)
+                    : FindBrush("StatusWarningBrush", Brushes.Goldenrod);
+            IdentityVerificationBannerTitleText.Text = isMismatch
+                ? "游戏身份不相同"
+                : identityState switch
+                {
+                    IdentityVerificationState.ReverificationRequired => "SCM 游戏身份需要重新验证",
+                    IdentityVerificationState.Revoked => "SCM 游戏身份已撤销",
+                    IdentityVerificationState.Unavailable => "暂时无法确认 SCM 游戏身份",
+                    _ => isVerified ? "SCM 游戏身份已验证" : "需要验证 SCM 游戏身份"
+                };
+            IdentityVerificationBannerDetailText.Text = isMismatch
+                ? "SCM、兼容账号或 Game.log 中存在不一致的游戏 ID；身份敏感操作已暂停"
+                : identityState switch
+                {
+                    IdentityVerificationState.ReverificationRequired =>
+                        "SCM 记录显示原游戏身份已失效；重新验证前身份敏感操作不可用",
+                    IdentityVerificationState.Revoked =>
+                        "SCM 游戏身份绑定已撤销；重新验证前身份敏感操作不可用",
+                    IdentityVerificationState.Unavailable =>
+                        "身份服务暂不可用；为保护账号，身份敏感操作暂不可用",
+                    _ => isVerified
+                        ? "SCM 已确认你的 Star Citizen 游戏账户"
+                        : "在应用内获取验证码，写入 RSI 个人资料后完成验证"
+                };
+            IdentityVerificationBannerTitleText.Foreground = statusBrush;
+            IdentityVerificationBanner.BorderBrush = statusBrush;
+            IdentityVerificationBannerActionButton.Content = _scmIdentityRefreshInProgress
+                ? "刷新中..."
+                : isVerified
+                    ? "刷新状态"
+                    : "立即验证";
+            IdentityVerificationBannerActionButton.IsEnabled = !_scmIdentityRefreshInProgress;
+            IdentityVerificationBannerActionButton.Visibility = Visibility.Visible;
+            if (PersonalHeaderBindingText is not null)
+            {
+                PersonalHeaderBindingText.Text = isMismatch
+                    ? "SCM 游戏身份 · 不一致"
+                    : identityState switch
+                    {
+                        IdentityVerificationState.ReverificationRequired => "SCM 游戏身份 · 需重新验证",
+                        IdentityVerificationState.Revoked => "SCM 游戏身份 · 已撤销",
+                        IdentityVerificationState.Unavailable => "SCM 游戏身份 · 暂不可用",
+                        _ => isVerified
+                            ? "SCM 游戏身份 · 已验证"
+                            : "SCM 游戏身份 · 待验证"
+                    };
+                PersonalHeaderBindingText.Foreground = statusBrush;
+            }
+            return;
+        }
+
         if (!_identityBindingSupported || IsIdentityBindingVerified)
         {
             IdentityVerificationBanner.Visibility = Visibility.Collapsed;
-            if (TopBannerReserveRow is not null)
-            {
-                TopBannerReserveRow.Height = new GridLength(0);
-            }
-
             return;
         }
 
         IdentityVerificationBanner.Visibility = Visibility.Visible;
-        if (TopBannerReserveRow is not null)
-        {
-            TopBannerReserveRow.Height = new GridLength(38);
-        }
-
         var warningBrush = FindBrush("StatusWarningBrush", Brushes.Goldenrod);
         IdentityVerificationBannerTitleText.Foreground = warningBrush;
         IdentityVerificationBanner.BorderBrush = warningBrush;
@@ -218,8 +294,53 @@ public partial class MainWindow
         }
     }
 
+    private void RecordScmIdentityPolicyState()
+    {
+        if (!IsScmLoggedIn)
+        {
+            _lastScmIdentityDiagnosticState = null;
+            return;
+        }
+
+        var assessment = CurrentScmIdentityAssessment;
+        var sensitiveWritesAllowed = assessment.CanUseIdentitySensitiveNetworkWrites;
+        var diagnosticState =
+            $"{assessment.AuthoritativeStatus}|{assessment.State}|{sensitiveWritesAllowed}";
+        if (string.Equals(
+                _lastScmIdentityDiagnosticState,
+                diagnosticState,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastScmIdentityDiagnosticState = diagnosticState;
+        ScmAuthDiagnostics.Write(
+            ScmAuthDiagnostics.NewCorrelationId(),
+            "game-identity-policy",
+            "evaluated",
+            $"authoritativeStatus={assessment.AuthoritativeStatus} " +
+            $"localState={assessment.State} " +
+            $"sensitiveWritesAllowed={sensitiveWritesAllowed.ToString().ToLowerInvariant()}");
+    }
+
     private string GetIdentityBindingSummaryText()
     {
+        if (IsScmLoggedIn)
+        {
+            var assessment = CurrentScmIdentityAssessment;
+            return assessment.State switch
+            {
+                IdentityVerificationState.Mismatch => "SCM 游戏身份 · 不一致",
+                IdentityVerificationState.Verified => "SCM 游戏身份 · 已验证",
+                IdentityVerificationState.AwaitingGameIdentity => "SCM 游戏身份 · 等待 Game.log",
+                IdentityVerificationState.ReverificationRequired => "SCM 游戏身份 · 需重新验证",
+                IdentityVerificationState.Revoked => "SCM 游戏身份 · 已撤销",
+                IdentityVerificationState.Unavailable => "SCM 游戏身份 · 暂不可用",
+                _ => "SCM 游戏身份 · 待验证"
+            };
+        }
+
         if (IsLoggedIn && !_identityBindingSupported)
         {
             return string.IsNullOrWhiteSpace(_localPlayer)
@@ -236,8 +357,70 @@ public partial class MainWindow
         };
     }
 
+    private string GetLegacyIdentityLinkSummaryText()
+    {
+        if (!IsScmLoggedIn)
+        {
+            return "需要 SCM 登录";
+        }
+
+        if (_legacyIdentityLinkProjection is null)
+        {
+            return _legacyIdentityLinked is null
+                ? "正在检查关联状态"
+                : "未关联旧 StarBridge 账号";
+        }
+
+        if (!string.Equals(_legacyIdentityLinkProjection.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"关联状态：{_legacyIdentityLinkProjection.Status}";
+        }
+
+        var accountId = _legacyIdentityLinkProjection.LegacyAccountId.Trim();
+        var suffix = accountId.Length <= 8 ? accountId : accountId[^8..];
+        return $"已关联旧账号 · ID 尾号 {suffix}";
+    }
+
     private async void IdentityVerificationBannerActionButton_Click(object sender, RoutedEventArgs e)
     {
+        if (!IsScmLoggedIn && IsLoggedIn)
+        {
+            StarBridgeMessageBox.Show(
+                this,
+                "验证旧 StarBridge 账号前，请先完成 SCM 统一账号授权。没有 SCM 账号可在授权页面完成注册，返回应用后再从个人档案继续。",
+                "需要 SCM 授权",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            await ShowLoginDialogAsync();
+            RefreshIdentityVerificationPresentation();
+            return;
+        }
+
+        if (IsScmLoggedIn)
+        {
+            if (!_scmOAuthSession!.GameIdentityVerified)
+            {
+                var verificationWindow = new GameIdentityVerificationWindow(
+                    _scmOAuthClient,
+                    _scmOAuthSession)
+                {
+                    Owner = this
+                };
+                if (verificationWindow.ShowDialog() == true)
+                {
+                    if (verificationWindow.VerifiedSession is not null)
+                    {
+                        ApplyScmOAuthSession(verificationWindow.VerifiedSession);
+                    }
+                    await RefreshScmGameIdentityAsync(silent: false);
+                }
+                return;
+            }
+
+            await RefreshScmGameIdentityAsync(silent: false);
+            return;
+        }
+
         if (!IsLoggedIn)
         {
             QuickScanLogAndStart();
@@ -246,6 +429,55 @@ public partial class MainWindow
         }
 
         await ShowIdentityBindingPromptAsync(force: true);
+    }
+
+    private async Task RefreshScmGameIdentityAsync(bool silent)
+    {
+        if (_scmIdentityRefreshInProgress || _scmOAuthSession is null)
+        {
+            return;
+        }
+
+        _scmIdentityRefreshInProgress = true;
+        RefreshIdentityVerificationPresentation();
+        try
+        {
+            var refreshedSession = await _scmOAuthClient.RefreshIdentityAsync(
+                _scmOAuthSession,
+                CancellationToken.None);
+            ApplyScmOAuthSession(refreshedSession);
+            await RefreshScmBootstrapAsync(refreshedSession, CancellationToken.None);
+            if (refreshedSession.GameIdentityVerified)
+            {
+                NetworkStatusText.Text = "SCM 游戏身份已验证";
+            }
+            else if (!silent)
+            {
+                StarBridgeMessageBox.Show(
+                    this,
+                    "SCM 尚未返回已验证状态。请重新打开应用内验证窗口，确认已将验证码写入 RSI 个人资料并成功提交。",
+                    "尚未完成验证",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!silent)
+            {
+                StarBridgeMessageBox.Show(
+                    this,
+                    UserFacingError.Describe(exception, "无法刷新 SCM 游戏身份状态，请稍后重试。"),
+                    "刷新失败",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+        finally
+        {
+            _scmIdentityRefreshInProgress = false;
+            RefreshIdentityVerificationPresentation();
+        }
     }
 
     private bool HasConnectedGameLog() =>
@@ -262,7 +494,7 @@ public partial class MainWindow
 
     private void ShowMandatoryIdentityBindingGuide()
     {
-        if (!IsLoggedIn || !_identityBindingSupported || IsIdentityBindingVerified)
+        if (!IsLoggedIn || IsScmLoggedIn || !_identityBindingSupported || IsIdentityBindingVerified)
         {
             return;
         }
@@ -393,7 +625,9 @@ public partial class MainWindow
             {
                 Content = JsonContent.Create(new IdentityBindingUpdateRequest(detectedGameName, replaceExisting))
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GetRelayAuthorizationToken());
             var relayKey = NetworkServerKeyBox.Password.Trim();
             if (!string.IsNullOrWhiteSpace(relayKey))
             {

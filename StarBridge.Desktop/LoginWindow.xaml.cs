@@ -2,15 +2,13 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
+using StarBridge.HostRuntime.Auth;
 
 namespace StarBridge.Desktop;
 
 public sealed record LoginWindowAuthRequest(
-    bool IsRegister,
     string Email,
-    string Password,
-    string? Callsign,
-    string? VerificationCode);
+    string Password);
 
 public sealed record LoginWindowAuthResult(
     bool Success,
@@ -21,12 +19,17 @@ public sealed record LoginWindowPasswordResetRequest(
     string VerificationCode,
     string NewPassword);
 
+public sealed record LoginWindowScmAuthResult(
+    bool Success,
+    string Message,
+    ScmOAuthSession? Session = null);
+
 public partial class LoginWindow : Window
 {
     private bool _isBusy;
     private bool _isRecoveryMode;
-
-    public Func<string, Task<string>>? SendVerificationCodeAsync { get; set; }
+    private bool _isClosed;
+    private CancellationTokenSource? _scmLoginCancellation;
 
     public Func<string, Task<string>>? SendPasswordResetCodeAsync { get; set; }
 
@@ -34,13 +37,14 @@ public partial class LoginWindow : Window
 
     public Func<LoginWindowPasswordResetRequest, Task<LoginWindowAuthResult>>? ResetPasswordAsync { get; set; }
 
+    public Func<CancellationToken, Task<LoginWindowScmAuthResult>>? AuthenticateWithScmAsync { get; set; }
+
     public LoginWindow(string? loginEmail)
     {
         InitializeComponent();
         LoginEmailBox.Text = loginEmail ?? "";
-        RegisterEmailBox.Text = loginEmail ?? "";
         RecoveryEmailBox.Text = loginEmail ?? "";
-        SetMode(isRegister: false);
+        SetLoginMode();
         LoginEmailBox.Focus();
     }
 
@@ -50,56 +54,104 @@ public partial class LoginWindow : Window
         MainWindowPlacementService.FitInitialWindow(this);
     }
 
-    public bool IsRegisterMode { get; private set; }
+    protected override void OnClosed(EventArgs e)
+    {
+        _isClosed = true;
+        _scmLoginCancellation?.Cancel();
+        base.OnClosed(e);
+    }
 
     public bool IsSkipped { get; private set; }
+
+    public ScmOAuthSession? ScmSession { get; private set; }
 
     public string LoginEmail => LoginEmailBox.Text.Trim();
 
     public string LoginPassword => LoginPasswordBox.Password;
 
-    public string RegisterEmail => RegisterEmailBox.Text.Trim();
-
-    public string RegisterPassword => RegisterPasswordBox.Password;
-
-    public string RegisterCallsign => RegisterCallsignBox.Text.Trim();
-
-    public string RegisterVerificationCode => VerificationCodeBox.Text.Trim();
-
     public string RecoveryEmail => RecoveryEmailBox.Text.Trim();
 
     public string RecoveryVerificationCode => RecoveryVerificationCodeBox.Text.Trim();
 
-    private void LoginModeButton_Click(object sender, RoutedEventArgs e)
+    public void ReportScmLoginProgress(string message)
     {
-        if (!_isBusy)
+        if (!_isClosed && _scmLoginCancellation is not null)
         {
-            SetMode(isRegister: false);
+            SetStatus(message);
+            Activate();
         }
     }
 
-    private void RegisterModeButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_isBusy)
-        {
-            SetMode(isRegister: true);
-        }
-    }
-
-    private void SetMode(bool isRegister)
+    private void SetLoginMode()
     {
         _isRecoveryMode = false;
-        IsRegisterMode = isRegister;
-        LoginPanel.Visibility = isRegister ? Visibility.Collapsed : Visibility.Visible;
-        RegisterPanel.Visibility = isRegister ? Visibility.Visible : Visibility.Collapsed;
+        LoginPanel.Visibility = Visibility.Visible;
         RecoveryPanel.Visibility = Visibility.Collapsed;
-        AccountSecurityPanel.Visibility = isRegister ? Visibility.Visible : Visibility.Collapsed;
-        LoginModeButton.Style = (Style)FindResource(isRegister ? "SecondaryButton" : "PrimaryButton");
-        RegisterModeButton.Style = (Style)FindResource(isRegister ? "PrimaryButton" : "SecondaryButton");
-        ConfirmButton.Content = isRegister ? "注册" : "登录";
-        SetStatus(isRegister
-            ? "注册后将使用登录邮箱接收验证码，并把呼号绑定到你的星海舰桥个人身份。"
-            : "使用注册邮箱登录。未登录时只能浏览，无法同步和管理组织。");
+        AccountSecurityPanel.Visibility = Visibility.Collapsed;
+        ConfirmButton.Content = "登录";
+        SetStatus("推荐使用 SCM 统一账号登录；没有账号可在授权页面完成 SCM 注册。");
+    }
+
+    private async void ScmLoginButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_scmLoginCancellation is not null)
+        {
+            _scmLoginCancellation.Cancel();
+            return;
+        }
+
+        if (_isBusy || AuthenticateWithScmAsync is null)
+        {
+            SetStatus("当前未连接 SCM 登录服务。", isError: true);
+            return;
+        }
+
+        var operationCancellation = new CancellationTokenSource();
+        _scmLoginCancellation = operationCancellation;
+        SetBusy(true, "SCM 授权");
+        ScmLoginButton.Content = "取消 SCM 授权";
+        SetStatus("系统浏览器已打开。请在 SCM 页面完成登录和授权，等待期间可取消。");
+        try
+        {
+            var result = await AuthenticateWithScmAsync(operationCancellation.Token);
+            if (_isClosed)
+            {
+                return;
+            }
+            SetStatus(result.Message, !result.Success);
+            if (result.Success && result.Session is not null)
+            {
+                ScmSession = result.Session;
+                DialogResult = true;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_isClosed)
+            {
+                SetStatus("已取消 SCM 授权，可重新发起。");
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!_isClosed)
+            {
+                SetStatus(UserFacingError.Describe(exception, "SCM 登录未完成，请稍后重试。"), isError: true);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_scmLoginCancellation, operationCancellation))
+            {
+                _scmLoginCancellation = null;
+            }
+            operationCancellation.Dispose();
+            if (!_isClosed && DialogResult != true)
+            {
+                SetBusy(false);
+                ScmLoginButton.Content = "使用 SCM 账号登录";
+            }
+        }
     }
 
     private void ForgotPasswordButton_Click(object sender, RoutedEventArgs e)
@@ -109,7 +161,7 @@ public partial class LoginWindow : Window
             return;
         }
 
-        RecoveryEmailBox.Text = string.IsNullOrWhiteSpace(LoginEmail) ? RegisterEmail : LoginEmail;
+        RecoveryEmailBox.Text = LoginEmail;
         SetRecoveryMode();
         RecoveryEmailBox.Focus();
     }
@@ -117,22 +169,18 @@ public partial class LoginWindow : Window
     private void SetRecoveryMode()
     {
         _isRecoveryMode = true;
-        IsRegisterMode = false;
         LoginPanel.Visibility = Visibility.Collapsed;
-        RegisterPanel.Visibility = Visibility.Collapsed;
         RecoveryPanel.Visibility = Visibility.Visible;
         AccountSecurityPanel.Visibility = Visibility.Collapsed;
-        LoginModeButton.Style = (Style)FindResource("SecondaryButton");
-        RegisterModeButton.Style = (Style)FindResource("SecondaryButton");
         ConfirmButton.Content = "重置密码";
-        SetStatus("验证注册邮箱后即可设置新密码。验证码 10 分钟内有效。");
+        SetStatus("验证旧账号邮箱后即可设置新密码。验证码 10 分钟内有效。");
     }
 
     private void SecurityMeasuresButton_Click(object sender, RoutedEventArgs e)
     {
         StarBridgeMessageBox.Show(
             this,
-            "注册与登录 StarBridge 不需要 RSI 账户，也不会要求你提供 RSI 密码、验证码或登录凭据。\n\n" +
+            "登录 StarBridge 不需要 RSI 账户，也不会要求你提供 RSI 密码、验证码或登录凭据。\n\n" +
             "登录信息只通过加密连接传输。服务器不会保存明文密码，而是为每个密码使用独立盐值和 Argon2id 单向哈希保护。\n\n" +
             "邮箱验证码在 10 分钟内有效、仅可使用一次，并限制错误尝试次数。会话令牌为随机生成，服务器仅保存摘要；本机登录凭证由 Windows 当前用户加密保护。\n\n" +
             "密码、验证码和访问令牌不会写入应用日志。StarBridge 不会通过邮件、短信或客服向你索取密码。",
@@ -145,7 +193,7 @@ public partial class LoginWindow : Window
     {
         StarBridgeMessageBox.Show(
             this,
-            "StarBridge 登录邮箱用于注册、登录验证和必要的账户安全通知，不会向组织成员公开。\n\n" +
+            "旧 StarBridge 账号邮箱仅用于登录验证、密码找回和必要的账户安全通知，不会向组织成员公开。\n\n" +
             "呼号、游戏 ID、公开资料和协作状态只会按你选择的可见范围显示。在“同步与隐私”中可以单独管理在线、飞船、地点、服务器、事件、机库和游玩统计。\n\n" +
             "好友私信、组织聊天和房间聊天会保存于 StarBridge 服务，仅对应会话或组织的可见成员可以查看。\n\n" +
             "主动提交举报或申诉时，相关内容、对象快照和处理记录会保存在 StarBridge 服务；证据仅授权审核账号可见。\n\n" +
@@ -181,7 +229,7 @@ public partial class LoginWindow : Window
             return;
         }
 
-        SetBusy(true, IsRegisterMode ? "注册中..." : "登录中...");
+        SetBusy(true, "登录中...");
         try
         {
             var result = await AuthenticateAsync(request);
@@ -212,7 +260,7 @@ public partial class LoginWindow : Window
         var confirmPassword = RecoveryConfirmPasswordBox.Password;
         if (string.IsNullOrWhiteSpace(email) || !LooksLikeEmail(email))
         {
-            SetStatus("请输入有效的注册邮箱。", isError: true);
+            SetStatus("请输入有效的旧账号邮箱。", isError: true);
             return;
         }
 
@@ -255,7 +303,7 @@ public partial class LoginWindow : Window
             RecoveryVerificationCodeBox.Clear();
             RecoveryPasswordBox.Clear();
             RecoveryConfirmPasswordBox.Clear();
-            SetMode(isRegister: false);
+            SetLoginMode();
             SetStatus("密码已重置，请使用新密码登录。");
             LoginPasswordBox.Focus();
         }
@@ -271,8 +319,8 @@ public partial class LoginWindow : Window
 
     private LoginWindowAuthRequest? BuildAuthRequest()
     {
-        var email = IsRegisterMode ? RegisterEmail : LoginEmail;
-        var password = IsRegisterMode ? RegisterPassword : LoginPassword;
+        var email = LoginEmail;
+        var password = LoginPassword;
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             SetStatus("请输入登录邮箱和密码。", isError: true);
@@ -285,77 +333,7 @@ public partial class LoginWindow : Window
             return null;
         }
 
-        if (!IsRegisterMode)
-        {
-            return new LoginWindowAuthRequest(false, email, password, null, null);
-        }
-
-        if (string.IsNullOrWhiteSpace(RegisterCallsign))
-        {
-            SetStatus("请输入呼号。", isError: true);
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(RegisterVerificationCode))
-        {
-            SetStatus("请输入邮箱验证码。", isError: true);
-            return null;
-        }
-
-        if (!StarBridge.Core.Identity.AccountPasswordPolicy.IsValidLength(RegisterPassword))
-        {
-            SetStatus("密码需要 8 到 128 个字符。", isError: true);
-            return null;
-        }
-
-        return new LoginWindowAuthRequest(true, email, password, RegisterCallsign, RegisterVerificationCode);
-    }
-
-    private async void SendCodeButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_isBusy)
-        {
-            return;
-        }
-
-        if (SendVerificationCodeAsync is null)
-        {
-            SetStatus("当前未连接验证码服务。", isError: true);
-            return;
-        }
-
-        var email = RegisterEmail;
-        if (string.IsNullOrWhiteSpace(email) || !LooksLikeEmail(email))
-        {
-            SetStatus("请输入有效的注册邮箱。", isError: true);
-            return;
-        }
-
-        SendCodeButton.IsEnabled = false;
-        SendCodeButton.Content = "发送中...";
-        SetStatus("正在向邮箱发送验证码...");
-        try
-        {
-            var message = await SendVerificationCodeAsync(email);
-            var isError = message.Contains("失败", StringComparison.OrdinalIgnoreCase) ||
-                          message.Contains("错误", StringComparison.OrdinalIgnoreCase) ||
-                          message.Contains("未配置", StringComparison.OrdinalIgnoreCase);
-            SetStatus(message, isError);
-            if (!isError)
-            {
-                await RunSendCodeCooldownAsync(SendCodeButton);
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            SetStatus(UserFacingError.Describe(ex, "验证码未发送，请稍后重试。"), isError: true);
-        }
-        finally
-        {
-            SendCodeButton.Content = "发送验证码";
-            SendCodeButton.IsEnabled = true;
-        }
+        return new LoginWindowAuthRequest(email, password);
     }
 
     private async void RecoverySendCodeButton_Click(object sender, RoutedEventArgs e)
@@ -374,7 +352,7 @@ public partial class LoginWindow : Window
         var email = RecoveryEmail;
         if (string.IsNullOrWhiteSpace(email) || !LooksLikeEmail(email))
         {
-            SetStatus("请输入有效的注册邮箱。", isError: true);
+            SetStatus("请输入有效的旧账号邮箱。", isError: true);
             return;
         }
 
@@ -427,6 +405,13 @@ public partial class LoginWindow : Window
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_scmLoginCancellation is not null)
+        {
+            _scmLoginCancellation.Cancel();
+            DialogResult = false;
+            return;
+        }
+
         if (!_isBusy)
         {
             DialogResult = false;
@@ -436,14 +421,11 @@ public partial class LoginWindow : Window
     private void SetBusy(bool isBusy, string? buttonText = null)
     {
         _isBusy = isBusy;
-        LoginModeButton.IsEnabled = !isBusy;
-        RegisterModeButton.IsEnabled = !isBusy;
         SkipButton.IsEnabled = !isBusy;
-        CloseDialogButton.IsEnabled = !isBusy;
+        CloseDialogButton.IsEnabled = !isBusy || _scmLoginCancellation is not null;
         ConfirmButton.IsEnabled = !isBusy;
-        SendCodeButton.IsEnabled = !isBusy && IsRegisterMode;
         RecoverySendCodeButton.IsEnabled = !isBusy && _isRecoveryMode;
-        ConfirmButton.Content = buttonText ?? (_isRecoveryMode ? "重置密码" : IsRegisterMode ? "注册" : "登录");
+        ConfirmButton.Content = buttonText ?? (_isRecoveryMode ? "重置密码" : "登录");
     }
 
     private void SetStatus(string message, bool isError = false)

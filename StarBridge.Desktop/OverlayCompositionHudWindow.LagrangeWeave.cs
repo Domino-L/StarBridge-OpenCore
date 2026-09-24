@@ -42,6 +42,7 @@ internal sealed partial class OverlayCompositionHudWindow
                     OffsetRect(rect, reveal.OffsetY),
                     state with { Opacity = state.Opacity * reveal.Opacity },
                     ResolveLagrangeModuleStyle(state, key).BackgroundOpacity,
+                    ResolveLagrangeModuleStyle(state, key).DecorationOpacity,
                     key);
             }
             else
@@ -129,6 +130,7 @@ internal sealed partial class OverlayCompositionHudWindow
         WpfRect rect,
         OverlayCompositionFrameState state,
         double backgroundOpacity,
+        double decorationOpacity,
         string moduleKey)
     {
         if (rect.Width <= 3 || rect.Height <= 3)
@@ -142,11 +144,13 @@ internal sealed partial class OverlayCompositionHudWindow
         var height = (float)rect.Height;
         var join = ResolveLagrangePanelJoin(state, moduleKey);
         var (plan, geometry) = ResolveLagrangePanelGeometry(moduleKey, width, height, join);
-        var opacity = state.Opacity;
+        var envelope = state.Opacity;
+        var opacity = envelope * OverlayLayoutItem.NormalizeDecorationOpacity(decorationOpacity);
+        state = state with { Opacity = opacity };
 
         if (!_lagrangeGlowMaskOnly)
         {
-            var fillAlpha = opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity);
+            var fillAlpha = envelope * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity);
             FillLagrangePanelShape(
                 target,
                 geometry,
@@ -468,6 +472,10 @@ internal sealed partial class OverlayCompositionHudWindow
         }
 
         var rect = state.EventRect;
+        var decorationState = state with
+        {
+            Opacity = state.Opacity * state.EventStyle.DecorationOpacity
+        };
         var railOnRight = state.EventSide == OverlayEventNotificationSide.Right;
         var railX = railOnRight ? (float)rect.Right - 8 : (float)rect.Left + 8;
         var y = (float)rect.Y;
@@ -502,7 +510,7 @@ internal sealed partial class OverlayCompositionHudWindow
                     (float)rect.Width,
                     mirror,
                     HudColor.FromRgb(0, 1, 4, 255),
-                    state.Opacity * fade * 0.30);
+                    decorationState.Opacity * fade * 0.30);
                 FillLagrangePanelShape(
                     target,
                     geometry,
@@ -514,22 +522,22 @@ internal sealed partial class OverlayCompositionHudWindow
                     backgroundAlpha);
                 foreach (var curve in plan.ShellCurves)
                 {
-                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Background, state.Opacity * fade * 0.92, 3.0f, 18, mirror, (float)rect.Width);
-                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Title, state.Opacity * fade * 0.88, 1.12f, 18, mirror, (float)rect.Width);
+                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Background, decorationState.Opacity * fade * 0.92, 3.0f, 18, mirror, (float)rect.Width);
+                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Title, decorationState.Opacity * fade * 0.88, 1.12f, 18, mirror, (float)rect.Width);
                 }
                 foreach (var curve in plan.FieldCurves)
                 {
-                    DrawLagrangeCurve(target, curve, x, y, row.AccentColor, state.Opacity * fade * 0.18, 0.64f, 14, mirror, (float)rect.Width);
+                    DrawLagrangeCurve(target, curve, x, y, state.Palette.Title, decorationState.Opacity * fade * 0.18, 0.64f, 14, mirror, (float)rect.Width);
                 }
 
                 var contentLeft = railOnRight ? x + 18 : x + 32;
-                DrawWrappedText(target, row.Title, _eventTitleFormat, contentLeft, y + 9, contentWidth, 34, row.AccentColor, state.Opacity * state.EventStyle.TextOpacity * fade);
+                DrawWrappedText(target, row.Title, _eventTitleFormat, contentLeft, y + 9, contentWidth, 34, state.Palette.Title, state.Opacity * state.EventStyle.TextOpacity * fade);
                 DrawWrappedText(target, row.Detail, _eventDetailFormat, contentLeft, y + 12 + titleHeight + 5, contentWidth, 48, state.Palette.Text, state.Opacity * state.EventStyle.TextOpacity * fade);
                 DrawText(target, row.Timestamp, _mutedRightFormat, x + (float)rect.Width - 58, y + 9, 44, 16, state.Palette.Muted, state.Opacity * state.EventStyle.TextOpacity * fade);
             }
 
-            DrawLagrangeMassAnchor(target, anchor.X, anchor.Y, state, state.Opacity * fade, active);
-            DrawLagrangeCaptureCurve(target, state, anchor, new Vector2(railX, centerY), row.AccentColor, fade, active);
+            DrawLagrangeMassAnchor(target, anchor.X, anchor.Y, decorationState, decorationState.Opacity * fade, active);
+            DrawLagrangeCaptureCurve(target, decorationState, anchor, new Vector2(railX, centerY), state.Palette.Title, fade, active);
             railBottom = y + itemHeight;
             y += itemHeight + 7;
             rowIndex++;
@@ -537,12 +545,12 @@ internal sealed partial class OverlayCompositionHudWindow
 
         if (!_lagrangeGlowMaskOnly)
         {
-            DrawLine(target, railX, (float)rect.Y - 12, railX, railBottom + 12, state.Palette.PanelBorder, state.Opacity * 0.34, 0.82f);
+            DrawLine(target, railX, (float)rect.Y - 12, railX, railBottom + 12, state.Palette.PanelBorder, decorationState.Opacity * 0.34, 0.82f);
             for (var index = 0; index < 4; index++)
             {
                 var tickY = (float)rect.Y - 5 + index * 6;
                 var direction = railOnRight ? -1 : 1;
-                DrawLine(target, railX, tickY, railX + direction * (index == 0 ? 8 : 4), tickY, state.Palette.Alert, state.Opacity * 0.34, 0.66f);
+                DrawLine(target, railX, tickY, railX + direction * (index == 0 ? 8 : 4), tickY, state.Palette.Alert, decorationState.Opacity * 0.34, 0.66f);
             }
         }
     }

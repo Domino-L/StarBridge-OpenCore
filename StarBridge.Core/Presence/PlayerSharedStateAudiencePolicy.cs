@@ -109,15 +109,14 @@ public static class PlayerSharedStateAudiencePolicy
         PlayerSharedStateViewerFacts viewer) =>
         publication.UsesFleetAudienceSources
             ? publication.FleetMembersCanView ||
-              publication.FleetAdministratorsCanView && viewer.IsFleetPrivacyAdmin ||
-              viewer.IsSelectedFleetVisibilityGroupMember
+              publication.FleetAdministratorsCanView && viewer.IsFleetPrivacyAdmin
             : FleetScopeAllows(publication.FleetScope, viewer);
 
     private static bool RoomAxisAllows(
         PlayerSharedStatePublicationPolicy publication,
         PlayerSharedStateViewerFacts viewer) =>
         publication.UsesRoomAudienceSources
-            ? publication.RoomMembersCanView || viewer.IsSelectedRoomVisibilityGroupMember
+            ? publication.RoomMembersCanView
             : string.Equals(
                 NormalizeRoomScope(publication.RoomScope),
                 RoomMembersScope,

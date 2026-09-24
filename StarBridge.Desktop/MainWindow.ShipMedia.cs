@@ -26,18 +26,34 @@ public partial class MainWindow
 
     private async Task NavigateToHangarPageAsync()
     {
-        if (!CanSynchronizeUserData)
+        if (!IsAccountAuthenticated)
         {
             await ShowAppNoticeAsync(
                 "我的机库暂不可用",
-                "完成登录与身份验证后即可管理机库和专属图片。",
-                "专属图片会绑定到你的舰船实例，并在允许展示机库的页面中使用。");
+                "登录 SCM 账号后即可查看和扫描本地机库。",
+                "专属图片同步等兼容功能仍需要完成旧账号关联。");
             return;
         }
 
         if (!TryLeaveOverlayEditorTab())
         {
             return;
+        }
+
+        if (IsScmLoggedIn &&
+            _legacyIdentityLinked == true &&
+            !_scmLegacyRelayAuthenticated &&
+            _scmOAuthSession is { } scmSession)
+        {
+            var restored = await RefreshScmLegacyRelaySessionAsync(scmSession, CancellationToken.None);
+            RefreshAccountPanel();
+            if (!restored)
+            {
+                await ShowAppNoticeAsync(
+                    "旧机库数据暂不可用",
+                    "兼容身份已关联，但旧业务会话暂未建立。",
+                    "本地机库仍可查看和扫描；旧机库、舰船图片和组织同步将在服务恢复后自动可用。");
+            }
         }
 
         _hangarManagementView ??= new HangarManagementView(
@@ -84,14 +100,16 @@ public partial class MainWindow
         await HangarImportedShipImageCache.UpgradeExistingAsync(
             _ownedShips.Select(ship => ship.Code));
 
-        var catalog = await _relayClient.GetFromJsonAsync<ShipMediaCatalogContract>("api/ship-media/mine") ??
-                      new ShipMediaCatalogContract([], DateTimeOffset.UtcNow);
-        var changed = OwnedShipMediaCatalogReconciler.Reconcile(_ownedShips, catalog.Items);
-
-        await EnsureShipMediaCachedAsync(catalog.Items.Select(item => item.MediaId));
-        if (changed)
+        if (AccountState.HasRelaySession)
         {
-            SaveOwnedShips();
+            var catalog = await _relayClient.GetFromJsonAsync<ShipMediaCatalogContract>("api/ship-media/mine") ??
+                          new ShipMediaCatalogContract([], DateTimeOffset.UtcNow);
+            var changed = OwnedShipMediaCatalogReconciler.Reconcile(_ownedShips, catalog.Items);
+            await EnsureShipMediaCachedAsync(catalog.Items.Select(item => item.MediaId));
+            if (changed)
+            {
+                SaveOwnedShips();
+            }
         }
 
         var favoriteCodes = (_personalProfileSettings.FavoriteShipCodes ?? [])
@@ -128,7 +146,7 @@ public partial class MainWindow
                     ship.Source,
                     ResolveShipDisplayImagePath(ship.CustomImageMediaId, fallback),
                     ship.CustomImageMediaId,
-                    !string.IsNullOrWhiteSpace(ship.InstanceId),
+                    AccountState.HasRelaySession && !string.IsNullOrWhiteSpace(ship.InstanceId),
                     string.IsNullOrWhiteSpace(catalogEntry?.Spec) ? "规格待补充" : catalogEntry.Spec,
                     string.IsNullOrWhiteSpace(catalogEntry?.Role)
                         ? "定位待补充"
@@ -189,6 +207,15 @@ public partial class MainWindow
 
     private async Task<bool> UploadShipMediaAsync(HangarManagementShipRow row)
     {
+        if (!AccountState.HasRelaySession)
+        {
+            await ShowAppNoticeAsync(
+                "专属图片暂不可用",
+                "查看和扫描本地机库不受影响。",
+                "完成旧账号关联后可上传并同步舰船专属图片。");
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(row.InstanceId))
         {
             await ShowAppNoticeAsync(
@@ -264,6 +291,15 @@ public partial class MainWindow
 
     private async Task<bool> RemoveShipMediaAsync(HangarManagementShipRow row)
     {
+        if (!AccountState.HasRelaySession)
+        {
+            await ShowAppNoticeAsync(
+                "专属图片暂不可用",
+                "查看和扫描本地机库不受影响。",
+                "完成旧账号关联后可移除已同步的舰船专属图片。");
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(row.CustomImageMediaId))
         {
             return false;

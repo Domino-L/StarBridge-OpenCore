@@ -64,7 +64,7 @@ public partial class MainWindow
         RefreshFleetRailHeaders();
     }
 
-    private void FleetRailButton_Click(object sender, RoutedEventArgs e)
+    private async void FleetRailButton_Click(object sender, RoutedEventArgs e)
     {
         if (FleetSubTabs is null)
         {
@@ -73,12 +73,24 @@ public partial class MainWindow
 
         var previousSection = FleetSubTabs.SelectedItem;
         if (ReferenceEquals(sender, FleetBroadcastRailButton) &&
-            !CanCurrentUserPublishFleetBroadcasts())
+            !CanUseFleetBroadcasts)
         {
             FleetSubTabs.SelectedItem = AllPlayersTab;
             RefreshFleetRailHeaders();
             RefreshFleetMainContentView();
             return;
+        }
+
+        if (ReferenceEquals(sender, FleetBroadcastRailButton))
+        {
+            await RefreshFleetBroadcastsAsync(showErrors: true);
+            if (!CanCurrentUserPublishFleetBroadcasts())
+            {
+                FleetSubTabs.SelectedItem = AllPlayersTab;
+                RefreshFleetRailHeaders();
+                RefreshFleetMainContentView();
+                return;
+            }
         }
 
         if (sender == AllPlayersRailButton)
@@ -1265,7 +1277,8 @@ public partial class MainWindow
 
         var zh = _language == "zh";
         ApplyOverlayModuleStyleLanguage(zh);
-        var canPublishBroadcast = CanCurrentUserPublishFleetBroadcasts();
+        var canPublishBroadcast = CanUseFleetBroadcasts &&
+                                  (_fleetBroadcastScope is null || _fleetBroadcastCanPublish);
         FleetBroadcastRailButton.Visibility = canPublishBroadcast
             ? Visibility.Visible
             : Visibility.Collapsed;

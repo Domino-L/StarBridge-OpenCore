@@ -50,6 +50,7 @@ public partial class MainWindow
             _receivedPartyRoomInvitations.Length +
             pendingRoomApplications +
             Math.Max(0, _partyRoomChatUnreadCount));
+        RefreshBridgeNotificationBadge();
     }
 
     private static void SetNavigationActivityBadge(Border? badge, TextBlock? text, int count)

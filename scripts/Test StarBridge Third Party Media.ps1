@@ -635,6 +635,14 @@ try {
     }
     $sensitivePaths.Add($activeRoot) | Out-Null
 
+    if ($mode -eq "payload") {
+        $flutterShipRoot = Join-Path $activeRoot 'data/flutter_assets/assets/ships'
+        if ((Test-Path -LiteralPath $flutterShipRoot) -and
+            @(Get-ChildItem -LiteralPath $flutterShipRoot -Filter 'catalog-*' -File).Count -gt 0) {
+            throw 'Private local-test Flutter ship media cannot enter a distribution payload.'
+        }
+    }
+
     if (-not (Test-Path -LiteralPath $activeRoot -PathType Container)) {
         throw "The $mode audit root was not found."
     }

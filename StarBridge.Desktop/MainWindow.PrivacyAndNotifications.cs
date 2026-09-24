@@ -13,7 +13,7 @@ public partial class MainWindow
 {
     private void CallsignBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_isLoadingSettings)
+        if (_isLoadingSettings || _isApplyingAccountProjection)
         {
             return;
         }
@@ -154,7 +154,7 @@ public partial class MainWindow
 
     private void EmailNotificationsCheck_Changed(object sender, RoutedEventArgs e)
     {
-        if (_isLoadingSettings || _isRefreshingAccountPanel)
+        if (_isLoadingSettings || _isRefreshingAccountPanel || _isApplyingAccountProjection)
         {
             return;
         }

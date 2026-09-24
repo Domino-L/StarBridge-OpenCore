@@ -15,11 +15,11 @@ internal sealed partial class OverlayCompositionHudWindow
         var style = state.NoticeStyle;
         if (state.LagrangeWeaveStyle)
         {
-            DrawLagrangePanelFrame(target, rect, state, style.BackgroundOpacity, "Notice");
+            DrawLagrangePanelFrame(target, rect, state, style.BackgroundOpacity, style.DecorationOpacity, "Notice");
         }
         else
         {
-            DrawPanelFrame(target, rect, state, 42, 150, 18, 60, style.BackgroundOpacity, moduleKey: "Notice");
+            DrawPanelFrame(target, rect, state, 42, 150, 18, 60, style.BackgroundOpacity, style.DecorationOpacity, moduleKey: "Notice");
         }
         DrawNoticePanelContent(target, state, rect);
     }
@@ -62,7 +62,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var textOpacity = state.Opacity * style.TextOpacity;
         var nightShadowJoin = NightShadowPanelJoin.None;
         const bool useNightShadowLayout = false;
-        DrawPanelFrame(target, rect, state, 30, 120, 34, 120, style.BackgroundOpacity, nightShadowJoin, "Squads");
+        DrawPanelFrame(target, rect, state, 30, 120, 34, 120, style.BackgroundOpacity, style.DecorationOpacity, nightShadowJoin, "Squads");
         var left = (float)rect.X + (useNightShadowLayout ? 28 : 20);
         var titleLeft = (float)rect.X + (useNightShadowLayout ? 28 : 20);
         var top = (float)rect.Y + (useNightShadowLayout ? 18 : 16);
@@ -251,7 +251,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var textOpacity = state.Opacity * style.TextOpacity;
         var nightShadowJoin = NightShadowPanelJoin.None;
         const bool useNightShadowLayout = false;
-        DrawPanelFrame(target, rect, state, 36, 150, 32, 110, style.BackgroundOpacity, nightShadowJoin, "Members");
+        DrawPanelFrame(target, rect, state, 36, 150, 32, 110, style.BackgroundOpacity, style.DecorationOpacity, nightShadowJoin, "Members");
         var left = (float)rect.X + (useNightShadowLayout ? 28 : 20);
         var titleLeft = (float)rect.X + (useNightShadowLayout ? 28 : 20);
         var top = (float)rect.Y + (useNightShadowLayout ? 18 : 16);
@@ -318,7 +318,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var textOpacity = state.Opacity * style.TextOpacity;
         var nightShadowJoin = NightShadowPanelJoin.None;
         const bool useNightShadowLayout = false;
-        DrawPanelFrame(target, rect, state, 28, 142, 28, 126, style.BackgroundOpacity, nightShadowJoin, "Chat");
+        DrawPanelFrame(target, rect, state, 28, 142, 28, 126, style.BackgroundOpacity, style.DecorationOpacity, nightShadowJoin, "Chat");
         var left = (float)rect.X + (useNightShadowLayout ? 28 : 18);
         var titleLeft = (float)rect.X + (useNightShadowLayout ? 28 : 18);
         var top = (float)rect.Y + (useNightShadowLayout ? 18 : 14);

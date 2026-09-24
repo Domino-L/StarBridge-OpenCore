@@ -19,9 +19,9 @@ because it is stored in a Git repository.
 
 | Path | Origin | StarBridge contribution | License status |
 | --- | --- | --- | --- |
-| `StarBridge.Desktop/Data/ship-name-pack.json` | Community Chinese ship translations compiled from the historical StarBridge compatibility table; exact per-entry upstream attribution remains pending | Complete normalized runtime-code, readable English-name, Chinese-display-name and alias mappings for the client | Apache-2.0 applies only to the StarBridge-authored schema, selection, normalization and compilation. No Apache-2.0 claim is made for community translations, underlying game identifiers, names or marks. Public or binary redistribution remains subject to documenting upstream permission |
-| `StarBridge.Desktop/Data/ship-name-pack.schema.json` | StarBridge-authored schema | Complete schema and validation contract | Apache-2.0 |
-| `StarBridge.Desktop/Data/ship-name-pack.provenance.json` | Pack-wide provenance coverage plus entry-level overrides for independently verified rows | Records the rights boundary once for the complete pack and preserves stronger evidence where available | Included in the public source package for audit, but not copied into the desktop client output |
+| `data/ship-names/ship-name-pack.json` | Community Chinese ship translations compiled from the historical StarBridge compatibility table; exact per-entry upstream attribution remains pending | Complete normalized runtime-code, readable English-name, Chinese-display-name and alias mappings for the client | Apache-2.0 applies only to the StarBridge-authored schema, selection, normalization and compilation. No Apache-2.0 claim is made for community translations, underlying game identifiers, names or marks. Public or binary redistribution remains subject to documenting upstream permission |
+| `data/ship-names/ship-name-pack.schema.json` | StarBridge-authored schema | Complete schema and validation contract | Apache-2.0 |
+| `data/ship-names/ship-name-pack.provenance.json` | Pack-wide provenance coverage plus entry-level overrides for independently verified rows | Records the rights boundary once for the complete pack and preserves stronger evidence where available | Included in the public source package for audit, but not copied into the desktop client output |
 | `StarBridge.Desktop/Data/location-names-zh.txt` | Runtime identifiers are game-derived; runtime-code pairings and field observations are independently compiled by StarBridge; Chinese display names have mixed provenance, including independently authored text and text adapted from the SC Toolbox translation data (`StarCitizenToolBox/LocalizationData`) | Mapping selection and structure, field validation, confidence handling, fallback behavior, and independently authored display text | The original StarBridge contributions may be covered by Apache-2.0, but no Apache-2.0 claim is made for third-party or provenance-pending Chinese translations; the complete file is excluded from the public source package until entry-level review is complete |
 | `StarBridge.Desktop/Data/starbridge_location_catalog.json` | Generated from game-derived StarMap XML, localization data, LayerBackups object-container chains, SCM catalogue data, and community Chinese localization | Runtime normalization, alias resolution, hierarchy validation, confidence boundaries, and the generated catalogue structure | Excluded from the public source package pending source-by-source redistribution review. The public client must continue to build and fall back safely without this catalogue |
 | `StarBridge.Desktop/Data/ship-names-zh.txt` | Historical compatibility table with incomplete entry-level provenance | Private migration source and optional legacy local lookup behavior | Excluded from the public source package. It does not override public pack entries and is not required by the public client |
@@ -29,6 +29,13 @@ because it is stored in a Git repository.
 | `StarBridge.Desktop/Data/ship-loaner-matrix.tsv` | Historical internal compilation; the public RSI Loaner Ship Matrix is the canonical verification reference, but row-level comparison is still pending | Chinese display names, normalization, display rules, hidden tags, and runtime integration | Excluded from the public source package until row-level verification and third-party redistribution review are complete; no Apache-2.0 claim is made for official RSI text or marks |
 
 ## Public build behavior
+
+`StarBridge.Desktop/Data/ship-display-review-v3.json` is a private, display-only
+derivative of the reviewed ship catalogue. It retains the source catalogue's
+rights boundary, is Git-ignored, and is not embedded when restricted game data
+is disabled. Its local integration does not approve public source or binary
+redistribution. Generic overlay parsing and rendering code remains independent
+of this optional data.
 
 The public desktop build sets `StarBridgeIncludeRestrictedGameData=false`.
 Missing restricted catalogues are treated as optional data. The client first

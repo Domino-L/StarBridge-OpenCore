@@ -42,10 +42,6 @@ public sealed record NetworkPlayerSnapshot(
     bool ArrivalPendingConfirmation = false,
     string? ArrivalTargetCode = null);
 
-public sealed record PlayerPresenceHeartbeatRequest(
-    bool Online,
-    string? LiveStatus);
-
 public sealed record NetworkPlayerSharedEventSnapshot(
     string Id,
     string Type,
@@ -341,6 +337,16 @@ public sealed record UpdateManifest(
     string? PackageSha256 = null,
     string? SignatureKeyId = null,
     string? Signature = null);
+
+public sealed record FlutterMigrationManifest(
+    string Version,
+    string? InstallerUrl,
+    string? InstallerSha256,
+    string? SignatureKeyId,
+    string? Signature,
+    DateTimeOffset? PublishedAt,
+    string? Notes,
+    bool MigrationOnly = true);
 
 public sealed record AppStatsSnapshot(
     long DownloadCount,

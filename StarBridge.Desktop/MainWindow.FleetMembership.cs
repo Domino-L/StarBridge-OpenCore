@@ -14,8 +14,57 @@ public partial class MainWindow
 {
     private async void RefreshFleetDirectory_Click(object sender, RoutedEventArgs e)
     {
-        await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
-        await PullNetworkFleetsAsync();
+        await RefreshFleetDirectoryFromUiAsync(
+            silent: false,
+            pushLocalSnapshot: true,
+            allowStartupRecovery: true);
+    }
+
+    private async Task<bool> RefreshFleetDirectoryFromUiAsync(
+        bool silent,
+        bool pushLocalSnapshot,
+        bool allowStartupRecovery = false)
+    {
+        if (!IsLoggedIn)
+        {
+            if (!silent)
+            {
+                EnsureLoggedIn("刷新组织目录需要先登录。");
+            }
+
+            return false;
+        }
+
+        var refreshAction = StartupDataRefreshPolicy.Resolve(
+            _startupDataGate.Current.State,
+            CanSynchronizeUserData);
+        if (refreshAction == StartupDataRefreshAction.WaitForStartup)
+        {
+            // Navigation is read-only while the authoritative startup pull is
+            // still in flight or the identity gate is unresolved.
+            return false;
+        }
+
+        if (refreshAction == StartupDataRefreshAction.RetryStartup)
+        {
+            if (!allowStartupRecovery)
+            {
+                return false;
+            }
+
+            // Only an explicit refresh/retry action may restart a terminal
+            // startup gate. Ordinary page navigation never owns this state.
+            await AutoConnectNetworkAsync();
+            return _startupDataGate.Current.State == StartupDataGateState.Live &&
+                   CanSynchronizeUserData;
+        }
+
+        if (pushLocalSnapshot)
+        {
+            await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
+        }
+
+        return await PullNetworkFleetsAsync(silent);
     }
 
     private async void JoinNetworkFleet_Click(object sender, RoutedEventArgs e)

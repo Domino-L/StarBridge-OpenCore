@@ -1,8 +1,7 @@
 using StarBridge.Core.FleetBroadcasts;
+using StarBridge.HostRuntime.Auth;
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.IO;
-using System.Net.Http.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -23,10 +22,22 @@ public partial class MainWindow
     private FleetBroadcastSenderSettings _fleetBroadcastSettings = FleetBroadcastSenderSettings.Default;
     private string _fleetBroadcastSettingsAccountKey = "";
     private string _fleetBroadcastFeedCode = "";
+    private ScmFleetBroadcastScope? _fleetBroadcastScope;
+    private long _fleetBroadcastResourceVersion;
     private bool _fleetBroadcastCanPublish;
     private bool _isRefreshingFleetBroadcasts;
     private bool _isPublishingFleetBroadcast;
     private bool _isApplyingFleetBroadcastSettings;
+    private CancellationTokenSource _fleetBroadcastRouteCts = new();
+
+    private AccountRouteIdentity CurrentAccountRouteIdentity =>
+        AccountRouteIdentity.Create(
+            _scmEnvironmentSettings.EnvironmentName,
+            _scmOAuthSession?.AuthorityId,
+            _scmOAuthSession?.Subject,
+            _legacyIdentityLinked == true
+                ? _legacyIdentityLinkProjection?.LegacyAccountId
+                : null);
 
     private void InitializeFleetBroadcasts()
     {
@@ -49,64 +60,93 @@ public partial class MainWindow
 
     private async Task RefreshFleetBroadcastsAsync(bool showErrors, CancellationToken cancellationToken = default)
     {
-        if (_isRefreshingFleetBroadcasts || !CanUseFleetChat || string.IsNullOrWhiteSpace(_fleetCode))
+        if (_isRefreshingFleetBroadcasts || !CanUseFleetBroadcasts || _scmOAuthSession is not { } scmSession)
         {
             return;
         }
 
         EnsureFleetBroadcastSettingsForAccount();
         var session = _accountSessionCoordinator.Capture();
+        var fleetCode = _fleetCode.Trim();
+        using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _fleetBroadcastRouteCts.Token);
+        var requestToken = requestCts.Token;
         _isRefreshingFleetBroadcasts = true;
         try
         {
-            var feed = await _relayClient.GetFromJsonAsync<FleetBroadcastFeedContract>(
-                $"api/fleets/broadcasts?fleetCode={Uri.EscapeDataString(_fleetCode)}");
-            cancellationToken.ThrowIfCancellationRequested();
-            if (feed is null)
+            if (!_fleetBroadcastFeedCode.Equals(fleetCode, StringComparison.OrdinalIgnoreCase) ||
+                _fleetBroadcastScope is null)
             {
-                throw new InvalidDataException("广播数据为空。");
+                var resolution = await _scmFleetBroadcastClient.ResolveOrganizationScopeAsync(
+                    scmSession,
+                    fleetCode,
+                    requestToken);
+                scmSession = resolution.ActiveSession;
+                if (!_accountSessionCoordinator.IsCurrent(session) ||
+                    !_fleetCode.Trim().Equals(fleetCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                ApplyScmOAuthSession(scmSession);
+                _fleetBroadcastFeedCode = fleetCode;
+                _fleetBroadcastScope = resolution.Result;
+                _scmRealtimeClient?.SetFleetBroadcastScope(_fleetBroadcastScope);
+                _fleetBroadcastResourceVersion = 0;
+                _fleetBroadcastCanPublish = false;
+                _seenFleetBroadcastIds.Clear();
+                _fleetBroadcastHistory.Clear();
             }
 
-            if (!_accountSessionCoordinator.IsCurrent(session))
+            var result = await _scmFleetBroadcastClient.LoadFeedAsync(
+                scmSession,
+                _fleetBroadcastScope,
+                _fleetBroadcastResourceVersion,
+                requestToken);
+            requestToken.ThrowIfCancellationRequested();
+
+            if (!_accountSessionCoordinator.IsCurrent(session) ||
+                !_fleetCode.Trim().Equals(fleetCode, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            ApplyFleetBroadcastFeed(feed);
+            ApplyScmOAuthSession(result.ActiveSession);
+            ApplyFleetBroadcastFeed(result.Result);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (requestToken.IsCancellationRequested)
         {
         }
         catch (Exception ex)
         {
-            if (showErrors)
+            if (showErrors && _accountSessionCoordinator.IsCurrent(session))
             {
                 SetFleetBroadcastStatus(UserFacingError.Describe(ex, "舰队广播暂时无法同步，请稍后重试。"), StatusPalette.WarningBrush);
             }
         }
         finally
         {
-            _isRefreshingFleetBroadcasts = false;
+            if (_accountSessionCoordinator.IsCurrent(session))
+            {
+                _isRefreshingFleetBroadcasts = false;
+            }
         }
     }
 
-    private void ApplyFleetBroadcastFeed(FleetBroadcastFeedContract feed)
+    private void ApplyFleetBroadcastFeed(ScmFleetBroadcastFeed feed)
     {
-        if (!feed.FleetCode.Equals(_fleetCode, StringComparison.OrdinalIgnoreCase))
+        if (_fleetBroadcastScope is not { } scope ||
+            !feed.ScopeType.Equals(scope.ScopeType, StringComparison.OrdinalIgnoreCase) ||
+            feed.ScopeId != scope.ScopeId)
         {
             return;
         }
 
-        if (!_fleetBroadcastFeedCode.Equals(feed.FleetCode, StringComparison.OrdinalIgnoreCase))
-        {
-            _fleetBroadcastFeedCode = feed.FleetCode;
-            _seenFleetBroadcastIds.Clear();
-            _fleetBroadcastHistory.Clear();
-        }
-
         _fleetBroadcastCanPublish = feed.CanPublish;
-        foreach (var broadcast in feed.Broadcasts.OrderBy(item => item.SentAt))
+        foreach (var item in feed.Broadcasts.OrderBy(item => item.ResourceVersion))
         {
+            var broadcast = ToFleetBroadcastContract(item);
             if (_fleetBroadcastHistory.All(row => !row.Broadcast.Id.Equals(broadcast.Id, StringComparison.OrdinalIgnoreCase)))
             {
                 _fleetBroadcastHistory.Insert(0, new FleetBroadcastHistoryRow(broadcast));
@@ -124,6 +164,7 @@ public partial class MainWindow
                 ShowFleetBroadcastAlert(broadcast);
             }
         }
+        _fleetBroadcastResourceVersion = Math.Max(_fleetBroadcastResourceVersion, feed.ResourceVersion);
 
         while (_fleetBroadcastHistory.Count > FleetBroadcastPolicy.MaximumRetainedBroadcasts)
         {
@@ -135,7 +176,8 @@ public partial class MainWindow
 
     private async void FleetBroadcastSendButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isPublishingFleetBroadcast || !CanCurrentUserPublishFleetBroadcasts())
+        if (_isPublishingFleetBroadcast || !_fleetBroadcastCanPublish ||
+            _fleetBroadcastScope is not { } scope || _scmOAuthSession is not { } scmSession)
         {
             return;
         }
@@ -148,22 +190,41 @@ public partial class MainWindow
         }
 
         EnsureFleetBroadcastSettingsForAccount();
+        var session = _accountSessionCoordinator.Capture();
+        using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(
+            _fleetBroadcastRouteCts.Token);
         _isPublishingFleetBroadcast = true;
         RenderFleetBroadcastPage();
         SetFleetBroadcastStatus("正在发送广播…", StatusPalette.InfoBrush);
         try
         {
-            var request = new FleetBroadcastPublishRequestContract(
-                _fleetCode,
+            var appearance = _fleetBroadcastSettings.ToAppearance();
+            var request = new ScmFleetBroadcastPublishRequest(
+                scope.ScopeType,
+                scope.ScopeId,
                 normalized.Message,
-                _fleetBroadcastSettings.ToAppearance(),
+                new ScmFleetBroadcastAppearance(
+                    appearance.AccentColor,
+                    appearance.BackgroundColor,
+                    appearance.TextColor,
+                    appearance.DurationSeconds,
+                    appearance.RepeatCount,
+                    appearance.FontScale),
                 Guid.NewGuid().ToString("N"));
-            using var response = await _relayClient.PostJsonAsync("api/fleets/broadcasts/publish", request);
-            var payload = await response.Content.ReadFromJsonAsync<FleetBroadcastMutationResponseContract>();
-            if (!response.IsSuccessStatusCode || payload?.Broadcast is null)
+            var result = await _scmFleetBroadcastClient.PublishAsync(
+                scmSession,
+                request,
+                requestCts.Token);
+            if (!_accountSessionCoordinator.IsCurrent(session))
+            {
+                return;
+            }
+
+            ApplyScmOAuthSession(result.ActiveSession);
+            if (result.Result.Broadcast is null)
             {
                 SetFleetBroadcastStatus(
-                    payload?.Error ?? DescribeResponseFailure(response.StatusCode),
+                    DescribeFleetBroadcastMutationFailure(result.Result),
                     StatusPalette.WarningBrush);
                 return;
             }
@@ -172,14 +233,23 @@ public partial class MainWindow
             SetFleetBroadcastStatus("广播已发出，正在游戏中的舰队成员将强制看到。", StatusPalette.SuccessBrush);
             await RefreshFleetBroadcastsAsync(showErrors: false);
         }
+        catch (OperationCanceledException) when (requestCts.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
-            SetFleetBroadcastStatus(UserFacingError.Describe(ex, "广播发送失败，请稍后重试。"), StatusPalette.WarningBrush);
+            if (_accountSessionCoordinator.IsCurrent(session))
+            {
+                SetFleetBroadcastStatus(UserFacingError.Describe(ex, "广播发送失败，请稍后重试。"), StatusPalette.WarningBrush);
+            }
         }
         finally
         {
-            _isPublishingFleetBroadcast = false;
-            RenderFleetBroadcastPage();
+            if (_accountSessionCoordinator.IsCurrent(session))
+            {
+                _isPublishingFleetBroadcast = false;
+                RenderFleetBroadcastPage();
+            }
         }
     }
 
@@ -209,9 +279,36 @@ public partial class MainWindow
     }
 
     private string ResolveFleetBroadcastAccountKey() =>
-        string.IsNullOrWhiteSpace(_accountId)
-            ? string.IsNullOrWhiteSpace(_accountName) ? "local" : _accountName
-            : _accountId;
+        CurrentAccountRouteIdentity.CacheNamespace;
+
+    private void AdvanceAccountRouteIdentity()
+    {
+        var changed = _accountSessionCoordinator.UpdateRouteNamespace(
+            CurrentAccountRouteIdentity.CacheNamespace);
+        InvalidateFleetBroadcastRouteIdentity();
+        if (changed)
+        {
+            ResetAccountScopedState("正在加载当前账号的组织通讯…");
+            LoadFleetStateCacheForCurrentAccount();
+            BindGameplayStatisticsOwner();
+            ReloadDualAxisPrivacySettings();
+            BeginPersonalProfileAccountSession(sameAccount: false);
+            LoadOwnedShips();
+        }
+    }
+
+    private void InvalidateFleetBroadcastRouteIdentity()
+    {
+        var accountKey = ResolveFleetBroadcastAccountKey();
+        if (_fleetBroadcastSettingsAccountKey.Equals(accountKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _fleetBroadcastSettingsAccountKey = "";
+        _fleetBroadcastSettings = FleetBroadcastSenderSettings.Default;
+        ResetFleetBroadcasts();
+    }
 
     private FleetBroadcastSenderSettings ReadFleetBroadcastSettingsFromControls() =>
         new(
@@ -259,7 +356,7 @@ public partial class MainWindow
             return;
         }
 
-        var allowed = _fleetBroadcastCanPublish || CanCurrentUserPublishFleetBroadcasts();
+        var allowed = _fleetBroadcastCanPublish;
         FleetBroadcastSendButton.IsEnabled = allowed && !_isPublishingFleetBroadcast;
         FleetBroadcastMessageBox.IsEnabled = allowed && !_isPublishingFleetBroadcast;
         FleetBroadcastPermissionText.Text = allowed
@@ -277,7 +374,15 @@ public partial class MainWindow
 
     private void ResetFleetBroadcasts()
     {
+        _fleetBroadcastRouteCts.Cancel();
+        _fleetBroadcastRouteCts.Dispose();
+        _fleetBroadcastRouteCts = new CancellationTokenSource();
+        _isRefreshingFleetBroadcasts = false;
+        _isPublishingFleetBroadcast = false;
+        _scmRealtimeClient?.SetFleetBroadcastScope(null);
         _fleetBroadcastFeedCode = "";
+        _fleetBroadcastScope = null;
+        _fleetBroadcastResourceVersion = 0;
         _fleetBroadcastCanPublish = false;
         _seenFleetBroadcastIds.Clear();
         _fleetBroadcastHistory.Clear();
@@ -285,6 +390,57 @@ public partial class MainWindow
         _fleetBroadcastAlertWindow = null;
         RenderFleetBroadcastPage();
     }
+
+    private async Task HandleFleetBroadcastInvalidationAsync(
+        string scopeType,
+        long scopeId,
+        long resourceVersion)
+    {
+        if (_fleetBroadcastScope is not { } scope ||
+            !scope.ScopeType.Equals(scopeType, StringComparison.OrdinalIgnoreCase) ||
+            scope.ScopeId != scopeId ||
+            resourceVersion <= _fleetBroadcastResourceVersion)
+        {
+            return;
+        }
+
+        await RefreshFleetBroadcastsAsync(showErrors: false);
+    }
+
+    private bool CanUseFleetBroadcasts =>
+        _scmOAuthSession is not null &&
+        _legacyIdentityLinked == true &&
+        _hasFleet &&
+        !string.IsNullOrWhiteSpace(_fleetCode);
+
+    private static FleetBroadcastContract ToFleetBroadcastContract(ScmFleetBroadcast item) =>
+        new(
+            item.Id,
+            item.Scope.ScopeId.ToString(CultureInfo.InvariantCulture),
+            item.Message,
+            new FleetBroadcastAuthorContract(
+                item.Author.LegacyAccountId,
+                item.Author.Callsign ?? item.Author.GameName ?? "未知成员",
+                item.Author.GameName ?? item.Author.Callsign ?? "未知成员",
+                item.Author.RoleTitle ?? "成员"),
+            new FleetBroadcastAppearanceContract(
+                item.Appearance.AccentColor,
+                item.Appearance.BackgroundColor,
+                item.Appearance.TextColor,
+                item.Appearance.DurationSeconds,
+                item.Appearance.RepeatCount,
+                item.Appearance.FontScale),
+            item.CreatedAt,
+            item.ExpiresAt);
+
+    private static string DescribeFleetBroadcastMutationFailure(ScmFleetBroadcastMutation mutation) =>
+        mutation.ErrorCode switch
+        {
+            "rate_limited" => $"发送过于频繁，请在 {Math.Max(1, mutation.RetryAfterSeconds)} 秒后重试。",
+            "idempotency_conflict" => "这次广播请求与先前请求冲突，请重新发送。",
+            "forbidden" => "当前身份没有发送广播权限。",
+            _ => "广播发送失败，请稍后重试。"
+        };
 
     private void SetFleetBroadcastStatus(string text, WpfBrush brush)
     {

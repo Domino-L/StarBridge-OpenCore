@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);STARBRIDGE_HOST_RUNTIME</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
+    <ProjectReference Include="..\StarBridge.NativeBridge\StarBridge.NativeBridge.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../StarBridge.Desktop/NotificationSettings.cs" Link="Notifications/WpfNotificationSettings.cs" />
+    <Compile Include="../StarBridge.Desktop/PlayerActivityNotificationPolicy.cs" Link="Notifications/WpfPlayerActivityPolicy.cs" />
+    <!-- Reuse pure WPF catalog/region vocabulary without a WPF assembly dependency. -->
+    <Compile Include="../StarBridge.Desktop/Models/PartyRoomTagCatalog.cs" Link="PartyRooms/PartyRoomTagCatalog.cs" />
+    <Compile Include="../StarBridge.Desktop/GameServerRegionPresentation.cs" Link="PartyRooms/GameServerRegionPresentation.cs" />
+    <Compile Include="../shared/community-queries/CommunityDirectoryFilters.cs" Link="Communities/CommunityDirectoryFilters.cs" />
+    <Compile Include="../shared/community-queries/CommunityShipQuery.cs" Link="Communities/CommunityShipQuery.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared display names only; schema and provenance remain source-only. -->
+    <EmbeddedResource Include="../release-notes/catalog.json" LogicalName="StarBridge.ReleaseNotes.catalog.json" />
+    <EmbeddedResource Include="../deploy/update-signing-public.xml" LogicalName="StarBridge.Updates.update-signing-public.xml" />
+    <EmbeddedResource Include="../deploy/update-signing-public-v2.xml" LogicalName="StarBridge.Updates.update-signing-public-v2.xml" />
+    <EmbeddedResource Include="..\data\ship-names\ship-name-pack.json"
+                      LogicalName="StarBridge.ShipNamePack.json" />
+    <EmbeddedResource Include="$(StarBridgeShipDisplayCatalogPath)"
+                      LogicalName="StarBridge.ShipDisplayCatalog.tsv"
+                      Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('$(StarBridgeShipDisplayCatalogPath)')" />
+    <EmbeddedResource Include="$(StarBridgeShipDisplayReviewPath)"
+                      LogicalName="StarBridge.ShipDisplayReview.json"
+                      Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('$(StarBridgeShipDisplayReviewPath)')" />
+    <EmbeddedResource Include="../StarBridge.Desktop/Data/ship-loaner-matrix.tsv"
+                      LogicalName="StarBridge.ShipLoanerMatrix.tsv"
+                      Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/ship-loaner-matrix.tsv')" />
+    <EmbeddedResource Include="..\data\location-names\location-name-pack.json"
+                      LogicalName="StarBridge.LocationCatalog.json"
+                      Condition="Exists('..\data\location-names\location-name-pack.json')" />
+    <!-- Private local test assets, never an official redistribution grant. -->
+    <EmbeddedResource Include="../StarBridge.Flutter/assets/ships/catalog-manifest.json"
+                      LogicalName="StarBridge.ShipMedia.json"
+                      Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('../StarBridge.Flutter/assets/ships/catalog-manifest.json')" />
+  </ItemGroup>
+
+</Project>

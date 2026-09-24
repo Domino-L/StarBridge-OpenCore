@@ -46,9 +46,7 @@ public partial class MainWindow
             Uri.TryCreate(trimmed, UriKind.Absolute, out var parsedUri) &&
             IPAddress.TryParse(parsedUri.Host, out _) &&
             !parsedUri.IsLoopback;
-        if (trimmed.Equals("http://127.0.0.1:5058", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.Equals("http://localhost:5058", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.Equals("http://api.scstarbridge.com", StringComparison.OrdinalIgnoreCase) ||
+        if (trimmed.Equals("http://api.scstarbridge.com", StringComparison.OrdinalIgnoreCase) ||
             isLegacyLiteralAddress)
         {
             return DefaultRelayUrl;

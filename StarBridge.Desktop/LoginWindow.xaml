@@ -73,24 +73,11 @@
                        Foreground="{StaticResource MutedTextBrush}"
                        TextWrapping="Wrap" />
 
-            <Grid Grid.Row="2" Margin="0,0,0,18">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Button x:Name="LoginModeButton"
-                        Grid.Column="0"
-                        Margin="0,0,8,0"
-                        Content="登录"
-                        Style="{StaticResource PrimaryButton}"
-                        Click="LoginModeButton_Click" />
-                <Button x:Name="RegisterModeButton"
-                        Grid.Column="1"
-                        Margin="8,0,0,0"
-                        Content="注册"
-                        Style="{StaticResource SecondaryButton}"
-                        Click="RegisterModeButton_Click" />
-            </Grid>
+            <TextBlock Grid.Row="2"
+                       Margin="0,0,0,18"
+                       Text="没有 SCM 账号？授权页面可前往 SCM 完成注册，完成后将自动返回应用。"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       TextWrapping="Wrap" />
 
             <Grid Grid.Row="3">
                 <Grid x:Name="LoginPanel">
@@ -99,26 +86,44 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Text="登录邮箱"
+                    <Button x:Name="ScmLoginButton"
+                            Grid.Row="0"
+                            Height="46"
+                            Margin="0,0,0,12"
+                            Content="使用 SCM 账号登录"
+                            ToolTip="在系统浏览器中打开 SCM 授权页面"
+                            Style="{StaticResource PrimaryButton}"
+                            Click="ScmLoginButton_Click" />
+
+                    <TextBlock Grid.Row="1"
+                               Margin="0,0,0,14"
+                               HorizontalAlignment="Center"
+                               Text="或使用旧 StarBridge 账号（迁移期兼容）"
+                               Foreground="{StaticResource MutedTextBrush}" />
+
+                    <TextBlock Grid.Row="2"
+                               Text="旧登录邮箱"
                                Foreground="{StaticResource MutedTextBrush}" />
                     <TextBox x:Name="LoginEmailBox"
-                             Grid.Row="0"
+                             Grid.Row="2"
                              Height="40"
                              Margin="0,24,0,14"
                              VerticalContentAlignment="Center" />
 
-                    <TextBlock Grid.Row="1"
-                               Text="密码"
+                    <TextBlock Grid.Row="3"
+                               Text="旧账号密码"
                                Foreground="{StaticResource MutedTextBrush}" />
                     <PasswordBox x:Name="LoginPasswordBox"
-                                 Grid.Row="1"
+                                 Grid.Row="3"
                                  Height="40"
                                  Margin="0,24,0,14"
                                  VerticalContentAlignment="Center" />
 
-                    <Button Grid.Row="2"
+                    <Button Grid.Row="4"
                             Margin="0,0,0,10"
                             HorizontalAlignment="Right"
                             HorizontalContentAlignment="Right"
@@ -126,84 +131,8 @@
                             Style="{StaticResource SecurityLinkButton}"
                             Click="ForgotPasswordButton_Click" />
 
-                    <TextBlock Grid.Row="3"
-                               Text="使用注册邮箱和密码登录。未登录时只能浏览，无法同步和管理组织。"
-                               Foreground="{StaticResource MutedTextBrush}"
-                               TextWrapping="Wrap" />
-                </Grid>
-
-                <Grid x:Name="RegisterPanel" Visibility="Collapsed">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="190" />
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Text="登录邮箱"
-                               Grid.ColumnSpan="2"
-                               Foreground="{StaticResource MutedTextBrush}" />
-                    <TextBox x:Name="RegisterEmailBox"
-                             Grid.ColumnSpan="2"
-                             Height="40"
-                             Margin="0,24,0,14"
-                             VerticalContentAlignment="Center" />
-
-                    <TextBlock Grid.Row="1"
-                               Grid.ColumnSpan="2"
-                               Text="密码"
-                               Foreground="{StaticResource MutedTextBrush}" />
-                    <PasswordBox x:Name="RegisterPasswordBox"
-                                 Grid.Row="1"
-                                 Grid.ColumnSpan="2"
-                                 Height="40"
-                                 Margin="0,24,0,14"
-                                 VerticalContentAlignment="Center" />
-
-                    <Grid Grid.Row="2"
-                          Grid.ColumnSpan="2">
-                        <TextBlock Text="呼号（昵称）"
-                                   Foreground="{StaticResource MutedTextBrush}" />
-                        <TextBlock Text="起一个队友好叫的名字～"
-                                   HorizontalAlignment="Right"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   FontSize="11" />
-                    </Grid>
-                    <TextBox x:Name="RegisterCallsignBox"
-                             Grid.Row="2"
-                             Grid.ColumnSpan="2"
-                             Height="40"
-                             Margin="0,24,0,14"
-                             VerticalContentAlignment="Center"
-                             MaxLength="24" />
-
-                    <TextBlock Grid.Row="3"
-                               Text="验证码"
-                               Grid.ColumnSpan="2"
-                               Foreground="{StaticResource MutedTextBrush}" />
-                    <TextBox x:Name="VerificationCodeBox"
-                             Grid.Row="3"
-                             Height="40"
-                             Margin="0,24,12,14"
-                             VerticalContentAlignment="Center"
-                             MaxLength="6" />
-                    <Button x:Name="SendCodeButton"
-                            Grid.Row="3"
-                            Grid.Column="1"
-                            Height="40"
-                            Margin="0,24,0,14"
-                            Content="发送验证码"
-                            Style="{StaticResource SecondaryButton}"
-                            Click="SendCodeButton_Click" />
-
-                    <TextBlock Grid.Row="4"
-                               Grid.ColumnSpan="2"
-                               Text="验证码将发送至你的邮箱，10 分钟内有效。"
+                    <TextBlock Grid.Row="5"
+                               Text="SCM 登录会在系统浏览器中完成，星海舰桥不会接触你的 SCM 密码。旧登录仅用于尚未迁移的功能。"
                                Foreground="{StaticResource MutedTextBrush}"
                                TextWrapping="Wrap" />
                 </Grid>
@@ -222,7 +151,7 @@
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.ColumnSpan="2"
-                               Text="注册邮箱"
+                               Text="旧账号邮箱"
                                Foreground="{StaticResource MutedTextBrush}" />
                     <TextBox x:Name="RecoveryEmailBox"
                              Grid.ColumnSpan="2"
@@ -273,7 +202,7 @@
 
                     <TextBlock Grid.Row="4"
                                Grid.ColumnSpan="2"
-                               Text="输入注册邮箱获取验证码。为保护账户，无论邮箱是否已注册，系统都会显示相同提示。"
+                               Text="输入旧账号邮箱获取验证码。为保护账户，无论账号是否存在，系统都会显示相同提示。"
                                Foreground="{StaticResource MutedTextBrush}"
                                TextWrapping="Wrap" />
                 </Grid>
@@ -293,7 +222,7 @@
                     <TextBlock Margin="0,7,0,0"
                                Foreground="{StaticResource MutedTextBrush}"
                                TextWrapping="Wrap"
-                               Text="注册与登录 StarBridge 均不需要 RSI 账户。StarBridge 不会要求、读取或保存你的 RSI 官网登录凭据。" />
+                               Text="SCM 统一登录与旧账号兼容登录均不需要 RSI 账户。应用不会要求、读取或保存你的 RSI 官网登录凭据。" />
                     <TextBlock Margin="0,5,0,0"
                                Foreground="{StaticResource MutedTextBrush}"
                                TextWrapping="Wrap"

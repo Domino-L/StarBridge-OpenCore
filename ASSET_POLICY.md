@@ -19,6 +19,12 @@
 
 这些文件本身不采用 Apache-2.0，而是适用同目录内的 `LICENSE.txt`。该许可仅允许为获取、构建和测试未修改的 StarBridge 开放核心而复制这些运行时品牌文件，不允许将其作为分支版本、修改版或其他产品的品牌继续使用或分发。名称和商标边界另见 `TRADEMARKS.md`。
 
+SCM 的图形标 `StarBridge.Flutter/assets/brand/scm_mark.png` 与无 K 横向字标
+`StarBridge.Flutter/assets/brand/scm_wordmark.png` 仅用于标识 SCM 账号授权与明确
+由 SCM 提供的数据来源，不属于 StarBridge 品牌，也不采用 Apache-2.0。其上游
+路径、原始提交、转换边界、逐字节哈希和集成权限记录于
+`docs/brand-assets/scm/README.md`。
+
 ## 不进入公开源码
 
 以下素材不会进入公开仓库：

@@ -13,10 +13,10 @@ if ([string]::IsNullOrWhiteSpace($LegacyPath)) {
     $LegacyPath = Join-Path $repoRoot "StarBridge.Desktop\Data\ship-names-zh.txt"
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path $repoRoot "StarBridge.Desktop\Data\ship-name-pack.json"
+    $OutputPath = Join-Path $repoRoot "data\ship-names\ship-name-pack.json"
 }
 if ([string]::IsNullOrWhiteSpace($ProvenancePath)) {
-    $ProvenancePath = Join-Path $repoRoot "StarBridge.Desktop\Data\ship-name-pack.provenance.json"
+    $ProvenancePath = Join-Path $repoRoot "data\ship-names\ship-name-pack.provenance.json"
 }
 
 $LegacyPath = [IO.Path]::GetFullPath($LegacyPath)

@@ -1,6 +1,7 @@
 using StarBridge.Core.TrustSafety;
 using StarBridge.Core.Presence;
 using StarBridge.Desktop.Theming;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -62,8 +63,6 @@ public partial class MainWindow
 
         Grid.SetColumn(TopFleetBannerLayer, IsBridgeShellEnabled ? 1 : 0);
         Grid.SetColumnSpan(TopFleetBannerLayer, IsBridgeShellEnabled ? 1 : 2);
-        Grid.SetColumn(IdentityVerificationBanner, IsBridgeShellEnabled ? 1 : 0);
-        Grid.SetColumnSpan(IdentityVerificationBanner, IsBridgeShellEnabled ? 1 : 2);
         FleetFooterStatusBar.Visibility = IsBridgeShellEnabled
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -164,15 +163,21 @@ public partial class MainWindow
         RefreshBridgeShellForSelectedTab();
         HeaderAccountMenu.PlacementTarget = BridgePersonalNavButton;
         HeaderAccountMenu.Placement = PlacementMode.Bottom;
-        HeaderAccountMenu.HorizontalOffset = -100;
+        HeaderAccountMenu.HorizontalOffset = -18;
         HeaderAccountMenu.IsOpen = true;
+        BridgePersonalNavButton.IsChecked = true;
         NotifyGuidedTourAction(GuideStep.OpenAccountMenu);
         e.Handled = true;
     }
 
+    private void HeaderAccountMenu_Closed(object sender, RoutedEventArgs e)
+    {
+        BridgePersonalNavButton.IsChecked = false;
+    }
+
     private void BridgePresenceModeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!IsLoggedIn)
+        if (!IsAccountAuthenticated)
         {
             LoginButton_Click(sender, e);
             return;
@@ -197,7 +202,8 @@ public partial class MainWindow
     {
         if (sender is not WpfButton { CommandParameter: string modeName } ||
             !Enum.TryParse<PlayerPresenceVisibilityMode>(modeName, ignoreCase: true, out var mode) ||
-            !Enum.IsDefined(mode))
+            !Enum.IsDefined(mode) ||
+            mode == PlayerPresenceVisibilityMode.Offline)
         {
             return;
         }
@@ -212,24 +218,6 @@ public partial class MainWindow
     {
         OpenPersonalIdentitySettings_Click(sender, e);
         RefreshBridgeShellForSelectedTab();
-    }
-
-    private void BridgePresenceSyncIssueButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryLeaveOverlayEditorTab())
-        {
-            return;
-        }
-
-        BridgePresenceModePopup.IsOpen = false;
-        var previousTab = MainTabs.SelectedItem;
-        MainTabs.SelectedItem = SettingsTab;
-        SetActiveNav(HeaderSettingsButton);
-        ShowPersonalSection(PersonalSection.AppSettings);
-        ShowPersonalDashboardSection(PersonalDashboardSection.SyncPrivacy);
-        QueueMainPageReveal(previousTab);
-        RefreshBridgeShellForSelectedTab();
-        e.Handled = true;
     }
 
     private void BridgeCurrentRoomButton_Click(object sender, RoutedEventArgs e)
@@ -506,30 +494,70 @@ public partial class MainWindow
             return;
         }
 
-        BridgeAuthenticationButton.Visibility = IsLoggedIn
+        BridgeAuthenticationButton.Visibility = IsAccountAuthenticated
             ? Visibility.Collapsed
             : Visibility.Visible;
-        BridgeAuthenticationButton.Content = _authenticationExpired
+        BridgeAuthenticationButton.Content = AccountState.AuthenticationExpired
             ? "重新登录"
-            : "登录 / 注册";
-        BridgeInboxButton.Visibility = IsLoggedIn
+            : "登录账号";
+        BridgeInboxButton.Visibility = IsAccountAuthenticated
             ? Visibility.Visible
             : Visibility.Collapsed;
         BridgeReviewNavButton.Visibility = IsLoggedIn &&
                                            _accountEntitlements.Contains(TrustSafetyEntitlements.ModerateReports)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        BridgeAvatarOnlineDot.Fill = HeaderAvatarOnlineDot?.Fill ??
-                                     FindBrush("StatusDisabledBrush", WpfBrushes.LightSlateGray);
+        var scmIdentityAbnormal = IsScmLoggedIn &&
+                                  ResolveStartupIdentityGateDecision() !=
+                                  StartupIdentityGateDecision.Allow;
+        BridgeRsiAbnormalDot.Visibility = scmIdentityAbnormal
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HeaderIdentityAbnormalDot.Visibility = scmIdentityAbnormal
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        BridgeRsiAbnormalDot.ToolTip = scmIdentityAbnormal
+            ? ResolveStartupIdentityGateDecision() == StartupIdentityGateDecision.IdentityMismatch
+                ? "SCM、兼容账号或 Game.log 的游戏 ID 不一致"
+                : "RSI 账号尚未验证或验证状态异常"
+            : null;
+        BridgeAccountNameText.Text = IsScmLoggedIn
+            ? _scmOAuthSession!.DisplayName
+            : IsLoggedIn ? GetPersonalDisplayName() : "星海舰桥访客";
+        RefreshBridgeAccountPresence();
         RefreshBridgeNotificationBadge();
         RefreshBridgeSceneBandStatus();
+    }
+
+    private void RefreshBridgeAccountPresence()
+    {
+        if (!IsAccountAuthenticated)
+        {
+            BridgeAccountStatusText.Text = "离线";
+            BridgeAccountStatusText.Foreground = FindBrush("StatusDisabledBrush", WpfBrushes.LightSlateGray);
+        }
+        else
+        {
+            BridgeAccountStatusText.Text = PlayerPresencePresentation.FormatLocal(
+                _localPresence,
+                _syncPrivacySettings.PresenceVisibilityMode,
+                _language);
+            BridgeAccountStatusText.Foreground = PlayerPresencePresentation.LocalBrush(
+                _localPresence,
+                _syncPrivacySettings.PresenceVisibilityMode);
+        }
+
+        BridgeAccountStatusDot.Fill = BridgeAccountStatusText.Foreground;
+        BridgeAccountStatusGlow.Color = BridgeAccountStatusText.Foreground is SolidColorBrush brush
+            ? brush.Color
+            : MediaColor.FromRgb(105, 204, 255);
+        BridgeAccountStatusGlow.Opacity = IsAccountAuthenticated ? 0.4 : 0;
     }
 
     private void RefreshBridgeSceneBandStatus()
     {
         if (!IsBridgeShellEnabled ||
             BridgePresenceModeButton is null ||
-            BridgePresenceSyncIssueButton is null ||
             BridgeGameRecognitionAlert is null ||
             BridgeCurrentRoomButton is null)
         {
@@ -538,57 +566,42 @@ public partial class MainWindow
 
         var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
         BridgePresenceModeLabel.Text = zh ? "对外状态" : "Visibility";
-        BridgeOnlinePeopleLabel.Text = zh ? "在线的人" : "Online people";
         RefreshBridgePresenceModeOptions();
 
-        if (!IsLoggedIn)
+        var accountState = AccountState;
+        if (!accountState.IsAuthenticated)
         {
             BridgePresenceModeText.Text = zh ? "未登录" : "Signed out";
             BridgePresenceModeText.Foreground = FindBrush("StatusDisabledBrush", WpfBrushes.LightSlateGray);
             BridgePresenceModeDot.Fill = FindBrush("StatusDisabledBrush", WpfBrushes.LightSlateGray);
             BridgePresenceModeButton.ToolTip = zh ? "登录后设置对外状态" : "Sign in to set your visibility";
-            BridgePresenceSyncIssueButton.Visibility = Visibility.Collapsed;
+        }
+        else if (!accountState.HasRelaySession)
+        {
+            var option = PlayerPresenceVisibilityCatalog.Find(
+                _syncPrivacySettings.PresenceVisibilityMode);
+            BridgePresenceModeText.Text = PlayerPresencePresentation.FormatLocal(
+                _localPresence, option.Mode, _language);
+            BridgePresenceModeText.Foreground = PlayerPresencePresentation.LocalBrush(
+                _localPresence, option.Mode);
+            BridgePresenceModeDot.Fill = BridgePresenceModeText.Foreground;
+            BridgePresenceModeButton.ToolTip = zh
+                ? "选择本机对外状态；完成旧账号关联后可同步到兼容服务"
+                : "Choose local visibility; linking is required to publish to legacy services";
         }
         else
         {
             var option = PlayerPresenceVisibilityCatalog.Find(
                 _syncPrivacySettings.PresenceVisibilityMode);
-            var isPresencePublishedOnline =
-                CanPublishPresenceHeartbeat() &&
-                GetLocalFleetPresencePrivacyProjection().Online;
-            var isPresenceSyncPaused =
-                option.Mode == PlayerPresenceVisibilityMode.Online &&
-                !isPresencePublishedOnline;
 
-            BridgePresenceModeText.Text = zh
-                ? option.DisplayName
-                : option.Mode switch
-                {
-                    PlayerPresenceVisibilityMode.Online => "Online",
-                    PlayerPresenceVisibilityMode.Invisible => "Invisible",
-                    _ => "Offline"
-                };
-            BridgePresenceModeText.Foreground = option.Mode switch
-            {
-                PlayerPresenceVisibilityMode.Online =>
-                    FindBrush("StatusSuccessBrush", WpfBrushes.SpringGreen),
-                PlayerPresenceVisibilityMode.Invisible =>
-                    FindBrush("StatusDisabledBrush", WpfBrushes.LightSlateGray),
-                _ => FindBrush("StatusDangerBrush", WpfBrushes.IndianRed)
-            };
+            BridgePresenceModeText.Text = PlayerPresencePresentation.FormatLocal(
+                _localPresence, option.Mode, _language);
+            BridgePresenceModeText.Foreground = PlayerPresencePresentation.LocalBrush(
+                _localPresence, option.Mode);
             BridgePresenceModeDot.Fill = BridgePresenceModeText.Foreground;
             BridgePresenceModeButton.ToolTip = zh
                 ? "选择对外状态"
                 : "Choose your visibility";
-
-            BridgePresenceSyncIssueButton.Visibility = isPresenceSyncPaused
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            if (isPresenceSyncPaused)
-            {
-                BridgePresenceSyncIssueText.Text = zh ? "需要处理" : "Needs attention";
-                BridgePresenceSyncIssueButton.ToolTip = GetPresenceHeartbeatSuppressionReason(zh);
-            }
         }
 
         var gameRunningPastGrace = _isGameProcessRunning &&
@@ -632,62 +645,61 @@ public partial class MainWindow
         }
     }
 
-    private string GetPresenceHeartbeatSuppressionReason(bool zh)
-    {
-        var reason = !IsLoggedIn
-            ? zh ? "账号尚未登录" : "the account is signed out"
-            : _isAccountTransition
-                ? zh ? "账号正在切换" : "the account is being switched"
-                : !_syncPrivacySettings.SyncEnabled
-                    ? zh ? "同步功能已关闭" : "sync is turned off"
-                    : !GetPresenceSharingDecision().CanPublishRealtime
-                        ? zh ? "当前对外状态不允许发布" : "the selected visibility does not publish presence"
-                        : _syncPrivacySettings.EffectiveVisibilityScope == SyncPrivacyVisibilityScope.Private
-                            ? zh ? "共享范围设为仅自己可见" : "the sharing scope is private"
-                            : !_syncPrivacySettings.SyncOnlineStatus
-                                ? zh ? "在线状态同步已关闭" : "online-status sync is turned off"
-                                : !PlayerPresence.IsOnline(_localPresence)
-                                    ? zh ? "应用当前未处于在线状态" : "the app is not currently online"
-                                    : zh ? "在线状态暂时无法发布" : "presence cannot currently be published";
-
-        return zh
-            ? $"在线状态暂时无法更新：{reason}。单击打开同步与隐私设置。"
-            : $"Presence cannot currently be updated: {reason}. Click to open sync and privacy settings.";
-    }
-
     private void RefreshBridgePresenceModeOptions()
     {
         if (BridgePresenceOnlineOption is null ||
+            BridgePresenceInGameOption is null ||
             BridgePresenceInvisibleOption is null ||
-            BridgePresenceOfflineOption is null)
+            BridgePresencePopupTitle is null)
         {
             return;
         }
 
         var currentMode = _syncPrivacySettings.PresenceVisibilityMode;
         BridgePresenceOnlineOption.Tag = currentMode == PlayerPresenceVisibilityMode.Online ? "Active" : null;
+        BridgePresenceInGameOption.Tag = currentMode == PlayerPresenceVisibilityMode.InGame ? "Active" : null;
         BridgePresenceInvisibleOption.Tag = currentMode == PlayerPresenceVisibilityMode.Invisible ? "Active" : null;
-        BridgePresenceOfflineOption.Tag = currentMode == PlayerPresenceVisibilityMode.Offline ? "Active" : null;
 
         var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
         BridgePresencePopupTitle.Text = zh ? "选择对外状态" : "Choose your visibility";
         BridgePresenceOnlineTitle.Text = zh ? "在线" : "Online";
-        BridgePresenceOnlineDescription.Text = zh ? "对外显示实际在线状态" : "Show your current activity";
+        BridgePresenceOnlineDescription.Text = zh ? "检测到游戏后自动显示游戏中" : "Switch to in game when detected";
+        BridgePresenceInGameTitle.Text = zh ? "游戏中" : "In game";
+        BridgePresenceInGameDescription.Text = zh ? "对外显示游戏中" : "Show your status as in game";
         BridgePresenceInvisibleTitle.Text = zh ? "隐身" : "Invisible";
         BridgePresenceInvisibleDescription.Text = zh ? "对外显示离线，仍可接收内容" : "Appear offline and keep receiving updates";
-        BridgePresenceOfflineTitle.Text = zh ? "离线模式" : "Offline mode";
-        BridgePresenceOfflineDescription.Text = zh ? "停止即时状态收发" : "Pause live status updates";
     }
 
     private void RefreshBridgeNotificationBadge()
     {
-        if (!IsBridgeShellEnabled || BridgeInboxUnreadBadge is null)
+        if (!IsBridgeShellEnabled || BridgeInboxUnreadBadge is null ||
+            HeaderInboxUnreadBadge is null)
         {
             return;
         }
 
-        BridgeInboxUnreadBadge.Visibility = HeaderInboxUnreadBadge?.Visibility ?? Visibility.Collapsed;
-        BridgeInboxUnreadBadgeText.Text = HeaderInboxUnreadBadgeText?.Text ?? "0";
+        var scmStationUnread = (int)Math.Min(
+            int.MaxValue,
+            Math.Max(0L, _scmBootstrapSnapshot?.UnreadNotifications ?? 0L));
+        var relayStationUnread = Math.Max(0, _notificationInbox?.UnreadCount ?? 0);
+        var relayChatUnread = Math.Max(0, _fleetChatTotalUnread) +
+                              Math.Max(0, _partyRoomChatUnreadCount) +
+                              _friendChatConversations.Sum(conversation =>
+                                  Math.Max(0, conversation.Conversation.UnreadCount));
+        var count = (long)scmStationUnread + relayStationUnread + relayChatUnread;
+        var badgeText = count > 99 ? "99+" : count.ToString(CultureInfo.InvariantCulture);
+        var visibility = IsAccountAuthenticated && count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        BridgeInboxUnreadBadgeText.Text = badgeText;
+        BridgeInboxUnreadBadge.Visibility = visibility;
+        HeaderInboxUnreadBadgeText.Text = badgeText;
+        HeaderInboxUnreadBadge.Visibility = visibility;
+        var tooltip = count > 0
+            ? $"消息 · {count} 条未读（SCM 站内信与舰桥通讯）"
+            : "消息";
+        BridgeInboxButton.ToolTip = tooltip;
+        HeaderInboxButton.ToolTip = tooltip;
     }
 
 }

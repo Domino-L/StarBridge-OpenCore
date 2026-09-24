@@ -43,6 +43,7 @@ public partial class AuthenticationRequiredView : System.Windows.Controls.UserCo
     public AuthenticationRequiredView()
     {
         InitializeComponent();
+        SetSessionRestoreInProgress(true);
     }
 
     public string Heading
@@ -79,6 +80,20 @@ public partial class AuthenticationRequiredView : System.Windows.Controls.UserCo
     {
         add => AddHandler(LoginRequestedEvent, value);
         remove => RemoveHandler(LoginRequestedEvent, value);
+    }
+
+    public void SetSessionRestoreInProgress(bool isRestoring)
+    {
+        AuthenticationStateLoadingIndicator.IsActive = isRestoring;
+        AuthenticationStateLoadingIndicator.Visibility = isRestoring
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AuthenticationStateText.Text = isRestoring ? "正在恢复 SCM 登录状态" : "账号未登录";
+        AuthenticationActionButton.Content = isRestoring ? "正在恢复..." : "登录账号";
+        AuthenticationActionButton.IsEnabled = !isRestoring;
+        AuthenticationFooterText.Text = isRestoring
+            ? "正在从 Windows 安全凭据恢复账号，请稍候。"
+            : "登录成功后将直接返回当前页面。";
     }
 
     private void LoginButton_Click(object sender, RoutedEventArgs e)

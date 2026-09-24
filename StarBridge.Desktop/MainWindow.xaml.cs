@@ -8,6 +8,7 @@ using StarBridge.Core.Presence;
 using StarBridge.Core.Profiles;
 using StarBridge.Core.State;
 using StarBridge.Core.TrustSafety;
+using StarBridge.HostRuntime.Auth;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -50,6 +51,14 @@ public partial class MainWindow : Window, IAppUpdateUi
 {
     private const bool UseBridgeShell = true;
     private static bool IsBridgeShellEnabled => UseBridgeShell;
+    private const int ScmAvatarMaxBytes = 512 * 1024;
+    private static readonly HttpClient ScmAvatarClient = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(10)
+    };
 
     private sealed record OverlayPresetEntry(string Id, string Name);
 
@@ -84,7 +93,8 @@ public partial class MainWindow : Window, IAppUpdateUi
     private const string OverlayEditorAlignmentGuideTag = "__overlay_editor_alignment_guide";
     private const string OverlayMemberPreviewRowTag = "__overlay_member_preview_row";
     private const double OverlayMemberColumnSplitHandleWidth = 7;
-    private const string DefaultRelayUrl = "https://api.scstarbridge.com";
+    private static string DefaultRelayUrl =>
+        ScmEnvironmentSettings.Load().RelayBaseUri.AbsoluteUri.TrimEnd('/');
     private const string LocalSystemAssetsRelativeDirectory = "assets/systems";
     private static readonly OverlayEventNotificationTypes[] OverlayEventDurationOrder =
     [
@@ -453,6 +463,8 @@ public partial class MainWindow : Window, IAppUpdateUi
     private DateTimeOffset? _fleetStateCachedAtUtc;
     private readonly StartupDataGateController _startupDataGate = new();
     private CancellationTokenSource? _startupDataSyncCts;
+    private readonly object _startupDataSyncLock = new();
+    private Task? _startupDataSyncTask;
     private readonly QuantumTravelContextTracker _quantumTravelContext = new();
     private readonly ObservableCollection<PlayerRow> _players = [];
     private readonly ObservableCollection<SpecifiedVisibilityMemberRow> _specifiedVisibilityMembers = [];
@@ -547,7 +559,6 @@ public partial class MainWindow : Window, IAppUpdateUi
     private readonly List<OverlayEditorHistoryState> _overlayEditorRedoHistory = [];
     private readonly DispatcherTimer _gameProcessTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _networkSyncTimer = new() { Interval = TimeSpan.FromSeconds(15) };
-    private readonly DispatcherTimer _presenceHeartbeatTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _networkPlayerRealtimePullTimer = new() { Interval = NetworkRealtimePullInterval };
     private readonly DispatcherTimer _networkRealtimePushTimer = new() { Interval = NetworkRealtimePushDebounce };
     private readonly DispatcherTimer _profileSyncDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(800) };
@@ -557,8 +568,20 @@ public partial class MainWindow : Window, IAppUpdateUi
     private readonly DispatcherTimer _temporaryEntitlementTimer = new();
     private readonly DispatcherTimer _entitlementRefreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly HttpClient _networkClient = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private readonly HttpClient _longPollHttpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly FleetDirectoryCache _fleetDirectoryCache = new();
     private readonly StarBridgeRelayClient _relayClient;
+    private readonly StarBridgeRelayClient _longPollRelayClient;
+    private ScmOAuthOptions _scmOAuthOptions;
+    private readonly ScmHttpClient _scmHttpClient;
+    private OAuthPkceClient _scmOAuthClient = null!;
+    private ScmFleetBroadcastClient _scmFleetBroadcastClient = null!;
+    private ScmRealtimeClient? _scmRealtimeClient;
+    private readonly ScmEnvironmentSettings _scmEnvironmentSettings;
+    private readonly ScmRegionRouter _scmRegionRouter;
+    private bool _scmRegionResolved;
+    private readonly ILegacyMigrationCredentialStore _legacyMigrationCredentialStore;
+    private IdentityLinkCoordinator _identityLinkCoordinator = null!;
     private readonly AppUpdateService _appUpdateService;
     private GameLogWatcher? _watcher;
     private string? _logPath;
@@ -568,7 +591,24 @@ public partial class MainWindow : Window, IAppUpdateUi
     private string? _accountName;
     private string? _authToken;
     private string? _accountId;
+    private ScmOAuthSession? _scmOAuthSession;
+    private ScmBootstrapSnapshot? _scmBootstrapSnapshot;
+    private readonly ScmProfileCacheStore _scmProfileCacheStore = new();
+    private ScmSelfProfileContract? _scmProfile;
+    private bool _scmProfileLoadedFromCache;
+    private bool _scmProfileWriteInProgress;
+    private bool _hasLegacyMigrationCredential;
+    private bool? _legacyIdentityLinked;
+    private ScmIdentityLinkProjection? _legacyIdentityLinkProjection;
+    private bool _scmLegacyRelayAuthenticated;
+    private bool _identityLinkInProgress;
+    private CancellationTokenSource? _identityLinkCancellation;
+    private bool _scmSessionRestoreInProgress = true;
+    private ScmSessionRestoreOutcome _scmSessionRestoreOutcome = ScmSessionRestoreOutcome.NotAttempted;
+    private string? _accountOperationStatusText;
+    private readonly AccountRuntimeStore _accountRuntimeStore;
     private readonly AccountSessionCoordinator _accountSessionCoordinator = new();
+    private readonly ScmRuntimeRecoveryCoordinator _scmRuntimeRecoveryCoordinator = new();
     private bool _isAccountTransition;
     private bool _authenticationExpired;
     private string? _lastAnimatedHeaderConnectionStatus;
@@ -923,16 +963,15 @@ public partial class MainWindow : Window, IAppUpdateUi
     private bool _isNetworkSyncRunning;
     private bool _isNetworkRealtimePullRunning;
     private bool _isNetworkRealtimePushRunning;
-    private bool _isPresenceHeartbeatRunning;
     private bool _isNetworkSnapshotPushRunning;
     private bool _networkRealtimePushQueued;
     private bool _pendingPrivacyOfflineClear;
     private bool _isNetworkSyncIssueRetrying;
     private bool _isRefreshingAccountPanel;
+    private bool _isApplyingAccountProjection;
     private bool _isUpdatingSpecifiedMemberSelection;
     private bool _isRelayLatencyProbeRunning;
     private int _networkSyncFailureCount;
-    private int _presenceHeartbeatFailureCount;
     private long _lastRelayLatencyMs = -1;
     private RelayServiceHealthState _relayServiceHealthState = RelayServiceHealthState.Unknown;
     private int _relayHealthConsecutiveFailures;
@@ -980,7 +1019,14 @@ public partial class MainWindow : Window, IAppUpdateUi
         DateTimeOffset? ExpiresAt);
 
     public MainWindow()
+        : this(new AccountRuntimeStore())
     {
+    }
+
+    internal MainWindow(AccountRuntimeStore accountRuntimeStore)
+    {
+        ArgumentNullException.ThrowIfNull(accountRuntimeStore);
+        _accountRuntimeStore = accountRuntimeStore;
         _isLoadingSettings = true;
         InitializeComponent();
         HelpReleaseHistoryList.ItemsSource = AppReleaseHistoryCatalog.Entries;
@@ -1027,13 +1073,32 @@ public partial class MainWindow : Window, IAppUpdateUi
             _networkClient,
             () => NetworkServerUrlBox.Text,
             () => NetworkServerKeyBox.Password,
-            () => _authToken,
+            GetRelayAuthorizationToken,
             () => CanSynchronizeUserData);
+        _longPollRelayClient = new StarBridgeRelayClient(
+            _longPollHttpClient,
+            () => NetworkServerUrlBox.Text,
+            () => NetworkServerKeyBox.Password,
+            GetRelayAuthorizationToken,
+            () => CanSynchronizeUserData);
+        _scmEnvironmentSettings = ScmEnvironmentSettings.Load();
+        _legacyMigrationCredentialStore = new WindowsLegacyMigrationCredentialStore(
+            Path.Combine(
+                DesktopAppConfig.ConfigDirectory,
+                _scmEnvironmentSettings.LegacyMigrationCredentialFileName));
+        _scmOAuthOptions = ScmOAuthOptions.Create(_scmEnvironmentSettings);
+        _scmHttpClient = new ScmHttpClient();
+        _scmRegionRouter = new ScmRegionRouter(
+            new HttpClient(),
+            Path.Combine(
+                DesktopAppConfig.ConfigDirectory,
+                _scmEnvironmentSettings.RegionCacheFileName));
+        ConfigureScmClients(_scmOAuthOptions);
+
         _personalProfileRepository = new PersonalProfileRemoteRepository(_relayClient);
         InitializeDualAxisPrivacyEditor();
         _appUpdateService = new AppUpdateService(
             _networkClient,
-            BuildNetworkUri,
             this,
             text => UpdateStatusText.Text = text,
             isEnabled => CheckUpdateButton.IsEnabled = isEnabled,
@@ -1084,20 +1149,25 @@ public partial class MainWindow : Window, IAppUpdateUi
         var config = DesktopAppConfig.Load();
         _applicationBehaviorSettings = (System.Windows.Application.Current as App)?.BehaviorSettings ??
                                        ApplicationBehaviorSettingsStore.Load();
-        var hasSavedSession = !string.IsNullOrWhiteSpace(config.AuthToken);
         _logPath = config.LogPath;
         _localPlayer = config.PlayerName;
         _localPlayerId = config.PlayerId;
         _accountName = config.AccountName;
-        _authToken = hasSavedSession ? config.AuthToken : null;
-        _accountId = hasSavedSession ? config.AccountId : null;
-        _fleetStateCachedAtUtc = config.FleetStateCachedAtUtc;
-        if (hasSavedSession)
+        // SCM is the only automatic application login. A saved legacy token is
+        // retained solely as encrypted migration proof and must never become a
+        // fallback session when SCM restore fails or requires reauthorization.
+        _authToken = null;
+        _accountId = null;
+        CaptureLegacyMigrationCredential(config.AccountId, config.AccountName, config.AuthToken);
+        _hasLegacyMigrationCredential = _legacyMigrationCredentialStore.Load() is not null;
+        if (FleetStateCacheStore.StageLegacy(
+            config.AccountId,
+            config.FleetStateJson,
+            config.FleetStateCachedAtUtc))
         {
-            _accountSessionCoordinator.Begin(
-                default,
-                new AccountSessionIdentity(_accountId, _accountName));
+            DesktopAppConfig.ClearLegacyFleetState(config);
         }
+        _fleetStateCachedAtUtc = null;
         _avatarPath = config.AvatarPath;
         _callsign = config.Callsign;
         BindGameplayStatisticsOwner();
@@ -1131,21 +1201,14 @@ public partial class MainWindow : Window, IAppUpdateUi
             ? "Ctrl+Shift+O"
             : config.OverlayHotkey;
         OverlayGlobalHotkeyEnabledCheck.IsChecked = config.EnableOverlayGlobalHotkey;
-        NetworkServerUrlBox.Text = NormalizeNetworkServerUrl(config.NetworkServerUrl);
+        NetworkServerUrlBox.Text = ScmRelayRouteSelection.Resolve(
+            _scmEnvironmentSettings,
+            NormalizeNetworkServerUrl(config.NetworkServerUrl));
         NetworkServerKeyBox.Password = config.NetworkServerKey ?? "";
         CallsignBox.Text = _callsign ?? "";
-        if (!string.IsNullOrWhiteSpace(config.FleetStateJson))
-        {
-            LoadFleetState(config.FleetStateJson);
-        }
-        if (hasSavedSession)
-        {
-            BeginStartupDataGate(_accountSessionCoordinator.Capture());
-        }
-        else
-        {
-            RefreshStartupDataGatePresentation();
-        }
+        RefreshStartupDataGatePresentation();
+        _accountRuntimeStore.Changed += AccountRuntimeStore_Changed;
+        UpdateAccountRuntimeState();
         RefreshAccountPanel();
         RenderCachedIdentity(initializeOfflineState: true);
         EnsureAvatarStoredAsUserAsset();
@@ -1184,7 +1247,6 @@ public partial class MainWindow : Window, IAppUpdateUi
         _gameProcessTimer.Tick += (_, _) => UpdateLocalOnlineStateFromGameProcess();
         _gameProcessTimer.Start();
         _networkSyncTimer.Tick += async (_, _) => await NetworkAutoSyncAsync();
-        _presenceHeartbeatTimer.Tick += async (_, _) => await SendPresenceHeartbeatAsync();
         _networkPlayerRealtimePullTimer.Tick += async (_, _) => await NetworkPlayerRealtimePullAsync();
         _networkRealtimePushTimer.Tick += async (_, _) => await FlushRealtimeNetworkSnapshotPushAsync();
         _profileSyncDebounceTimer.Tick += async (_, _) =>
@@ -1209,7 +1271,8 @@ public partial class MainWindow : Window, IAppUpdateUi
             _ = MeasureRelayLatencyAsync();
         }
 
-        if (_syncPrivacySettings.PresenceVisibilityMode == PlayerPresenceVisibilityMode.Online)
+        if (_syncPrivacySettings.PresenceVisibilityMode is PlayerPresenceVisibilityMode.Online
+            or PlayerPresenceVisibilityMode.InGame)
         {
             _appStatsTimer.Start();
         }
@@ -1217,6 +1280,143 @@ public partial class MainWindow : Window, IAppUpdateUi
         AppendOutput("请选择 Star Citizen 的 Game.log 开始读取。");
         RefreshHeaderStatusBar();
         OpenDefaultStartupPage();
+    }
+
+    private void ConfigureScmClients(ScmOAuthOptions options)
+    {
+        var routeChanged = !_scmOAuthOptions.AuthorizationServerBaseUri.Equals(options.AuthorizationServerBaseUri) ||
+                           !_scmOAuthOptions.ResourceServerBaseUri.Equals(options.ResourceServerBaseUri);
+        _scmRealtimeClient?.Stop();
+        if (routeChanged)
+        {
+            _accountSessionCoordinator.RetireCurrentLeases();
+            _scmRuntimeRecoveryCoordinator.Retire();
+            _scmBootstrapSnapshot = null;
+            _scmProfile = null;
+            _scmProfileLoadedFromCache = false;
+            _legacyIdentityLinked = null;
+            _legacyIdentityLinkProjection = null;
+            _scmLegacyRelayAuthenticated = false;
+            ResetFleetBroadcasts();
+        }
+
+        _scmOAuthOptions = options;
+        var scmDeviceId = ScmDeviceId.LoadOrCreate();
+        var oauthClient = new OAuthPkceClient(
+            _scmHttpClient,
+            new WindowsTokenVault(Path.Combine(
+                DesktopAppConfig.ConfigDirectory,
+                _scmEnvironmentSettings.TokenVaultFileName)),
+            options,
+            () => scmDeviceId);
+        oauthClient.SessionInvalidated += HandleScmSessionInvalidated;
+        _scmOAuthClient = oauthClient;
+        _scmFleetBroadcastClient = new ScmFleetBroadcastClient(
+            _scmHttpClient,
+            _scmOAuthClient,
+            options);
+        ScmRealtimeClient? realtimeClient = null;
+        realtimeClient = new ScmRealtimeClient(
+            _scmOAuthClient,
+            options,
+            scmDeviceId,
+            (generation, session) => Dispatcher.BeginInvoke(() =>
+            {
+                if (ReferenceEquals(_scmRealtimeClient, realtimeClient) &&
+                    realtimeClient!.IsCurrentGeneration(generation))
+                {
+                    ApplyScmOAuthSession(session);
+                    ScheduleScmRuntimeRecovery(
+                        session,
+                        "realtime-session-updated",
+                        forceDependencyReplay: true);
+                }
+            }),
+            (generation, status) => Dispatcher.BeginInvoke(() =>
+            {
+                if (ReferenceEquals(_scmRealtimeClient, realtimeClient) &&
+                    realtimeClient!.IsCurrentGeneration(generation))
+                {
+                    ApplyScmPresenceStatus(status);
+                }
+            }),
+            (generation, reason) => Dispatcher.BeginInvoke(async () =>
+            {
+                if (ReferenceEquals(_scmRealtimeClient, realtimeClient) &&
+                    realtimeClient!.IsCurrentGeneration(generation))
+                {
+                    await ForceScmLogoutFromRealtimeAsync(reason);
+                }
+            }),
+            (generation, scopeType, scopeId, resourceVersion) => Dispatcher.BeginInvoke(async () =>
+            {
+                if (ReferenceEquals(_scmRealtimeClient, realtimeClient) &&
+                    realtimeClient!.IsCurrentGeneration(generation))
+                {
+                    await HandleFleetBroadcastInvalidationAsync(scopeType, scopeId, resourceVersion);
+                }
+            }));
+        _scmRealtimeClient = realtimeClient;
+        _identityLinkCoordinator = new IdentityLinkCoordinator(
+            _scmOAuthClient,
+            new IdentityLinkClient(
+                _scmHttpClient,
+                _networkClient,
+                options,
+                () => BuildAuthenticationUri("")),
+            _legacyMigrationCredentialStore);
+        if (_scmOAuthSession is not null)
+        {
+            _scmRealtimeClient.Start(_scmOAuthSession);
+            if (routeChanged)
+            {
+                ScheduleScmRuntimeRecovery(
+                    _scmOAuthSession,
+                    "resource-route-changed",
+                    forceDependencyReplay: true);
+            }
+        }
+    }
+
+    private void HandleScmSessionInvalidated(
+        OAuthPkceClient source,
+        ScmOAuthSession invalidatedSession)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => HandleScmSessionInvalidated(source, invalidatedSession));
+            return;
+        }
+
+        if (!ReferenceEquals(_scmOAuthClient, source) ||
+            _scmOAuthSession is not { } currentSession ||
+            !string.Equals(currentSession.AuthorityId, invalidatedSession.AuthorityId, StringComparison.Ordinal) ||
+            !string.Equals(currentSession.Subject, invalidatedSession.Subject, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        LogoutScmSession(revokeRemoteSession: false);
+        LoginStatusText.Text = "SCM 登录状态已失效，请重新登录";
+        NetworkStatusText.Text = "登录已失效：同步已停止";
+        RefreshHeaderStatusBar();
+    }
+
+    private async Task EnsureScmRegionResolvedAsync(CancellationToken cancellationToken)
+    {
+        if (_scmRegionResolved)
+        {
+            return;
+        }
+
+        var route = await _scmRegionRouter.ResolveAsync(_scmEnvironmentSettings, cancellationToken);
+        ConfigureScmClients(ScmOAuthOptions.Create(_scmEnvironmentSettings, route));
+        _scmRegionResolved = true;
+        ScmAuthDiagnostics.Write(
+            ScmAuthDiagnostics.NewCorrelationId(),
+            "region-routing",
+            "completed",
+            $"environment={_scmEnvironmentSettings.EnvironmentName} source={route.Source} host={route.ResourceBaseUri.Host}");
     }
 
     private void MainWindow_ContentRendered(object? sender, EventArgs e)
@@ -1253,7 +1453,7 @@ public partial class MainWindow : Window, IAppUpdateUi
         RegisterOverlayHotkey();
     }
 
-    private void FindFleetNav_Click(object sender, RoutedEventArgs e)
+    private async void FindFleetNav_Click(object sender, RoutedEventArgs e)
     {
         if (!TryLeaveOverlayEditorTab())
         {
@@ -1266,7 +1466,9 @@ public partial class MainWindow : Window, IAppUpdateUi
         QueueMainPageReveal(previousTab);
         if (IsLoggedIn)
         {
-            _ = PullNetworkFleetsAsync(silent: true);
+            await RefreshFleetDirectoryFromUiAsync(
+                silent: true,
+                pushLocalSnapshot: false);
         }
     }
 
@@ -1377,6 +1579,16 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private async void HeaderInboxButton_Click(object sender, RoutedEventArgs e)
     {
+        if (!CanSynchronizeUserData)
+        {
+            var scmUnread = Math.Max(0L, _scmBootstrapSnapshot?.UnreadNotifications ?? 0L);
+            await ShowAppNoticeAsync(
+                "SCM 站内信",
+                scmUnread > 0 ? $"当前有 {scmUnread} 条 SCM 站内信未读。" : "当前没有未读 SCM 站内信。",
+                "站内信列表接口将在 W09 后续接入；旧聊天、房间与组织通讯仍由 C# Relay 提供。 ");
+            return;
+        }
+
         await ShowNotificationCenterAsync();
     }
 
@@ -2028,7 +2240,332 @@ public partial class MainWindow : Window, IAppUpdateUi
         SetActiveNav(null);
     }
 
-    private bool IsLoggedIn => !string.IsNullOrWhiteSpace(_authToken);
+    private bool IsLoggedIn =>
+        !string.IsNullOrWhiteSpace(_authToken) || _scmLegacyRelayAuthenticated;
+
+    private string? GetRelayAuthorizationToken()
+    {
+        if (!string.IsNullOrWhiteSpace(_authToken))
+        {
+            return _authToken;
+        }
+
+        return _scmLegacyRelayAuthenticated || _legacyIdentityLinked == true
+            ? _scmOAuthSession?.AccessToken
+            : null;
+    }
+
+    private bool IsScmLoggedIn => _scmOAuthSession is not null;
+
+    private AccountRuntimeState AccountState => _accountRuntimeStore.Current;
+
+    private bool IsAccountAuthenticated => AccountState.IsAuthenticated;
+
+    private bool UpdateAccountRuntimeState() =>
+        _accountRuntimeStore.Update(AccountRuntimeState.Resolve(
+            IsScmLoggedIn,
+            IsLoggedIn,
+            _scmOAuthSession?.DisplayName,
+            _accountName,
+            _authenticationExpired));
+
+    private void RefreshAccountRuntimeProjection()
+    {
+        RefreshAccountPanel();
+        RefreshIdentityVerificationPresentation();
+        UpdateFleetEntryPanels();
+        RefreshHomeDashboard();
+        RefreshPersonalIdentityConsole();
+    }
+
+    private void AccountRuntimeStore_Changed(object? sender, AccountRuntimeState state)
+        => RefreshAccountRuntimeProjection();
+
+    private void ApplyScmOAuthSession(ScmOAuthSession session)
+    {
+        var couldSynchronizeBeforeSessionUpdate = CanSynchronizeUserData;
+        var identityChanged =
+            !string.Equals(_scmOAuthSession?.Subject, session.Subject, StringComparison.Ordinal) ||
+            !string.Equals(_scmOAuthSession?.AuthorityId, session.AuthorityId, StringComparison.Ordinal);
+        if (identityChanged)
+        {
+            _scmRealtimeClient?.Stop();
+            _scmRuntimeRecoveryCoordinator.Retire();
+            _scmOAuthSession = null;
+            _scmBootstrapSnapshot = null;
+            _scmProfile = null;
+            _scmProfileLoadedFromCache = false;
+            ClearAuthenticatedLocalState();
+            _legacyIdentityLinked = null;
+            _legacyIdentityLinkProjection = null;
+            _scmLegacyRelayAuthenticated = false;
+        }
+
+        _scmOAuthSession = session;
+        AdvanceAccountRouteIdentity();
+        LoadCachedScmProfileForActiveRoute();
+        _authenticationExpired = false;
+        LoginStatusText.Text = $"SCM 已登录：{session.DisplayName}";
+        NetworkStatusText.Text = "SCM 统一账号已连接";
+        var stateChanged = UpdateAccountRuntimeState();
+        ScmAuthDiagnostics.Write(
+            session.CorrelationId ?? "runtime-store",
+            "account-runtime-publish",
+            "completed",
+            $"stateChanged={stateChanged} scmAuthenticated={AccountState.ScmAuthenticated} " +
+            $"relayAuthenticated={AccountState.LegacyRelayAuthenticated} stage={AccountState.AuthenticationStage}");
+        if (!stateChanged)
+        {
+            RefreshAccountRuntimeProjection();
+        }
+        ReevaluateIdentityBinding(showPrompt: false);
+        if (!couldSynchronizeBeforeSessionUpdate &&
+            CanSynchronizeUserData &&
+            _startupDataGate.Current.State == StartupDataGateState.IdentityRequired &&
+            IsLoaded &&
+            !Dispatcher.HasShutdownStarted)
+        {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(async () => await AutoConnectNetworkAsync()));
+        }
+        _scmRealtimeClient?.Start(session);
+    }
+
+    private async void ApplyScmPresenceStatus(int status)
+    {
+        NetworkStatusText.Text = status switch
+        {
+            2 => "SCM 统一账号已连接（游戏中）",
+            3 => "SCM 统一账号已连接（隐身）",
+            _ => "SCM 统一账号已连接"
+        };
+        var mode = status switch
+        {
+            2 => PlayerPresenceVisibilityMode.InGame,
+            3 => PlayerPresenceVisibilityMode.Invisible,
+            _ => PlayerPresenceVisibilityMode.Online
+        };
+        await ApplyPresenceVisibilityModeLocallyAsync(mode);
+    }
+
+    private async Task ForceScmLogoutFromRealtimeAsync(string? reason)
+    {
+        var session = _scmOAuthSession;
+        _scmRealtimeClient?.Stop();
+        try
+        {
+            if (session is not null)
+            {
+                await _scmOAuthClient.ClearLocalCredentialAsync(session, CancellationToken.None);
+            }
+        }
+        catch (Exception exception)
+        {
+            ScmAuthDiagnostics.Write(
+                session?.CorrelationId ?? "remote-logout",
+                "remote-logout-local-credential-clear",
+                "failed",
+                $"exceptionType={exception.GetType().Name}");
+        }
+        finally
+        {
+            LogoutScmSession(revokeRemoteSession: false);
+        }
+        LoginStatusText.Text = reason == "device_untrusted"
+            ? "当前设备已被取消信任，请重新登录"
+            : "SCM 会话已被远程终止，请重新登录";
+    }
+
+    private async Task<bool> RefreshScmBootstrapAsync(
+        ScmOAuthSession session,
+        CancellationToken cancellationToken,
+        ScmRuntimeRecoveryLease? recoveryLease = null)
+    {
+        try
+        {
+            var result = await _scmOAuthClient.LoadBootstrapAsync(session, cancellationToken);
+            if (!CanPublishScmRuntimeRecovery(result.ActiveSession, recoveryLease))
+            {
+                return false;
+            }
+
+            _scmBootstrapSnapshot = result.Snapshot;
+            _legacyIdentityLinkProjection = result.Snapshot.IdentityLink.Linked &&
+                                             !string.IsNullOrWhiteSpace(result.Snapshot.IdentityLink.LegacyAccountId)
+                ? new ScmIdentityLinkProjection("ACTIVE", result.Snapshot.IdentityLink.LegacyAccountId!)
+                : null;
+            if (result.Snapshot.IdentityLink.Linked && _legacyIdentityLinkProjection is null)
+            {
+                _legacyIdentityLinkProjection = await _identityLinkCoordinator.ResolveAsync(
+                    result.ActiveSession,
+                    cancellationToken);
+                if (!CanPublishScmRuntimeRecovery(result.ActiveSession, recoveryLease))
+                {
+                    return false;
+                }
+            }
+            _legacyIdentityLinked = _legacyIdentityLinkProjection is not null &&
+                                    string.Equals(
+                                        _legacyIdentityLinkProjection.Status,
+                                        "ACTIVE",
+                                        StringComparison.OrdinalIgnoreCase) &&
+                                    !string.IsNullOrWhiteSpace(_legacyIdentityLinkProjection.LegacyAccountId);
+            ApplyScmOAuthSession(result.ActiveSession);
+            PublishScmProfile(
+                new ScmSelfProfileContract(
+                    result.Snapshot.Profile.Subject,
+                    result.Snapshot.Profile.DisplayName,
+                    result.Snapshot.Profile.AvatarUrl,
+                    result.Snapshot.Profile.Email,
+                    result.Snapshot.Profile.Locale,
+                    result.Snapshot.Profile.TimeZone),
+                loadedFromCache: false,
+                persist: true);
+            await RefreshScmLegacyRelaySessionAsync(
+                result.ActiveSession,
+                cancellationToken,
+                recoveryLease);
+            if (!CanPublishScmRuntimeRecovery(result.ActiveSession, recoveryLease))
+            {
+                return false;
+            }
+
+            await RefreshScmProfileAsync(result.ActiveSession, cancellationToken, recoveryLease);
+            if (!CanPublishScmRuntimeRecovery(result.ActiveSession, recoveryLease))
+            {
+                return false;
+            }
+
+            await RefreshScmAvatarAsync(
+                result.ActiveSession,
+                _scmProfile?.AvatarUrl ?? result.Snapshot.Profile.AvatarUrl,
+                cancellationToken);
+            ScmAuthDiagnostics.Write(
+                result.ActiveSession.CorrelationId ?? "bootstrap",
+                "bootstrap-publish",
+                "completed",
+                $"fleetCount={result.Snapshot.Fleets.Length} " +
+                $"primaryFleetPresent={result.Snapshot.PrimaryFleet is not null} " +
+                $"identityLinked={result.Snapshot.IdentityLink.Linked} " +
+                $"unreadNotifications={result.Snapshot.UnreadNotifications}");
+            return true;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException)
+        {
+            ScmAuthDiagnostics.Write(
+                session.CorrelationId ?? "bootstrap",
+                "bootstrap-publish",
+                "degraded",
+                $"exceptionType={exception.GetType().Name}");
+            return false;
+        }
+    }
+
+    private async Task RefreshScmAvatarAsync(
+        ScmOAuthSession session,
+        string? avatarUrl,
+        CancellationToken cancellationToken)
+    {
+        ResetAccountAvatarState();
+        if (!Uri.TryCreate(avatarUrl, UriKind.Absolute, out var avatarUri) ||
+            avatarUri.Scheme != Uri.UriSchemeHttps ||
+            avatarUri.Port != 443 ||
+            avatarUri.HostNameType != UriHostNameType.Dns ||
+            avatarUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+            avatarUri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
+        {
+            LoadAvatarPreview();
+            return;
+        }
+
+        try
+        {
+            using var response = await ScmAvatarClient.GetAsync(
+                avatarUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            if (!response.IsSuccessStatusCode ||
+                response.Content.Headers.ContentLength is > ScmAvatarMaxBytes ||
+                response.Content.Headers.ContentType?.MediaType?.StartsWith(
+                    "image/", StringComparison.OrdinalIgnoreCase) != true)
+            {
+                LoadAvatarPreview();
+                return;
+            }
+
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var output = new MemoryStream();
+            var buffer = new byte[81920];
+            while (true)
+            {
+                var read = await input.ReadAsync(buffer, cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                if (output.Length + read > ScmAvatarMaxBytes)
+                {
+                    LoadAvatarPreview();
+                    return;
+                }
+
+                output.Write(buffer, 0, read);
+            }
+
+            if (!string.Equals(_scmOAuthSession?.Subject, session.Subject, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var bytes = output.ToArray();
+            var subjectToken = BuildSafeImageToken(session.Subject, "scm-account");
+            var hash = Convert.ToHexString(SHA256.HashData(bytes))[..12].ToLowerInvariant();
+            var prefix = $"scm-{subjectToken}-avatar";
+            var path = BuildImagePath(prefix, hash);
+            WriteImageFileIfChanged(path, bytes);
+            if (!TryLoadBitmapImage(path, out _))
+            {
+                File.Delete(path);
+                LoadAvatarPreview();
+                return;
+            }
+
+            CleanupImageVariants(prefix, path);
+            _avatarPath = path;
+            _cachedAvatarImagePath = null;
+            _cachedAvatarImageData = null;
+            LoadAvatarPreview();
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or
+                                          TaskCanceledException or UnauthorizedAccessException)
+        {
+            LoadAvatarPreview();
+        }
+    }
+
+    private string BuildScmHeaderStateText()
+    {
+        if (_scmBootstrapSnapshot is null)
+        {
+            return "SCM 统一账号 · 快照暂不可用";
+        }
+
+        var parts = new List<string>
+        {
+            _scmBootstrapSnapshot.Profile.GameIdentityVerified == true ? "RSI 已验证" : "RSI 待验证"
+        };
+        if (_scmBootstrapSnapshot.PrimaryFleet is { } primaryFleet)
+        {
+            parts.Add($"主舰队 {primaryFleet.Sid}");
+        }
+        if (_scmBootstrapSnapshot.UnreadNotifications > 0)
+        {
+            parts.Add($"SCM 未读 {_scmBootstrapSnapshot.UnreadNotifications}");
+        }
+        return string.Join(" · ", parts);
+    }
 
     private PlayerPresenceSharingDecision GetPresenceSharingDecision() =>
         PlayerPresence.DecideSharing(_localPresence, _syncPrivacySettings.PresenceVisibilityMode);
@@ -2191,15 +2728,27 @@ public partial class MainWindow : Window, IAppUpdateUi
 
         RestoreAccountAvatarFromServer(auth.AvatarImageData);
 
-        _allowEmailNotifications = FleetActionFeatureSettingsLocked ? false : auth.AllowEmailNotifications;
-        CallsignBox.Text = _callsign ?? "";
-        EmailNotificationsCheck.IsChecked = _allowEmailNotifications;
+        var wasApplyingAccountProjection = _isApplyingAccountProjection;
+        _isApplyingAccountProjection = true;
+        try
+        {
+            _allowEmailNotifications = FleetActionFeatureSettingsLocked ? false : auth.AllowEmailNotifications;
+            CallsignBox.Text = _callsign ?? "";
+            EmailNotificationsCheck.IsChecked = _allowEmailNotifications;
+        }
+        finally
+        {
+            _isApplyingAccountProjection = wasApplyingAccountProjection;
+        }
         ApplyOverlayEntitlementState();
         ScheduleTemporaryEntitlementRefresh();
         _entitlementRefreshTimer.Start();
         RefreshPersonalApplicationSettings();
         BeginPersonalProfileAccountSession(sameAccount);
-        RefreshAccountPanel();
+        if (!UpdateAccountRuntimeState())
+        {
+            RefreshAccountRuntimeProjection();
+        }
 
         foreach (var profile in OverlaySkinCatalog.All.Where(profile => profile.Entitlement is not null))
         {
@@ -2438,9 +2987,7 @@ public partial class MainWindow : Window, IAppUpdateUi
     }
 
     private static bool IsAuthorizationFailure(HttpStatusCode? statusCode)
-    {
-        return statusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
-    }
+        => RelayAuthorizationFailurePolicy.InvalidatesSession(statusCode);
 
     private bool HandleAuthorizationFailure(HttpStatusCode? statusCode, string context, bool silent = false)
     {
@@ -2480,7 +3027,7 @@ public partial class MainWindow : Window, IAppUpdateUi
             return;
         }
 
-        HeaderAvatarOnlineDot.Fill = IsLoggedIn
+        HeaderAvatarOnlineDot.Fill = IsAccountAuthenticated
             ? PlayerPresencePresentation.LocalBrush(
                 _localPresence,
                 _syncPrivacySettings.PresenceVisibilityMode)
@@ -2497,10 +3044,22 @@ public partial class MainWindow : Window, IAppUpdateUi
         _isRefreshingAccountPanel = true;
         try
         {
-            HeaderAuthenticationButton.Visibility = IsLoggedIn
+            var accountOperationInProgress = _scmSessionRestoreInProgress || _identityLinkInProgress;
+            HeaderAccountOperationStatus.Visibility = accountOperationInProgress
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            HeaderAccountOperationLoadingIndicator.IsActive = accountOperationInProgress;
+            HeaderAccountOperationStatusText.Text = _scmSessionRestoreInProgress
+                ? "正在恢复 SCM 登录状态"
+                : _accountOperationStatusText ?? "正在处理旧账号关联";
+            HeaderAuthenticationButton.Visibility = IsLoggedIn || IsScmLoggedIn
                 ? Visibility.Collapsed
-                : Visibility.Visible;
-            HeaderAuthenticationStateText.Text = _authenticationExpired
+                : _scmSessionRestoreInProgress ? Visibility.Collapsed : Visibility.Visible;
+            HeaderAuthenticationStateText.Text = AccountState.ScmAuthenticated && !AccountState.HasRelaySession
+                ? AccountState.LegacyRelayAuthenticationExpired
+                    ? "SCM 统一账号已连接 · 旧同步会话已失效"
+                    : "SCM 统一账号已连接"
+                : AccountState.AuthenticationExpired
                 ? "登录已失效"
                 : "当前为浏览模式";
             HeaderFriendCenterButton.Visibility = IsLoggedIn
@@ -2510,9 +3069,18 @@ public partial class MainWindow : Window, IAppUpdateUi
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             HeaderAvatarHost.Visibility = Visibility.Visible;
-            HeaderProfileMenuItem.Visibility = IsLoggedIn
+            HeaderProfileMenuItem.Visibility = IsLoggedIn || IsScmLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            HeaderLegacyIdentityLinkMenuItem.Visibility = IsScmLoggedIn && _legacyIdentityLinked != true
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            HeaderLegacyIdentityLinkMenuItem.IsEnabled = _identityLinkInProgress || _legacyIdentityLinked == false;
+            HeaderLegacyIdentityLinkMenuItem.Header = _identityLinkInProgress
+                ? "取消兼容身份设置"
+                : _legacyIdentityLinked is null
+                    ? "正在检查旧账号关联..."
+                    : "设置 StarBridge 兼容身份";
             HeaderAccountSafetyMenuItem.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
@@ -2522,47 +3090,54 @@ public partial class MainWindow : Window, IAppUpdateUi
             PersonalAccountSafetyButton.Visibility = IsLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            HeaderLoginMenuItem.Header = IsLoggedIn ? "切换账号" : "登录 / 注册";
-            HeaderLogoutMenuItem.Visibility = IsLoggedIn
+            HeaderLoginMenuItem.Header = IsLoggedIn || IsScmLoggedIn ? "切换账号" : "登录账号";
+            HeaderLogoutMenuItem.Visibility = IsLoggedIn || IsScmLoggedIn
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             RefreshOverlayLocalModeNoticeVisibility();
 
             if (!IsLoggedIn)
             {
-                HeaderAccountMenuNameText.Text = "星海舰桥访客";
-                HeaderAccountMenuStateText.Text = _authenticationExpired
-                    ? "登录已失效 · 可重新登录"
-                    : "浏览模式 · 可配置 Game.log";
+                HeaderAccountMenuNameText.Text = IsScmLoggedIn
+                    ? _scmOAuthSession!.DisplayName
+                    : _scmSessionRestoreInProgress ? "正在恢复 SCM 账号" : "星海舰桥访客";
+                HeaderAccountMenuStateText.Text = IsScmLoggedIn
+                    ? BuildScmHeaderStateText()
+                    : GetSignedOutScmStatusText();
             }
 
             RefreshHeaderAvatarPresenceDot();
 
-            if (IsLoggedIn)
+            if (IsAccountAuthenticated)
             {
                 var maskedAccount = MaskAccountForDisplay(_accountName);
-                HeaderAccountMenuNameText.Text = GetPersonalDisplayName();
-                HeaderAccountMenuStateText.Text = string.IsNullOrWhiteSpace(maskedAccount)
-                    ? "已登录"
-                    : $"{maskedAccount} · 已登录";
+                HeaderAccountMenuNameText.Text = IsScmLoggedIn
+                    ? _scmOAuthSession!.DisplayName
+                    : GetPersonalDisplayName();
+                HeaderAccountMenuStateText.Text = IsScmLoggedIn
+                    ? BuildScmHeaderStateText()
+                    : string.IsNullOrWhiteSpace(maskedAccount) ? "已登录" : $"{maskedAccount} · 已登录";
                 AccountNameText.Text = GetPersonalDisplayName();
-                AccountModeText.Text = _syncPrivacySettings.PresenceVisibilityMode switch
-                {
-                    PlayerPresenceVisibilityMode.Invisible => "隐身模式：可浏览在线内容，不上传即时状态",
-                    PlayerPresenceVisibilityMode.Offline => "离线模式：即时同步已暂停，游玩时长仅在本地记录",
-                    _ => "已连接星海舰桥服务器，可同步舰队与玩家状态"
-                };
+                AccountModeText.Text = AccountState.HasRelaySession
+                    ? _syncPrivacySettings.PresenceVisibilityMode switch
+                    {
+                        PlayerPresenceVisibilityMode.Invisible => "隐身模式：可浏览在线内容，不上传即时状态",
+                        PlayerPresenceVisibilityMode.Offline => "离线模式：即时同步已暂停，游玩时长仅在本地记录",
+                        _ => "已连接星海舰桥服务器，可同步舰队与玩家状态"
+                    }
+                    : "SCM 统一账号已连接；旧舰队与聊天服务正在等待兼容同步";
                 LoginButton.Content = "切换账号";
+                LoginButton.IsEnabled = true;
                 LogoutButton.IsEnabled = true;
-                LoginStatusText.Text = string.IsNullOrWhiteSpace(maskedAccount)
-                    ? "已登录"
-                    : $"{maskedAccount} · 已登录";
-                CallsignBox.IsReadOnly = false;
-                CallsignBox.IsEnabled = true;
+                LoginStatusText.Text = IsScmLoggedIn
+                    ? $"SCM 已登录：{_scmOAuthSession!.DisplayName}"
+                    : string.IsNullOrWhiteSpace(maskedAccount) ? "已登录" : $"{maskedAccount} · 已登录";
+                CallsignBox.IsReadOnly = !AccountState.HasRelaySession;
+                CallsignBox.IsEnabled = AccountState.HasRelaySession;
                 CallsignBox.Text = _callsign ?? "";
-                EmailNotificationsCheck.IsEnabled = !FleetActionFeatureSettingsLocked;
-                EmailNotificationsCheck.IsChecked = _allowEmailNotifications;
-                ChooseAvatarButton.IsEnabled = true;
+                EmailNotificationsCheck.IsEnabled = AccountState.HasRelaySession && !FleetActionFeatureSettingsLocked;
+                EmailNotificationsCheck.IsChecked = AccountState.HasRelaySession && _allowEmailNotifications;
+                ChooseAvatarButton.IsEnabled = AccountState.HasRelaySession;
                 OpenHangarReaderButton.IsEnabled = true;
                 ClearShipDatabaseButton.IsEnabled = true;
                 RenderCachedIdentity();
@@ -2571,25 +3146,29 @@ public partial class MainWindow : Window, IAppUpdateUi
                 return;
             }
 
-            AccountNameText.Text = _authenticationExpired ? GetPersonalDisplayName() : "访客模式";
-            AccountModeText.Text = _authenticationExpired
-                ? "登录已失效，本地资料已保留；重新登录后恢复同步"
-                : "只能浏览，无法同步或管理舰队";
-            LoginButton.Content = "登录 / 注册";
-            LogoutButton.IsEnabled = false;
-            LoginStatusText.Text = _authenticationExpired ? "登录已失效" : "未登录";
+            AccountNameText.Text = IsScmLoggedIn
+                ? _scmOAuthSession!.DisplayName
+                : _scmSessionRestoreInProgress ? "正在恢复 SCM 账号"
+                : "访客模式";
+            AccountModeText.Text = IsScmLoggedIn
+                ? "SCM 统一账号已连接；旧舰队与聊天服务仍处于迁移兼容阶段"
+                : _scmSessionRestoreInProgress
+                    ? "正在从 Windows 安全凭据恢复统一账号，请稍候"
+                    : GetSignedOutScmAccountModeText();
+            LoginButton.Content = _scmSessionRestoreInProgress
+                ? "正在恢复 SCM 登录..."
+                : IsScmLoggedIn ? "切换 SCM 账号" : "登录 SCM 账号";
+            LoginButton.IsEnabled = !_scmSessionRestoreInProgress;
+            LogoutButton.IsEnabled = IsScmLoggedIn && !_scmSessionRestoreInProgress;
+            LoginStatusText.Text = IsScmLoggedIn
+                ? $"SCM 已登录：{_scmOAuthSession!.DisplayName}"
+                : GetSignedOutScmLoginStatusText();
             CallsignBox.IsReadOnly = true;
             CallsignBox.IsEnabled = false;
             CallsignBox.Text = _authenticationExpired ? _callsign ?? "" : "";
             EmailNotificationsCheck.IsEnabled = false;
             EmailNotificationsCheck.IsChecked = false;
-            GameNameText.Text = _authenticationExpired && !string.IsNullOrWhiteSpace(_localPlayer)
-                ? _localPlayer
-                : "请登录后查看";
-            PlayerIdText.Text = _authenticationExpired && !string.IsNullOrWhiteSpace(_localPlayerId)
-                ? _localPlayerId
-                : "请登录后查看";
-            ProfileStatusText.Text = _authenticationExpired ? "离线资料" : "浏览模式";
+            RenderCachedIdentity();
             ChooseAvatarButton.IsEnabled = false;
             OpenHangarReaderButton.IsEnabled = false;
             ClearShipDatabaseButton.IsEnabled = false;
@@ -2616,43 +3195,85 @@ public partial class MainWindow : Window, IAppUpdateUi
         var successBrush = FindBrush("StatusSuccessBrush", Brushes.SpringGreen);
         var warningBrush = FindBrush("StatusWarningBrush", Brushes.Orange);
 
-        var maskedAccount = MaskAccountForDisplay(_accountName);
-        PersonalMaskedEmailText.Text = IsLoggedIn && !string.IsNullOrWhiteSpace(maskedAccount)
+        var accountState = AccountState;
+        var hasAuthenticatedAccount = accountState.IsAuthenticated;
+        var scmEmail = _scmProfile?.Email ?? _scmBootstrapSnapshot?.Profile.Email;
+        var maskedAccount = MaskAccountForDisplay(
+            accountState.ScmAuthenticated && !string.IsNullOrWhiteSpace(scmEmail)
+                ? scmEmail
+                : _accountName);
+        PersonalMaskedEmailText.Text = accountState.HasRelaySession && !string.IsNullOrWhiteSpace(maskedAccount)
             ? maskedAccount
-            : "未登录";
-        PersonalDisplayNameText.Text = !string.IsNullOrWhiteSpace(_callsign)
-            ? _callsign!
-            : GetPersonalDisplayName();
-        PersonalLoginStateText.Text = IsLoggedIn ? "已登录" : "未登录";
-        PersonalLoginStateText.Foreground = IsLoggedIn ? successBrush : mutedBrush;
-        PersonalHeaderBindingText.Text = GetIdentityBindingSummaryText();
-        PersonalHeaderBindingText.Foreground = CanSynchronizeUserData
+            : accountState.ScmAuthenticated
+                ? !string.IsNullOrWhiteSpace(maskedAccount) ? maskedAccount : "SCM 账号"
+                : "未登录";
+        PersonalDisplayNameText.Text = !hasAuthenticatedAccount
+            ? "请登录后查看"
+            : accountState.ScmAuthenticated
+                ? _scmProfile?.DisplayName ?? _scmOAuthSession?.DisplayName ?? "SCM 用户"
+                : !string.IsNullOrWhiteSpace(_callsign)
+                    ? _callsign!
+                    : GetPersonalDisplayName();
+        PersonalLoginStateText.Text = accountState.HasRelaySession
+            ? "已登录"
+            : accountState.ScmAuthenticated ? "SCM 已登录" : "未登录";
+        PersonalLoginStateText.Foreground = accountState.HasRelaySession
+            ? successBrush
+            : accountState.ScmAuthenticated ? successBrush : mutedBrush;
+        PersonalHeaderBindingText.Text = hasAuthenticatedAccount
+            ? GetIdentityBindingSummaryText()
+            : "请登录后查看";
+        PersonalHeaderBindingText.Foreground = !hasAuthenticatedAccount
+            ? mutedBrush
+            : IsScmLoggedIn
+            ? IsScmGameIdentityVerified ? successBrush : warningBrush
+            : CanSynchronizeUserData
             ? successBrush
             : warningBrush;
+        PersonalLegacyIdentityLinkText.Text = hasAuthenticatedAccount
+            ? GetLegacyIdentityLinkSummaryText()
+            : "请登录后查看";
+        PersonalLegacyIdentityLinkText.Foreground = !hasAuthenticatedAccount || !IsScmLoggedIn
+            ? mutedBrush
+            : _legacyIdentityLinkProjection is not null
+                ? successBrush
+                : _legacyIdentityLinked is null ? warningBrush : mutedBrush;
 
-        PersonalGameProcessText.Text = _isGameProcessRunning ? "运行中" : "未检测到游戏进程";
-        PersonalGameProcessText.Foreground = _isGameProcessRunning ? successBrush : warningBrush;
+        PersonalGameProcessText.Text = !hasAuthenticatedAccount
+            ? "请登录后查看"
+            : _isGameProcessRunning ? "运行中" : "未检测到游戏进程";
+        PersonalGameProcessText.Foreground = !hasAuthenticatedAccount
+            ? mutedBrush
+            : _isGameProcessRunning ? successBrush : warningBrush;
         if (ProfileStatusText is not null)
         {
-            ProfileStatusText.Text = !IsLoggedIn
-                ? "未登录"
+            ProfileStatusText.Text = !accountState.HasRelaySession
+                ? accountState.ScmAuthenticated ? "SCM 已登录" : "未登录"
                 : PlayerPresencePresentation.FormatLocal(
                     _localPresence,
                     _syncPrivacySettings.PresenceVisibilityMode,
                     _language);
-            ProfileStatusText.Foreground = !IsLoggedIn
-                ? mutedBrush
+            ProfileStatusText.Foreground = !accountState.HasRelaySession
+                ? accountState.ScmAuthenticated ? warningBrush : mutedBrush
                 : PlayerPresencePresentation.LocalBrush(
                     _localPresence,
                     _syncPrivacySettings.PresenceVisibilityMode);
         }
 
-        PersonalServerRegionText.Text = GetGameServerRegionDisplay();
-        PersonalServerRegionText.Foreground = IsGameServerRegionCurrent() ? successBrush : mutedBrush;
-        PersonalShardText.Text = IsGameServerRegionCurrent()
+        PersonalServerRegionText.Text = hasAuthenticatedAccount
+            ? GetGameServerRegionDisplay()
+            : "请登录后查看";
+        PersonalServerRegionText.Foreground = hasAuthenticatedAccount && IsGameServerRegionCurrent()
+            ? successBrush
+            : mutedBrush;
+        PersonalShardText.Text = !hasAuthenticatedAccount
+            ? "请登录后查看"
+            : IsGameServerRegionCurrent()
             ? _gameServerShard
             : _isGameProcessRunning ? "等待 Join PU" : "未连接";
-        PersonalShardText.Foreground = IsGameServerRegionCurrent() ? normalBrush : mutedBrush;
+        PersonalShardText.Foreground = hasAuthenticatedAccount && IsGameServerRegionCurrent()
+            ? normalBrush
+            : mutedBrush;
 
         var local = string.IsNullOrWhiteSpace(_localPlayer)
             ? null
@@ -2661,10 +3282,12 @@ public partial class MainWindow : Window, IAppUpdateUi
         var formattedShip = string.IsNullOrWhiteSpace(rawShip)
             ? null
             : FormatShipForUser(rawShip);
-        PersonalCurrentShipText.Text = PlayerSessionStatePresentation.ResolveShip(
-            _localPresence,
-            _localPresence == PlayerPresenceKind.InGame && IsGameServerRegionCurrent(),
-            formattedShip);
+        PersonalCurrentShipText.Text = hasAuthenticatedAccount
+            ? PlayerSessionStatePresentation.ResolveShip(
+                _localPresence,
+                _localPresence == PlayerPresenceKind.InGame && IsGameServerRegionCurrent(),
+                formattedShip)
+            : "请登录后查看";
 
         PersonalOverlayStatusText.Text = IsOverlayRunning ? "已开启" : "未开启";
         PersonalOverlayStatusText.Foreground = IsOverlayRunning ? successBrush : mutedBrush;
@@ -2678,8 +3301,12 @@ public partial class MainWindow : Window, IAppUpdateUi
         PersonalVersionText.Text = GetAppVersion();
         PersonalServerAddressText.Text = NormalizeNetworkServerUrl(NetworkServerUrlBox.Text);
 
-        PersonalRightAccountText.Text = IsLoggedIn ? "已登录" : "未登录";
-        PersonalRightAccountText.Foreground = IsLoggedIn ? successBrush : mutedBrush;
+        PersonalRightAccountText.Text = accountState.HasRelaySession
+            ? "已登录"
+            : accountState.ScmAuthenticated ? "SCM 已登录" : "未登录";
+        PersonalRightAccountText.Foreground = accountState.HasRelaySession
+            ? successBrush
+            : accountState.ScmAuthenticated ? successBrush : mutedBrush;
         PersonalRightLogText.Text = string.IsNullOrWhiteSpace(_logPath)
             ? "未选择"
             : File.Exists(_logPath) ? "已连接" : "路径待确认";
@@ -2690,20 +3317,37 @@ public partial class MainWindow : Window, IAppUpdateUi
             ? "无读取记录"
             : _lastGameLogReadAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.CurrentCulture);
         PersonalLogLastReadText.Foreground = _lastGameLogReadAt == DateTimeOffset.MinValue ? mutedBrush : normalBrush;
-        PersonalRightGameProcessText.Text = _isGameProcessRunning ? "运行中" : "未检测到游戏进程";
-        PersonalRightGameProcessText.Foreground = _isGameProcessRunning ? successBrush : mutedBrush;
-        PersonalRightServerText.Text = IsGameServerRegionCurrent()
+        PersonalRightGameProcessText.Text = !hasAuthenticatedAccount
+            ? "请登录后查看"
+            : _isGameProcessRunning ? "运行中" : "未检测到游戏进程";
+        PersonalRightGameProcessText.Foreground = hasAuthenticatedAccount && _isGameProcessRunning
+            ? successBrush
+            : mutedBrush;
+        PersonalRightServerText.Text = !hasAuthenticatedAccount
+            ? "请登录后查看"
+            : IsGameServerRegionCurrent()
             ? _gameServerRegion
             : _isGameProcessRunning ? "等待确认" : "未连接";
-        PersonalRightServerText.Foreground = IsGameServerRegionCurrent() ? successBrush : mutedBrush;
-        PersonalRightSyncText.Text = IsLoggedIn ? GetNetworkSyncStatusText() : "等待登录";
-        PersonalRightSyncText.Foreground = IsLoggedIn ? successBrush : mutedBrush;
+        PersonalRightServerText.Foreground = hasAuthenticatedAccount && IsGameServerRegionCurrent()
+            ? successBrush
+            : mutedBrush;
+        PersonalRightSyncText.Text = accountState.HasRelaySession
+            ? GetNetworkSyncStatusText()
+            : accountState.ScmAuthenticated
+                ? _legacyIdentityLinkProjection is not null
+                    ? "旧账号已关联 · 等待同步会话"
+                    : "等待账号映射"
+                : "等待登录";
+        PersonalRightSyncText.Foreground = accountState.HasRelaySession
+            ? successBrush
+            : accountState.ScmAuthenticated ? warningBrush : mutedBrush;
         RefreshPersonalRightEmailReminderStatus();
         PersonalRightOverlayText.Text = IsOverlayRunning ? "已开启" : "未开启";
         PersonalRightOverlayText.Foreground = IsOverlayRunning ? successBrush : mutedBrush;
         RefreshPersonalHeaderFleetCard();
         RefreshPersonalProfileHeaderIdentity();
         RefreshPersonalConnectionHealth(successBrush, warningBrush, mutedBrush);
+        RefreshScmProfilePresentation();
     }
 
     private void RefreshPersonalRightEmailReminderStatus()
@@ -2741,9 +3385,14 @@ public partial class MainWindow : Window, IAppUpdateUi
         System.Windows.Media.Brush mutedBrush,
         System.Windows.Media.Brush accentBrush)
     {
-        if (!IsLoggedIn)
+        if (!IsAccountAuthenticated)
         {
             return ("等待登录", mutedBrush, mutedBrush);
+        }
+
+        if (!AccountState.HasRelaySession)
+        {
+            return ("等待旧业务同步", warningBrush, warningBrush);
         }
 
         if (FleetActionFeatureSettingsLocked)
@@ -2822,14 +3471,23 @@ public partial class MainWindow : Window, IAppUpdateUi
         System.Windows.Media.Brush warningBrush,
         System.Windows.Media.Brush mutedBrush)
     {
-        var hasIdentity = IsLoggedIn && !string.IsNullOrWhiteSpace(_localPlayer);
+        var hasIdentity = IsScmLoggedIn
+            ? IsScmGameIdentityVerified
+            : IsLoggedIn &&
+              (_identityBindingSupported
+                  ? IsIdentityBindingVerified
+                  : !string.IsNullOrWhiteSpace(_localPlayer));
         SetHealthCheck(
             PersonalIdentityHealthResultText,
             PersonalIdentityHealthHintText,
             hasIdentity ? "正常" : "等待识别",
-            hasIdentity
-                ? "登录身份与识别玩家一致。"
-                : "选择游戏日志并进入游戏后完成身份比对。",
+            IsScmLoggedIn
+                ? hasIdentity
+                    ? "SCM 已确认你的 Star Citizen 游戏账户。"
+                    : "请完成 SCM 游戏身份验证后刷新状态。"
+                : hasIdentity
+                    ? "登录身份与识别玩家一致。"
+                    : "选择游戏日志并进入游戏后完成身份比对。",
             hasIdentity ? successBrush : mutedBrush);
 
         var logPathSelected = !string.IsNullOrWhiteSpace(_logPath);
@@ -3023,6 +3681,11 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private string GetPersonalDisplayName()
     {
+        if (IsScmLoggedIn)
+        {
+            return _scmProfile?.DisplayName ?? _scmOAuthSession!.DisplayName;
+        }
+
         if (!string.IsNullOrWhiteSpace(_callsign))
         {
             return _callsign!;
@@ -3340,22 +4003,25 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private void RefreshAuthenticationRequiredViews()
     {
-        var visibility = IsLoggedIn
+        var visibility = IsAccountAuthenticated
             ? Visibility.Collapsed
             : Visibility.Visible;
 
         if (FindFleetLoginRequiredPanel is not null)
         {
+            FindFleetLoginRequiredPanel.SetSessionRestoreInProgress(_scmSessionRestoreInProgress);
             FindFleetLoginRequiredPanel.Visibility = visibility;
         }
 
         if (FleetLoginRequiredPanel is not null)
         {
+            FleetLoginRequiredPanel.SetSessionRestoreInProgress(_scmSessionRestoreInProgress);
             FleetLoginRequiredPanel.Visibility = visibility;
         }
 
         if (PartyLobbyLoginRequiredPanel is not null)
         {
+            PartyLobbyLoginRequiredPanel.SetSessionRestoreInProgress(_scmSessionRestoreInProgress);
             PartyLobbyLoginRequiredPanel.Visibility = visibility;
         }
     }
@@ -3615,6 +4281,8 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     protected override void OnClosed(EventArgs e)
     {
+        _identityLinkCancellation?.Cancel();
+        _accountRuntimeStore.Changed -= AccountRuntimeStore_Changed;
         _gameplayStatisticsRecorder.Stop(DateTimeOffset.UtcNow);
         _locationDataContributionSyncTimer.Stop();
         if (_isOverlayEditorFullScreen)
@@ -3661,6 +4329,10 @@ public partial class MainWindow : Window, IAppUpdateUi
         DisposeFriendCenter();
         DisposeFleetChat();
         DisposePlayerActivityDesktopNotifications();
+        _scmRealtimeClient?.Stop();
+        _scmRuntimeRecoveryCoordinator.Dispose();
+        _longPollHttpClient.Dispose();
+        _networkClient.Dispose();
         base.OnClosed(e);
     }
 
@@ -3923,13 +4595,13 @@ public partial class MainWindow : Window, IAppUpdateUi
             {
                 ShowGameplayDataConsentIfNeeded();
             }
-            if (IsLoggedIn)
+            if (IsAccountAuthenticated)
             {
-                GameNameText.Text = _localPlayer;
-                PlayerIdText.Text = string.IsNullOrWhiteSpace(_localPlayerId)
-                    ? "Unknown"
-                    : _localPlayerId;
-                ProfileStatusText.Text = "游戏中";
+                RenderCachedIdentity();
+                if (!IsScmGameIdentityMismatch)
+                {
+                    ProfileStatusText.Text = "游戏中";
+                }
             }
             SaveCurrentConfig();
             LoadOwnedShips();
@@ -4492,7 +5164,7 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private bool CanCurrentUserPublishFleetBroadcasts()
     {
-        return HasCurrentUserFleetPermissionId(FleetPermissionPolicy.PublishBroadcasts);
+        return CanUseFleetBroadcasts && _fleetBroadcastCanPublish;
     }
 
     private bool CanCurrentUserEditFleetAvatar()
@@ -4843,75 +5515,10 @@ public partial class MainWindow : Window, IAppUpdateUi
 
     private string FormatLogEventForUser(FleetEvent fleetEvent)
     {
-        var player = FormatPlayerForUser(fleetEvent.Player);
-        return fleetEvent.Type switch
-        {
-            FleetEventType.PlayerOnline => $"已识别玩家：{player}",
-            FleetEventType.PlayerOffline => $"{player} 已离线",
-            FleetEventType.PlayerEnteredShip => $"{player} 进入飞船：{FormatShipForUser(fleetEvent.Ship)}",
-            FleetEventType.PlayerExitedShip => $"{player} 离开飞船：{FormatShipForUser(fleetEvent.Ship)}",
-            FleetEventType.PlayerControllingShip => $"{player} 进入驾驶位：{FormatShipForUser(fleetEvent.Ship)}",
-            FleetEventType.PlayerStoppedDrivingShip => $"{player} 离开驾驶位：{FormatShipForUser(fleetEvent.Ship)}",
-            FleetEventType.PlayerLocationChanged => FormatLocationChangeForUser(player, fleetEvent),
-            FleetEventType.PlayerNavigationTargetChanged => FormatNavigationTargetForUser(player, fleetEvent),
-            FleetEventType.PlayerDowned => FormatDownedForUser(player, fleetEvent.LifeContext),
-            FleetEventType.PlayerDied => $"{player} 已死亡，等待重生",
-            FleetEventType.PlayerRevived => $"{player} 已被救起，恢复行动",
-            FleetEventType.PlayerRespawned => $"{player} 已重生",
-            FleetEventType.CombatStateChanged => $"{player} 状态：{FormatCombatStateForUser(fleetEvent.CombatState)}",
-            FleetEventType.NetworkStateChanged => null,
-            FleetEventType.PlayerShipControlSignal => null,
-            _ => null
-        } ?? string.Empty;
-    }
-
-    private static string FormatDownedForUser(string player, LifeEventContext lifeContext)
-    {
-        return lifeContext == LifeEventContext.SafeZoneMedicalResponse
-            ? $"{player} 在安全区倒地，本地救援已响应"
-            : $"{player} 已失去行动能力，等待救援";
-    }
-
-    private string FormatLocationChangeForUser(string player, FleetEvent fleetEvent)
-    {
-        var location = fleetEvent.Location;
-        if (IsQuantumArrivalPlaceholder(location))
-        {
-            var playerState = _fleetState.Players
-                .FirstOrDefault(candidate => candidate.Name.Equals(fleetEvent.Player, StringComparison.OrdinalIgnoreCase));
-            var target = playerState?.ArrivalTargetCode ?? fleetEvent.NavigationTarget;
-            var targetName = FormatLocationForUser(target);
-            return targetName.Equals("未知", StringComparison.OrdinalIgnoreCase)
-                ? $"{player} 已结束量子航行，等待当前位置确认"
-                : $"{player} 已抵达导航目标：{targetName}，等待当前位置确认";
-        }
-
-        return $"{player} 位置更新：{FormatLocationForUser(location)}";
-    }
-
-    private string FormatNavigationTargetForUser(string player, FleetEvent fleetEvent)
-    {
-        var location = FormatLocationForUser(fleetEvent.Location);
-        var target = FormatLocationForUser(fleetEvent.NavigationTarget);
-        var hasLocation = !location.Equals("未知", StringComparison.OrdinalIgnoreCase);
-        var hasTarget = !target.Equals("未知", StringComparison.OrdinalIgnoreCase);
-
-        if (hasLocation && hasTarget)
-        {
-            return $"{player} 设置导航：{location} → {target}";
-        }
-
-        if (hasTarget)
-        {
-            return $"{player} 设置导航目标：{target}";
-        }
-
-        if (hasLocation)
-        {
-            return $"{player} 当前位置：{location}";
-        }
-
-        return string.Empty;
+        var arrival = _fleetState.Players.FirstOrDefault(candidate =>
+            candidate.Name.Equals(fleetEvent.Player, StringComparison.OrdinalIgnoreCase))?.ArrivalTargetCode;
+        return StarBridge.HostRuntime.Support.LocalGameEventPresentation.Title(
+            fleetEvent, FormatShipForUser, FormatLocationForUser, arrival);
     }
 
     private string FormatShipForUser(string? ship)
@@ -4949,17 +5556,6 @@ public partial class MainWindow : Window, IAppUpdateUi
                value.Equals("None", StringComparison.OrdinalIgnoreCase)
             ? "未知"
             : value.Trim();
-    }
-
-    private static string FormatCombatStateForUser(string? combatState)
-    {
-        return combatState switch
-        {
-            null or "" => "待命",
-            "Combat" => "战斗中",
-            "Idle" => "待命",
-            _ => combatState
-        };
     }
 
     private static bool IsQuantumArrivalPlaceholder(string? location)
@@ -5181,14 +5777,17 @@ public partial class MainWindow : Window, IAppUpdateUi
             return;
         }
 
-        HeaderAccountStatusText.Text = IsLoggedIn
+        var accountState = AccountState;
+        HeaderAccountStatusText.Text = accountState.IsAuthenticated
             ? CompactHeaderText(
-                !string.IsNullOrWhiteSpace(_callsign) ? _callsign! :
-                string.IsNullOrWhiteSpace(_accountName) ? "已登录" : _accountName!,
+                accountState.HasRelaySession && !string.IsNullOrWhiteSpace(_callsign) ? _callsign! :
+                string.IsNullOrWhiteSpace(accountState.DisplayName) ? "已登录" : accountState.DisplayName!,
                 18)
             : "未登录";
-        HeaderAccountStatusText.Foreground = IsLoggedIn
+        HeaderAccountStatusText.Foreground = accountState.HasRelaySession
             ? FindBrush("StatusSuccessBrush", Brushes.MediumSpringGreen)
+            : accountState.ScmAuthenticated
+                ? FindBrush("StatusWarningBrush", Brushes.Orange)
             : FindBrush("StatusDisabledBrush", Brushes.LightSlateGray);
 
         var connectionStatus = GetHeaderConnectionStatus();

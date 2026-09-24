@@ -279,6 +279,27 @@ internal sealed class DualAxisPrivacySettingsStore
         File.Move(temporaryPath, path, overwrite: true);
     }
 
+    internal void PromoteLegacyAccountIdentity(
+        string legacyAccountIdentity,
+        string accountRouteIdentity)
+    {
+        if (string.IsNullOrWhiteSpace(legacyAccountIdentity) ||
+            string.IsNullOrWhiteSpace(accountRouteIdentity))
+        {
+            return;
+        }
+
+        var source = ResolveSettingsPath(legacyAccountIdentity);
+        var destination = ResolveSettingsPath(accountRouteIdentity);
+        if (source.Equals(destination, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        PromoteFile(source, destination);
+        PromoteFile($"{source}.bak", $"{destination}.bak");
+    }
+
     private DualAxisPrivacySettings? TryLoad(string path)
     {
         try
@@ -311,5 +332,22 @@ internal sealed class DualAxisPrivacySettingsStore
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedIdentity)))
             .ToLowerInvariant();
         return Path.Combine(_settingsDirectory, $"{hash}.json");
+    }
+
+    private static void PromoteFile(string source, string destination)
+    {
+        if (!File.Exists(source))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (File.Exists(destination))
+        {
+            File.Delete(source);
+            return;
+        }
+
+        File.Move(source, destination);
     }
 }

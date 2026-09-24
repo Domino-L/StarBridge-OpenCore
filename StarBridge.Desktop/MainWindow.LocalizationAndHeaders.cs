@@ -622,7 +622,7 @@ public partial class MainWindow
 
     private void LoadAvatarPreview()
     {
-        if (!IsLoggedIn)
+        if (!IsAccountAuthenticated)
         {
             AvatarImage.Source = null;
             AvatarPlaceholderText.Content = "请登录";

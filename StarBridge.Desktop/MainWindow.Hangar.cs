@@ -14,7 +14,9 @@ public partial class MainWindow
     private void LoadOwnedShips()
     {
         _ownedShips.Clear();
-        if (!IsLoggedIn && !_authenticationExpired)
+        var routeIdentity = CurrentAccountRouteIdentity;
+        var hasRouteOwner = routeIdentity.IsAuthenticated && _legacyIdentityLinked == true;
+        if (!IsLoggedIn && !_authenticationExpired && !hasRouteOwner)
         {
             UpdateShipDatabaseSummary();
             RefreshFleetShipInventory();
@@ -126,6 +128,19 @@ public partial class MainWindow
 
     private string GetShipDatabaseOwnerKey()
     {
+        var routeIdentity = CurrentAccountRouteIdentity;
+        if (routeIdentity.IsAuthenticated && _legacyIdentityLinked == true)
+        {
+            if (!string.IsNullOrWhiteSpace(_accountName) &&
+                _legacyIdentityLinkProjection?.LegacyAccountId is { Length: > 0 } legacyAccountId &&
+                string.Equals(_accountId, legacyAccountId, StringComparison.OrdinalIgnoreCase))
+            {
+                ShipDatabaseStore.PromoteLegacyOwner($"account:{_accountName}", routeIdentity.CacheNamespace);
+            }
+
+            return routeIdentity.CacheNamespace;
+        }
+
         if (!string.IsNullOrWhiteSpace(_accountName))
         {
             return $"account:{_accountName}";
@@ -147,7 +162,7 @@ public partial class MainWindow
     private void UpdateShipDatabaseSummary(int? matchedCodes = null, int? matchedNames = null)
     {
         RefreshPersonalProfileHangarSummary();
-        if (!IsLoggedIn && !_authenticationExpired)
+        if (!IsAccountAuthenticated && !_authenticationExpired)
         {
             ShipDatabaseStatusText.Text = "请登录后使用舰船数据库";
             if (PersonalHangarShipCountText is not null)

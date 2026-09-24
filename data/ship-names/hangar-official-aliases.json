@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "alias": "A1 Spirit",
+      "runtimeId": "CRUS_A1_Spirit"
+    },
+    {
+      "alias": "Ares Ion",
+      "runtimeId": "CRUS_Starfighter_Ion"
+    },
+    {
+      "alias": "Asgard",
+      "runtimeId": "ANVL_Asgard"
+    },
+    {
+      "alias": "Basher",
+      "runtimeId": "GLSN_Basher"
+    },
+    {
+      "alias": "Cyclone MT",
+      "runtimeId": "TMBL_Cyclone_MT"
+    },
+    {
+      "alias": "Dragonfly Black",
+      "runtimeId": "DRAK_Dragonfly_Black"
+    },
+    {
+      "alias": "Eclipse",
+      "runtimeId": "AEGS_Eclipse"
+    },
+    {
+      "alias": "F7C-M Super Hornet Mk II",
+      "runtimeId": "ANVL_Hornet_F7CM_Mk2"
+    },
+    {
+      "alias": "F8C Lightning",
+      "runtimeId": "ANVL_Lightning_F8C"
+    },
+    {
+      "alias": "Fury MX",
+      "runtimeId": "Misc_Fury_Miru"
+    },
+    {
+      "alias": "Gatac Tyilui",
+      "runtimeId": "Tyilui"
+    },
+    {
+      "alias": "Gladius",
+      "runtimeId": "AEGS_Gladius"
+    },
+    {
+      "alias": "Hammerhead",
+      "runtimeId": "AEGS_Hammerhead"
+    },
+    {
+      "alias": "Hercules Starlifter A2",
+      "runtimeId": "CRUS_Starlifter_A2"
+    },
+    {
+      "alias": "Hurricane",
+      "runtimeId": "ANVL_Hurricane"
+    },
+    {
+      "alias": "Idris-P Frigate",
+      "runtimeId": "AEGS_Idris_P"
+    },
+    {
+      "alias": "Ironclad",
+      "runtimeId": "DRAK_Ironclad"
+    },
+    {
+      "alias": "Ironclad Assault",
+      "runtimeId": "DRAK_Ironclad_Assault"
+    },
+    {
+      "alias": "M80",
+      "runtimeId": "ORIG_M80"
+    },
+    {
+      "alias": "Nox",
+      "runtimeId": "XIAN_Nox"
+    },
+    {
+      "alias": "Origin M80",
+      "runtimeId": "ORIG_M80"
+    },
+    {
+      "alias": "Railen",
+      "runtimeId": "XIAN_Railen"
+    },
+    {
+      "alias": "Retaliator",
+      "runtimeId": "AEGS_Retaliator"
+    },
+    {
+      "alias": "Sabre Firebird",
+      "runtimeId": "AEGS_Sabre_Firebird"
+    },
+    {
+      "alias": "Scorpius Antares",
+      "runtimeId": "RSI_Scorpius_Antares"
+    },
+    {
+      "alias": "Starlancer TAC",
+      "runtimeId": "MISC_Starlancer_TAC"
+    },
+    {
+      "alias": "起源 M80",
+      "runtimeId": "ORIG_M80"
+    },
+    {
+      "alias": "Starfarer Gemini",
+      "runtimeId": "MISC_Starfarer_Gemini"
+    },
+    {
+      "alias": "Terrapin",
+      "runtimeId": "ANVL_Terrapin"
+    },
+    {
+      "alias": "Tyilui",
+      "runtimeId": "Tyilui"
+    },
+    {
+      "alias": "Vanguard Harbinger",
+      "runtimeId": "AEGS_Vanguard_Harbinger"
+    }
+  ]
+}

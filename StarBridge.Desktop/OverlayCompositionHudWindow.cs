@@ -218,6 +218,10 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             sceneContext,
             chatMessages);
         _viewModel.PropertyChanged += OverlayViewModel_PropertyChanged;
+        if (settings.ShowEventNotifications)
+        {
+            _viewModel.QueueEventReceiverConnectionIfNeeded(language);
+        }
         ApplyLayoutDependentViewModelState();
     }
 
@@ -360,19 +364,23 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         }, DispatcherPriority.Send);
     }
 
+    public void QueueGameEventNotification(OverlayEventNotificationTypes eventType, string title, string detail,
+        bool important, bool positive) => QueueGameEventNotification(eventType, title, detail, important, positive, null);
+
     public void QueueGameEventNotification(
         OverlayEventNotificationTypes eventType,
         string title,
         string detail,
         bool important,
-        bool positive)
+        bool positive,
+        Func<bool>? isCurrent)
     {
         if (_disposed || !_settings.ShowEventNotifications)
         {
             return;
         }
 
-        _viewModel.QueueGameEventNotification(eventType, title, detail, important, positive);
+        _viewModel.QueueGameEventNotification(eventType, title, detail, important, positive, isCurrent);
         PublishStateToRenderer(forceEventPulse: true);
     }
 
@@ -384,6 +392,20 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         }
 
         _viewModel.QueueCommunicationEvent(title, detail);
+        PublishStateToRenderer(forceEventPulse: false);
+    }
+
+    internal bool TryShowLiveCommunicationEvent(Guid id, string title, string detail)
+    {
+        if (_disposed || !_settings.ShowNotice || !_viewModel.TryShowLiveCommunicationEvent(id, title, detail)) return false;
+        PublishStateToRenderer(forceEventPulse: false);
+        return true;
+    }
+
+    internal void ClearLiveCommunicationEvent(Guid id)
+    {
+        if (_disposed) return;
+        _viewModel.ClearLiveCommunicationEvent(id);
         PublishStateToRenderer(forceEventPulse: false);
     }
 
@@ -434,6 +456,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     public void Refresh(
         OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
+        IEnumerable<OverlayLayoutItem> layout,
         OverlayDisplaySettings settings,
         OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
@@ -450,6 +473,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             return;
         }
 
+        _layout = layout.ToArray();
         _settings = settings;
         _language = language;
         _surfaceBounds = NormalizeSurfaceBounds(surfaceBounds);
@@ -483,6 +507,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             PublishStateToRenderer(forceEventPulse: false);
         }, DispatcherPriority.Render);
     }
+
+    internal void ClearAuthorizedContent() => _viewModel.ClearAuthorizedContent();
 
     private void StartRenderThread()
     {
@@ -955,25 +981,32 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         var eventRect = ResolveEventNotificationRect(width, height);
         var eventStyle = new OverlayCompositionModuleStyle(
             OverlayLayoutItem.NormalizeTextOpacity(_settings.EventNotificationTextOpacity),
-            OverlayLayoutItem.NormalizeBackgroundOpacity(_settings.EventNotificationBackgroundOpacity));
+            OverlayLayoutItem.NormalizeBackgroundOpacity(_settings.EventNotificationBackgroundOpacity),
+            OverlayLayoutItem.NormalizeDecorationOpacity(_settings.EventNotificationDecorationOpacity));
         var overviewTopLocations = _viewModel.OverviewTopLocations.Take(2).ToArray();
         var overviewLocationLayout = OverlayOverviewLocationLayout.Resolve(
             squadsRect.Width,
             squadsRect.Height,
             overviewTopLocations);
+        var visibility = InformationOverlayRuntimeProjection.ResolveVisibility(
+            _settings,
+            new InformationOverlayContentState(
+                _viewModel.NotificationVisibility == WpfVisibility.Visible,
+                _viewModel.ChatVisibility == WpfVisibility.Visible,
+                _viewModel.EventNotificationVisibility == WpfVisibility.Visible));
 
         return new OverlayCompositionFrameState(
             width,
             height,
-            Math.Clamp(_settings.Opacity, 0.15, 1.0),
+            1.0,
             BuildPalette(),
             OverlaySkinCatalog.Get(_settings.Skin).RenderKind,
-            _viewModel.NotificationVisibility == WpfVisibility.Visible,
-            _viewModel.SquadsVisibility == WpfVisibility.Visible,
-            _viewModel.MembersVisibility == WpfVisibility.Visible,
-            _viewModel.ChatVisibility == WpfVisibility.Visible,
-            _viewModel.CrosshairVisibility == WpfVisibility.Visible,
-            _viewModel.EventNotificationVisibility == WpfVisibility.Visible,
+            visibility.ShowNotice,
+            visibility.ShowSquads,
+            visibility.ShowMembers,
+            visibility.ShowChat,
+            visibility.ShowCrosshair,
+            visibility.ShowEventNotifications,
             noticeRect,
             squadsRect,
             membersRect,
@@ -1076,7 +1109,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             ? OverlayCompositionModuleStyle.Default
             : new OverlayCompositionModuleStyle(
                 OverlayLayoutItem.NormalizeTextOpacity(item.TextOpacity),
-                OverlayLayoutItem.NormalizeBackgroundOpacity(item.BackgroundOpacity));
+                OverlayLayoutItem.NormalizeBackgroundOpacity(item.BackgroundOpacity),
+                OverlayLayoutItem.NormalizeDecorationOpacity(item.DecorationOpacity));
     }
 
     private IReadOnlyList<string> ResolveModuleDrawOrder()
@@ -1633,9 +1667,10 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
 
     private sealed record OverlayCompositionModuleStyle(
         double TextOpacity,
-        double BackgroundOpacity)
+        double BackgroundOpacity,
+        double DecorationOpacity)
     {
-        public static OverlayCompositionModuleStyle Default { get; } = new(1.0, 1.0);
+        public static OverlayCompositionModuleStyle Default { get; } = new(1.0, 1.0, 1.0);
     }
 
     private sealed record OverlayCompositionFrameState(

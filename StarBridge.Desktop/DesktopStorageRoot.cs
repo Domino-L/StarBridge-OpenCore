@@ -23,6 +23,9 @@ internal static class DesktopStorageRoot
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
     private static string? _currentRoot;
+    // Keep the writer lease rooted through process termination, including late
+    // shutdown callbacks. OnExit is too early to prove all stores have stopped.
+    private static IDisposable? _activityLease;
 
     internal static string BootstrapDirectory { get; } = ResolveBootstrapDirectory();
 
@@ -50,6 +53,7 @@ internal static class DesktopStorageRoot
     {
         _currentRoot = NormalizeDirectory(root);
         Directory.CreateDirectory(_currentRoot);
+        StarBridge.HostRuntime.HostDataRoot.UsePreparedRoot(_currentRoot);
     }
 
     internal static bool TryPrepareForStartup(
@@ -68,6 +72,10 @@ internal static class DesktopStorageRoot
             var pendingPath = GetPendingLocatorPath(BootstrapDirectory);
             if (File.Exists(pendingPath))
             {
+                // Do not consume/rename the pending request when another client
+                // still owns the data. Acquisition failure aborts startup safely.
+                using var migrationLease = StarBridge.HostRuntime.Storage.StorageActivityLease.AcquireMigration(BootstrapDirectory);
+                sourceRoot = ResolveConfiguredRoot(BootstrapDirectory);
                 try
                 {
                     migration = ApplyPendingSelection(BootstrapDirectory, sourceRoot);
@@ -82,6 +90,10 @@ internal static class DesktopStorageRoot
                 }
             }
 
+            _activityLease ??= StarBridge.HostRuntime.Storage.StorageActivityLease.AcquireWriter(BootstrapDirectory);
+            // A migration could complete between startup migration and writer
+            // acquisition. Resolve again under the lease, never use a stale root.
+            sourceRoot = ResolveConfiguredRoot(BootstrapDirectory);
             EnsureRootAvailable(sourceRoot);
             if (ContainsDamagedPathMarker(sourceRoot))
             {
@@ -89,6 +101,7 @@ internal static class DesktopStorageRoot
             }
 
             _currentRoot = sourceRoot;
+            StarBridge.HostRuntime.HostDataRoot.UsePreparedRoot(sourceRoot);
             return true;
         }
         catch (Exception ex)
@@ -114,22 +127,7 @@ internal static class DesktopStorageRoot
     }
 
     internal static string ResolveConfiguredRoot(string bootstrapDirectory)
-    {
-        var normalizedBootstrap = NormalizeDirectory(bootstrapDirectory);
-        var locatorPath = GetLocatorPath(normalizedBootstrap);
-        if (!File.Exists(locatorPath))
-        {
-            return normalizedBootstrap;
-        }
-
-        var configured = ReadPathFile(locatorPath);
-        if (string.IsNullOrWhiteSpace(configured))
-        {
-            throw new InvalidDataException("数据目录指针为空。请恢复 data-root.path 的有效绝对路径。");
-        }
-
-        return NormalizeDirectory(configured);
-    }
+        => StarBridge.HostRuntime.Storage.StorageRootLocator.Read(bootstrapDirectory);
 
     internal static DesktopStorageMigrationResult ApplyPendingSelection(
         string bootstrapDirectory,
@@ -179,102 +177,19 @@ internal static class DesktopStorageRoot
     }
 
     internal static string ValidateMigrationDestination(string sourceRoot, string destinationRoot)
-    {
-        var normalizedSource = NormalizeDirectory(sourceRoot);
-        var normalizedDestination = NormalizeDirectory(destinationRoot);
-        if (ContainsDamagedPathMarker(normalizedDestination))
-        {
-            throw new InvalidOperationException("所选路径包含损坏的替换字符，请重新选择名称正常的文件夹。中文目录本身受支持。");
-        }
-
-        var root = Path.GetPathRoot(normalizedDestination);
-        if (PathEquals(normalizedDestination, root))
-        {
-            throw new InvalidOperationException("不能直接使用磁盘根目录，请选择或新建一个专用文件夹。");
-        }
-
-        if (PathEquals(normalizedSource, normalizedDestination))
-        {
-            return normalizedDestination;
-        }
-
-        if (IsNestedPath(normalizedSource, normalizedDestination) ||
-            IsNestedPath(normalizedDestination, normalizedSource))
-        {
-            throw new InvalidOperationException("新旧数据目录不能互相包含，请选择另一个独立文件夹。");
-        }
-
-        EnsureDriveAvailable(normalizedDestination);
-        if (Directory.Exists(normalizedDestination))
-        {
-            var attributes = File.GetAttributes(normalizedDestination);
-            if ((attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                throw new InvalidOperationException("数据目录不能是符号链接或重解析点。");
-            }
-
-            if (Directory.EnumerateFileSystemEntries(normalizedDestination).Any())
-            {
-                throw new InvalidOperationException("目标文件夹必须为空，避免覆盖其他文件或混入旧数据。");
-            }
-        }
-
-        return normalizedDestination;
-    }
+        => StarBridge.HostRuntime.Storage.StorageMigrationDestination.Validate(sourceRoot, destinationRoot);
 
     private static DesktopStorageMigrationResult CopyAndVerify(
         string bootstrapDirectory,
         string sourceRoot,
         string destinationRoot)
     {
-        EnsureRootAvailable(sourceRoot);
-        EnsureDestinationWritable(destinationRoot);
-
-        var stagingRoot = destinationRoot + $".starbridge-migration-{Guid.NewGuid():N}";
-        Directory.CreateDirectory(stagingRoot);
-        try
-        {
-            var sourceFiles = EnumerateMovableFiles(bootstrapDirectory, sourceRoot)
-                .Select(path => new FileSnapshot(path, Path.GetRelativePath(sourceRoot, path)))
-                .OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            long byteCount = 0;
-
-            foreach (var item in sourceFiles)
-            {
-                var targetPath = Path.Combine(stagingRoot, item.RelativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-                File.Copy(item.SourcePath, targetPath, overwrite: false);
-                byteCount += new FileInfo(item.SourcePath).Length;
-            }
-
-            foreach (var item in sourceFiles)
-            {
-                var copiedPath = Path.Combine(stagingRoot, item.RelativePath);
-                if (!File.Exists(copiedPath) || !HashesMatch(item.SourcePath, copiedPath))
-                {
-                    throw new IOException($"迁移校验失败：{item.RelativePath}");
-                }
-            }
-
-            if (Directory.Exists(destinationRoot))
-            {
-                Directory.Delete(destinationRoot, recursive: false);
-            }
-
-            Directory.Move(stagingRoot, destinationRoot);
-            return new DesktopStorageMigrationResult(
-                sourceRoot,
-                destinationRoot,
-                sourceFiles.Length,
-                byteCount,
-                SourceCleanupCompleted: false);
-        }
-        catch
-        {
-            TryDeleteDirectory(stagingRoot);
-            throw;
-        }
+        var result = StarBridge.HostRuntime.Storage.VerifiedStorageCopy.Copy(
+            sourceRoot, destinationRoot,
+            relative => !PathEquals(sourceRoot, bootstrapDirectory) ||
+                !IsBootstrapOwnedPath(sourceRoot, Path.Combine(sourceRoot, relative)));
+        return new DesktopStorageMigrationResult(sourceRoot, result.DestinationRoot,
+            result.FileCount, result.ByteCount, SourceCleanupCompleted: false);
     }
 
     private static IEnumerable<string> EnumerateMovableFiles(string bootstrapDirectory, string sourceRoot)
@@ -335,21 +250,7 @@ internal static class DesktopStorageRoot
     }
 
     private static bool IsBootstrapOwnedPath(string bootstrapDirectory, string path)
-    {
-        var relative = Path.GetRelativePath(bootstrapDirectory, path);
-        var firstSegment = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
-        if (firstSegment.Equals("Updates", StringComparison.OrdinalIgnoreCase) ||
-            firstSegment.Equals("Installer", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return relative.Equals(LocatorFileName, StringComparison.OrdinalIgnoreCase) ||
-               relative.Equals(PendingLocatorFileName, StringComparison.OrdinalIgnoreCase) ||
-               relative.Equals(FailedPendingLocatorFileName, StringComparison.OrdinalIgnoreCase) ||
-               relative.Equals("desktop-crash.log", StringComparison.OrdinalIgnoreCase) ||
-               relative.Equals("desktop-overlay-diagnostics.log", StringComparison.OrdinalIgnoreCase);
-    }
+        => StarBridge.HostRuntime.Storage.StorageMigrationFiles.IsBootstrapOwned(Path.GetRelativePath(bootstrapDirectory, path));
 
     private static void TryPreserveFailedPendingSelection(string bootstrapDirectory)
     {

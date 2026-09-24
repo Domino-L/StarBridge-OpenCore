@@ -119,22 +119,28 @@ internal sealed partial class OverlayCompositionHudWindow
         float leftScanStart,
         float leftScanEnd,
         double backgroundOpacity,
+        double decorationOpacity,
         NightShadowPanelJoin nightShadowJoin = NightShadowPanelJoin.None,
         string moduleKey = "")
     {
         var x = (float)rect.X;
+#if STARBRIDGE_VERDICT_NEXT
+        if (state.VerdictStyle && _verdictNextContentOnly) return;
+#endif
         var y = (float)rect.Y;
         var w = (float)rect.Width;
         var h = (float)rect.Height;
 
         if (state.LagrangeWeaveStyle)
         {
-            DrawLagrangePanelFrame(target, rect, state, backgroundOpacity, moduleKey);
+            DrawLagrangePanelFrame(target, rect, state, backgroundOpacity, decorationOpacity, moduleKey);
             return;
         }
 
 
-        FillRect(target, x, y, w, h, state.Palette.PanelBackground, state.Opacity * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
+        var envelope = state.Opacity;
+        var chromeOpacity = envelope * OverlayLayoutItem.NormalizeDecorationOpacity(decorationOpacity);
+        FillRect(target, x, y, w, h, state.Palette.PanelBackground, envelope * OverlayLayoutItem.NormalizeBackgroundOpacity(backgroundOpacity));
 
         var frameX = x + PanelFrameInset;
         var frameY = y + PanelFrameInset;
@@ -147,10 +153,10 @@ internal sealed partial class OverlayCompositionHudWindow
         var chromeHeight = Math.Max(1, frameHeight - chromeInset * 2);
         var topScanEndX = Math.Max(topScanStart, Math.Min(chromeWidth - 8, topScanEnd));
         var leftScanEndY = Math.Max(leftScanStart, Math.Min(chromeHeight - 8, leftScanEnd));
-        DrawRectangle(target, frameX, frameY, frameWidth, frameHeight, state.Palette.PanelBorder, state.Opacity, 1);
-        DrawLine(target, chromeX + topScanStart, chromeY, chromeX + topScanEndX, chromeY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
-        DrawLine(target, chromeX, chromeY + leftScanStart, chromeX, chromeY + leftScanEndY, state.Palette.PanelBorder, 0.32f * state.Opacity, 1);
-        DrawCorners(target, chromeX, chromeY, chromeWidth, chromeHeight, state.Palette.Title, state.Opacity);
+        DrawRectangle(target, frameX, frameY, frameWidth, frameHeight, state.Palette.PanelBorder, chromeOpacity, 1);
+        DrawLine(target, chromeX + topScanStart, chromeY, chromeX + topScanEndX, chromeY, state.Palette.PanelBorder, 0.32f * chromeOpacity, 1);
+        DrawLine(target, chromeX, chromeY + leftScanStart, chromeX, chromeY + leftScanEndY, state.Palette.PanelBorder, 0.32f * chromeOpacity, 1);
+        DrawCorners(target, chromeX, chromeY, chromeWidth, chromeHeight, state.Palette.Title, chromeOpacity);
     }
 
 

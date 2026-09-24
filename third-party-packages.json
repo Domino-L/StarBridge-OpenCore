@@ -2,6 +2,14 @@
   "schemaVersion": 1,
   "packages": [
     {
+      "id": "Microsoft.Windows.CsWinRT",
+      "version": "2.1.6",
+      "licenseFile": "licenses/Microsoft.Windows.CsWinRT-2.1.6.txt",
+      "noticeFiles": [
+        "licenses/Microsoft.Windows.CsWinRT-2.1.6-NOTICE.txt"
+      ]
+    },
+    {
       "id": "Microsoft.Web.WebView2",
       "version": "1.0.2592.51",
       "licenseFile": "licenses/Microsoft.Web.WebView2-1.0.2592.51.txt",
@@ -44,6 +52,11 @@
       "id": "System.IO.Pipelines",
       "version": "9.0.1",
       "licenseFile": "licenses/System.IO.Pipelines-9.0.1.txt"
+    },
+    {
+      "id": "System.Security.Cryptography.ProtectedData",
+      "version": "8.0.0",
+      "licenseFile": "licenses/System.Security.Cryptography.ProtectedData-8.0.0.txt"
     },
     {
       "id": "System.Text.Encodings.Web",

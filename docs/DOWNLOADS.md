@@ -1,5 +1,7 @@
 # 下载帮助
 
+当前桥梁版本为 0.6.6.1，负责从旧 WPF 客户端迁移到 Flutter 0.7.0。
+
 ## 推荐下载方式
 
 - [在线安装器](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-online-setup.exe)：自动获取并安装最新版本。

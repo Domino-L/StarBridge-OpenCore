@@ -217,7 +217,9 @@ public sealed record PersonalProfileFleetAffiliationContract(
     string FleetCode,
     string? FleetLogoAssetId,
     string PositionTitle,
-    string PositionColor);
+    string PositionColor,
+    string? LogoImageData = null,
+    string? Kind = null);
 
 public sealed record PersonalProfileHangarShipContract(
     string Code,
@@ -241,7 +243,8 @@ public sealed record PersonalProfileGameplayStatisticsContract(
     long HistoricalPlayTimeSeconds = 0,
     int HistoricalSessionCount = 0,
     int HistoricalIncompleteSessionCount = 0,
-    DateTimeOffset? HistoryImportedAt = null);
+    DateTimeOffset? HistoryImportedAt = null,
+    string? HistoryImportState = null);
 
 public sealed record PersonalProfileDocumentContract(
     int SchemaVersion,
@@ -254,7 +257,19 @@ public sealed record PersonalProfileDocumentContract(
     PersonalProfileFleetAffiliationContract? FleetAffiliation,
     PersonalProfileHangarContract? Hangar = null,
     PersonalProfileGameplayStatisticsContract? GameplayStatistics = null,
-    bool IsGameplayStatisticsPublic = false);
+    bool IsGameplayStatisticsPublic = false,
+    string Visibility = "private",
+    int AvatarStyle = 0,
+    string WallpaperId = "none");
+
+public sealed record PersonalProfilePresentationUpdateContract(
+    long ExpectedRevision,
+    string Visibility,
+    string CallSign,
+    int AvatarStyle,
+    string WallpaperId,
+    string Introduction,
+    PersonalProfileModuleContract[] Modules);
 
 public sealed record PersonalProfileUpdateRequestContract(
     long ExpectedRevision,
@@ -269,4 +284,8 @@ public sealed record PersonalProfileGameplayStatisticsUpdateRequestContract(
     long HistoricalPlayTimeSeconds = 0,
     int HistoricalSessionCount = 0,
     int HistoricalIncompleteSessionCount = 0,
-    DateTimeOffset? HistoryImportedAt = null);
+    DateTimeOffset? HistoryImportedAt = null,
+    long? ExpectedGameplayRevision = null,
+    string? ResetOperationId = null,
+    string? HistoryImportOperationId = null,
+    DateTimeOffset? ExpiresAt = null);

@@ -9,6 +9,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
+    <!-- Exercise the platform-free desktop geometry without moving UI into Core. -->
+    <Compile Include="..\StarBridge.Desktop\OverlayEventStackLayout.cs" Link="DesktopGeometry\OverlayEventStackLayout.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\data\overlay\information-overlay-layout-conformance-v1.json"
+          Link="data\information-overlay-layout-conformance-v1.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -3,6 +3,7 @@ namespace StarBridge.Desktop;
 internal enum OverlaySkinPublicationState
 {
     Released,
+    InDevelopment,
     Archived
 }
 
@@ -38,7 +39,11 @@ internal sealed record OverlaySkinProfile(
     OverlaySkinRenderKind RenderKind,
     OverlaySkin FallbackSkin,
     OverlaySkinPresentation Presentation,
-    OverlaySkinPublicationState PublicationState)
+    OverlaySkinPublicationState PublicationState,
+    bool PreviewReady = false,
+    double EventEnterDurationMs = 430,
+    double EventExitDurationMs = 320,
+    double StartupFocusHandoffMs = 0)
 {
     public string DisplayName(string language) =>
         language.Equals("zh", StringComparison.OrdinalIgnoreCase)
@@ -48,6 +53,9 @@ internal sealed record OverlaySkinProfile(
     public bool IsReleased => PublicationState == OverlaySkinPublicationState.Released;
 
     public bool IsArchived => PublicationState == OverlaySkinPublicationState.Archived;
+
+    // Preview visibility never grants runtime use or a commercial entitlement.
+    public bool IsPreviewAvailable => IsReleased || (!IsArchived && PreviewReady);
 }
 
 internal sealed record OverlaySkinResolution(
@@ -111,6 +119,7 @@ internal static partial class OverlaySkinCatalog
         ];
 
         RegisterAdditionalProfiles(profiles);
+        ConfigureOptionalProfiles(profiles);
 
         var duplicateIds = profiles
             .GroupBy(profile => profile.Id)
@@ -127,6 +136,7 @@ internal static partial class OverlaySkinCatalog
     }
 
     static partial void RegisterAdditionalProfiles(List<OverlaySkinProfile> profiles);
+    static partial void ConfigureOptionalProfiles(List<OverlaySkinProfile> profiles);
 
     private static readonly IReadOnlyDictionary<OverlaySkin, OverlaySkinProfile> ProfilesById =
         Profiles.ToDictionary(profile => profile.Id);
@@ -135,6 +145,9 @@ internal static partial class OverlaySkinCatalog
 
     public static IEnumerable<OverlaySkinProfile> Released =>
         Profiles.Where(profile => profile.IsReleased);
+
+    public static IEnumerable<OverlaySkinProfile> Listed =>
+        Profiles.Where(profile => !profile.IsArchived);
 
     public static OverlaySkinProfile Get(OverlaySkin skin) =>
         ProfilesById.TryGetValue(skin, out var profile)
@@ -172,16 +185,16 @@ internal static partial class OverlaySkinCatalog
         OverlayDisplaySettings requested,
         IEnumerable<string>? entitlements)
     {
-        var archivedRequest = ContainsArchivedAppearanceRequest(requested);
         var requestedSkin = ResolveRequestedSkin(requested);
+        var unavailableRequest = ContainsUnavailableAppearanceRequest(requested, requestedSkin);
         var requestedProfile = Get(requestedSkin);
-        var available = CanUse(requestedSkin, entitlements);
+        var available = !unavailableRequest && CanUse(requestedSkin, entitlements);
         var effectiveSkin = available
             ? requestedSkin
             : requestedProfile.FallbackSkin;
         var profile = Get(effectiveSkin);
         var effectiveRequest = requested with { RequestedSkin = requestedSkin };
-        if (archivedRequest)
+        if (unavailableRequest)
         {
             effectiveRequest = effectiveRequest with
             {
@@ -274,10 +287,24 @@ internal static partial class OverlaySkinCatalog
         ProfilesById.TryGetValue(skin, out var profile) &&
         profile.IsReleased;
 
-    private static bool ContainsArchivedAppearanceRequest(OverlayDisplaySettings settings) =>
-        Get(settings.Skin).IsArchived ||
-        Get(settings.EffectiveRequestedSkin).IsArchived ||
-        Profiles.Any(profile =>
-            profile.DefaultTheme == settings.Theme &&
-            profile.IsArchived);
+    private static bool ContainsUnavailableAppearanceRequest(
+        OverlayDisplaySettings settings,
+        OverlaySkin requestedSkin)
+    {
+        if (settings.Skin != OverlaySkin.Default &&
+            requestedSkin == settings.Skin &&
+            settings.Skin != settings.EffectiveRequestedSkin &&
+            IsSelectable(settings.Skin))
+        {
+            return false;
+        }
+
+        return !ProfilesById.ContainsKey(settings.Skin) ||
+               !ProfilesById.ContainsKey(settings.EffectiveRequestedSkin) ||
+               !Get(settings.Skin).IsReleased ||
+               !Get(settings.EffectiveRequestedSkin).IsReleased ||
+               Profiles.Any(profile =>
+                   profile.DefaultTheme == settings.Theme &&
+                   !profile.IsReleased);
+    }
 }

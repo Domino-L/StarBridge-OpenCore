@@ -8,6 +8,11 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $PayloadRoot = [IO.Path]::GetFullPath($PayloadRoot)
+$flutterShipRoot = Join-Path $PayloadRoot 'data/flutter_assets/assets/ships'
+if ((Test-Path -LiteralPath $flutterShipRoot) -and
+    @(Get-ChildItem -LiteralPath $flutterShipRoot -Filter 'catalog-*' -File).Count -gt 0) {
+    throw 'Private local-test Flutter ship media cannot enter a distribution payload.'
+}
 if (-not (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
     throw "Media-free payload directory was not found: $PayloadRoot"
 }

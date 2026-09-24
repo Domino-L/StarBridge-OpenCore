@@ -11,6 +11,7 @@ declared license file.
 
 | Package | Version | License | License file |
 | --- | --- | --- | --- |
+| Microsoft.Windows.CsWinRT | 2.1.6 | MIT plus upstream third-party notices | `licenses/Microsoft.Windows.CsWinRT-2.1.6.txt` |
 | Microsoft.Web.WebView2 | 1.0.2592.51 | BSD-3-Clause-style package license | `licenses/Microsoft.Web.WebView2-1.0.2592.51.txt` |
 | SharpGen.Runtime | 2.4.2-beta | MIT | `licenses/SharpGen.Runtime-2.4.2-beta.txt` |
 | SharpGen.Runtime.COM | 2.4.2-beta | MIT | `licenses/SharpGen.Runtime.COM-2.4.2-beta.txt` |
@@ -18,6 +19,7 @@ declared license file.
 | SkiaSharp.NativeAssets.Win32 | 3.119.4 | MIT plus upstream native notices | `licenses/SkiaSharp-3.119.4.txt` |
 | SkiaSharp.NativeAssets.macOS | 3.119.4 | MIT plus upstream native notices | `licenses/SkiaSharp-3.119.4.txt` |
 | System.IO.Pipelines | 9.0.1 | MIT | `licenses/System.IO.Pipelines-9.0.1.txt` |
+| System.Security.Cryptography.ProtectedData | 8.0.0 | MIT | `licenses/System.Security.Cryptography.ProtectedData-8.0.0.txt` |
 | System.Text.Encodings.Web | 9.0.1 | MIT | `licenses/System.Text.Encodings.Web-9.0.1.txt` |
 | System.Text.Json | 9.0.1 | MIT | `licenses/System.Text.Json-9.0.1.txt` |
 | Vortice.Direct2D1 | 3.8.3 | MIT | `licenses/Vortice.Direct2D1-3.8.3.txt` |
@@ -27,7 +29,9 @@ declared license file.
 | Vortice.DXGI | 3.8.3 | MIT | `licenses/Vortice.DXGI-3.8.3.txt` |
 | Vortice.Mathematics | 2.1.0 | MIT | `licenses/Vortice.Mathematics-2.1.0.txt` |
 
-Microsoft.Web.WebView2 also ships an upstream third-party notice:
+Microsoft.Windows.CsWinRT and Microsoft.Web.WebView2 also ship upstream
+third-party notices:
+`licenses/Microsoft.Windows.CsWinRT-2.1.6-NOTICE.txt` and
 `licenses/Microsoft.Web.WebView2-1.0.2592.51-NOTICE.txt`.
 
 The SkiaSharp native-asset packages also ship their upstream third-party

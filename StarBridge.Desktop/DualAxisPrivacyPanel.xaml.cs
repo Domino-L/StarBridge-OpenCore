@@ -173,9 +173,7 @@ public partial class DualAxisPrivacyPanel : System.Windows.Controls.UserControl
                 Fields = fleetFields,
                 AdministratorsCanView = FleetAdministratorsCheck.IsChecked == true,
                 AllMembersCanView = FleetAllMembersCheck.IsChecked == true,
-                VisibilityGroupIds = FleetSpecifiedPeopleCheck.IsChecked == true
-                    ? groups.Where(row => row.FleetSelected).Select(row => row.GroupId).ToArray()
-                    : []
+                VisibilityGroupIds = baseline.Fleet.VisibilityGroupIds
             },
             Room = baseline.Room with
             {
@@ -298,9 +296,7 @@ public partial class DualAxisPrivacyPanel : System.Windows.Controls.UserControl
 
     private void RefreshProgressiveDisclosure()
     {
-        // Private groups remain a supported model capability, but the current
-        // people-first editor deliberately keeps the specified-people control
-        // out of the interaction surface until that workflow is reintroduced.
+        // Legacy group data is read-only compatibility, never an editor audience.
         FleetSpecifiedPeopleSection.Visibility = Visibility.Collapsed;
     }
 

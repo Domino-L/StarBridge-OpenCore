@@ -93,8 +93,25 @@ internal sealed class GameplayStatisticsRecorder
     public void BindOwner(string? ownerKey)
     {
         var normalized = ownerKey?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized) ||
-            string.Equals(_ownerKey, normalized, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            if (string.IsNullOrWhiteSpace(_ownerKey))
+            {
+                return;
+            }
+
+            Stop(DateTimeOffset.UtcNow);
+            _ownerKey = null;
+            _consentPath = null;
+            _statisticsPath = null;
+            Consent = new GameplayDataConsentSettings();
+            Snapshot = GameplayStatisticsSnapshot.Empty;
+            _dirty = false;
+            _lastSavedAt = DateTimeOffset.MinValue;
+            return;
+        }
+
+        if (string.Equals(_ownerKey, normalized, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -109,6 +126,32 @@ internal sealed class GameplayStatisticsRecorder
         _dirty = snapshotRequiresMigration;
         _lastSavedAt = DateTimeOffset.UtcNow;
         Flush();
+    }
+
+    public void PromoteLegacyOwner(string legacyOwnerKey, string accountRouteOwnerKey)
+    {
+        var legacyOwner = legacyOwnerKey?.Trim();
+        var routeOwner = accountRouteOwnerKey?.Trim();
+        if (string.IsNullOrWhiteSpace(legacyOwner) ||
+            string.IsNullOrWhiteSpace(routeOwner) ||
+            legacyOwner.Equals(routeOwner, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (string.Equals(_ownerKey, legacyOwner, StringComparison.OrdinalIgnoreCase))
+        {
+            Stop(DateTimeOffset.UtcNow);
+        }
+
+        var legacyHash = HashOwnerKey(legacyOwner);
+        var routeHash = HashOwnerKey(routeOwner);
+        PromoteFile(
+            Path.Combine(_statisticsDirectory, $"{legacyHash}.consent.json"),
+            Path.Combine(_statisticsDirectory, $"{routeHash}.consent.json"));
+        PromoteFile(
+            Path.Combine(_statisticsDirectory, $"{legacyHash}.json"),
+            Path.Combine(_statisticsDirectory, $"{routeHash}.json"));
     }
 
     public void SetConsent(GameplayDataConsentState state, DateTimeOffset now)
@@ -416,6 +459,23 @@ internal sealed class GameplayStatisticsRecorder
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(ownerKey.Trim().ToLowerInvariant()));
         return Convert.ToHexString(bytes.AsSpan(0, 12)).ToLowerInvariant();
+    }
+
+    private static void PromoteFile(string source, string destination)
+    {
+        if (!File.Exists(source))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (File.Exists(destination))
+        {
+            File.Delete(source);
+            return;
+        }
+
+        File.Move(source, destination);
     }
 
     private static DateTimeOffset? Min(DateTimeOffset? left, DateTimeOffset? right)

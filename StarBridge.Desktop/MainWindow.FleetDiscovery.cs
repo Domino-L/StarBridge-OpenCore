@@ -93,7 +93,10 @@ public partial class MainWindow
 
     private async void FindFleetDirectoryRetryButton_Click(object sender, RoutedEventArgs e)
     {
-        await PullNetworkFleetsAsync();
+        await RefreshFleetDirectoryFromUiAsync(
+            silent: false,
+            pushLocalSnapshot: false,
+            allowStartupRecovery: true);
     }
 
     private void ApplyFleetSearchFilter(IReadOnlyList<string>? preservedVisibleOrder = null)

@@ -1024,6 +1024,7 @@ public partial class MainWindow
             _overlayWindow.Refresh(
                 roster,
                 projection.ChatMessages,
+                _overlayLayout,
                 projection.Settings,
                 GetOverlayRosterSelectionSettings(),
                 _language,
@@ -1102,22 +1103,41 @@ public partial class MainWindow
 
     private OverlayStartupTransitionContext BuildOverlayStartupTransitionContext(OverlayDisplaySettings settings)
     {
-        var zh = _language.Equals("zh", StringComparison.OrdinalIgnoreCase);
+        var traditional = _language.StartsWith("zh-Hant", StringComparison.OrdinalIgnoreCase) ||
+                          _language.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ||
+                          _language.Equals("zh-HK", StringComparison.OrdinalIgnoreCase);
+        var zh = traditional || _language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        string Localize(string simplified, string traditionalText, string english) =>
+            traditional ? traditionalText : zh ? simplified : english;
+
+        var localized = OverlayStartupTransitionContext.ForLanguage(_language);
         var hasCollaborativeFleet = IsLoggedIn && _hasFleet;
         var logSelected = !string.IsNullOrWhiteSpace(_logPath);
         var logExists = logSelected && File.Exists(_logPath!);
         var logLabel = logExists
             ? Path.GetFileName(_logPath!)
-            : logSelected ? "Game.log path check" : "Game.log not selected";
+            : logSelected
+                ? Localize("Game.log 路径待检查", "Game.log 路徑待檢查", "Game.log path check")
+                : Localize("尚未选择 Game.log", "尚未選擇 Game.log", "Game.log not selected");
         var identityLabel = !string.IsNullOrWhiteSpace(_localPlayer)
             ? DisplayCallsign(_callsign, _localPlayer)
-            : IsLoggedIn ? (_callsign ?? "account identity") : "guest identity";
+            : IsLoggedIn
+                ? (_callsign ?? Localize("账号身份", "帳號身份", "account identity"))
+                : Localize("访客身份", "訪客身份", "guest identity");
         var fleetLabel = hasCollaborativeFleet
             ? $"{_fleetName} [{_fleetCode}]"
-            : "local command mode";
+            : Localize("本地指挥模式", "本機指揮模式", "local command mode");
         var relayHost = BuildOverlayRelayHostLabel();
         var hudModuleCount = CountOverlayHudModules(settings);
-        var hudModuleLabel = $"{hudModuleCount} modules active";
+        var hudModuleLabel = Localize(
+            $"已启用 {hudModuleCount} 个模块",
+            $"已啟用 {hudModuleCount} 個模組",
+            $"{hudModuleCount} modules active");
+        var logStateLabel = !logSelected
+            ? Localize("未选择", "未選擇", "NOT SELECTED")
+            : logExists
+                ? Localize("就绪", "就緒", "READY")
+                : Localize("检查路径", "檢查路徑", "CHECK PATH");
         var sessionId = Math.Abs(HashCode.Combine(_localPlayer ?? "", _fleetCode ?? "", _logPath ?? "")).ToString("X", CultureInfo.InvariantCulture);
         if (sessionId.Length > 6)
         {
@@ -1127,75 +1147,118 @@ public partial class MainWindow
         var statusSteps = new OverlayStartupStatusStep[]
         {
             new(
-                "GAME WINDOW",
-                _isGameProcessRunning ? "StarCitizen.exe" : "waiting for StarCitizen.exe",
-                "SCAN",
-                _isGameProcessRunning ? "FOUND" : "WAITING"),
+                localized.StatusSteps[0].Label,
+                _isGameProcessRunning
+                    ? "StarCitizen.exe"
+                    : Localize("等待 StarCitizen.exe", "等待 StarCitizen.exe", "waiting for StarCitizen.exe"),
+                Localize("扫描", "掃描", "SCAN"),
+                _isGameProcessRunning
+                    ? Localize("已找到", "已找到", "FOUND")
+                    : Localize("等待中", "等待中", "WAITING")),
             new(
-                "GAME.LOG CHANNEL",
+                localized.StatusSteps[1].Label,
                 CompactOverlayTransitionText(logLabel, 34),
-                "WAIT",
-                logExists ? _watcher is null ? "READY" : "SYNC" : "CHECK"),
+                Localize("等待", "等待", "WAIT"),
+                logExists
+                    ? _watcher is null
+                        ? Localize("就绪", "就緒", "READY")
+                        : Localize("同步", "同步", "SYNC")
+                    : Localize("检查", "檢查", "CHECK")),
             new(
-                "IDENTITY",
+                localized.StatusSteps[2].Label,
                 CompactOverlayTransitionText(identityLabel, 34),
-                "STANDBY",
-                !string.IsNullOrWhiteSpace(_localPlayer) ? "BOUND" : IsLoggedIn ? "ACCOUNT" : "GUEST"),
+                Localize("待命", "待命", "STANDBY"),
+                !string.IsNullOrWhiteSpace(_localPlayer)
+                    ? Localize("已绑定", "已綁定", "BOUND")
+                    : IsLoggedIn
+                        ? Localize("账号", "帳號", "ACCOUNT")
+                        : Localize("访客", "訪客", "GUEST")),
             new(
-                "FLEET RELAY",
+                localized.StatusSteps[3].Label,
                 CompactOverlayTransitionText(hasCollaborativeFleet ? $"{_fleetCode} via {relayHost}" : relayHost, 34),
-                "STANDBY",
-                hasCollaborativeFleet ? "READY" : "BYPASS"),
+                Localize("待命", "待命", "STANDBY"),
+                hasCollaborativeFleet
+                    ? Localize("就绪", "就緒", "READY")
+                    : Localize("已旁路", "已旁路", "BYPASS")),
             new(
-                "HUD MODULES",
+                localized.StatusSteps[4].Label,
                 hudModuleLabel,
-                "WAIT",
-                hudModuleCount > 0 ? "OK" : "EMPTY"),
+                Localize("等待", "等待", "WAIT"),
+                hudModuleCount > 0
+                    ? Localize("正常", "正常", "OK")
+                    : Localize("空", "空", "EMPTY")),
             new(
-                "CLICK-THROUGH",
-                "transparent input layer",
-                "SAFE",
-                "ARMED"),
+                localized.StatusSteps[5].Label,
+                localized.StatusSteps[5].Value,
+                localized.StatusSteps[5].PendingState,
+                localized.StatusSteps[5].DoneState),
             new(
-                "OVERLAY SURFACE",
-                CompactOverlayTransitionText(hasCollaborativeFleet ? fleetLabel : "local overlay surface", 34),
-                "MOUNT",
-                "ONLINE")
+                localized.StatusSteps[6].Label,
+                CompactOverlayTransitionText(
+                    hasCollaborativeFleet
+                        ? fleetLabel
+                        : Localize("本地浮层界面", "本機浮層介面", "local overlay surface"),
+                    34),
+                localized.StatusSteps[6].PendingState,
+                localized.StatusSteps[6].DoneState)
         };
 
         var terminalLines = new List<string>
         {
-            "> mount starbridge.overlay.surface",
+            localized.TerminalLines[0],
             _isGameProcessRunning
-                ? "> locate active game window: StarCitizen.exe"
-                : "> wait for active game window: standby",
+                ? Localize("> 已找到游戏窗口：StarCitizen.exe", "> 已找到遊戲視窗：StarCitizen.exe", "> locate active game window: StarCitizen.exe")
+                : Localize("> 等待游戏窗口：待命", "> 等待遊戲視窗：待命", "> wait for active game window: standby"),
             logExists
-                ? $"> read {Path.GetFileName(_logPath!)} channel: {(_watcher is null ? "ready" : "sync")}"
-                : "> read Game.log channel: path check",
-            $"> bind identity: {CompactOverlayTransitionText(identityLabel, 28)}",
+                ? Localize(
+                    $"> 读取 {Path.GetFileName(_logPath!)} 通道：{(_watcher is null ? "就绪" : "同步")}",
+                    $"> 讀取 {Path.GetFileName(_logPath!)} 通道：{(_watcher is null ? "就緒" : "同步")}",
+                    $"> read {Path.GetFileName(_logPath!)} channel: {(_watcher is null ? "ready" : "sync")}")
+                : Localize("> 读取 Game.log 通道：检查路径", "> 讀取 Game.log 通道：檢查路徑", "> read Game.log channel: path check"),
+            Localize(
+                $"> 绑定身份：{CompactOverlayTransitionText(identityLabel, 28)}",
+                $"> 綁定身份：{CompactOverlayTransitionText(identityLabel, 28)}",
+                $"> bind identity: {CompactOverlayTransitionText(identityLabel, 28)}"),
             hasCollaborativeFleet
-                ? $"> sync fleet relay: {CompactOverlayTransitionText(_fleetCode, 18)}"
-                : "> load local command surface",
-            "> arm click-through overlay layer",
-            $"> calibrate tactical HUD modules: {hudModuleCount}",
-            "> control surface online"
+                ? Localize(
+                    $"> 同步舰队中继：{CompactOverlayTransitionText(_fleetCode, 18)}",
+                    $"> 同步艦隊中繼：{CompactOverlayTransitionText(_fleetCode, 18)}",
+                    $"> sync fleet relay: {CompactOverlayTransitionText(_fleetCode, 18)}")
+                : Localize("> 载入本地指挥界面", "> 載入本機指揮介面", "> load local command surface"),
+            localized.TerminalLines[4],
+            Localize(
+                $"> 校准战术浮层模块：{hudModuleCount}",
+                $"> 校準戰術浮層模組：{hudModuleCount}",
+                $"> calibrate tactical HUD modules: {hudModuleCount}"),
+            localized.TerminalLines[6]
         };
 
         return new OverlayStartupTransitionContext(
             statusSteps,
             terminalLines,
-            HeaderTargetLabel: _isGameProcessRunning ? "StarCitizen.exe // LOCK" : "LOCAL OVERLAY // STANDBY",
-            SurfaceTitle: zh ? "星海舰桥控制界面" : "STAR BRIDGE CONTROL SURFACE",
-            MountingStateLabel: "MOUNTING",
-            CheckingStateLabel: "SYSTEM CHECK",
-            OnlineStateLabel: zh ? "浮层在线" : "OVERLAY ONLINE",
-            BootStateLabel: "BOOT",
-            BottomLeftDiagnostic: $"SESSION {sessionId} / {(hasCollaborativeFleet ? "FLEET" : "LOCAL")} SURFACE",
-            BottomRightDiagnostic: $"LOG {BuildOverlayLogStateLabel(logSelected, logExists)} / INPUT CLICK-THROUGH",
-            CompletionLabel: zh ? "浮层已接入" : "OVERLAY ONLINE",
+            HeaderTargetLabel: _isGameProcessRunning
+                ? Localize("StarCitizen.exe // 已锁定", "StarCitizen.exe // 已鎖定", "StarCitizen.exe // LOCK")
+                : Localize("本地浮层 // 待命", "本機浮層 // 待命", "LOCAL OVERLAY // STANDBY"),
+            SurfaceTitle: localized.SurfaceTitle,
+            MountingStateLabel: localized.MountingStateLabel,
+            CheckingStateLabel: localized.CheckingStateLabel,
+            OnlineStateLabel: localized.OnlineStateLabel,
+            BootStateLabel: localized.BootStateLabel,
+            BottomLeftDiagnostic: Localize(
+                $"会话 {sessionId} / {(hasCollaborativeFleet ? "舰队" : "本地")}界面",
+                $"工作階段 {sessionId} / {(hasCollaborativeFleet ? "艦隊" : "本機")}介面",
+                $"SESSION {sessionId} / {(hasCollaborativeFleet ? "FLEET" : "LOCAL")} SURFACE"),
+            BottomRightDiagnostic: Localize(
+                $"日志 {logStateLabel} / 鼠标穿透",
+                $"日誌 {logStateLabel} / 滑鼠穿透",
+                $"LOG {logStateLabel} / INPUT CLICK-THROUGH"),
+            CompletionLabel: localized.CompletionLabel,
             CompletionSubLabel: hasCollaborativeFleet
-                ? zh ? $"舰桥链路已建立 / {_fleetCode}" : $"BRIDGE LINK ESTABLISHED / {_fleetCode}"
-                : zh ? "本地战术界面已上线" : "LOCAL TACTICAL SURFACE ONLINE");
+                ? Localize(
+                    $"舰桥链路已建立 / {_fleetCode}",
+                    $"艦橋鏈路已建立 / {_fleetCode}",
+                    $"BRIDGE LINK ESTABLISHED / {_fleetCode}")
+                : Localize("本地战术界面已上线", "本機戰術介面已上線", "LOCAL TACTICAL SURFACE ONLINE"));
     }
 
     private int CountOverlayHudModules(OverlayDisplaySettings settings)
@@ -1244,16 +1307,6 @@ public partial class MainWindow
         }
 
         return CompactOverlayTransitionText(serverText, 32);
-    }
-
-    private static string BuildOverlayLogStateLabel(bool selected, bool exists)
-    {
-        if (!selected)
-        {
-            return "NOT SELECTED";
-        }
-
-        return exists ? "READY" : "CHECK PATH";
     }
 
     private static string CompactOverlayTransitionText(string? value, int maxLength)

@@ -1,8 +1,10 @@
 using StarBridge.Core.Events;
 using StarBridge.Core.Presence;
+using StarBridge.HostRuntime.Auth;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Windows;
 using System.Windows.Input;
@@ -81,7 +83,7 @@ public partial class MainWindow
     {
         if (_isAppStatsHeartbeatRunning ||
             string.IsNullOrWhiteSpace(_appStatsClientId) ||
-            _syncPrivacySettings.PresenceVisibilityMode != PlayerPresenceVisibilityMode.Online)
+            !GetPresenceSharingDecision().CanPublishRealtime)
         {
             return;
         }
@@ -302,7 +304,7 @@ public partial class MainWindow
         bool queueNetworkPush)
     {
         var next = PlayerPresence.Resolve(
-            IsLoggedIn,
+            IsAccountAuthenticated,
             _isGameProcessRunning,
             _lastAppInteractionAtUtc,
             now);
@@ -355,7 +357,83 @@ public partial class MainWindow
 
     private async Task ApplyPresenceVisibilityModeAsync(PlayerPresenceVisibilityMode mode)
     {
-        if (!Enum.IsDefined(mode) || mode == _syncPrivacySettings.PresenceVisibilityMode)
+        if (!Enum.IsDefined(mode) ||
+            mode == PlayerPresenceVisibilityMode.Offline ||
+            mode == _syncPrivacySettings.PresenceVisibilityMode)
+        {
+            return;
+        }
+
+        if (IsScmLoggedIn)
+        {
+            var sessionBeforeUpdate = _scmOAuthSession;
+            try
+            {
+                var scmStatus = mode switch
+                {
+                    PlayerPresenceVisibilityMode.Online => 1,
+                    PlayerPresenceVisibilityMode.InGame => 2,
+                    PlayerPresenceVisibilityMode.Invisible => 3,
+                    _ => throw new InvalidOperationException("不支持的 SCM 在线状态。")
+                };
+                var result = await _scmOAuthClient.UpdatePresenceStatusAsync(
+                    _scmOAuthSession!, scmStatus, CancellationToken.None);
+                ApplyScmOAuthSession(result.ActiveSession);
+                mode = result.Status.SignInStatus switch
+                {
+                    2 => PlayerPresenceVisibilityMode.InGame,
+                    3 => PlayerPresenceVisibilityMode.Invisible,
+                    _ => PlayerPresenceVisibilityMode.Online
+                };
+            }
+            catch (ScmApiForbiddenException)
+            {
+                const string message =
+                    "当前 SCM 登录授权版本过旧，尚未包含在线状态同步权限。\n\n" +
+                    "是否立即重新授权？完成后会自动重试刚才选择的状态。";
+                NetworkStatusText.Text = "在线状态需要重新授权";
+                RefreshHeaderStatusBar();
+                var decision = StarBridgeMessageBox.Show(
+                    this,
+                    message,
+                    "需要更新 SCM 授权",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+                if (decision != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+
+                await ShowLoginDialogAsync();
+                if (_scmOAuthSession is null ||
+                    ReferenceEquals(_scmOAuthSession, sessionBeforeUpdate) ||
+                    string.Equals(_scmOAuthSession.AccessToken, sessionBeforeUpdate?.AccessToken, StringComparison.Ordinal))
+                {
+                    NetworkStatusText.Text = "未完成重新授权，在线状态保持不变";
+                    RefreshHeaderStatusBar();
+                    return;
+                }
+
+                await ApplyPresenceVisibilityModeAsync(mode);
+                return;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException)
+            {
+                NetworkStatusText.Text = UserFacingError.Describe(
+                    exception, "SCM 在线状态未更新，请稍后重试。");
+                RefreshHeaderStatusBar();
+                return;
+            }
+        }
+
+        await ApplyPresenceVisibilityModeLocallyAsync(mode);
+    }
+
+    private async Task ApplyPresenceVisibilityModeLocallyAsync(PlayerPresenceVisibilityMode mode)
+    {
+        if (!Enum.IsDefined(mode) ||
+            mode == PlayerPresenceVisibilityMode.Offline ||
+            mode == _syncPrivacySettings.PresenceVisibilityMode)
         {
             return;
         }
@@ -366,7 +444,8 @@ public partial class MainWindow
         SaveSyncPrivacySettingsAndRefreshDualAxis();
         ApplySyncPrivacySettingsToControls();
 
-        if (mode != PlayerPresenceVisibilityMode.Online)
+        var canPublishRealtime = PlayerPresence.DecideSharing(_localPresence, mode).CanPublishRealtime;
+        if (!canPublishRealtime)
         {
             await PushOfflineSnapshotOnShutdownAsync();
         }
@@ -389,7 +468,7 @@ public partial class MainWindow
             _partyRoomRefreshTimer?.Start();
             _relayLatencyTimer.Start();
             _ = MeasureRelayLatencyAsync();
-            if (mode == PlayerPresenceVisibilityMode.Online)
+            if (canPublishRealtime)
             {
                 _appStatsTimer.Start();
             }
@@ -402,10 +481,12 @@ public partial class MainWindow
                 StartNetworkSyncTimers();
             }
 
-            if (mode == PlayerPresenceVisibilityMode.Online)
+            if (canPublishRealtime)
             {
                 QueueRealtimeNetworkSnapshotPush();
-                NetworkStatusText.Text = "在线：即时状态同步已恢复";
+                NetworkStatusText.Text = mode == PlayerPresenceVisibilityMode.InGame
+                    ? "游戏中：即时状态同步已恢复"
+                    : "在线：即时状态同步已恢复";
             }
             else
             {

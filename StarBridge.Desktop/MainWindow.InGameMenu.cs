@@ -2144,7 +2144,7 @@ public partial class MainWindow
 
     private void InGameMenuCoordinator_FleetBroadcastRequested(object? sender, EventArgs e)
     {
-        if (!CanCurrentUserPublishFleetBroadcasts())
+        if (!CanUseFleetBroadcasts || !_fleetBroadcastCanPublish)
         {
             _inGameMenuCoordinator.ShowNotice(
                 "无法发送舰队广播",
@@ -2299,7 +2299,8 @@ public partial class MainWindow
             false);
         try
         {
-            if (!CanSynchronizeUserData ||
+            if (!AccountState.HasRelaySession ||
+                !CanSynchronizeUserData ||
                 string.IsNullOrWhiteSpace(accountIdentity) ||
                 _personalProfileRepository is null)
             {

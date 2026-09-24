@@ -59,7 +59,7 @@ public partial class MainWindow
                         $"api/fleets/activity?after={_fleetActivityVersion}" +
                         $"&instance={Uri.EscapeDataString(_fleetActivityInstanceId)}" +
                         "&waitSeconds=20"));
-                using var response = await _relayClient.SendAsync(request, cancellationToken);
+                using var response = await _longPollRelayClient.SendAsync(request, cancellationToken);
                 if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
@@ -80,11 +80,7 @@ public partial class MainWindow
                 var previousVersion = instanceChanged ? -1 : _fleetActivityVersion;
                 _fleetActivityInstanceId = activity.InstanceId;
                 _fleetActivityVersion = activity.Version;
-                if (previousVersion < 0)
-                {
-                    await RefreshFleetBroadcastsAsync(showErrors: false, cancellationToken);
-                }
-                else if (instanceChanged || activity.Version > previousVersion)
+                if (previousVersion >= 0 && (instanceChanged || activity.Version > previousVersion))
                 {
                     await RefreshFleetAfterRealtimeActivityAsync(session, cancellationToken);
                 }
@@ -128,7 +124,6 @@ public partial class MainWindow
         _isNetworkRealtimePullRunning = true;
         try
         {
-            await RefreshFleetBroadcastsAsync(showErrors: false, cancellationToken);
             await PullNetworkFleetsAsync(
                 silent: true,
                 refreshBehavior: FleetDirectoryRefreshBehavior.PreserveVisibleOrder);

@@ -28,6 +28,11 @@ public partial class MainWindow
         LocalGameEventList.IsVisibleChanged += (_, _) => QueueLocalGameEventJournalRender();
         _localGameEventJournal.Changed += LocalGameEventJournal_Changed;
         _localGameEventJournal.Load();
+        Closed += async (_, _) =>
+        {
+            await _localGameEventJournal.FlushAsync();
+            _localGameEventJournal.Dispose();
+        };
         RenderLocalGameEventJournal();
     }
 
@@ -104,15 +109,7 @@ public partial class MainWindow
             return;
         }
 
-        var detail = fleetEvent.Type switch
-        {
-            FleetEventType.PlayerEnteredShip or FleetEventType.PlayerExitedShip or
-                FleetEventType.PlayerControllingShip or FleetEventType.PlayerStoppedDrivingShip =>
-                string.IsNullOrWhiteSpace(fleetEvent.Ship) ? "" : $"原始舰船标识：{fleetEvent.Ship}",
-            FleetEventType.PlayerLocationChanged or FleetEventType.PlayerNavigationTargetChanged =>
-                string.IsNullOrWhiteSpace(fleetEvent.Location) ? "" : $"原始地点标识：{fleetEvent.Location}",
-            _ => string.IsNullOrWhiteSpace(fleetEvent.Player) ? "" : $"玩家：{fleetEvent.Player}"
-        };
+        var detail = StarBridge.HostRuntime.Support.LocalGameEventPresentation.Detail(fleetEvent);
         _localGameEventJournal.Append(
             LocalGameEventJournal.Classify(fleetEvent.Type),
             fleetEvent.Type.ToString(),
@@ -132,11 +129,9 @@ public partial class MainWindow
 
     private void RecordLocalGameProcessEvent(bool isRunning, DateTimeOffset now)
     {
+        var entry = StarBridge.HostRuntime.Support.LocalGameEventPresentation.Process(isRunning);
         _localGameEventJournal.Append(
-            LocalGameEventCategories.Session,
-            isRunning ? "GameStarted" : "GameStopped",
-            isRunning ? "检测到 Star Citizen 启动" : "检测到 Star Citizen 退出",
-            "来源：本机进程监控",
+            entry.Category, entry.EventType, entry.Title, entry.Detail,
             now);
     }
 
@@ -162,7 +157,12 @@ public partial class MainWindow
             return;
         }
 
-        _localGameEventJournal.Clear();
+        ClearLocalGameEventsButton.IsEnabled = false;
+        var result = await _localGameEventJournal.ClearAsync();
+        RenderLocalGameEventJournal();
+        LocalGameEventSummaryText.Text = result == StarBridge.HostRuntime.Support.LocalJournalClearResult.Cleared
+            ? "已清空本地事件记录。"
+            : "未能完成清空，请重试。";
     }
 
     private async void ExportLocalGameEventsButton_Click(object sender, RoutedEventArgs e)

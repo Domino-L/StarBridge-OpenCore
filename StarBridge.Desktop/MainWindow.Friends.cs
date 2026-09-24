@@ -51,6 +51,7 @@ public partial class MainWindow
     private bool _isUpdatingDirectMessagePrivacy;
     private bool _friendChatHasOlder;
     private bool _isLoadingOlderFriendChat;
+    private FriendChatOperationLane? _loadingOlderFriendChatLane;
     private bool _friendChatFollowLatest = true;
     private FriendUserContract? _activeFriendChatUser;
     private FriendChatConversationContract? _activeFriendChatConversation;
@@ -190,7 +191,7 @@ public partial class MainWindow
                         $"api/social/activity?after={_socialActivityVersion}" +
                         $"&instance={Uri.EscapeDataString(_socialActivityInstanceId)}" +
                         "&waitSeconds=20"));
-                using var response = await _relayClient.SendAsync(request, cancellationToken);
+                using var response = await _longPollRelayClient.SendAsync(request, cancellationToken);
                 if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
@@ -1341,8 +1342,12 @@ public partial class MainWindow
         }
 
         var targetId = _activeFriendChatUser.AccountId;
+        var lane = CreateFriendChatOperationLane(
+            _accountSessionCoordinator.Capture(),
+            targetId);
         var before = _friendChatMessages.Min(row => row.Message.Sequence);
         _isLoadingOlderFriendChat = true;
+        _loadingOlderFriendChatLane = lane;
         FriendChatHistoryStatusText.Text = "正在加载更早消息…";
         FriendChatHistoryStatusPanel.Visibility = ChatHistoryViewport.Find(FriendChatMessageList) is { } viewer &&
                                                   ChatHistoryViewport.IsNearTop(viewer)
@@ -1353,8 +1358,7 @@ public partial class MainWindow
             var history = await _relayClient.GetFromJsonAsync<FriendChatHistoryContract>(
                 $"api/friends/chat/messages?targetAccountId={Uri.EscapeDataString(targetId)}" +
                 $"&before={before}&limit=50");
-            if (history is null || _activeFriendChatUser is null ||
-                !_activeFriendChatUser.AccountId.Equals(targetId, StringComparison.OrdinalIgnoreCase))
+            if (history is null || !IsFriendChatOperationCurrent(lane))
             {
                 return;
             }
@@ -1377,13 +1381,20 @@ public partial class MainWindow
         }
         catch
         {
-            FriendChatStatusText.Text = "更早消息加载失败，滚到顶部可重试。";
-            FriendChatStatusText.Foreground = StatusPalette.WarningBrush;
+            if (IsFriendChatOperationCurrent(lane))
+            {
+                FriendChatStatusText.Text = "更早消息加载失败，滚到顶部可重试。";
+                FriendChatStatusText.Foreground = StatusPalette.WarningBrush;
+            }
         }
         finally
         {
-            _isLoadingOlderFriendChat = false;
-            UpdateFriendChatHistoryStatus(ChatHistoryViewport.Find(FriendChatMessageList));
+            if (_loadingOlderFriendChatLane == lane)
+            {
+                _loadingOlderFriendChatLane = null;
+                _isLoadingOlderFriendChat = false;
+                UpdateFriendChatHistoryStatus(ChatHistoryViewport.Find(FriendChatMessageList));
+            }
         }
     }
 
@@ -1411,6 +1422,7 @@ public partial class MainWindow
     {
         _friendChatHasOlder = false;
         _isLoadingOlderFriendChat = false;
+        _loadingOlderFriendChatLane = null;
         _friendChatFollowLatest = true;
         if (FriendChatHistoryStatusPanel is not null)
         {

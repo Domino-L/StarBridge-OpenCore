@@ -72,6 +72,7 @@ public static partial class HangarShipImporter
             ["F7C-M Super Hornet Mk II"] = "ANVL_Hornet_F7CM_Mk2",
             ["F8C Lightning"] = "ANVL_Lightning_F8C",
             ["Fury MX"] = "Misc_Fury_Miru",
+            ["Gatac Tyilui"] = "Tyilui",
             ["Gladius"] = "AEGS_Gladius",
             ["Hammerhead"] = "AEGS_Hammerhead",
             ["Hercules Starlifter A2"] = "CRUS_Starlifter_A2",
@@ -90,6 +91,7 @@ public static partial class HangarShipImporter
             ["起源 M80"] = "ORIG_M80",
             ["Starfarer Gemini"] = "MISC_Starfarer_Gemini",
             ["Terrapin"] = "ANVL_Terrapin",
+            ["Tyilui"] = "Tyilui",
             ["Vanguard Harbinger"] = "AEGS_Vanguard_Harbinger"
         };
 
@@ -637,6 +639,30 @@ public static class ShipDatabaseStore
                 ship.CustomImageCropFrame.FocusY.ToString("R", CultureInfo.InvariantCulture),
                 ship.CustomImageCropFrame.Zoom.ToString("R", CultureInfo.InvariantCulture))),
             Encoding.UTF8);
+    }
+
+    public static void PromoteLegacyOwner(string legacyOwnerKey, string accountRouteOwnerKey)
+    {
+        if (string.IsNullOrWhiteSpace(legacyOwnerKey) ||
+            string.IsNullOrWhiteSpace(accountRouteOwnerKey))
+        {
+            return;
+        }
+
+        var source = GetPath(legacyOwnerKey);
+        var destination = GetPath(accountRouteOwnerKey);
+        if (source.Equals(destination, StringComparison.OrdinalIgnoreCase) || !File.Exists(source))
+        {
+            return;
+        }
+
+        if (File.Exists(destination))
+        {
+            File.Delete(source);
+            return;
+        }
+
+        File.Move(source, destination);
     }
 
     private static double ParseCropValue(string[] parts, int index, double fallback) =>

@@ -12,7 +12,6 @@ namespace StarBridge.Desktop;
 internal sealed class AppUpdateService
 {
     private readonly HttpClient _httpClient;
-    private readonly Func<string, Uri> _buildUri;
     private readonly Window _owner;
     private readonly Action<string> _setStatus;
     private readonly Action<bool> _setCheckButtonEnabled;
@@ -20,14 +19,12 @@ internal sealed class AppUpdateService
 
     public AppUpdateService(
         HttpClient httpClient,
-        Func<string, Uri> buildUri,
         Window owner,
         Action<string> setStatus,
         Action<bool> setCheckButtonEnabled,
         IAppUpdateUi? updateUi = null)
     {
         _httpClient = httpClient;
-        _buildUri = buildUri;
         _owner = owner;
         _setStatus = setStatus;
         _setCheckButtonEnabled = setCheckButtonEnabled;
@@ -59,7 +56,8 @@ internal sealed class AppUpdateService
                 _setStatus($"正在检查更新... 当前版本 V{currentVersion}");
             }
 
-            var manifest = await _httpClient.GetFromJsonAsync<UpdateManifest>(_buildUri("api/updates/latest"));
+            var manifest = await _httpClient.GetFromJsonAsync<UpdateManifest>(
+                AppUpdateEndpoint.BuildUri("api/updates/latest"));
             if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version))
             {
                 if (!silent)
@@ -78,6 +76,8 @@ internal sealed class AppUpdateService
                 {
                     _setStatus($"当前已是最新版本 V{currentVersion}。");
                 }
+
+                await CheckForFlutterMigrationAsync(silent, currentVersion);
 
                 return;
             }
@@ -127,6 +127,85 @@ internal sealed class AppUpdateService
             }
         }
     }
+
+    private async Task CheckForFlutterMigrationAsync(bool silent, string currentVersion)
+    {
+        if (!IsMigrationBridgeVersion(currentVersion))
+        {
+            return;
+        }
+
+        FlutterMigrationManifest? migration;
+        try
+        {
+            migration = await _httpClient.GetFromJsonAsync<FlutterMigrationManifest>(
+                AppUpdateEndpoint.BuildUri("api/updates/flutter-migration"));
+        }
+        catch
+        {
+            // The bridge is optional. A missing or disabled Java manifest must not make
+            // ordinary WPF update checks fail.
+            return;
+        }
+
+        if (migration is null || !migration.MigrationOnly ||
+            !IsNewerVersion(migration.Version, currentVersion) ||
+            string.IsNullOrWhiteSpace(migration.InstallerUrl))
+        {
+            return;
+        }
+
+        var installerManifest = new UpdateManifest(
+            migration.Version,
+            migration.InstallerUrl,
+            null,
+            migration.Notes,
+            false,
+            migration.PublishedAt,
+            migration.InstallerSha256,
+            null,
+            migration.SignatureKeyId,
+            migration.Signature);
+
+        try
+        {
+            UpdateManifestSecurity.ValidateAndVerify(installerManifest);
+        }
+        catch
+        {
+            if (!silent)
+            {
+                _setStatus("检测到 Flutter 迁移信息，但签名校验未通过，已跳过迁移。");
+            }
+
+            return;
+        }
+
+        var notes = string.IsNullOrWhiteSpace(migration.Notes)
+            ? "可升级到 StarBridge Flutter 0.7.0。原 WPF 客户端和数据会保留。"
+            : migration.Notes.Trim();
+        const string hangarNotice = "升级到新客户端后，个人机库需要重新导入。";
+        _setStatus($"可迁移到 Flutter V{migration.Version}。{hangarNotice}{notes}");
+        var shouldMigrate = _updateUi is not null
+            ? await _updateUi.ConfirmUpdateAsync(
+                installerManifest,
+                currentVersion,
+                $"Flutter 迁移安装（原 WPF 将保留）\n{hangarNotice}")
+            : StarBridgeMessageBox.Show(
+                _owner,
+                $"可以迁移到 Flutter V{migration.Version}。\n\n{hangarNotice}\n\n{notes}\n\n将下载并启动独立安装器，原 WPF 客户端不会被删除。现在开始吗？",
+                "星海舰桥 Flutter 迁移",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information) == MessageBoxResult.Yes;
+
+        if (shouldMigrate)
+        {
+            await DownloadAndRunInstallerUpdateAsync(installerManifest);
+        }
+    }
+
+    private static bool IsMigrationBridgeVersion(string currentVersion) =>
+        string.Equals(currentVersion.Trim(), "0.6.6.1", StringComparison.OrdinalIgnoreCase);
 
     private async Task DownloadAndApplyPackageUpdateAsync(UpdateManifest manifest)
     {
@@ -799,6 +878,19 @@ try {
             2 => $"{parts[0]}.{parts[1]}.0",
             _ => version
         };
+    }
+}
+
+internal static class AppUpdateEndpoint
+{
+    private static readonly Uri OfficialBaseUri = new("https://api.scstarbridge.com/");
+
+    public static Uri BuildUri(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        if (relativePath is not ("api/updates/latest" or "api/updates/flutter-migration"))
+            throw new ArgumentException("Only official update metadata routes are supported.", nameof(relativePath));
+        return new Uri(OfficialBaseUri, relativePath);
     }
 }
 

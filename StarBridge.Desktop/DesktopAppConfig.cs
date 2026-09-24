@@ -121,6 +121,20 @@ internal sealed record DesktopAppConfig(
         File.WriteAllLines(ConfigPath, lines);
     }
 
+    public static void ClearLegacyFleetState(DesktopAppConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(config.FleetStateJson) && config.FleetStateCachedAtUtc is null)
+        {
+            return;
+        }
+
+        Save(config with
+        {
+            FleetStateJson = null,
+            FleetStateCachedAtUtc = null
+        });
+    }
+
     public static string? LoadOverlaySettings()
     {
         return ReadOptionalText(OverlaySettingsPath) ?? ReadOptionalText(FallbackOverlaySettingsPath);

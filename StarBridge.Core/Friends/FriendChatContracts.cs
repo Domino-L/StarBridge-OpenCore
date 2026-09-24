@@ -99,7 +99,11 @@ public sealed record FriendChatSendRequestContract(
     string Text,
     string ClientMessageId,
     string Origin = DirectMessageOrigins.Unknown,
-    ChatAttachmentContract? Attachment = null);
+    ChatAttachmentContract? Attachment = null)
+{
+    public DateTimeOffset? ClientRequestedAt { get; init; }
+    public bool ConfirmOnly { get; init; }
+}
 
 public sealed record FriendChatMutationResponseContract(
     FriendChatMessageContract? Message,

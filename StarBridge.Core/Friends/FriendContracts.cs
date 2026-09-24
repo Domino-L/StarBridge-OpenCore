@@ -27,7 +27,8 @@ public sealed record FriendUserContract(
     string? AvatarImageData,
     string Presence,
     string RelationshipState,
-    DateTimeOffset LastUpdated);
+    DateTimeOffset LastUpdated,
+    FriendSharedView? Shared = null);
 
 public sealed record FriendEntryContract(
     FriendUserContract User,

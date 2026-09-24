@@ -176,6 +176,19 @@ public partial class MainWindow
         BridgeStatePresenter presenter,
         StartupDataGateState state)
     {
+        if (state == StartupDataGateState.IdentityMismatch)
+        {
+            presenter.State = BridgeStateKind.AccessDenied;
+            presenter.TitleOverride = _language == "zh"
+                ? "游戏身份不相同"
+                : "Game identities do not match";
+            presenter.DescriptionOverride = _language == "zh"
+                ? "SCM、兼容账号或 Game.log 中存在不一致的游戏 ID；用户数据同步已暂停。"
+                : "SCM, compatibility-account, or Game.log identities disagree. User data synchronization is paused.";
+            presenter.ActionTextOverride = string.Empty;
+            return;
+        }
+
         if (state == StartupDataGateState.IdentityRequired)
         {
             presenter.State = BridgeStateKind.AccessDenied;

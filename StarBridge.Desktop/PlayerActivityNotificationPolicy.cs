@@ -1,6 +1,10 @@
 using StarBridge.Core.Presence;
 
+#if STARBRIDGE_HOST_RUNTIME
+namespace StarBridge.HostRuntime.Notifications.Wpf;
+#else
 namespace StarBridge.Desktop;
+#endif
 
 internal enum PlayerActivityNotificationKind
 {

@@ -645,7 +645,7 @@
 
     <!-- Avatar and its disclosure glyph form one account-menu trigger. -->
     <Style x:Key="BridgeAvatarButtonStyle" TargetType="ToggleButton">
-        <Setter Property="Width" Value="66" />
+        <Setter Property="Width" Value="196" />
         <Setter Property="Height" Value="42" />
         <Setter Property="Margin" Value="8,0,0,0" />
         <Setter Property="Padding" Value="3" />

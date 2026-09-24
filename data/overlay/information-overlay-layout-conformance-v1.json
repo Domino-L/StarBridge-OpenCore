@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "resolveCases": [
+    {
+      "id": "default-layout-1920x1080",
+      "surfaceWidth": 1920,
+      "surfaceHeight": 1080,
+      "items": [
+        {
+          "key": "Notice",
+          "x": 0.34,
+          "y": 0,
+          "width": 0.32,
+          "height": 0.055,
+          "horizontalAnchor": "Center",
+          "verticalAnchor": "Top",
+          "isLocked": false,
+          "textOpacity": 1,
+          "backgroundOpacity": 0.5
+        },
+        {
+          "key": "Squads",
+          "x": 0,
+          "y": 0.4211,
+          "width": 0.1327,
+          "height": 0.1042,
+          "horizontalAnchor": "Left",
+          "verticalAnchor": "Middle",
+          "isLocked": false,
+          "textOpacity": 1,
+          "backgroundOpacity": 0.5
+        },
+        {
+          "key": "Members",
+          "x": 0,
+          "y": 0.5253,
+          "width": 0.1327,
+          "height": 0.1557,
+          "horizontalAnchor": "Right",
+          "verticalAnchor": "Middle",
+          "isLocked": false,
+          "textOpacity": 1,
+          "backgroundOpacity": 0.5
+        },
+        {
+          "key": "Chat",
+          "x": 0,
+          "y": 0.681,
+          "width": 0.1327,
+          "height": 0.1069,
+          "horizontalAnchor": "Center",
+          "verticalAnchor": "Bottom",
+          "isLocked": false,
+          "textOpacity": 1,
+          "backgroundOpacity": 1
+        }
+      ],
+      "expected": {
+        "Notice": [652.8, 0, 614.4, 59.4],
+        "Squads": [0, 436.056, 254.784, 150],
+        "Members": [0, 586.056, 254.784, 168.156],
+        "Chat": [0, 754.212, 254.784, 115.452]
+      }
+    },
+    {
+      "id": "intentional-overlap-remains",
+      "surfaceWidth": 1920,
+      "surfaceHeight": 1080,
+      "items": [
+        {
+          "key": "Squads",
+          "x": 0.05,
+          "y": 0.4,
+          "width": 0.24,
+          "height": 0.2,
+          "horizontalAnchor": "Left",
+          "verticalAnchor": "Middle",
+          "isLocked": false,
+          "textOpacity": 1,
+          "backgroundOpacity": 1
+        },
+        {
+          "key": "Members",
+          "x": 0.05,
+          "y": 0.5,
+          "width": 0.24,
+          "height": 0.2,
+          "horizontalAnchor": "Left",
+          "verticalAnchor": "Middle",
+          "isLocked": false,
+          "textOpacity": 1,
+          "backgroundOpacity": 1
+        }
+      ],
+      "expected": {
+        "Squads": [96, 432, 460.8, 216],
+        "Members": [96, 540, 460.8, 216]
+      }
+    }
+  ],
+  "applyCases": [
+    {
+      "id": "right-bottom-anchor-round-trip",
+      "surfaceWidth": 1920,
+      "surfaceHeight": 1080,
+      "item": {
+        "key": "Chat",
+        "x": 0.7,
+        "y": 0.8,
+        "width": 0.2,
+        "height": 0.1,
+        "horizontalAnchor": "Right",
+        "verticalAnchor": "Bottom",
+        "isLocked": false,
+        "textOpacity": 1,
+        "backgroundOpacity": 1
+      },
+      "rect": [1500, 900, 300, 100],
+      "expectedNormalized": [0.78125, 0.8333333333333334, 0.15625, 0.0962962962962963],
+      "expectedResolved": [1500, 900, 300, 104]
+    }
+  ],
+  "eventCases": [
+    {
+      "id": "right-side-grid-snap",
+      "surfaceWidth": 1920,
+      "surfaceHeight": 1080,
+      "side": "Right",
+      "normalizedY": 0.333,
+      "preferredHeight": 96,
+      "snapSize": 16,
+      "expected": [1540, 320, 380, 96]
+    }
+  ],
+  "sceneCases": [
+    {
+      "id": "auto-prefers-current-room",
+      "preference": "Auto",
+      "hasCurrentPartyRoom": true,
+      "expectedKind": "PartyRoom",
+      "expectedFallback": false
+    },
+    {
+      "id": "missing-requested-room-falls-back",
+      "preference": "PartyRoom",
+      "hasCurrentPartyRoom": false,
+      "expectedKind": "Fleet",
+      "expectedFallback": true
+    },
+    {
+      "id": "fleet-remains-fleet-with-room-present",
+      "preference": "Fleet",
+      "hasCurrentPartyRoom": true,
+      "expectedKind": "Fleet",
+      "expectedFallback": false
+    }
+  ],
+  "visibilityCases": [
+    {
+      "id": "content-gates-transient-modules",
+      "settings": {
+        "showNotice": true,
+        "showSquads": true,
+        "showMembers": true,
+        "showChat": true,
+        "showCrosshair": true,
+        "showEventNotifications": true
+      },
+      "content": {
+        "noticeHasContent": false,
+        "chatHasContent": true,
+        "eventNotificationsHaveContent": false
+      },
+      "expected": {
+        "showNotice": false,
+        "showSquads": true,
+        "showMembers": true,
+        "showChat": true,
+        "showCrosshair": true,
+        "showEventNotifications": false
+      }
+    },
+    {
+      "id": "disabled-settings-remain-hidden",
+      "settings": {
+        "showNotice": false,
+        "showSquads": false,
+        "showMembers": false,
+        "showChat": false,
+        "showCrosshair": false,
+        "showEventNotifications": false
+      },
+      "content": {
+        "noticeHasContent": true,
+        "chatHasContent": true,
+        "eventNotificationsHaveContent": true
+      },
+      "expected": {
+        "showNotice": false,
+        "showSquads": false,
+        "showMembers": false,
+        "showChat": false,
+        "showCrosshair": false,
+        "showEventNotifications": false
+      }
+    }
+  ]
+}

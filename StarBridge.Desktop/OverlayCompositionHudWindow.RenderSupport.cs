@@ -13,6 +13,20 @@ namespace StarBridge.Desktop;
 
 internal sealed partial class OverlayCompositionHudWindow
 {
+    // The offline capture build supplies a deterministic clock; shipping builds
+    // retain the native wall-clock and monotonic timing sources.
+    private static DateTimeOffset AppearanceAnimationUtcNow =>
+#if STARBRIDGE_APPEARANCE_CAPTURE
+        DateTimeOffset.UnixEpoch.AddMilliseconds(_catalogAnimationTimeMs);
+#else
+        DateTimeOffset.UtcNow;
+#endif
+    private static double AppearanceAnimationTicks =>
+#if STARBRIDGE_APPEARANCE_CAPTURE
+        _catalogAnimationTimeMs;
+#else
+        Environment.TickCount64;
+#endif
     private bool IsEventSlideActive()
     {
         if (_state?.AnimationFrameRate == OverlayAnimationFrameRate.Off)

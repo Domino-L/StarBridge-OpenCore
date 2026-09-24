@@ -29,6 +29,7 @@ internal interface IOverlayHost
     void Refresh(
         OverlayAuthorizedRoster roster,
         IEnumerable<OverlayChatMessage> chatMessages,
+        IEnumerable<OverlayLayoutItem> layout,
         OverlayDisplaySettings settings,
         OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,

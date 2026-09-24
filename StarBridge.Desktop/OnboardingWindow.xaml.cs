@@ -107,8 +107,8 @@ public partial class OnboardingWindow : Window
 
         AccountPreparationStatusText.Text = isLoggedIn
             ? "已登录 · 多人同步账号已就绪"
-            : "未登录 · 先登录或注册以启用多人同步";
-        PreparationLoginButton.Content = isLoggedIn ? "已登录" : "登录 / 注册";
+            : "未登录 · 先登录 SCM 账号以启用多人同步";
+        PreparationLoginButton.Content = isLoggedIn ? "已登录" : "登录账号";
         PreparationLoginButton.IsEnabled = !isLoggedIn;
 
         LogPreparationStatusText.Text = hasLog

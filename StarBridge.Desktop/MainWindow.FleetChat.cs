@@ -44,6 +44,7 @@ public partial class MainWindow
     private bool _fleetChatNeedsFullHistoryRefresh = true;
     private bool _fleetChatHasOlder;
     private bool _isLoadingOlderFleetChat;
+    private FleetChatOperationLane? _loadingOlderFleetChatLane;
     private bool _fleetChatFollowLatest = true;
     private int _fleetChatRefreshTick;
     private int _fleetChatTotalUnread;
@@ -701,8 +702,13 @@ public partial class MainWindow
         }
 
         var channelId = _activeFleetChatChannel.ChannelId;
+        var lane = CreateFleetChatOperationLane(
+            _accountSessionCoordinator.Capture(),
+            _fleetCode,
+            channelId);
         var before = _fleetChatMessages.Min(row => row.Message.Sequence);
         _isLoadingOlderFleetChat = true;
+        _loadingOlderFleetChatLane = lane;
         FleetChatHistoryLoadingIndicator.IsActive = true;
         FleetChatHistoryStatusText.Text = "正在加载更早消息…";
         FleetChatHistoryStatusPanel.Visibility = ChatHistoryViewport.Find(FleetChatMessageList) is { } viewer &&
@@ -714,8 +720,7 @@ public partial class MainWindow
             var history = await _relayClient.GetFromJsonAsync<FleetChatHistoryContract>(
                 $"api/fleets/chat/messages?fleetCode={Uri.EscapeDataString(_fleetCode)}" +
                 $"&channelId={Uri.EscapeDataString(channelId)}&before={before}&limit=50");
-            if (history is null || _activeFleetChatChannel is null ||
-                !_activeFleetChatChannel.ChannelId.Equals(channelId, StringComparison.OrdinalIgnoreCase))
+            if (history is null || !IsFleetChatOperationCurrent(lane))
             {
                 return;
             }
@@ -727,13 +732,20 @@ public partial class MainWindow
         }
         catch
         {
-            FleetChatStatusText.Text = "更早消息加载失败，滚到顶部可重试。";
-            FleetChatStatusText.Foreground = StatusPalette.WarningBrush;
+            if (IsFleetChatOperationCurrent(lane))
+            {
+                FleetChatStatusText.Text = "更早消息加载失败，滚到顶部可重试。";
+                FleetChatStatusText.Foreground = StatusPalette.WarningBrush;
+            }
         }
         finally
         {
-            _isLoadingOlderFleetChat = false;
-            UpdateFleetChatHistoryStatus(ChatHistoryViewport.Find(FleetChatMessageList));
+            if (_loadingOlderFleetChatLane == lane)
+            {
+                _loadingOlderFleetChatLane = null;
+                _isLoadingOlderFleetChat = false;
+                UpdateFleetChatHistoryStatus(ChatHistoryViewport.Find(FleetChatMessageList));
+            }
         }
     }
 
@@ -763,6 +775,7 @@ public partial class MainWindow
     {
         _fleetChatHasOlder = false;
         _isLoadingOlderFleetChat = false;
+        _loadingOlderFleetChatLane = null;
         _fleetChatFollowLatest = true;
         if (FleetChatHistoryStatusPanel is not null)
         {

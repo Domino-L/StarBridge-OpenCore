@@ -52,8 +52,12 @@ public partial class MainWindow
 
     private Task<bool> OpenHangarReaderAsync()
     {
-        if (!EnsureLoggedIn("读取官网机库需要先登录。"))
+        if (!IsAccountAuthenticated)
         {
+            LoginStatusText.Text = "读取官网机库需要先登录 SCM 账号。";
+            NetworkStatusText.Text = "浏览模式：请先登录";
+            RefreshHeaderStatusBar();
+            _ = ShowLoginDialogAsync();
             return Task.FromResult(false);
         }
 

@@ -284,7 +284,7 @@ public partial class MainWindow
 
         _fleetState.Apply(new FleetEvent(FleetEventType.PlayerOffline, _localPlayer));
         var snapshot = BuildOfflineNetworkSnapshot();
-        var authToken = _authToken;
+        var authToken = GetRelayAuthorizationToken();
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -319,7 +319,7 @@ public partial class MainWindow
         }
 
         var snapshot = BuildOfflineNetworkSnapshot();
-        var authToken = _authToken;
+        var authToken = GetRelayAuthorizationToken();
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));

@@ -43,7 +43,7 @@ internal sealed record PlayerEventSharingSettings(
         NormalizeTypes((PlayerSharedEventTypes)value);
 
     private static PlayerSharedEventTypes NormalizeTypes(PlayerSharedEventTypes value) =>
-        value & PlayerSharedEventTypes.All;
+        (PlayerSharedEventTypes)SharedEventChoice.Normalize((SharedActivityEventTypes)value);
 }
 
 internal static class PlayerEventSharingSettingsStore

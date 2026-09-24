@@ -23,6 +23,7 @@ public sealed class AccountSessionCoordinator
 {
     private long _revision;
     private AccountSessionIdentity _current;
+    private string _routeNamespace = "local";
 
     public AccountSessionTransition Begin(
         AccountSessionIdentity previous,
@@ -44,13 +45,34 @@ public sealed class AccountSessionCoordinator
 
     public AccountSessionLease Capture() => new(_revision, _current.StableKey);
 
+    public bool UpdateRouteNamespace(string routeNamespace)
+    {
+        var normalized = string.IsNullOrWhiteSpace(routeNamespace)
+            ? "local"
+            : routeNamespace.Trim();
+        if (_routeNamespace.Equals(normalized, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _routeNamespace = normalized;
+        _revision++;
+        return true;
+    }
+
     public bool IsCurrent(AccountSessionLease lease) =>
         lease.Revision == _revision &&
         lease.StableKey.Equals(_current.StableKey, StringComparison.OrdinalIgnoreCase);
 
+    public void RetireCurrentLeases()
+    {
+        _revision++;
+    }
+
     public void End()
     {
         _current = default;
+        _routeNamespace = "local";
         _revision++;
     }
 

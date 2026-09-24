@@ -14,48 +14,21 @@ internal sealed record SavePrivateVisibilityGroupContract(
     string? Name,
     string[]? MemberAccountIds);
 
-internal sealed class PrivateVisibilityGroupClient(StarBridgeRelayClient relayClient)
+internal sealed class PrivateVisibilityGroupClient
 {
-    internal async Task<PrivateVisibilityGroupContract[]> LoadAsync(CancellationToken cancellationToken = default)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            relayClient.BuildUri("api/privacy/visibility-groups"));
-        using var response = await relayClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<PrivateVisibilityGroupContract[]>(cancellationToken)
-               ?? [];
-    }
+    internal PrivateVisibilityGroupClient(StarBridgeRelayClient relayClient) { }
+    internal Task<PrivateVisibilityGroupContract[]> LoadAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(Array.Empty<PrivateVisibilityGroupContract>());
 
-    internal async Task<PrivateVisibilityGroupContract> SaveAsync(
+    internal Task<PrivateVisibilityGroupContract> SaveAsync(
         string? groupId,
         string name,
         IEnumerable<string> memberAccountIds,
-        CancellationToken cancellationToken = default)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Put,
-            relayClient.BuildUri("api/privacy/visibility-groups"))
-        {
-            Content = JsonContent.Create(new SavePrivateVisibilityGroupContract(
-                groupId,
-                name,
-                memberAccountIds.ToArray()))
-        };
-        using var response = await relayClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<PrivateVisibilityGroupContract>(cancellationToken)
-               ?? throw new InvalidOperationException("服务器没有返回可见性分组。");
-    }
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<PrivateVisibilityGroupContract>(new NotSupportedException("Private visibility groups are retired."));
 
-    internal async Task DeleteAsync(string groupId, CancellationToken cancellationToken = default)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Delete,
-            relayClient.BuildUri($"api/privacy/visibility-groups/{Uri.EscapeDataString(groupId)}"));
-        using var response = await relayClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-    }
+    internal Task DeleteAsync(string groupId, CancellationToken cancellationToken = default) =>
+        Task.FromException(new NotSupportedException("Private visibility groups are retired."));
 }
 
 internal sealed class PrivateVisibilityGroupDirectoryLoader(
@@ -156,7 +129,7 @@ internal readonly record struct DualAxisPrivacyWireSettings(
 internal static class DualAxisPrivacyTakeover
 {
     internal static bool IsReadyForWire(DualAxisPrivacySettings settings) =>
-        !settings.TracksLegacySettings && settings.PendingGroupMigrations.Length == 0;
+        !settings.TracksLegacySettings;
 
     internal static DualAxisPrivacySettings WithoutRoomGroupReferences(DualAxisPrivacySettings settings)
     {
@@ -246,8 +219,8 @@ internal static class DualAxisPrivacyTakeover
             normalized.PublicationEnabled ? normalized.Room.Fields : StarBridge.Core.Presence.PlayerSharedStateFields.None,
             normalized.PublicationEnabled && normalized.Fleet.AdministratorsCanView,
             normalized.PublicationEnabled && normalized.Fleet.AllMembersCanView,
-            normalized.PublicationEnabled ? normalized.Fleet.VisibilityGroupIds ?? [] : [],
+            [],
             normalized.PublicationEnabled && normalized.Room.AllMembersCanView,
-            normalized.PublicationEnabled ? normalized.Room.VisibilityGroupIds ?? [] : []);
+            []);
     }
 }

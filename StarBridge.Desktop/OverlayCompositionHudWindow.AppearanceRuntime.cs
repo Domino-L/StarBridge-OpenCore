@@ -5,10 +5,20 @@ namespace StarBridge.Desktop;
 
 internal sealed partial class OverlayCompositionHudWindow
 {
+    public double AppearanceStartupFocusRemainingMs =>
+#if STARBRIDGE_VERDICT_NEXT
+        _settings.Skin == OverlaySkin.Verdict ? VerdictNextFocusRemainingMs() : 0;
+#else
+        0;
+#endif
+
     private void BeginAppearanceStartup(out bool started, out double durationMs)
     {
         started = false;
         durationMs = 0;
+#if STARBRIDGE_VERDICT_NEXT
+        if (TryBeginVerdictNextStartup(ref started, ref durationMs)) return;
+#endif
         TryBeginExtendedAppearanceStartup(ref started, ref durationMs);
         if (started)
         {
@@ -37,11 +47,17 @@ internal sealed partial class OverlayCompositionHudWindow
             false,
             false);
         TryReadExtendedAppearanceAnimationState(ref state);
+#if STARBRIDGE_VERDICT_NEXT
+        if (_state is { VerdictStyle: true }) state = ReadVerdictNextAnimationState();
+#endif
         return state;
     }
 
     private ID2D1CommandList? BuildAppearanceGlowMask(ID2D1DeviceContext target)
     {
+#if STARBRIDGE_VERDICT_NEXT
+        if (_state is { VerdictStyle: true }) return null; // Shared renderer owns its local halo.
+#endif
         ID2D1CommandList? glowMask = null;
         TryBuildExtendedAppearanceGlowMask(target, ref glowMask);
         return glowMask ?? (ShouldDrawLagrangeGlow(_state)
@@ -55,6 +71,9 @@ internal sealed partial class OverlayCompositionHudWindow
         ID2D1CommandList? glowMask)
     {
         var handled = false;
+#if STARBRIDGE_VERDICT_NEXT
+        if (state.VerdictStyle) return;
+#endif
         TryDrawExtendedAppearanceGlow(target, state, glowMask, ref handled);
         if (!handled)
         {
@@ -65,11 +84,17 @@ internal sealed partial class OverlayCompositionHudWindow
     private void DisposeAppearanceResources()
     {
         DisposeLagrangeGeometryCache();
+#if STARBRIDGE_VERDICT_NEXT
+        DisposeVerdictNextResources();
+#endif
         DisposeExtendedAppearanceResources();
     }
 
     private void DrawScene(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
+#if STARBRIDGE_VERDICT_NEXT
+        if (state.VerdictStyle) { DrawVerdictNextScene(target, state); return; }
+#endif
         var handled = false;
         TryDrawExtendedAppearanceScene(target, state, ref handled);
         if (handled)
@@ -108,6 +133,7 @@ internal sealed partial class OverlayCompositionHudWindow
         ref bool handled);
 
     partial void DisposeExtendedAppearanceResources();
+
 
     private void DrawStandardScene(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
@@ -202,7 +228,7 @@ internal sealed partial class OverlayCompositionHudWindow
             return (1, 0);
         }
 
-        var elapsedMs = (DateTimeOffset.UtcNow - _contentRevealStartedAtUtc).TotalMilliseconds;
+        var elapsedMs = (AppearanceAnimationUtcNow - _contentRevealStartedAtUtc).TotalMilliseconds;
         var delayMs = ResolveContentRevealDelayMs(rect, index);
         var progress = Smooth01((float)((elapsedMs - delayMs) / ContentRevealMs));
         return (progress, ContentRevealOffsetY * (1 - progress));
@@ -225,7 +251,7 @@ internal sealed partial class OverlayCompositionHudWindow
     private bool IsContentRevealActive()
     {
         return _contentRevealStartedAtUtc != DateTimeOffset.MinValue &&
-               (DateTimeOffset.UtcNow - _contentRevealStartedAtUtc).TotalMilliseconds <
+               (AppearanceAnimationUtcNow - _contentRevealStartedAtUtc).TotalMilliseconds <
                ContentRevealMs + ContentRevealMaxDelayMs + 80;
     }
 

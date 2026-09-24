@@ -96,18 +96,18 @@ foreach ($relativePath in $forbiddenPublicPaths) {
 }
 
 foreach ($relativePath in @(
-    "StarBridge.Desktop/Data/ship-name-pack.json",
-    "StarBridge.Desktop/Data/ship-name-pack.schema.json",
-    "StarBridge.Desktop/Data/ship-name-pack.provenance.json"
+    "data/ship-names/ship-name-pack.json",
+    "data/ship-names/ship-name-pack.schema.json",
+    "data/ship-names/ship-name-pack.provenance.json"
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $relativePath) -PathType Leaf)) {
         $errors.Add("Reviewed public ship-name data contract is missing: $relativePath")
     }
 }
 
-$shipNamePackPath = Join-Path $Root "StarBridge.Desktop/Data/ship-name-pack.json"
-$shipNameSchemaPath = Join-Path $Root "StarBridge.Desktop/Data/ship-name-pack.schema.json"
-$shipNameProvenancePath = Join-Path $Root "StarBridge.Desktop/Data/ship-name-pack.provenance.json"
+$shipNamePackPath = Join-Path $Root "data/ship-names/ship-name-pack.json"
+$shipNameSchemaPath = Join-Path $Root "data/ship-names/ship-name-pack.schema.json"
+$shipNameProvenancePath = Join-Path $Root "data/ship-names/ship-name-pack.provenance.json"
 if ((Test-Path -LiteralPath $shipNamePackPath -PathType Leaf) -and
     (Test-Path -LiteralPath $shipNameSchemaPath -PathType Leaf) -and
     (Test-Path -LiteralPath $shipNameProvenancePath -PathType Leaf)) {

@@ -1,4 +1,8 @@
+#if STARBRIDGE_HOST_RUNTIME
+namespace StarBridge.HostRuntime.PartyRooms;
+#else
 namespace StarBridge.Desktop;
+#endif
 
 using StarBridge.Core.Presence;
 

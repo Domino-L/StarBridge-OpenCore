@@ -14,9 +14,9 @@ internal static class PlayerPresenceVisibilityCatalog
 {
     public static IReadOnlyList<PlayerPresenceVisibilityOption> Options { get; } =
     [
-        new(PlayerPresenceVisibilityMode.Online, "在线", "应用启动后对外显示在线；游戏中或暂离时会按实际状态更新。"),
-        new(PlayerPresenceVisibilityMode.Invisible, "隐身", "对外显示离线且不上传即时状态，仍可接收在线内容。"),
-        new(PlayerPresenceVisibilityMode.Offline, "离线模式", "停止即时状态收发，游玩时长只在本地记录。")
+        new(PlayerPresenceVisibilityMode.Online, "在线", "对外显示在线；检测到游戏运行后会自动显示游戏中。"),
+        new(PlayerPresenceVisibilityMode.InGame, "游戏中", "对外显示游戏中。"),
+        new(PlayerPresenceVisibilityMode.Invisible, "隐身", "对外显示离线且不上传即时状态，仍可接收在线内容。")
     ];
 
     public static PlayerPresenceVisibilityOption Find(PlayerPresenceVisibilityMode mode) =>
@@ -61,9 +61,9 @@ internal static class PlayerPresencePresentation
     public static System.Windows.Media.Brush Brush(PlayerPresenceKind presence) =>
         presence switch
         {
-            PlayerPresenceKind.AppOnline => StatusPalette.InfoBrush,
+            PlayerPresenceKind.AppOnline => StatusPalette.SuccessBrush,
             PlayerPresenceKind.Away => StatusPalette.WarningBrush,
-            PlayerPresenceKind.InGame => StatusPalette.SuccessBrush,
+            PlayerPresenceKind.InGame => StatusPalette.WarningBrush,
             _ => StatusPalette.DisabledBrush
         };
 
@@ -75,22 +75,28 @@ internal static class PlayerPresencePresentation
         var zh = language.Equals("zh", StringComparison.OrdinalIgnoreCase);
         return visibilityMode switch
         {
+            PlayerPresenceVisibilityMode.InGame => zh ? "游戏中" : "In game",
             PlayerPresenceVisibilityMode.Invisible => automaticPresence == PlayerPresenceKind.InGame
                 ? zh ? "隐身 · 游戏记录中" : "Invisible · game tracking"
                 : zh ? "隐身" : "Invisible",
             PlayerPresenceVisibilityMode.Offline => automaticPresence == PlayerPresenceKind.InGame
                 ? zh ? "离线模式 · 游戏记录中" : "Offline mode · game tracking"
                 : zh ? "离线模式" : "Offline mode",
-            _ => Format(automaticPresence, language)
+            _ => automaticPresence == PlayerPresenceKind.InGame
+                ? zh ? "游戏中" : "In game"
+                : zh ? "在线" : "Online"
         };
     }
 
     public static System.Windows.Media.Brush LocalBrush(
         PlayerPresenceKind automaticPresence,
         PlayerPresenceVisibilityMode visibilityMode) =>
-        visibilityMode == PlayerPresenceVisibilityMode.Online
-            ? Brush(automaticPresence)
-            : StatusPalette.DisabledBrush;
+        visibilityMode switch
+        {
+            PlayerPresenceVisibilityMode.InGame => Brush(PlayerPresenceKind.InGame),
+            PlayerPresenceVisibilityMode.Online => Brush(automaticPresence),
+            _ => StatusPalette.DisabledBrush
+        };
 }
 
 internal static class PlayerSessionStatePresentation

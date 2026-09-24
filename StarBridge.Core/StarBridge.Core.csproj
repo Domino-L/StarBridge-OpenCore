@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\data\ship-names\hangar-official-aliases.json" LogicalName="StarBridge.HangarOfficialAliases.json" />
     <Compile Remove=".altobj\**\*.cs" />
   </ItemGroup>
 

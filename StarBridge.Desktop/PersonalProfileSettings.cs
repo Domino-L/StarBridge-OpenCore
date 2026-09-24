@@ -110,8 +110,13 @@ internal sealed record PersonalProfileSettings(
 
     public static PersonalProfileSettings Load(string? accountIdentity = null)
     {
+        if (string.IsNullOrWhiteSpace(accountIdentity))
+        {
+            return CreateDefault();
+        }
+
         var path = ResolveSettingsPath(accountIdentity);
-        if (!string.IsNullOrWhiteSpace(accountIdentity) && !File.Exists(path))
+        if (!File.Exists(path))
         {
             TryMigrateLegacySettings(accountIdentity, path);
         }
@@ -151,6 +156,11 @@ internal sealed record PersonalProfileSettings(
 
     public void Save(string? accountIdentity = null)
     {
+        if (string.IsNullOrWhiteSpace(accountIdentity))
+        {
+            throw new InvalidOperationException("An authenticated account route is required to save personal profile settings.");
+        }
+
         var path = ResolveSettingsPath(accountIdentity);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tempPath = $"{path}.tmp";
@@ -161,6 +171,28 @@ internal sealed record PersonalProfileSettings(
         }
 
         File.Move(tempPath, path, overwrite: true);
+    }
+
+    internal static void PromoteLegacyAccountIdentity(
+        string legacyAccountIdentity,
+        string accountRouteIdentity)
+    {
+        if (string.IsNullOrWhiteSpace(legacyAccountIdentity) ||
+            string.IsNullOrWhiteSpace(accountRouteIdentity))
+        {
+            return;
+        }
+
+        var source = ResolveSettingsPath(legacyAccountIdentity);
+        var destination = ResolveSettingsPath(accountRouteIdentity);
+        if (source.Equals(destination, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        TryMigrateLegacySettings(legacyAccountIdentity, source);
+        PromoteFile(source, destination);
+        PromoteFile($"{source}.bak", $"{destination}.bak");
     }
 
     public PersonalProfileSettings Copy() => this with
@@ -184,6 +216,23 @@ internal sealed record PersonalProfileSettings(
     private static string HashAccountIdentity(string accountIdentity) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(accountIdentity.Trim())))
             .ToLowerInvariant();
+
+    private static void PromoteFile(string source, string destination)
+    {
+        if (!File.Exists(source))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (File.Exists(destination))
+        {
+            File.Delete(source);
+            return;
+        }
+
+        File.Move(source, destination);
+    }
 
     private static void TryMigrateLegacySettings(string accountIdentity, string accountPath)
     {

@@ -41,10 +41,10 @@ public sealed class OverlayStartupTransitionLayer : FrameworkElement
     private TerminalTransitionPalette _palette = TerminalTransitionPalette.Default;
     private IReadOnlyList<OverlayStartupStatusStep> StatusSteps => _context.StatusSteps.Count >= 7
         ? _context.StatusSteps
-        : OverlayStartupTransitionContext.Default.StatusSteps;
+        : OverlayStartupTransitionContext.ForLanguage(_language).StatusSteps;
     private IReadOnlyList<string> TerminalLines => _context.TerminalLines.Count > 0
         ? _context.TerminalLines
-        : OverlayStartupTransitionContext.Default.TerminalLines;
+        : OverlayStartupTransitionContext.ForLanguage(_language).TerminalLines;
 
     public OverlayStartupTransitionLayer()
     {
@@ -63,7 +63,7 @@ public sealed class OverlayStartupTransitionLayer : FrameworkElement
         }
 
         _language = language;
-        _context = context ?? OverlayStartupTransitionContext.Default;
+        _context = context ?? OverlayStartupTransitionContext.ForLanguage(language);
         ApplyPalette(settings);
         ApplyFrameRate(settings);
         _startedAt = DateTime.UtcNow;
@@ -82,7 +82,7 @@ public sealed class OverlayStartupTransitionLayer : FrameworkElement
 
     public void ApplySettings(OverlayDisplaySettings settings, OverlayStartupTransitionContext? context)
     {
-        _context = context ?? OverlayStartupTransitionContext.Default;
+        _context = context ?? OverlayStartupTransitionContext.ForLanguage(_language);
         ApplyPalette(settings);
         ApplyFrameRate(settings);
 
@@ -146,7 +146,7 @@ public sealed class OverlayStartupTransitionLayer : FrameworkElement
         }
 
         _language = language;
-        _context = context ?? OverlayStartupTransitionContext.Default;
+        _context = context ?? OverlayStartupTransitionContext.ForLanguage(language);
         ApplyPalette(settings);
         ApplyFrameRate(settings);
         _staticSnapshotProgress = Clamp(progress, 0, 1);
@@ -179,7 +179,7 @@ public sealed class OverlayStartupTransitionLayer : FrameworkElement
         var layer = new OverlayStartupTransitionLayer
         {
             _language = language,
-            _context = context ?? OverlayStartupTransitionContext.Default,
+            _context = context ?? OverlayStartupTransitionContext.ForLanguage(language),
             _pixelsPerDip = Math.Max(1, dpiScale)
         };
         layer.ApplyPalette(settings);

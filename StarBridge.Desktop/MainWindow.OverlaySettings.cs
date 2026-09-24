@@ -688,7 +688,7 @@ public partial class MainWindow
             hideOfflineMembers,
             _overlaySettings.HideSquadIcons,
             TrayModeCheck.IsChecked == true,
-            Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.15, 1.0),
+            1.0,
             ShowNoticePanelCheck.IsChecked == true,
             ShowSquadsPanelCheck.IsChecked == true,
             false,
@@ -775,7 +775,8 @@ public partial class MainWindow
             _overlaySettings.EventNotificationTextOpacity,
             _overlaySettings.EventNotificationBackgroundOpacity,
             OverlaySkipTransitionInGameCheck.IsChecked == true,
-            overlaySkin));
+            overlaySkin,
+            _overlaySettings.EventNotificationDecorationOpacity));
 
         RefreshCrosshairSettingLabels();
         RefreshOverlayTransitionControls();

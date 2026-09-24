@@ -54,6 +54,7 @@ public partial class MainWindow
     private bool _isPartyRoomCodeVisible;
     private bool _partyRoomChatHasOlder;
     private bool _isLoadingOlderPartyRoomChat;
+    private PartyRoomChatOperationLane? _loadingOlderPartyRoomChatLane;
     private bool _partyRoomChatFollowLatest = true;
     private bool _isRefreshingPartyLobbyRoomList;
     private bool _isEditingPartyRoom;
@@ -1285,7 +1286,6 @@ public partial class MainWindow
 
     private async Task PublishCurrentPresenceBeforePartyRoomMutationAsync()
     {
-        await SendPresenceHeartbeatAsync();
         await PushLocalSnapshotAsync(silent: true, pushFleetDirectory: false);
     }
 
@@ -1956,8 +1956,13 @@ public partial class MainWindow
         }
 
         var roomId = _currentPartyRoom.RoomId;
+        var lane = new PartyRoomChatOperationLane(
+            _accountSessionCoordinator.Capture(),
+            roomId,
+            _overlayChatReceiveSession.Version);
         var before = _partyRoomChatMessages.Min(message => message.Sequence);
         _isLoadingOlderPartyRoomChat = true;
+        _loadingOlderPartyRoomChatLane = lane;
         PartyRoomChatHistoryStatusText.Text = "正在加载更早消息…";
         PartyRoomChatHistoryStatusPanel.Visibility = ChatHistoryViewport.Find(PartyRoomChatList) is { } viewer &&
                                                      ChatHistoryViewport.IsNearTop(viewer)
@@ -1968,8 +1973,8 @@ public partial class MainWindow
             using var response = await _relayClient.GetAsync(
                 $"api/party-rooms/chat?roomId={Uri.EscapeDataString(roomId)}&before={before}&limit=50");
             var history = await response.Content.ReadFromJsonAsync<PartyRoomChatResponse>();
-            if (!response.IsSuccessStatusCode || history is null || _currentPartyRoom is null ||
-                !_currentPartyRoom.RoomId.Equals(roomId, StringComparison.OrdinalIgnoreCase))
+            if (!response.IsSuccessStatusCode || history is null ||
+                !IsPartyRoomChatOperationCurrent(lane))
             {
                 return;
             }
@@ -1981,12 +1986,19 @@ public partial class MainWindow
         }
         catch
         {
-            PartyRoomChatStatusText.Text = "更早消息加载失败，滚到顶部可重试。";
+            if (IsPartyRoomChatOperationCurrent(lane))
+            {
+                PartyRoomChatStatusText.Text = "更早消息加载失败，滚到顶部可重试。";
+            }
         }
         finally
         {
-            _isLoadingOlderPartyRoomChat = false;
-            UpdatePartyRoomChatHistoryStatus(ChatHistoryViewport.Find(PartyRoomChatList));
+            if (_loadingOlderPartyRoomChatLane == lane)
+            {
+                _loadingOlderPartyRoomChatLane = null;
+                _isLoadingOlderPartyRoomChat = false;
+                UpdatePartyRoomChatHistoryStatus(ChatHistoryViewport.Find(PartyRoomChatList));
+            }
         }
     }
 
@@ -2063,6 +2075,7 @@ public partial class MainWindow
         _partyRoomChatMessages.Clear();
         _partyRoomChatHasOlder = false;
         _isLoadingOlderPartyRoomChat = false;
+        _loadingOlderPartyRoomChatLane = null;
         _partyRoomChatFollowLatest = true;
         if (PartyRoomChatEmptyPanel is not null)
         {

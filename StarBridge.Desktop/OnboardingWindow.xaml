@@ -288,13 +288,13 @@
                                                    FontWeight="SemiBold" />
                                         <TextBlock x:Name="AccountPreparationStatusText"
                                                    Margin="0,5,12,0"
-                                                   Text="未登录 · 先登录或注册以启用多人同步"
+                                                   Text="未登录 · 先登录 SCM 账号以启用多人同步"
                                                    Foreground="#91A5B5"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <Button x:Name="PreparationLoginButton"
                                             Grid.Column="1"
-                                            Content="登录 / 注册"
+                                            Content="登录账号"
                                             Height="36"
                                             Style="{StaticResource PrimaryButton}"
                                             Click="PreparationLoginButton_Click" />

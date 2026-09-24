@@ -54,6 +54,17 @@ internal static class OverlayOverviewProjection
 
         var players = closedPlayers as PlayerRow[] ?? closedPlayers.ToArray();
         var zh = language?.Equals("zh", StringComparison.OrdinalIgnoreCase) == true;
+        if (sceneContext.Kind == OverlaySceneKind.Community)
+        {
+            var organization = ProjectFleet(players, hasFleet, localPresence, localShard, language, zh);
+            return organization with
+            {
+                Title = zh ? "组织概况" : "ORGANIZATION OVERVIEW",
+                Focus = players.Length == 0
+                    ? zh ? "暂无可见成员" : "No visible members"
+                    : organization.Focus
+            };
+        }
         return sceneContext.Kind == OverlaySceneKind.PartyRoom
             ? ProjectPartyRoom(players, sceneContext, localPresence, localShard, language, zh)
             : ProjectFleet(players, hasFleet, localPresence, localShard, language, zh);
