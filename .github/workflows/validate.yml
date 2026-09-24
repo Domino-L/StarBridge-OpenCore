@@ -35,11 +35,14 @@ jobs:
           git init $sdkPath
           if ($LASTEXITCODE -ne 0) { throw 'Flutter SDK checkout initialization failed' }
           git -C $sdkPath remote add origin https://github.com/flutter/flutter.git
-          git -C $sdkPath fetch --depth 1 origin d3b14c876900e553bc736ca19295fc09e3853e8e
+          # Flutter derives its semantic version from the official Git tag.
+          # Verify the tag against the fixed commit before executing SDK code.
+          git -C $sdkPath fetch --depth 1 origin refs/tags/3.47.2:refs/tags/3.47.2
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Flutter revision fetch failed' }
           git -C $sdkPath checkout --detach FETCH_HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Flutter checkout failed' }
           if ((git -C $sdkPath rev-parse HEAD) -ne 'd3b14c876900e553bc736ca19295fc09e3853e8e') { throw 'Unexpected Flutter revision' }
+          if ((git -C $sdkPath describe --tags --exact-match HEAD) -ne '3.47.2') { throw 'Flutter semantic version tag is missing' }
           (Join-Path $sdkPath 'bin') >> $env:GITHUB_PATH
 
       - name: Select installed Windows SDK
