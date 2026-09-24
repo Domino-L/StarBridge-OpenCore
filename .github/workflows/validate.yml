@@ -28,6 +28,17 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Select installed Windows SDK
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/Platforms/UAP'
+          $sdk = Get-ChildItem -LiteralPath $sdkRoot -Directory |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'Platform.xml')) } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if ($null -eq $sdk) { throw "No complete Windows UAP SDK was found" }
+          "STARBRIDGE_TARGET_PLATFORM_VERSION=$($sdk.Name)" >> $env:GITHUB_ENV
+
       - name: Scan tracked files
         shell: pwsh
         run: |
@@ -39,7 +50,7 @@ jobs:
           & "./scripts/Test StarBridge Public Hub.ps1"
 
       - name: Restore
-        run: dotnet restore StarBridge.sln
+        run: dotnet restore StarBridge.sln -p:StarBridgeTargetPlatformVersion=${{ env.STARBRIDGE_TARGET_PLATFORM_VERSION }}
 
       - name: Validate third-party license inventory
         shell: pwsh
@@ -47,7 +58,7 @@ jobs:
           & "./scripts/Test Third Party Licenses.ps1"
 
       - name: Build
-        run: dotnet build StarBridge.sln --configuration Release --no-restore -p:StarBridgeIncludeCommercialAppearances=false -p:StarBridgeIncludeThirdPartyMedia=false -p:StarBridgeIncludeRestrictedGameData=false
+        run: dotnet build StarBridge.sln --configuration Release --no-restore -p:StarBridgeTargetPlatformVersion=${{ env.STARBRIDGE_TARGET_PLATFORM_VERSION }} -p:StarBridgeIncludeCommercialAppearances=false -p:StarBridgeIncludeThirdPartyMedia=false -p:StarBridgeIncludeRestrictedGameData=false
 
       - name: Run regression tests
         run: dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build
