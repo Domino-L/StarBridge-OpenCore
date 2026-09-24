@@ -1,11 +1,11 @@
 # 下载帮助
 
-当前桥梁版本为 0.6.6.1，负责从旧 WPF 客户端迁移到 Flutter 0.7.0。
+当前公开测试版为 0.7.0.1；本版保留信息浮层，不提供菜单浮层。
 
 ## 推荐下载方式
 
-- [在线安装器](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-online-setup.exe)：自动获取并安装最新版本。
-- [完整安装包](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-win-x64-setup.exe)：下载后可离线安装。
+- [官网下载页](https://scstarbridge.com/)：查看当前公告和校验信息。
+- [0.7.0.1 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.1-20260923-04-win-x64-setup.exe)：下载后可离线安装。
 - [全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases)：查看版本说明、历史安装包和校验文件。
 
 GitHub 自动生成的 “Source code” 压缩包只包含开放核心源码，不是应用安装包。普通用户请选择名称以 `.exe` 结尾的安装器。
@@ -24,12 +24,12 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\StarBridge-win-x64-setup.exe"
 
 ### Windows 显示“未知发布者”
 
-0.6.6 要求主程序、完整安装器和在线安装器均具有可信 Windows 数字签名和时间戳。
+官方主程序、更新助手和完整安装器均要求可信 Windows 数字签名和时间戳。
 如果安装时显示“未知发布者”或签名不是有效状态，请不要继续；重新从官方渠道下载并提交反馈。
 
 ### 安装包中的第三方图片
 
-0.6.6 不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+公开源码不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
 Release 中的 `THIRD-PARTY-MEDIA-AUDIT.json` 应显示 `rightsStatus: not-included`、零文件和零字节；相应页面可能显示占位图。
 
 ### 在线安装器无法下载

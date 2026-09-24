@@ -1,8 +1,9 @@
 <Project>
   <PropertyGroup>
-    <Version>0.7.0</Version>
-    <FileVersion>0.7.0</FileVersion>
-    <AssemblyVersion>0.7.0</AssemblyVersion>
+    <StarBridgeVersion>0.7.0.1</StarBridgeVersion>
+    <Version>$(StarBridgeVersion)</Version>
+    <FileVersion>$(StarBridgeVersion)</FileVersion>
+    <AssemblyVersion>$(StarBridgeVersion)</AssemblyVersion>
     <Authors>StarBridge contributors</Authors>
     <Copyright>Copyright 2026 StarBridge contributors</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

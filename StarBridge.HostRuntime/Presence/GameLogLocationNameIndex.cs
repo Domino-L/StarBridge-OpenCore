@@ -23,11 +23,18 @@ internal sealed class GameLogLocationNameIndex
 
     internal static GameLogLocationNameIndex Load()
     {
+        using var stream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream("StarBridge.LocationCatalog.json");
+        return Load(stream);
+    }
+
+    // Caller owns the stream. Keeps optional-data behavior testable without
+    // distributing the private compatibility catalog or mutating global state.
+    internal static GameLogLocationNameIndex Load(Stream? stream)
+    {
         var index = new GameLogLocationNameIndex();
         try
         {
-            using var stream = Assembly.GetExecutingAssembly()
-                .GetManifestResourceStream("StarBridge.LocationCatalog.json");
             if (stream is null)
             {
                 return index;

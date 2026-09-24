@@ -1,0 +1,24 @@
+StarBridge - CIG Fankit Asset and Trademark Notice
+
+Scope
+-----
+This notice applies to CIG Fankit assets bundled with the non-commercial
+StarBridge client, including approved personal-profile wallpapers when
+they are bundled.
+The original trademark watermarks, brand names, and ownership notices remain
+unchanged.
+
+Required notice
+---------------
+This site is not endorsed by or affiliated with the Cloud Imperium or Roberts
+Space Industries group of companies. All game content and materials are
+copyright Cloud Imperium Rights LLC and Cloud Imperium Rights Ltd.. Star
+Citizen®, Squadron 42®, Roberts Space Industries®, and Cloud Imperium® are
+registered trademarks of Cloud Imperium Rights LLC. All rights reserved.
+
+Source
+------
+CIG Fankit Agreement supplied with the Fankit asset pack.
+
+This notice does not sublicense the assets or transfer ownership to StarBridge
+users, contributors, or downstream distributors.

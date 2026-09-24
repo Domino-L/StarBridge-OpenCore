@@ -1,0 +1,436 @@
+{
+  "schema": 1,
+  "source": "motion-handoff-20260921/vehicle-motion-catalog-v2.snapshot.html",
+  "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+  "license": "Local integration authorized by owner. No new public redistribution license.",
+  "sampleHz": 120,
+  "renderer": "Native vectors, interpolated affine matrices and opacity; original controller timers included",
+  "staticOnly": [
+    "unclassified-small",
+    "unclassified-medium",
+    "unclassified-large",
+    "unclassified-capital"
+  ],
+  "glyphs": [
+    {
+      "key": "combat-small",
+      "duration": 1600,
+      "tracks": 6,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 270,
+      "rawBytes": 56700,
+      "sha256": "1acd3fc4319c8fb8cab196369528deeef3819548af8483cf0c8493a86935cbe0"
+    },
+    {
+      "key": "combat-medium",
+      "duration": 1800,
+      "tracks": 7,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 303,
+      "rawBytes": 81810,
+      "sha256": "10a3129ba257aa1c577755d9eec892d7de55339df2b813034cc36ef5e390b6c0"
+    },
+    {
+      "key": "combat-large",
+      "duration": 2000,
+      "tracks": 8,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 325,
+      "rawBytes": 107250,
+      "sha256": "ac8b1961fb27991877a45eee1fc6addc3237ac1e054c86b9ecaeff4d01f5332a"
+    },
+    {
+      "key": "combat-capital",
+      "duration": 2200,
+      "tracks": 9,
+      "paths": 8,
+      "layouts": 1,
+      "frames": 359,
+      "rawBytes": 140010,
+      "sha256": "074bf33b5a74054e6683c11a6a929084d8e5835c4bf6019a45b95e171517f64a"
+    },
+    {
+      "key": "exploration-small",
+      "duration": 2800,
+      "tracks": 9,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 465,
+      "rawBytes": 136710,
+      "sha256": "428ab39d6a1e34a00dd05cf5d59cc18cbd54fc73b7b8b2dcbd6201fe6d9b8cbe"
+    },
+    {
+      "key": "exploration-medium",
+      "duration": 3000,
+      "tracks": 10,
+      "paths": 10,
+      "layouts": 1,
+      "frames": 510,
+      "rawBytes": 164220,
+      "sha256": "6c0da4503a197d0b3641acd4a15d6a39ef5ffbc85b45b22d6112681b249b116a"
+    },
+    {
+      "key": "exploration-large",
+      "duration": 3200,
+      "tracks": 11,
+      "paths": 11,
+      "layouts": 1,
+      "frames": 551,
+      "rawBytes": 192850,
+      "sha256": "f4046aa5309c548ff70b43743622d40537f9ddb00313f286f0045f3a9e5723e6"
+    },
+    {
+      "key": "exploration-capital",
+      "duration": 3400,
+      "tracks": 12,
+      "paths": 12,
+      "layouts": 1,
+      "frames": 583,
+      "rawBytes": 220374,
+      "sha256": "cab7d5401fe30efdc09a90a5b28ab934e9021887c1acbb354dec28d8ecc80f63"
+    },
+    {
+      "key": "industrial-small",
+      "duration": 1600,
+      "tracks": 6,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 270,
+      "rawBytes": 54540,
+      "sha256": "c4efa14221a1d29221df551e80896f78322a60222126201defd60da8cb29ff1c"
+    },
+    {
+      "key": "industrial-medium",
+      "duration": 1800,
+      "tracks": 6,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 303,
+      "rawBytes": 61206,
+      "sha256": "aaa63f08aa7a9a25a7b7903c11a5acba75dc02e4411d36b318625d0a5322277f"
+    },
+    {
+      "key": "industrial-large",
+      "duration": 2000,
+      "tracks": 6,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 328,
+      "rawBytes": 66256,
+      "sha256": "0232480a444fd94b52d18454868906e69443b607fd0873096ba1c46e49acea0f"
+    },
+    {
+      "key": "industrial-capital",
+      "duration": 2200,
+      "tracks": 6,
+      "paths": 6,
+      "layouts": 1,
+      "frames": 362,
+      "rawBytes": 73124,
+      "sha256": "eec4112f6ba7a8d906f7d2491a4e926c715f1230788a73c91f22eb3778ac289c"
+    },
+    {
+      "key": "logistics-small",
+      "duration": 2565,
+      "tracks": 8,
+      "paths": 9,
+      "layouts": 2,
+      "frames": 409,
+      "rawBytes": 137654,
+      "sha256": "6f6895826ba29922d67f1dcc7ca2c0c338916ad7bddb8a2c7a18a420c4dc1a69"
+    },
+    {
+      "key": "logistics-medium",
+      "duration": 2745,
+      "tracks": 10,
+      "paths": 11,
+      "layouts": 2,
+      "frames": 443,
+      "rawBytes": 198594,
+      "sha256": "9f054aea6aa13a53d5ef264761f6970e8486068b3d096cef90c60d055b25cc1a"
+    },
+    {
+      "key": "logistics-large",
+      "duration": 2925,
+      "tracks": 12,
+      "paths": 13,
+      "layouts": 2,
+      "frames": 470,
+      "rawBytes": 263216,
+      "sha256": "7a49d7afb09f94cf99995e74051fa0c298c712d3a5c43e2d3caf0eb3163e23cb"
+    },
+    {
+      "key": "logistics-capital",
+      "duration": 3105,
+      "tracks": 14,
+      "paths": 15,
+      "layouts": 2,
+      "frames": 513,
+      "rawBytes": 344670,
+      "sha256": "d12972e535ec78ea62658588336560ea3bd0fa5f934eccbd746b16252fdc4476"
+    },
+    {
+      "key": "support-small",
+      "duration": 2785,
+      "tracks": 9,
+      "paths": 9,
+      "layouts": 2,
+      "frames": 469,
+      "rawBytes": 139462,
+      "sha256": "3106eaa8e03c2f1c5effb889826d3dfec7f874c45d6e96fc8f8f3313ff45b05a"
+    },
+    {
+      "key": "support-medium",
+      "duration": 2985,
+      "tracks": 10,
+      "paths": 11,
+      "layouts": 2,
+      "frames": 517,
+      "rawBytes": 182634,
+      "sha256": "a69226a8a0db95753221b31c0839e81993c9d43c628ffcf22192c6a086584e29"
+    },
+    {
+      "key": "support-large",
+      "duration": 3185,
+      "tracks": 11,
+      "paths": 12,
+      "layouts": 2,
+      "frames": 559,
+      "rawBytes": 228722,
+      "sha256": "6029bd43077268218c47e61b52a71207c567cc122e049a6b283be03a0785bcd3"
+    },
+    {
+      "key": "support-capital",
+      "duration": 3385,
+      "tracks": 12,
+      "paths": 14,
+      "layouts": 2,
+      "frames": 592,
+      "rawBytes": 275320,
+      "sha256": "ebf16ad78fe8548e969beee066eb26495deb61b1408a2e89d494c8306997a71f"
+    },
+    {
+      "key": "competition-small",
+      "duration": 3000,
+      "tracks": 11,
+      "paths": 10,
+      "layouts": 1,
+      "frames": 1057,
+      "rawBytes": 369950,
+      "sha256": "d71e760a3dae44a4020efa7734ea6eea4548757b45b0554475a3472a7df56fa9"
+    },
+    {
+      "key": "competition-medium",
+      "duration": 3250,
+      "tracks": 13,
+      "paths": 12,
+      "layouts": 1,
+      "frames": 1150,
+      "rawBytes": 471500,
+      "sha256": "eebf1ce437ce1e3e0c1698cbfd156b8e1bcbb01f00b44ef7e68e0b5b2c78d57e"
+    },
+    {
+      "key": "competition-large",
+      "duration": 3500,
+      "tracks": 15,
+      "paths": 14,
+      "layouts": 1,
+      "frames": 1222,
+      "rawBytes": 574340,
+      "sha256": "99a769e83ae82337bc7eb31de30b57a4c03d5e8259154526226a4d96d4248e4d"
+    },
+    {
+      "key": "ground-combat-small-gravlev",
+      "duration": 3000,
+      "tracks": 10,
+      "paths": 10,
+      "layouts": 1,
+      "frames": 519,
+      "rawBytes": 204486,
+      "sha256": "46af769cda9b665ba60c497a8057629e0d6d89506588f309614f49f7e0c36223"
+    },
+    {
+      "key": "ground-combat-small-wheeled",
+      "duration": 2800,
+      "tracks": 9,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 508,
+      "rawBytes": 179832,
+      "sha256": "efcafaf305896c2cb463255bd6c37b357c6e4276da7a13a6a6f8d04a1b558a1e"
+    },
+    {
+      "key": "ground-combat-small-mech",
+      "duration": 3200,
+      "tracks": 12,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 550,
+      "rawBytes": 194700,
+      "sha256": "14d4509603bc9cac95268084b28d9b28b0cd632d9eccf8ffb005ed57418f32c3"
+    },
+    {
+      "key": "ground-combat-medium-wheeled",
+      "duration": 3000,
+      "tracks": 13,
+      "paths": 13,
+      "layouts": 1,
+      "frames": 551,
+      "rawBytes": 274398,
+      "sha256": "462f2119618aa45523d62c5f28adf5e9af3916c7cd0adc4d9338d70de4d451e7"
+    },
+    {
+      "key": "ground-combat-medium-tracked",
+      "duration": 3100,
+      "tracks": 7,
+      "paths": 7,
+      "layouts": 1,
+      "frames": 535,
+      "rawBytes": 146590,
+      "sha256": "95739a8c07abf382a16f3648b0452008bc4bb4efdbfc344aaf183b35e5cc1daf"
+    },
+    {
+      "key": "ground-combat-large-wheeled",
+      "duration": 3400,
+      "tracks": 19,
+      "paths": 19,
+      "layouts": 1,
+      "frames": 679,
+      "rawBytes": 479374,
+      "sha256": "57c6c1d9472f38676142076ce7f165e82ffdc5f20c4be967fde86abe6564a0fe"
+    },
+    {
+      "key": "ground-combat-large-tracked",
+      "duration": 3400,
+      "tracks": 7,
+      "paths": 7,
+      "layouts": 1,
+      "frames": 575,
+      "rawBytes": 157550,
+      "sha256": "78a5b661dbdfb00f95c1053d0e05724768aa3513fec5bfb131f00bb3eca2b990"
+    },
+    {
+      "key": "ground-industrial-mining-mech",
+      "duration": 3400,
+      "tracks": 17,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 635,
+      "rawBytes": 245110,
+      "sha256": "b5ff394f3b127dfea1ba2a5700ba79b9fc5711d1566b5fe94abd1abfa53da79e"
+    },
+    {
+      "key": "ground-transport-cargo-mech",
+      "duration": 3800,
+      "tracks": 17,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 712,
+      "rawBytes": 274832,
+      "sha256": "9757808c7aa3a001475f86454f4bf49fb5854a716a92d3b8753549eb085dc879"
+    },
+    {
+      "key": "ground-industrial-small-rover",
+      "duration": 3400,
+      "tracks": 15,
+      "paths": 8,
+      "layouts": 1,
+      "frames": 632,
+      "rawBytes": 198448,
+      "sha256": "b9bf66c4605c9184f7c470cc5bd35834f2cfabc31dda3d4250e0005c5fded381"
+    },
+    {
+      "key": "ground-industrial-medium-rover",
+      "duration": 3600,
+      "tracks": 16,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 673,
+      "rawBytes": 235550,
+      "sha256": "fd6128f21d00f026ca78b9b941cc32e27420ee8a57b24f6c0c05831f7bd808b6"
+    },
+    {
+      "key": "ground-exploration-gravlev",
+      "duration": 3400,
+      "tracks": 15,
+      "paths": 8,
+      "layouts": 1,
+      "frames": 641,
+      "rawBytes": 201274,
+      "sha256": "92371b8cae2e1b938d5eaa50df85c24e417ee2694d159b41f07988b7c717d207"
+    },
+    {
+      "key": "ground-exploration-light-rover",
+      "duration": 3500,
+      "tracks": 14,
+      "paths": 8,
+      "layouts": 1,
+      "frames": 658,
+      "rawBytes": 206612,
+      "sha256": "3a0d7682b42554b0a0ba90725652ad3149334a8256986bff9e7d845c4c4cf485"
+    },
+    {
+      "key": "ground-exploration-medium-rover",
+      "duration": 3700,
+      "tracks": 19,
+      "paths": 11,
+      "layouts": 1,
+      "frames": 727,
+      "rawBytes": 306794,
+      "sha256": "0f0b835ea1dff41ff5b4b55bb1dbf9331bf663b174a8d8361de2c58e879a86dd"
+    },
+    {
+      "key": "ground-support-medical-rover",
+      "duration": 3500,
+      "tracks": 17,
+      "paths": 9,
+      "layouts": 1,
+      "frames": 666,
+      "rawBytes": 233100,
+      "sha256": "958018b7acfd04edec94e086f326b7161f944f5944b23b8fb4e3d342f1a2e9a1"
+    },
+    {
+      "key": "ground-competition-gravlev",
+      "duration": 4100,
+      "tracks": 22,
+      "paths": 13,
+      "layouts": 1,
+      "frames": 822,
+      "rawBytes": 376476,
+      "sha256": "276e2f859f19872dffd89a0df538702a15dcb75788140c6f2887ec55a7c0c8b2"
+    },
+    {
+      "key": "ground-competition-light-rover",
+      "duration": 4300,
+      "tracks": 19,
+      "paths": 11,
+      "layouts": 1,
+      "frames": 831,
+      "rawBytes": 327414,
+      "sha256": "00d805b793b5974feb71be61972077eb2f1f034f77b7c8954311b08726d0cd69"
+    },
+    {
+      "key": "ground-transport-flatbed",
+      "duration": 4300,
+      "tracks": 15,
+      "paths": 8,
+      "layouts": 1,
+      "frames": 838,
+      "rawBytes": 263132,
+      "sha256": "9d58756154523ed1e8155c81c80fffb55b0f6e6e28a7c89e306ef993f176c253"
+    },
+    {
+      "key": "utility-mpuv-tractor",
+      "duration": 4300,
+      "tracks": 15,
+      "paths": 8,
+      "layouts": 1,
+      "frames": 827,
+      "rawBytes": 259678,
+      "sha256": "fb9309495b8e7014bdc275221ee1b256d7284660afb10020a703d9b11e93bae0"
+    }
+  ]
+}

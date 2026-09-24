@@ -201,17 +201,25 @@ internal static class GameLogRuntimeTests
             ship.GetProperty("names").GetProperty("zhHans").GetString() == "箭矢",
             "The local ship channel confirms and localizes the current ship.");
         var location = active.GetProperty("location");
-        Require(location.GetProperty("state").GetString() == "confirmed" &&
-            location.GetProperty("englishName").GetString() == "Lorville" &&
-            location.GetProperty("names").GetProperty("zhHans").GetString() == "罗威尔",
-            "The local inventory context confirms and localizes the current location.");
+        var hasLocationPack = GameLogLocationCatalogTests.HasPack;
+        Require(hasLocationPack
+            ? location.GetProperty("state").GetString() == "confirmed" &&
+              location.GetProperty("englishName").GetString() == "Lorville" &&
+              location.GetProperty("names").GetProperty("zhHans").GetString() == "罗威尔"
+            : location.GetProperty("state").GetString() == "unknown" &&
+              !location.TryGetProperty("englishName", out _) &&
+              !location.GetProperty("names").TryGetProperty("zhHans", out _),
+            "The optional catalog localizes known locations; a missing catalog leaves public location unknown.");
         Require(!active.GetRawText().Contains("Stanton1_Lorville", StringComparison.Ordinal),
             "Raw location identifiers do not cross the host boundary.");
 
         File.AppendAllText(h.Log,
             Line("<Player Selected Quantum Target - Local> | AUTH | ANVL_Arrow_101[1]| Player has selected point Area04 as their destination"));
-        Require(h.Call().Payload.GetProperty("session").GetProperty("location")
-                .GetProperty("englishName").GetString() == "Lorville",
+        var afterNavigation = h.Call().Payload.GetProperty("session").GetProperty("location");
+        Require(hasLocationPack
+            ? afterNavigation.GetProperty("englishName").GetString() == "Lorville"
+            : afterNavigation.GetProperty("state").GetString() == "unknown" &&
+              !afterNavigation.TryGetProperty("englishName", out _),
             "A navigation target cannot replace the current confirmed location.");
 
         File.AppendAllText(h.Log,

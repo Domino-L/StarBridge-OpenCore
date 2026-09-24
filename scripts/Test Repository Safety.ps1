@@ -15,7 +15,7 @@ if (-not (Test-Path -LiteralPath $gitDirectory)) {
 }
 
 $textExtensions = @(
-    ".cs", ".csproj", ".props", ".targets", ".xaml", ".xml", ".json",
+    ".cs", ".csproj", ".props", ".targets", ".xaml", ".xml", ".json", ".dart", ".cpp", ".cc", ".h", ".cmake",
     ".md", ".txt", ".tsv", ".csv", ".html", ".css", ".js", ".ts",
     ".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".sh", ".yml", ".yaml",
     ".toml", ".ini", ".config", ".example", ".iss", ".svg"
@@ -36,6 +36,19 @@ $emailPattern =
     '(?i)(?<![A-Z0-9._%+\-])[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}(?![A-Z0-9.\-])'
 $userPathPattern = '(?i)[A-Z]:\\Users\\([^\\\s"'']+)'
 $findings = [Collections.Generic.List[string]]::new()
+$reviewedLicensePaths = @{}
+foreach ($inventoryRelative in @('flutter-packages.json', 'open-core/flutter-packages.json')) {
+    $inventoryPath = Join-Path $Root $inventoryRelative
+    if (!(Test-Path -LiteralPath $inventoryPath)) { continue }
+    $inventoryRoot = Split-Path -Parent $inventoryPath
+    $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+    foreach ($package in $inventory.packages) {
+        $licensePath = [IO.Path]::GetFullPath((Join-Path $inventoryRoot $package.licenseFile))
+        if (!$licensePath.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'License path escaped repository.' }
+        if (!(Test-Path -LiteralPath $licensePath) -or (Get-FileHash -LiteralPath $licensePath).Hash -ne $package.licenseSha256) { throw 'Reviewed Flutter license changed.' }
+        $reviewedLicensePaths[$licensePath] = $true
+    }
+}
 $clientPackagingFiles = @(
     "installer/StarBridge.iss",
     "scripts/Build Star Bridge Inno Installer.ps1",
@@ -82,7 +95,8 @@ try {
         $isThirdPartyLegalAttributionFile =
             [regex]::IsMatch(
                 $gitPath,
-                '(?i)^(?:open-core/)?licenses/[^/]*(?:license|notice)[^/]*\.txt$')
+                '(?i)^(?:open-core/)?licenses/[^/]*(?:license|notice)[^/]*\.txt$') -or
+            $reviewedLicensePaths.ContainsKey([IO.Path]::GetFullPath($fullPath))
         if ($clientPackagingFiles -contains $gitPath -and
             [regex]::IsMatch($text, $serverPayloadPattern)) {
             $findings.Add("$relativePath [server content referenced by client packaging]")

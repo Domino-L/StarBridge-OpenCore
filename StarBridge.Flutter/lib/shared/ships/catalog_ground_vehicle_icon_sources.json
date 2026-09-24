@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "status": "v3-user-authorized-derived-static-artwork",
+  "indexPath": "ship-icon-mapping-v1\\icon-index.json",
+  "indexSha256": "7d3d3f4f5b2108c3d90f48f738bf4bb18bc0d783b14aac642586d41a9e594ca1",
+  "generatedFile": "catalog_ground_vehicle_icon_geometry.dart",
+  "generatedSha256": "ef6086b878ab566ec3166cb80b31445176c2ac6b502f04236abdec6e2405d99f",
+  "mappingName": "_catalogGroundVehicleGlyphs",
+  "keyMode": "Full exact icon-index iconKey, case-sensitive",
+  "glyphs": [
+    {
+      "iconKey": "ground-combat-small-gravlev",
+      "sourcePath": "approved\\ground-hover-bike-v1\\small-gravlev-white.svg",
+      "sourceSha256": "7dd36f1ffe09c1fa282741dc66dbe7656f4ac692c3b61e78da47cbc50bcf7b2b",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "632cba6fa522ece7ce72e149234ac5c08ca3aa4686a518e96aef3e580bfc4eb2"
+    },
+    {
+      "iconKey": "ground-combat-small-wheeled",
+      "sourcePath": "approved\\ground-light-wheeled-v2\\small-wheeled-white.svg",
+      "sourceSha256": "a00e4a27910f6ad799dc45553a26c9dd2c959bd231be8b99477dd29c89b560d0",
+      "viewBox": [
+        -4,
+        -5,
+        40,
+        40
+      ],
+      "layers": 7,
+      "normalizedGeometrySha256": "1ad5f33bbecdc4ed4a6b1db6dd5d615d21f3c8ec2f9632d5a88ab8cda178ef44"
+    },
+    {
+      "iconKey": "ground-combat-small-mech",
+      "sourcePath": "approved\\ground-power-suit-v1\\small-mech-white.svg",
+      "sourceSha256": "55ac129be67ecad48b67043f7b90803c1f1fec286576b2cf16c5bd96fc6b5a02",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 7,
+      "normalizedGeometrySha256": "74a823b908fba5a0d4b536a9bd2693af3cc5aac6ca12acde311948f75e86a66d"
+    },
+    {
+      "iconKey": "ground-combat-medium-wheeled",
+      "sourcePath": "approved\\ground-armored-wheeled-v1\\medium-wheeled-white.svg",
+      "sourceSha256": "63a2fd756829eb66bb0aa64f063d0654240ab64f7f65ec6826bb4a8fa8e10687",
+      "viewBox": [
+        -4,
+        -5,
+        40,
+        40
+      ],
+      "layers": 10,
+      "normalizedGeometrySha256": "e810e6d1c51ffd2c1cbe1f13f8506cf552347f977a2e34bfa7b4c1ab4da4d2d1"
+    },
+    {
+      "iconKey": "ground-combat-medium-tracked",
+      "sourcePath": "approved\\ground-combat-v1\\medium-tracked-white.svg",
+      "sourceSha256": "177633d1a3868ec4a5bd442395cf3fed04b101f1cb2e304cc2c5f932ee54fc5d",
+      "viewBox": [
+        -4,
+        -5,
+        40,
+        40
+      ],
+      "layers": 5,
+      "normalizedGeometrySha256": "e9e47d9a1f22d38091480bc67dbda0cf2066fb580177b23308ab7d1d73feb3a2"
+    },
+    {
+      "iconKey": "ground-combat-large-wheeled",
+      "sourcePath": "approved\\ground-heavy-wheeled-v1\\large-wheeled-white.svg",
+      "sourceSha256": "2f9027c3319368c9700b32c947ccb80a88ff8a5616340bb2bdd479418c66db5c",
+      "viewBox": [
+        -4,
+        -5,
+        40,
+        40
+      ],
+      "layers": 14,
+      "normalizedGeometrySha256": "32b7b093c1660b1ffa43dc4e08d7481d16462071ee1673f600ece32cf94a9192"
+    },
+    {
+      "iconKey": "ground-combat-large-tracked",
+      "sourcePath": "approved\\ground-combat-v1\\large-tracked-white.svg",
+      "sourceSha256": "c556a5713430093c94f05fcb195e36a70c2ff3883fa0619800b7aa8e7ff5b858",
+      "viewBox": [
+        -4,
+        -5,
+        40,
+        40
+      ],
+      "layers": 5,
+      "normalizedGeometrySha256": "a836060e29e4e0a5a04cfb287d46c115102deedd62f68cadc16e0d40ba7a0188"
+    },
+    {
+      "iconKey": "ground-industrial-mining-mech",
+      "sourcePath": "approved\\ground-work-mechs-v1\\mining-mech-white.svg",
+      "sourceSha256": "e2f97e0d7fcd1b20c7be0db7ba5bda3a3c19302f90ece85c25683fe003cc2aec",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 9,
+      "normalizedGeometrySha256": "4eccf8f01c53f4953402db7ab6d47a8ba6566b6fb48c6633a96ccb271eedbd47"
+    },
+    {
+      "iconKey": "ground-transport-cargo-mech",
+      "sourcePath": "approved\\ground-work-mechs-v1\\cargo-mech-white.svg",
+      "sourceSha256": "388003ff97bd57a6ffddc304972f63dbbc8816bedac19e01c1b3b48038baad2c",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 9,
+      "normalizedGeometrySha256": "46e8ee4def852b18988b8335de2df158c74bee40c5ef3d7ba47a5d2c9671be5d"
+    },
+    {
+      "iconKey": "ground-industrial-small-rover",
+      "sourcePath": "approved\\ground-mining-rovers-v1\\small-work-rover-white.svg",
+      "sourceSha256": "fdaf4658052d852cc116dbd4bfd05b7a1e7fbb8a772b1f7102244b5eb162c1d6",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "4a433e06e86a6f83999d214882ee56931b5bd2429833dc6e5e12537d41f3b926"
+    },
+    {
+      "iconKey": "ground-industrial-medium-rover",
+      "sourcePath": "approved\\ground-mining-rovers-v1\\medium-work-rover-white.svg",
+      "sourceSha256": "9c7ca439f51976a255ba4ded16b8844163469ce0e4a2c28ab5a60794f0e22dbb",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 9,
+      "normalizedGeometrySha256": "e2ce48ced33f2c9084c65ac80d0f023ca4581a9b0f4f5d0d2e0ef8db2098448d"
+    },
+    {
+      "iconKey": "ground-exploration-gravlev",
+      "sourcePath": "candidates\\ground-exploration-v2\\exploration-gravlev-white.svg",
+      "sourceSha256": "8a660fcbf389e0a8fa15b0afc65523e12ff4edec2c3079b2b6f052b562ea3e98",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "60b438d16a60db1f9a3fa0cda7f8f18e527f8be762f6909bdcdf88b25f832b58"
+    },
+    {
+      "iconKey": "ground-exploration-light-rover",
+      "sourcePath": "approved\\ground-exploration-rovers-v1\\exploration-light-rover-white.svg",
+      "sourceSha256": "f5caadf5866b2090525e207cf5294333d97c575c448a0131d56ce6ca46c19e69",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "8ac755991af797227b93d1a181ba4c533231c9d8249dcd723f184cd97e16bb79"
+    },
+    {
+      "iconKey": "ground-exploration-medium-rover",
+      "sourcePath": "approved\\ground-exploration-rovers-v1\\exploration-medium-rover-white.svg",
+      "sourceSha256": "b991f3d14a53f997c09becef7918d99beb59fa8bda27a60a788ab9db330c9cd1",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 11,
+      "normalizedGeometrySha256": "b807b4e01d2248a3c60aa6653e21055a8438fe03a0947d646c63a26478f535d2"
+    },
+    {
+      "iconKey": "ground-support-medical-rover",
+      "sourcePath": "approved\\ground-medical-rover-v1\\medical-medium-rover-white.svg",
+      "sourceSha256": "bfd7d8f117a0a53909842bc3a36fdd0d458fa3babb0eb0fb48a6347650a12261",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 9,
+      "normalizedGeometrySha256": "fc19e45dc4628f301c1e9de1261480d5b2d62278835cbe0f47ad6a12eeb218fd"
+    },
+    {
+      "iconKey": "ground-competition-gravlev",
+      "sourcePath": "candidates\\ground-competition-v4\\competition-gravlev-white.svg",
+      "sourceSha256": "0c27297d0314740489f48b3853ee5a2d15803c0501011896aabdd9ab82d428c4",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "645dd3c705164e939e9509f9cc6acf4867c623bc2e98f4118580a7aeeb2b6b8a"
+    },
+    {
+      "iconKey": "ground-competition-light-rover",
+      "sourcePath": "candidates\\ground-competition-v4\\competition-light-rover-white.svg",
+      "sourceSha256": "fad5e7537dcf6149c63649e7326dd9b7eee403aeaa28fff4b1fd02cb0a070de3",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 7,
+      "normalizedGeometrySha256": "a7ee30e48ba49eb8f4dafd61ecf5e42b1ed8ec85258a9a4415ff1ef4ed9fd2f5"
+    },
+    {
+      "iconKey": "ground-transport-flatbed",
+      "sourcePath": "candidates\\mpuv-tractor-v5\\cargo-flatbed-rover-white.svg",
+      "sourceSha256": "682d3d816f2a5288de411078c1dbe189bcfdda908b475c411acbdc7af112b202",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "502bd39e4bd839b7d60f949fe19003100eab7627c34b96bab77274a78e00a32a"
+    },
+    {
+      "iconKey": "utility-mpuv-tractor",
+      "sourcePath": "candidates\\mpuv-tractor-v5\\mpuv-tractor-white.svg",
+      "sourceSha256": "f147c51b0c7b0465cb31a5502c29865daae1d1f799ed6c699fe2843e74434afd",
+      "viewBox": [
+        0,
+        0,
+        40,
+        40
+      ],
+      "layers": 8,
+      "normalizedGeometrySha256": "f47346e9773c80e256c70067f8a2d44bc0c67f93bcba5bc1ef056960bfbd73cf"
+    }
+  ],
+  "bodyColor": "Pure white maps to null theme foreground; other source RGBA colors retained",
+  "transforms": "Affine transforms expanded by existing operations converter, rounded to six decimals",
+  "limitations": "No canonical changes or Flutter runtime verification; static only. No new ownership, release, or identity bindings."
+}

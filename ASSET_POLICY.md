@@ -1,47 +1,32 @@
 # 素材与许可边界
 
-本仓库将源码、产品品牌素材和第三方游戏素材分开处理。
+公开源码、运行时品牌文件、字体与第三方游戏媒体采用不同的权利边界。
 
-## 随公开源码提供
+## 明确列出的运行时文件
 
-- `StarBridge.Desktop/Assets/Navigation/MyFleet_Nav.png`
-- `StarBridge.Desktop/Assets/Navigation/MySquad_Nav.png`
+完整文件列表、SHA-256 与许可路径见 `client-assets.json`。导出仅接受逐项列出的文件，
+不会递归公开素材目录。新增或修改文件必须同时更新来源与审查记录。
 
-这两项是桌面客户端使用的项目 UI 素材，随公开客户端源码提供并纳入 Apache-2.0 开放范围。
+- StarBridge 新版运行时图标、主题小图标和字标：适用
+  `StarBridge.Flutter/assets/brand/LICENSE.txt`，仅用于获取、构建和测试未修改的
+  官方源码。分支或修改版必须更换品牌，不采用 Apache-2.0。
+- SCM 标记：仅按已批准集成范围标识 SCM 授权和数据来源，SCM 保留权利。
+  来源、哈希和转换记录见 `docs/brand-assets/scm/README.md`；不授权作为其他产品品牌。
+- Adobe Source Sans 3、Source Han Sans CN、Source Code Pro：保留 SIL OFL 1.1
+  原文，位于 `StarBridge.Flutter/assets/font-licenses/`。
+- Dart/Flutter 依赖许可：`flutter-packages.json` 与 `licenses/flutter/`。
+  SDK 本身适用其上游许可；构建时由官方 Flutter SDK 提供。
+- .NET 依赖许可：`third-party-packages.json` 与 `licenses/`。
 
-## 品牌素材
-
-以下三个 StarBridge 运行时品牌文件随源码提供，以便官方客户端能够直接编译和运行：
-
-- `StarBridge.Desktop/Assets/Brand/StarBridge_AppIcon.ico`
-- `StarBridge.Desktop/Assets/Brand/StarBridge_AppIcon.png`
-- `StarBridge.Desktop/Assets/Brand/StarBridge_logo.png`
-
-这些文件本身不采用 Apache-2.0，而是适用同目录内的 `LICENSE.txt`。该许可仅允许为获取、构建和测试未修改的 StarBridge 开放核心而复制这些运行时品牌文件，不允许将其作为分支版本、修改版或其他产品的品牌继续使用或分发。名称和商标边界另见 `TRADEMARKS.md`。
-
-SCM 的图形标 `StarBridge.Flutter/assets/brand/scm_mark.png` 与无 K 横向字标
-`StarBridge.Flutter/assets/brand/scm_wordmark.png` 仅用于标识 SCM 账号授权与明确
-由 SCM 提供的数据来源，不属于 StarBridge 品牌，也不采用 Apache-2.0。其上游
-路径、原始提交、转换边界、逐字节哈希和集成权限记录于
-`docs/brand-assets/scm/README.md`。
+产品名称和商标规则另见 `TRADEMARKS.md`。开放源码许可不覆盖品牌权利。
 
 ## 不进入公开源码
 
-以下素材不会进入公开仓库：
+可编辑品牌母版、高分辨率设计稿、舰船截图、星系地图、背景视频、个人头像、
+聊天附件、测试截图、用户缓存、商业外观素材，以及未确认再分发权的游戏媒体，
+均不进入公开树。缺少可选媒体时使用既有中性占位，不应复制私人数据来补齐构建。
 
-- `StarBridge.Desktop/Assets/Brand/Master/` 中的可编辑品牌母版和高分辨率导出稿；
-- 舰船截图和舰船详情图；
-- 星系地图原图；
-- 来源或再分发权尚未确认的游戏媒体；
-- 商业外观专用素材；
-- 测试截图、个人头像、用户上传内容和本地缓存。
+游戏标识、翻译表和外部数据库内容按 `DATA_RIGHTS.md` 单独审查。
+官方二进制所含媒体还需遵守 `THIRD-PARTY-MEDIA-NOTICE.md` 的发布审计。
 
-它们在内部工作区中可能用于完整应用构建，但不属于 Apache-2.0 源码包。官方客户端中的第三方图片必须先通过来源、再分发范围和文件哈希审计，具体规则见
-[`THIRD-PARTY-MEDIA-NOTICE.md`](THIRD-PARTY-MEDIA-NOTICE.md)。
-
-游戏名称、标识符、翻译表和外部数据库内容不属于媒体素材，统一按照
-`DATA_RIGHTS.md` 记录来源和许可边界。
-
-## 新增素材要求
-
-提交新的图片、图标、字体、音频或其他媒体时，必须同时说明来源和许可。无法确认来源或再分发权的素材不得加入公开仓库。
+新增图片、图标、字体、音频或视频必须说明来源和许可。未审核的文件不得加入白名单。

@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "flutterVersion": "3.47.2",
+  "flutterRevision": "d3b14c876900e553bc736ca19295fc09e3853e8e",
+  "packages": [
+    {
+      "id": "async",
+      "version": "2.13.1",
+      "archiveSha256": "e2eb0491ba5ddb6177742d2da23904574082139b07c1e33b8503b9f46f3e1a37",
+      "licenseFile": "licenses/flutter/async-2.13.1.txt",
+      "licenseSha256": "ff15faa32a2e638107b7789592b14426162a75ba620044ee2340a20ec6ce5e73"
+    },
+    {
+      "id": "boolean_selector",
+      "version": "2.1.2",
+      "archiveSha256": "8aab1771e1243a5063b8b0ff68042d67334e3feab9e95b9490f9a6ebf73b42ea",
+      "licenseFile": "licenses/flutter/boolean_selector-2.1.2.txt",
+      "licenseSha256": "b71519245009a3b8f126196a5408ec031e216e8e0d985085958c6543f82a8a2a"
+    },
+    {
+      "id": "characters",
+      "version": "1.4.1",
+      "archiveSha256": "faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b",
+      "licenseFile": "licenses/flutter/characters-1.4.1.txt",
+      "licenseSha256": "0371d1da6a57fb791db29d29b95333429205f51f3cb2eb3a0c12d91838a38744"
+    },
+    {
+      "id": "clock",
+      "version": "1.1.3",
+      "archiveSha256": "e51d50bca3217c9a9fa2b41a30e4a38971133f5f9ec7a3d57bae095007f1d28e",
+      "licenseFile": "licenses/flutter/clock-1.1.3.txt",
+      "licenseSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "collection",
+      "version": "1.19.1",
+      "archiveSha256": "2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76",
+      "licenseFile": "licenses/flutter/collection-1.19.1.txt",
+      "licenseSha256": "ff15faa32a2e638107b7789592b14426162a75ba620044ee2340a20ec6ce5e73"
+    },
+    {
+      "id": "crypto",
+      "version": "3.0.7",
+      "archiveSha256": "c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf",
+      "licenseFile": "licenses/flutter/crypto-3.0.7.txt",
+      "licenseSha256": "ad6a71997da90924b2cfb1fb47ec46537f70faf469efe016168794ae45ed6888"
+    },
+    {
+      "id": "csslib",
+      "version": "1.0.2",
+      "archiveSha256": "09bad715f418841f976c77db72d5398dc1253c21fb9c0c7f0b0b985860b2d58e",
+      "licenseFile": "licenses/flutter/csslib-1.0.2.txt",
+      "licenseSha256": "dfb09c74e29386cd3e2719f32d4995d59526179753931d31840757c77fbf2791"
+    },
+    {
+      "id": "fake_async",
+      "version": "1.3.3",
+      "archiveSha256": "5368f224a74523e8d2e7399ea1638b37aecfca824a3cc4dfdf77bf1fa905ac44",
+      "licenseFile": "licenses/flutter/fake_async-1.3.3.txt",
+      "licenseSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "flutter_lints",
+      "version": "6.0.0",
+      "archiveSha256": "3105dc8492f6183fb076ccf1f351ac3d60564bff92e20bfc4af9cc1651f4e7e1",
+      "licenseFile": "licenses/flutter/flutter_lints-6.0.0.txt",
+      "licenseSha256": "89519eca6f7b9529b35bdddd623a58c3af06a88c458dbd6531ddb4675acf75a9"
+    },
+    {
+      "id": "html",
+      "version": "0.15.7",
+      "archiveSha256": "43b67b8f43321ab066817dfac5619596c98bb1b61624e77203bb4351785f9699",
+      "licenseFile": "licenses/flutter/html-0.15.7.txt",
+      "licenseSha256": "6ed8a26ed0f30589422f86356eed53bb6dacffc3e2fd4feddc944c4331945151"
+    },
+    {
+      "id": "intl",
+      "version": "0.20.3",
+      "archiveSha256": "1ca20c894b1717686a2319b8548763d812bc0aabdac580420a44c5178c57a867",
+      "licenseFile": "licenses/flutter/intl-0.20.3.txt",
+      "licenseSha256": "7e124af6a556f045cb3a20cafbdaa31602ac2c82cbcb3c3b15faaaf514b06028"
+    },
+    {
+      "id": "leak_tracker",
+      "version": "11.0.2",
+      "archiveSha256": "33e2e26bdd85a0112ec15400c8cbffea70d0f9c3407491f672a2fad47915e2de",
+      "licenseFile": "licenses/flutter/leak_tracker-11.0.2.txt",
+      "licenseSha256": "08a004aa8956c3cf3b24f7f69c966247233953e18e6afaa61191ea47b7eb70f6"
+    },
+    {
+      "id": "leak_tracker_flutter_testing",
+      "version": "3.0.10",
+      "archiveSha256": "1dbc140bb5a23c75ea9c4811222756104fbcd1a27173f0c34ca01e16bea473c1",
+      "licenseFile": "licenses/flutter/leak_tracker_flutter_testing-3.0.10.txt",
+      "licenseSha256": "08a004aa8956c3cf3b24f7f69c966247233953e18e6afaa61191ea47b7eb70f6"
+    },
+    {
+      "id": "leak_tracker_testing",
+      "version": "3.0.2",
+      "archiveSha256": "8d5a2d49f4a66b49744b23b018848400d23e54caf9463f4eb20df3eb8acb2eb1",
+      "licenseFile": "licenses/flutter/leak_tracker_testing-3.0.2.txt",
+      "licenseSha256": "08a004aa8956c3cf3b24f7f69c966247233953e18e6afaa61191ea47b7eb70f6"
+    },
+    {
+      "id": "lints",
+      "version": "6.1.0",
+      "archiveSha256": "12f842a479589fea194fe5c5a3095abc7be0c1f2ddfa9a0e76aed1dbd26a87df",
+      "licenseFile": "licenses/flutter/lints-6.1.0.txt",
+      "licenseSha256": "421fe78c3b5df297f8b4ab2c74f2450a274ee6d245a113091f6b9f90570af193"
+    },
+    {
+      "id": "matcher",
+      "version": "0.12.20",
+      "archiveSha256": "31bd099b47c10cd1aeb55146a2d46ce0277630ecef3f7dae54ad7873f36696cd",
+      "licenseFile": "licenses/flutter/matcher-0.12.20.txt",
+      "licenseSha256": "3c32b53167c7dae9190c38dab5dd9fe1789c53623ebc7d1babcb29914c5b3f16"
+    },
+    {
+      "id": "material_color_utilities",
+      "version": "0.13.0",
+      "archiveSha256": "9c337007e82b1889149c82ed242ed1cb24a66044e30979c44912381e9be4c48b",
+      "licenseFile": "licenses/flutter/material_color_utilities-0.13.0.txt",
+      "licenseSha256": "d103f246ef4c18dab8af0c1dcf6a8af884e5cff554da7261a48ac43c17d98f2e"
+    },
+    {
+      "id": "meta",
+      "version": "1.18.3",
+      "archiveSha256": "c82594181e3312f3d0695fc95aaaf7758d75b8d4ae2bbecf223b9fd5109a059d",
+      "licenseFile": "licenses/flutter/meta-1.18.3.txt",
+      "licenseSha256": "b71519245009a3b8f126196a5408ec031e216e8e0d985085958c6543f82a8a2a"
+    },
+    {
+      "id": "path",
+      "version": "1.9.1",
+      "archiveSha256": "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5",
+      "licenseFile": "licenses/flutter/path-1.9.1.txt",
+      "licenseSha256": "3c32b53167c7dae9190c38dab5dd9fe1789c53623ebc7d1babcb29914c5b3f16"
+    },
+    {
+      "id": "plugin_platform_interface",
+      "version": "2.1.8",
+      "archiveSha256": "4820fbfdb9478b1ebae27888254d445073732dae3d6ea81f0b7e06d5dedc3f02",
+      "licenseFile": "licenses/flutter/plugin_platform_interface-2.1.8.txt",
+      "licenseSha256": "89519eca6f7b9529b35bdddd623a58c3af06a88c458dbd6531ddb4675acf75a9"
+    },
+    {
+      "id": "source_span",
+      "version": "1.10.2",
+      "archiveSha256": "56a02f1f4cd1a2d96303c0144c93bd6d909eea6bee6bf5a0e0b685edbd4c47ab",
+      "licenseFile": "licenses/flutter/source_span-1.10.2.txt",
+      "licenseSha256": "3c32b53167c7dae9190c38dab5dd9fe1789c53623ebc7d1babcb29914c5b3f16"
+    },
+    {
+      "id": "stack_trace",
+      "version": "1.12.2",
+      "archiveSha256": "277654b3034d17ac6f9f1cb5595db011b1d5d41e8806866db28e0abaa101c490",
+      "licenseFile": "licenses/flutter/stack_trace-1.12.2.txt",
+      "licenseSha256": "ff0b91d4f3c32b25cb6ec84985e8da89b0ba2a2b2f7eef353cda5e5423a20390"
+    },
+    {
+      "id": "stream_channel",
+      "version": "2.1.4",
+      "archiveSha256": "969e04c80b8bcdf826f8f16579c7b14d780458bd97f56d107d3950fdbeef059d",
+      "licenseFile": "licenses/flutter/stream_channel-2.1.4.txt",
+      "licenseSha256": "ff15faa32a2e638107b7789592b14426162a75ba620044ee2340a20ec6ce5e73"
+    },
+    {
+      "id": "string_scanner",
+      "version": "1.4.1",
+      "archiveSha256": "921cd31725b72fe181906c6a94d987c78e3b98c2e205b397ea399d4054872b43",
+      "licenseFile": "licenses/flutter/string_scanner-1.4.1.txt",
+      "licenseSha256": "3c32b53167c7dae9190c38dab5dd9fe1789c53623ebc7d1babcb29914c5b3f16"
+    },
+    {
+      "id": "term_glyph",
+      "version": "1.2.2",
+      "archiveSha256": "7f554798625ea768a7518313e58f83891c7f5024f88e46e7182a4558850a4b8e",
+      "licenseFile": "licenses/flutter/term_glyph-1.2.2.txt",
+      "licenseSha256": "ea97a7558a7bd7cee4e2355f7529e3cbebb0dcbb546ddb9a90f10c9eb6b08da5"
+    },
+    {
+      "id": "test_api",
+      "version": "0.7.12",
+      "archiveSha256": "2a122cbe059f8b610d3a5415f42e255b6c17b1f21eee1d960f31080237fb4f11",
+      "licenseFile": "licenses/flutter/test_api-0.7.12.txt",
+      "licenseSha256": "ff1b9f0df9036c04be424b1e3ce12789bea880ad5ffc3a48e069ae2d40a087a4"
+    },
+    {
+      "id": "typed_data",
+      "version": "1.4.0",
+      "archiveSha256": "f9049c039ebfeb4cf7a7104a675823cd72dba8297f264b6637062516699fa006",
+      "licenseFile": "licenses/flutter/typed_data-1.4.0.txt",
+      "licenseSha256": "ff15faa32a2e638107b7789592b14426162a75ba620044ee2340a20ec6ce5e73"
+    },
+    {
+      "id": "vector_math",
+      "version": "2.4.0",
+      "archiveSha256": "1d774bbdf6b72a0b12122fc1560c9c2d2a67db5a4a4cc2bd8a5c990ab20e3188",
+      "licenseFile": "licenses/flutter/vector_math-2.4.0.txt",
+      "licenseSha256": "420f7739f169097f0aad1242045169cd643c8f1d94e62866fad265ae4c369b7d"
+    },
+    {
+      "id": "video_player",
+      "version": "2.14.0",
+      "archiveSha256": "8c837b570dccb9ae6ff73d2e0b03c7e708bfefd3bd1194faa7f3e7f200dfc399",
+      "licenseFile": "licenses/flutter/video_player-2.14.0.txt",
+      "licenseSha256": "420f7739f169097f0aad1242045169cd643c8f1d94e62866fad265ae4c369b7d"
+    },
+    {
+      "id": "video_player_android",
+      "version": "2.12.2",
+      "archiveSha256": "d27054dea34d748a44f06d433a57005d2aac69944485b0abbaed3303dbcfa3f1",
+      "licenseFile": "licenses/flutter/video_player_android-2.12.2.txt",
+      "licenseSha256": "420f7739f169097f0aad1242045169cd643c8f1d94e62866fad265ae4c369b7d"
+    },
+    {
+      "id": "video_player_avfoundation",
+      "version": "2.12.0",
+      "archiveSha256": "2fc56e537324a19eb649fca991aa308ac961b5406292876fa657b062de461fd8",
+      "licenseFile": "licenses/flutter/video_player_avfoundation-2.12.0.txt",
+      "licenseSha256": "420f7739f169097f0aad1242045169cd643c8f1d94e62866fad265ae4c369b7d"
+    },
+    {
+      "id": "video_player_platform_interface",
+      "version": "6.9.0",
+      "archiveSha256": "92c0fbabe20c788e71fd10d26cea998d0d253282e65d145aed0818731cf593ce",
+      "licenseFile": "licenses/flutter/video_player_platform_interface-6.9.0.txt",
+      "licenseSha256": "420f7739f169097f0aad1242045169cd643c8f1d94e62866fad265ae4c369b7d"
+    },
+    {
+      "id": "video_player_web",
+      "version": "2.4.0",
+      "archiveSha256": "9f3c00be2ef9b76a95d94ac5119fb843dca6f2c69e6c9968f6f2b6c9e7afbdeb",
+      "licenseFile": "licenses/flutter/video_player_web-2.4.0.txt",
+      "licenseSha256": "89519eca6f7b9529b35bdddd623a58c3af06a88c458dbd6531ddb4675acf75a9"
+    },
+    {
+      "id": "video_player_win",
+      "version": "3.2.2",
+      "archiveSha256": "a4caca55ead1eb469d10060592e7ecdcbcd4493c6e2b63e4e666ff5446c790f1",
+      "licenseFile": "licenses/flutter/video_player_win-3.2.2.txt",
+      "licenseSha256": "06e0e9de800afb1a565357fb7fe7afcbf8ec6c8325744dff7302e8e021711fa7"
+    },
+    {
+      "id": "vm_service",
+      "version": "15.3.0",
+      "archiveSha256": "5f37239c4851efcef929cea7824e76df7f2f0970aef85d66bbc430afa40e72f0",
+      "licenseFile": "licenses/flutter/vm_service-15.3.0.txt",
+      "licenseSha256": "ad6a71997da90924b2cfb1fb47ec46537f70faf469efe016168794ae45ed6888"
+    },
+    {
+      "id": "web",
+      "version": "1.1.1",
+      "archiveSha256": "868d88a33d8a87b18ffc05f9f030ba328ffefba92d6c127917a2ba740f9cfe4a",
+      "licenseFile": "licenses/flutter/web-1.1.1.txt",
+      "licenseSha256": "aa913ff50d7542eb8cc35b9f48a80928ac6819ba9057f85d424655e3e8dc271c"
+    }
+  ]
+}

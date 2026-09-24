@@ -1,0 +1,7 @@
+* text=auto
+# License hashes are checked from the exact reviewed LF-normalized text.
+*.txt text eol=lf
+*.png binary
+*.ico binary
+*.otf binary
+*.ttf binary

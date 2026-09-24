@@ -13,11 +13,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="../StarBridge.Desktop/NotificationSettings.cs" Link="Notifications/WpfNotificationSettings.cs" />
-    <Compile Include="../StarBridge.Desktop/PlayerActivityNotificationPolicy.cs" Link="Notifications/WpfPlayerActivityPolicy.cs" />
-    <!-- Reuse pure WPF catalog/region vocabulary without a WPF assembly dependency. -->
-    <Compile Include="../StarBridge.Desktop/Models/PartyRoomTagCatalog.cs" Link="PartyRooms/PartyRoomTagCatalog.cs" />
-    <Compile Include="../StarBridge.Desktop/GameServerRegionPresentation.cs" Link="PartyRooms/GameServerRegionPresentation.cs" />
+    <Compile Include="../shared/client-policies/NotificationSettings.cs" Link="Notifications/WpfNotificationSettings.cs" />
+    <Compile Include="../shared/client-policies/PlayerActivityNotificationPolicy.cs" Link="Notifications/WpfPlayerActivityPolicy.cs" />
+    <!-- Pure client rules have no dependency on the retired UI source tree. -->
+    <Compile Include="../shared/client-policies/PartyRoomTagCatalog.cs" Link="PartyRooms/PartyRoomTagCatalog.cs" />
+    <Compile Include="../shared/client-policies/GameServerRegionPresentation.cs" Link="PartyRooms/GameServerRegionPresentation.cs" />
     <Compile Include="../shared/community-queries/CommunityDirectoryFilters.cs" Link="Communities/CommunityDirectoryFilters.cs" />
     <Compile Include="../shared/community-queries/CommunityShipQuery.cs" Link="Communities/CommunityShipQuery.cs" />
   </ItemGroup>

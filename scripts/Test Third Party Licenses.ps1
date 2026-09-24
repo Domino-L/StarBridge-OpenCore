@@ -25,7 +25,7 @@ else {
 }
 
 if ([string]::IsNullOrWhiteSpace($AssetsPath)) {
-    $AssetsPath = Join-Path $Root "StarBridge.Desktop\obj\project.assets.json"
+    $AssetsPath = Join-Path $Root "StarBridge.NativeHost\obj\project.assets.json"
 }
 elseif (-not [IO.Path]::IsPathRooted($AssetsPath)) {
     $AssetsPath = Join-Path $Root $AssetsPath

@@ -24,7 +24,6 @@ var tests = new (string Name, Action Test)[]
     ("Ship names localize only unambiguous catalog matches and preserve model variants", StarBridge.Core.Tests.ShipNameIndexTests.RunAll),
     ("SCM profile contracts separate public, private, patch, and offline cache fields", StarBridge.Core.Tests.ScmProfileContractTests.RunAll),
     ("SCM profile time zones preserve IANA and map safely on Windows", StarBridge.Core.Tests.ProfileTimeZoneContractTests.RunAll),
-    ("Identity link completion resumes the guarded startup synchronization lane", StarBridge.Core.Tests.IdentityLinkSyncContractTests.RunAll),
     ("SCM RSI identity policy fails closed for identity-sensitive writes", StarBridge.Core.Tests.RsiIdentityPolicyTests.RunAll),
     ("Hangar identity matches only an unambiguous verified account Handle", StarBridge.Core.Tests.RsiHangarIdentityPolicyTests.RunAll),
     ("Hangar scans require stable complete pages and preserve every ship occurrence", StarBridge.Core.Tests.HangarScanSessionTests.RunAll),

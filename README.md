@@ -21,15 +21,15 @@
 
 | 下载方式 | 适合场景 |
 | --- | --- |
-| [下载在线安装器](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-online-setup.exe) | 推荐。安装器体积较小，会自动获取并安装最新版本。 |
-| [下载完整安装包](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-win-x64-setup.exe) | 适合离线安装，或需要保留完整安装文件时使用。 |
+| [官网下载](https://scstarbridge.com/) | 查看当前版本、更新公告和文件校验信息。 |
+| [0.7.0.1 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.1-20260923-04-win-x64-setup.exe) | 当前公开测试版，下载后可离线安装。 |
 | [查看全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases) | 查看更新说明、历史版本和 SHA-256 校验文件。 |
 
-0.6.6.1 是 WPF 到 Flutter 0.7.0 的最小迁移桥梁；主程序、完整安装器和在线安装器均要求可信 Windows 数字签名与时间戳。
+当前公开测试版为 0.7.0.1。主程序、更新助手和完整安装器要求可信 Windows 数字签名与时间戳。
 请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对
-`SHA256SUMS.txt`、签名更新清单和 `AUTHENTICODE-STATUS.json`。如果 Windows 仍显示“未知发布者”，请停止安装并提交反馈。
+`SHA256SUMS.txt` 和签名更新清单；证据格式见下方 Release 核验指南。如果 Windows 仍显示“未知发布者”，请停止安装并提交反馈。
 
-0.6.6.1 官方客户端不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
+官方客户端不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
 缺少可用图片时会显示应用自带占位图；详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
 
 安装与首次使用说明见 [开始使用](docs/GETTING_STARTED.md)。如果下载或更新失败，请先查看 [下载帮助](docs/DOWNLOADS.md)。需要核验精确 Release tag、SHA-256、Windows 签名、SBOM 与构建来源时，请按 [Release 核验指南](docs/RELEASE-VERIFICATION.md) 操作。
@@ -223,14 +223,42 @@ CIG/RSI 的用户协议对未获授权的第三方软件、信息收集、客户
 
 ### 构建开放核心
 
-需要 .NET 8 SDK：
+需要 Windows、.NET 8 SDK、Flutter 3.47.2（Dart 3.13.2）、Visual Studio 的
+“使用 C++ 的桌面开发”与 Windows SDK。Flutter 插件需要 Windows 开发者模式
+或系统允许创建目录符号链接。无需生产密钥、私有数据或托管服务源码。
 
 ```powershell
-dotnet build StarBridge.sln
-dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj
+dotnet build StarBridge.sln --configuration Release
+dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build
+cd StarBridge.Flutter
+flutter pub get
+flutter test --dart-define=STARBRIDGE_PUBLIC_SOURCE=true
+flutter build windows --release --dart-define=STARBRIDGE_ENABLE_MENU_OVERLAY=false
 ```
 
-桌面客户端输出位于 `StarBridge.Desktop/bin/Debug/net8.0-windows10.0.22621.0/`。源码包不会附带来源或再分发权尚未确认的舰船图片和星系地图；缺少这些可选媒体不会阻止客户端编译。
+客户端输出位于 `StarBridge.Flutter/build/windows/x64/runner/Release/`。
+公开源码不附带游戏截图、背景媒体及内部视觉基线；上述公开测试模式仅省略内部
+截图比较和专有素材解码验收，功能及缺图降级断言仍运行。缺少可选媒体使用中性占位，
+不需要从其他仓库复制素材。运行时品牌文件保持单独许可；修改版或分支版本必须更换品牌。
+
+内置 RSI 机库读取器可选使用 WebView2 SDK 1.0.3179.45。Runner 读取已还原到
+NuGet 缓存的该版本，也可通过 CMake `STARBRIDGE_WEBVIEW2_SDK_ROOT` 指向合法安装的 SDK。
+未提供时客户端仍可构建，读取器会明确显示不可用，不会下载或复制私有组件。
+
+### 当前源码结构
+
+| 模块 | 职责 |
+| --- | --- |
+| `StarBridge.Flutter` | 当前客户端界面、状态、交互与 Windows Runner。 |
+| `StarBridge.NativeBridge` | 客户端与本机 Host 的公开通信契约。 |
+| `StarBridge.HostRuntime` / `StarBridge.NativeHost` | 本机持久化、日志读取、托盘和通知等 Windows 能力，以及远端接口的客户端适配。 |
+| `StarBridge.OverlayRuntime.Windows` | 信息浮层的 Windows 渲染，不包含旧客户端入口。 |
+| `StarBridge.Core` | 公开领域规则与日志解析。 |
+| `StarBridge.UpdateHelper` | 本机受校验的更新事务，不是云端发布服务。 |
+
+当前树不包含旧客户端 UI、云端业务实现、服务端数据库、生产部署或签名私钥。
+远端功能仍需要合法账号及相应服务权限；公开客户端不会绕过授权。
+0.7.0.1 默认关闭菜单浮层，保留信息浮层。
 
 ## 许可与名称
 

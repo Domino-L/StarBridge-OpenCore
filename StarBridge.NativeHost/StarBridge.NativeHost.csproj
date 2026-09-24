@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>StarBridge.NativeHost</AssemblyName>
+    <Product>StarBridge Native Host</Product>
+    <TargetFramework Condition="'$(StarBridgeTargetPlatformVersion)' != ''">net8.0-windows$(StarBridgeTargetPlatformVersion)</TargetFramework>
+    <TargetFramework Condition="'$(StarBridgeTargetPlatformVersion)' == ''">net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformVersion Condition="'$(StarBridgeTargetPlatformVersion)' != ''">$(StarBridgeTargetPlatformVersion)</TargetPlatformVersion>
+    <TargetPlatformVersion Condition="'$(StarBridgeTargetPlatformVersion)' == ''">10.0.22621.0</TargetPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\StarBridge.HostRuntime\StarBridge.HostRuntime.csproj" />
+    <ProjectReference Include="..\StarBridge.OverlayRuntime.Windows\StarBridge.OverlayRuntime.Windows.csproj" />
+  </ItemGroup>
+
+  <!-- Intentionally empty in local builds. Release packaging must explicitly
+       supply the dedicated Flutter installer manifest, never the WPF endpoint. -->
+  <ItemGroup>
+    <AssemblyMetadata Include="StarBridgeFlutterInstallerManifestUrl" Value="$(StarBridgeFlutterInstallerManifestUrl)" />
+    <AssemblyMetadata Include="StarBridgeEnableInstalledUpdates" Value="$(StarBridgeEnableInstalledUpdates)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="9.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets/Audio/cue-catalog.v1.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Private acceptance resources are staged explicitly, not redistributed as public source. -->
+    <Content Include="../.private-ops/notification-audio/*.wav" Link="Assets/Audio/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

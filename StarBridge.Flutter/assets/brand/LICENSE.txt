@@ -1,0 +1,61 @@
+StarBridge Runtime Brand Artwork License
+
+Copyright 2026 Ruiyang Lyu. All rights reserved.
+
+Permission is granted to reproduce the runtime artwork files listed below only
+as necessary to obtain, build and test an unmodified copy of the official
+StarBridge open-core source. This scope was confirmed by the maintainer on
+2026-09-24. It does not cover editable masters or unrelated media.
+
+- StarBridge.Flutter/assets/brand/starbridge_app_icon.png
+- StarBridge.Flutter/assets/brand/starbridge_mark_dark_surface.png
+- StarBridge.Flutter/assets/brand/starbridge_mark_light_surface.png
+- StarBridge.Flutter/assets/brand/starbridge_mark_transparent.png
+- StarBridge.Flutter/assets/brand/starbridge_star_center.png
+- StarBridge.Flutter/assets/brand/starbridge_taskbar_compact.png
+- StarBridge.Flutter/assets/brand/starbridge_taskbar_trails.png
+- StarBridge.Flutter/assets/brand/starbridge_wordmark_en_text_only_dark_surface.png
+- StarBridge.Flutter/assets/brand/starbridge_wordmark_en_text_only_light_surface.png
+- StarBridge.Flutter/assets/brand/starbridge_wordmark_zh_hans_text_only_dark_surface.png
+- StarBridge.Flutter/assets/brand/starbridge_wordmark_zh_hans_text_only_light_surface.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/128.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/16.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/20.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/24.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/256.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/30.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/32.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/36.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/40.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/48.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/64.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/72.png
+- StarBridge.Flutter/assets/brand/small_icons/dark_surface/96.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/128.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/16.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/20.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/24.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/256.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/30.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/32.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/36.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/40.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/48.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/64.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/72.png
+- StarBridge.Flutter/assets/brand/small_icons/light_surface/96.png
+- StarBridge.Flutter/windows/runner/resources/app_icon_dark_surface.ico
+- StarBridge.Flutter/windows/runner/resources/app_icon_light_surface.ico
+- StarBridge.Flutter/windows/runner/resources/app_icon.ico
+
+No permission is granted to use or redistribute these files as the branding of
+a fork, modified build, competing product, or any distribution likely to imply
+official status, affiliation or endorsement. Forks and modified builds must
+replace these brand assets. These files are not licensed under Apache-2.0.
+
+This permission does not grant trademark rights in the StarBridge name, logo,
+application icon or visual identity. The name and artwork are unregistered
+product identifiers; no claim of registration is made.
+
+SCM marks and Adobe fonts are not covered by this permission. Their separate
+provenance and license files are recorded in client-assets.json.

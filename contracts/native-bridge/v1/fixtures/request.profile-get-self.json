@@ -1,0 +1,16 @@
+{
+  "protocolVersion": 1,
+  "messageType": "request",
+  "name": "profile.getSelf",
+  "correlationId": "fixture-correlation",
+  "sessionGeneration": 7,
+  "accountContext": {
+    "environment": "local",
+    "authority": "https://example.invalid",
+    "subject": "synthetic-subject"
+  },
+  "payload": {
+    "locale": "zh-CN",
+    "multiline": "line one\nline two"
+  }
+}

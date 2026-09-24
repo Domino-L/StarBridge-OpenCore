@@ -6,7 +6,8 @@ Thank you for helping improve StarBridge Open Core.
 
 The public repository accepts changes to:
 
-- the Windows desktop client and its public user experience;
+- the Flutter Windows client and its public user experience;
+- local Windows Host capabilities and client-side remote adapters (not hosted backend implementations);
 - fleet, party-room, friends, profile, hangar, and communication clients;
 - the public overlay framework, layout editor, and built-in open appearances;
 - read-only `Game.log` watching and parsing;
@@ -32,6 +33,12 @@ contracts may remain public so settings can migrate safely.
    dotnet build StarBridge.sln
    dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj
    powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Test Repository Safety.ps1"
+   powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Test StarBridge Client Source Boundary.ps1" -RequireStandalone
+   powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Test StarBridge Flutter Licenses.ps1"
+   cd StarBridge.Flutter
+   flutter pub get
+   flutter test --dart-define=STARBRIDGE_PUBLIC_SOURCE=true
+   flutter build windows --release --dart-define=STARBRIDGE_ENABLE_MENU_OVERLAY=false
    ```
 
 4. Keep changes focused and explain any assumptions about the game log format.

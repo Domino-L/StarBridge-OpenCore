@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework Condition="'$(StarBridgeTargetPlatformVersion)' != ''">net8.0-windows$(StarBridgeTargetPlatformVersion)</TargetFramework>
+    <TargetFramework Condition="'$(StarBridgeTargetPlatformVersion)' == ''">net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformVersion Condition="'$(StarBridgeTargetPlatformVersion)' != ''">$(StarBridgeTargetPlatformVersion)</TargetPlatformVersion>
+    <TargetPlatformVersion Condition="'$(StarBridgeTargetPlatformVersion)' == ''">10.0.22621.0</TargetPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Rendering/**</DefaultItemExcludes>
+    <StarBridgeIncludeCommercialAppearances Condition="'$(StarBridgeIncludeCommercialAppearances)' == '' and Exists('../StarBridge.CommercialAppearances/StarBridge.CommercialAppearances.projitems')">true</StarBridgeIncludeCommercialAppearances>
+    <StarBridgeIncludeCommercialAppearances Condition="'$(StarBridgeIncludeCommercialAppearances)' == ''">false</StarBridgeIncludeCommercialAppearances>
+    <DefineConstants Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true'">$(DefineConstants);STARBRIDGE_COMMERCIAL_APPEARANCES</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\StarBridge.HostRuntime\StarBridge.HostRuntime.csproj" />
+    <Using Include="StarBridge.Core.Overlay" />
+    <Using Include="StarBridge.HostRuntime.Account" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="9.0.1" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
+  </ItemGroup>
+
+  <Import Project="RenderingSources.props" />
+  <Import Project="../StarBridge.CommercialAppearances/StarBridge.CommercialAppearances.projitems"
+          Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and Exists('../StarBridge.CommercialAppearances/StarBridge.CommercialAppearances.projitems')" />
+  <Import Project="$(StarBridgePrivateAppearanceRoot)/Runtime/StarBridge.PrivateAppearance.projitems"
+          Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and '$(StarBridgePrivateAppearanceRoot)' != '' and Exists('$(StarBridgePrivateAppearanceRoot)/Runtime/StarBridge.PrivateAppearance.projitems')" />
+  <ItemGroup>
+    <Resource Include="../StarBridge.Flutter/assets/brand/starbridge_mark_dark_surface.png" Link="Assets/Brand/notification_mark_dark.png" />
+    <Resource Include="../StarBridge.Flutter/assets/brand/starbridge_mark_light_surface.png" Link="Assets/Brand/notification_mark_light.png" />
+    <Content Include="../data/ship-names/ship-name-pack.json" Link="Data/ship-name-pack.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../StarBridge.Desktop/Data/location-names-zh.txt" Link="Data/location-names-zh.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/location-names-zh.txt')" />
+    <Content Include="../StarBridge.Desktop/Data/starbridge_location_catalog.json" Link="Data/starbridge_location_catalog.json" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/starbridge_location_catalog.json')" />
+  </ItemGroup>
+
+</Project>

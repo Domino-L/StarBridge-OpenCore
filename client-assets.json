@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "description": "Exact reviewed runtime assets only. No masters, game media, captures, caches or commercial artwork.",
+  "files": [
+    {
+      "path": "StarBridge.Flutter/assets/brand/scm_mark.png",
+      "sha256": "7025b5b097df2d67796ecfebd8e14f8e82986c100b07b237a7037ccc11ef582e",
+      "license": "SCM retained rights; approved integration only",
+      "licenseFile": "docs/brand-assets/scm/README.md"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/scm_wordmark.png",
+      "sha256": "7a53b9112d324b4eecb40429efdb8139e0707d5a588b5ea69cb84ce16feee174",
+      "license": "SCM retained rights; approved integration only",
+      "licenseFile": "docs/brand-assets/scm/README.md"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_app_icon.png",
+      "sha256": "d2c413bd2a36db96025a78d8f4a662c58c8acdc9d5e4ae086dc9b9d18bfbf6ec",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_mark_dark_surface.png",
+      "sha256": "1b97b9a13feead8ad956592cc5af62f85b162e26ed9c90541a32c9e054330a70",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_mark_light_surface.png",
+      "sha256": "00d18f7a585d2447e8b63f91278ec1062e1ba135d25bcb2753f703a1271d3eca",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_mark_transparent.png",
+      "sha256": "82892ba54043ba2f6fd1f6bd53684898e3accff74c6f8862eed7120fe71f2287",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_star_center.png",
+      "sha256": "96072dd58ea31ac7cc309acc78d62c9fc607dda65ae602f91e7e8a4832d21f23",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_taskbar_compact.png",
+      "sha256": "f0202fdf685d721fb200d696382ad525e31f98f330593803b9de7d4bfc0de96d",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_taskbar_trails.png",
+      "sha256": "ef5560414295d84b94bf4561dcfa334a28bed490214cf5c1d6aad4de9f804bb2",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_wordmark_en_text_only_dark_surface.png",
+      "sha256": "536b653b3abdf5c96c7e21d06cd99a25a9652b689ef6adb054c37b1ed5289927",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_wordmark_en_text_only_light_surface.png",
+      "sha256": "da30f39dd9f57bfc401eef9154e9ce4cbce4f92ed1466d19a434730e382cd1d6",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_wordmark_zh_hans_text_only_dark_surface.png",
+      "sha256": "235504ace2f8bd02803d315fb31065940db1f39ffc968e08e742055a7b1799c2",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/starbridge_wordmark_zh_hans_text_only_light_surface.png",
+      "sha256": "c4aae6c88645e630fd2c06b9bd653556905c217f256fa737ca806fbbada54c30",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/128.png",
+      "sha256": "bf4dccf54fb531b57a059120aceab79df0e3915d34268eded91cdf280c2dfea7",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/16.png",
+      "sha256": "63a7b4cfcd9eb3457de22e34a96ccc1e63d44e0d7771d77606a38513088071e0",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/20.png",
+      "sha256": "7c582c4edd4711ccd816caecc55a704fcb86fb0aad16feea51b832ebc2b72f7c",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/24.png",
+      "sha256": "11e02140e0c57354f8b30668611a9468ca62eec010d0dbc28454567d814239a8",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/256.png",
+      "sha256": "5177ded26da679572e50c9742682607f7c5c350f04d9b7f99d02fe12b5684b42",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/30.png",
+      "sha256": "1d29a24cb5e56103de0d17065ffc5da1fb3f35284255b817e49f93514486d5a3",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/32.png",
+      "sha256": "a3ea804e82bf2067daba4ff7a573b47d5ce19541df9786da73589f4a8e1f04b7",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/36.png",
+      "sha256": "85554d8c01ac475e18d900a984bb565a811d61d305467f8d5ff8b4b89fcbd0dc",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/40.png",
+      "sha256": "23fc2e143ddec124dbfa6c454be3af36e85672aea86efb89d57a8ecee1a746b5",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/48.png",
+      "sha256": "ba272615dc0c39e9cebb3c04b8efc1d4772ae3776593051846a90fddd781480b",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/64.png",
+      "sha256": "765874c9ef67de906a9b43d26b287d3d65d3af20a429774f15466f423169e0be",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/72.png",
+      "sha256": "83c0881c0696fed2bf71d1a21e2515f1488dae68cd4c1c48a55a0124ebb06bc9",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/dark_surface/96.png",
+      "sha256": "1949f531bd0ed2f4481c2fecf27c5b82bd587374ec3b3450fb31a446232ad57a",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/128.png",
+      "sha256": "df7f6ce77bd0bef7664a66cf854615d4da4eb90ec5b0a2716eab596a17b7e37b",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/16.png",
+      "sha256": "ca4b8158d681d86fe2285c70d19f2fc27af61dfca3bff962dce4611996a77aaf",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/20.png",
+      "sha256": "2590b224e31ae5371d7b99c25bda458671f9ce869058b9594ad7b94f99962b4d",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/24.png",
+      "sha256": "755006cac523b970be54474474313ce913445d108880ec8eab71f4034cd94b92",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/256.png",
+      "sha256": "480ddbb26fc6ea3cd135985d0fc42b694618ac14c2cd232d675050026f80aff0",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/30.png",
+      "sha256": "99de380ba3c34bb8d0ffcb87da1623887f29c055760ab06977a77abf172dcc34",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/32.png",
+      "sha256": "bd88434c0975af224ae60edfe8a3148ec74e625000cc52dd2bd58e09b0742d4d",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/36.png",
+      "sha256": "a253c73704fdca6e565e89c9c109631c1ddab2692884a0a51c93f70595977da2",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/40.png",
+      "sha256": "e41aa5e5c068f7147a401fe08d523cdbc116540fed71c5de11bde5a207fa00f6",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/48.png",
+      "sha256": "d1f6e263c42a7495b913f456a5468439abbfaf5104e0de348e0dba42320538f9",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/64.png",
+      "sha256": "4160bf4678279c30e0237ddfe5dce7e09e070d3e56d7383d4dfd62714932b45b",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/72.png",
+      "sha256": "f2164d6349b67d71687035415b31126671621f88e4b68aeb0d89fb0e85012fab",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/small_icons/light_surface/96.png",
+      "sha256": "6baa39ffa49e4f53b457a7aed6004e79084d6b9c2fb68f759791e4413331b302",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/SourceCodeVF-Upright.ttf",
+      "sha256": "c4066e584e995ec317a072f1777742861d3ce0bf210096b84450a249d0210198",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Source-Code-Pro.md"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/SourceHanSansCN-VF.ttf",
+      "sha256": "25a01e41b5cc99893eb35a6cd2cc7611841dc19eb03cbaf7f0c1de8210f2ba0b",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Source-Han-Sans.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/SourceSans3VF-Upright.ttf",
+      "sha256": "1147db9a3f0edd4956068de77930148acce2742dd76d57f7239b2b1c687ac63f",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Source-Sans-3.md"
+    },
+    {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon_dark_surface.ico",
+      "sha256": "f8a803e7e32042481fa70f5c2b7525233f91bcb4026dd1a722245953e8977fac",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon_light_surface.ico",
+      "sha256": "164f25e9c0b76f84cdaae4a1d0a65a88eb9e2c92e26e420b3019ec0a33a45fca",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon.ico",
+      "sha256": "4b58ca7fe99357808452ce48578e07b116ebddc1e9815dd52700e0c587a4ccf9",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    }
+  ]
+}

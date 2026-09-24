@@ -17,7 +17,7 @@ jobs:
   build:
     name: Build and test
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Check out source
@@ -27,6 +27,20 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 8.0.x
+
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: |
+          $sdkPath = Join-Path $env:RUNNER_TEMP 'starbridge-flutter-sdk'
+          git init $sdkPath
+          if ($LASTEXITCODE -ne 0) { throw 'Flutter SDK checkout initialization failed' }
+          git -C $sdkPath remote add origin https://github.com/flutter/flutter.git
+          git -C $sdkPath fetch --depth 1 origin d3b14c876900e553bc736ca19295fc09e3853e8e
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Flutter revision fetch failed' }
+          git -C $sdkPath checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Flutter checkout failed' }
+          if ((git -C $sdkPath rev-parse HEAD) -ne 'd3b14c876900e553bc736ca19295fc09e3853e8e') { throw 'Unexpected Flutter revision' }
+          (Join-Path $sdkPath 'bin') >> $env:GITHUB_PATH
 
       - name: Select installed Windows SDK
         shell: pwsh
@@ -44,21 +58,7 @@ jobs:
         run: |
           & "./scripts/Test Repository Safety.ps1"
 
-      - name: Validate public downloads and help links
+      - name: Build and validate the complete public client
         shell: pwsh
         run: |
-          & "./scripts/Test StarBridge Public Hub.ps1"
-
-      - name: Restore
-        run: dotnet restore StarBridge.sln -p:StarBridgeTargetPlatformVersion=${{ env.STARBRIDGE_TARGET_PLATFORM_VERSION }}
-
-      - name: Validate third-party license inventory
-        shell: pwsh
-        run: |
-          & "./scripts/Test Third Party Licenses.ps1"
-
-      - name: Build
-        run: dotnet build StarBridge.sln --configuration Release --no-restore -p:StarBridgeTargetPlatformVersion=${{ env.STARBRIDGE_TARGET_PLATFORM_VERSION }} -p:StarBridgeIncludeCommercialAppearances=false -p:StarBridgeIncludeThirdPartyMedia=false -p:StarBridgeIncludeRestrictedGameData=false
-
-      - name: Run regression tests
-        run: dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build
+          & "./scripts/Test StarBridge Public Client.ps1"

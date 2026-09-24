@@ -10,7 +10,10 @@
   <ItemGroup>
     <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
     <!-- Exercise the platform-free desktop geometry without moving UI into Core. -->
-    <Compile Include="..\StarBridge.Desktop\OverlayEventStackLayout.cs" Link="DesktopGeometry\OverlayEventStackLayout.cs" />
+    <Compile Include="../StarBridge.OverlayRuntime.Windows/Rendering/OverlayEventStackLayout.cs" Link="DesktopGeometry/OverlayEventStackLayout.cs"
+             Condition="Exists('../StarBridge.OverlayRuntime.Windows/Rendering/OverlayEventStackLayout.cs')" />
+    <Compile Include="../StarBridge.Desktop/OverlayEventStackLayout.cs" Link="DesktopGeometry/OverlayEventStackLayout.cs"
+             Condition="!Exists('../StarBridge.OverlayRuntime.Windows/Rendering/OverlayEventStackLayout.cs')" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,7 +2,7 @@
 
 ## 1. 安装应用
 
-推荐下载 [在线安装器](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-online-setup.exe)。需要离线安装时，可下载 [完整安装包](https://github.com/Domino-L/StarBridge-OpenCore/releases/latest/download/StarBridge-win-x64-setup.exe)。
+请从 [星海舰桥官网](https://scstarbridge.com/) 查看当前版本和更新说明，下载完整安装包。当前公开测试版为 0.7.0.1。
 
 当前测试版安装包可能触发 Windows SmartScreen 提示。请确认文件来自 `Domino-L/StarBridge-OpenCore` 的 Releases 或星海舰桥官网，再继续安装。
 
@@ -18,10 +18,10 @@ StarCitizen\LIVE\Game.log
 
 ## 3. 选择你要使用的功能
 
-- “寻找舰队”用于浏览和加入公开舰队；
-- “我的舰队”用于查看成员、小队、通讯、舰船与管理内容；
-- “组队大厅”用于创建或加入临时房间；
-- “游戏浮层”用于配置游戏内显示的协作信息；
+- “社区组织”用于查找、加入组织以及查看成员、聊天、舰船与管理内容；
+- “房间”用于创建或加入临时组队房间；
+- “个人机库”用于读取、确认并保存自己的机库；
+- “浮层”用于配置信息浮层；当前版本不提供菜单浮层；
 - 点击右上角头像可进入个人资料、设置和帮助。
 
 未登录时仍可使用部分本地浮层能力，但舰队、好友、房间和在线同步功能需要登录。

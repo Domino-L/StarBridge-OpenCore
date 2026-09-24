@@ -1,23 +1,48 @@
 # 核验 StarBridge Release
 
-当前桥梁版本为 0.6.6.1；它只负责引导到 Flutter 0.7.0，不替换旧 WPF 更新包。
+当前公开测试版为 0.7.0.1。版本记录按产品版本统一展示，不区分实现技术。
 
 请只运行来自 [StarBridge-OpenCore Releases](https://github.com/Domino-L/StarBridge-OpenCore/releases)
 或 [星海舰桥官网](https://scstarbridge.com/) 的安装器。相同文件名不能证明文件可信。
 
-## 0.6.6.1 的签名状态
+## 0.7.0.1 的签名状态
 
-0.6.6.1 的主程序、完整安装器和在线安装器均必须具有可信 Windows Authenticode
+0.7.0.1 的主程序、更新助手和完整安装器均必须具有可信 Windows Authenticode
 签名和时间戳。如果 Windows 显示“未知发布者”，或 `Get-AuthenticodeSignature`
 不是 `Valid`，请不要安装或运行该文件。
 
-## 1. 核验精确 tag 和 Release 资产
+## 0.7.0.1 完整安装器
+
+本版使用完整安装器，不使用历史版本的 `win-x64-update.zip`。正式下载文件为：
+
+- 官网文件：`StarBridge-0.7.0.1-20260923-04-win-x64-setup.exe`
+- GitHub 附件：`StarBridge-0.7.0.1-win-x64-setup.exe`
+- 两者 SHA-256：`f00f028f32be3233111edb77809380d24215a01288b3f0cc678e5b297bb7a129`
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\StarBridge-0.7.0.1-win-x64-setup.exe
+Get-AuthenticodeSignature .\StarBridge-0.7.0.1-win-x64-setup.exe |
+    Format-List Status, SignerCertificate, TimeStamperCertificate
+```
+
+摘要必须完全一致，签名必须是 `Valid` 且有可信时间戳。应用内更新另行验证
+带签名的安装清单，其版本、地址、摘要及公告内容都属于验证范围。
+GitHub Release 发布后，还应运行 `gh release verify v0.7.0.1 --repo Domino-L/StarBridge-OpenCore`
+与相应的 `gh release verify-asset`；草稿或未通过不可变验证不等于已完成 GitHub 发布。
+
+当前 OpenCore `main` 会继续演进，不是完整官方安装包的逐字节构建证明。
+下列 ZIP、SBOM 和载荷审计命令适用于随附这些证据的历史发行包，不能声称
+已核验不存在的当前版附件，也不能把旧报告用于新的安装器。
+
+## 历史 ZIP 发行包核验（以 0.6.6 为例）
+
+### 1. 核验精确 tag 和 Release 资产
 
 安装 [GitHub CLI](https://cli.github.com/) 后运行：
 
 ```powershell
 $repo = "Domino-L/StarBridge-OpenCore"
-$tag = "v0.6.6.1"
+$tag = "v0.6.6"
 
 gh release verify $tag --repo $repo
 gh release download $tag --repo $repo --dir ".\release"

@@ -487,6 +487,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("GameLog journal LifeEvidenceUsesSameParser", GameLogJournalSourceTests.LifeEvidenceUsesSameParser),
     ("GameLog journal InvalidIdentityAndAccountDoNotCommit", GameLogJournalSourceTests.InvalidIdentityAndAccountDoNotCommit),
     ("GameLog journal PauseResetAndPartialLines", GameLogJournalSourceTests.PauseResetAndPartialLines),
+    ("GameLog catalog synthetic and absent data", GameLogLocationCatalogTests.SyntheticAndAbsentCatalog),
     ("GameLog journal ServerNavigationAndPrivateProjection", GameLogJournalSourceTests.ServerNavigationAndPrivateProjection),
     ("GameLog journal ClearAndAccountRace", GameLogJournalSourceTests.ClearAndAccountRace),
     ("GameLog journal RecoveryAndBoundedQueue", GameLogJournalSourceTests.RecoveryAndBoundedQueue),
@@ -2166,13 +2167,17 @@ static string FindRepositoryRoot()
          directory is not null;
          directory = directory.Parent)
     {
-        if (File.Exists(Path.Combine(directory.FullName, "StarBridge.sln")))
+        // Identify this source tree by its projects, not the old solution name.
+        // An exported client tree can live beneath the private repository; never
+        // walk past that tree and accidentally validate the private parent's files.
+        if (File.Exists(Path.Combine(directory.FullName, "StarBridge.HostRuntime", "StarBridge.HostRuntime.csproj")) &&
+            File.Exists(Path.Combine(directory.FullName, "StarBridge.NativeHost", "StarBridge.NativeHost.csproj")))
         {
             return directory.FullName;
         }
     }
 
-    throw new InvalidOperationException("Could not locate StarBridge.sln from the test output directory.");
+    throw new InvalidOperationException("Could not locate the client source projects from the test output directory.");
 }
 
 static string CreateIsolatedDataRoot()

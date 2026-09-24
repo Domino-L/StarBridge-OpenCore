@@ -1,0 +1,4 @@
+#pragma once
+inline constexpr wchar_t kHangarIdentityScript[] = LR"SBJS(@SB_READER_IDENTITY@)SBJS";
+inline constexpr wchar_t kHangarPageScript[] = LR"SBJS(@SB_READER_PAGE@)SBJS";
+inline constexpr wchar_t kHangarCaptureScript[] = LR"SBJS(@SB_READER_CAPTURE@)SBJS";

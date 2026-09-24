@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.14)
+project(overlay_editor_native_test LANGUAGES CXX)
+add_executable(overlay_editor_native_test main.cpp ../../../../windows/runner/overlay_editor_window.cpp)
+target_compile_features(overlay_editor_native_test PRIVATE cxx_std_17)
+target_compile_definitions(overlay_editor_native_test PRIVATE UNICODE _UNICODE NOMINMAX)
+target_include_directories(overlay_editor_native_test PRIVATE ../../../../windows/runner)
+target_link_libraries(overlay_editor_native_test PRIVATE user32 ole32 uuid)

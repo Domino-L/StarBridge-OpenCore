@@ -24,7 +24,10 @@ $requiredFiles = @(
     "third-party-media-manifest.json",
     "BINARY-DISTRIBUTION-NOTICE.md",
     "third-party-packages.json",
-    "StarBridge.Desktop/Assets/Brand/LICENSE.txt",
+    "StarBridge.Flutter/assets/brand/LICENSE.txt",
+    "StarBridge.Flutter/pubspec.yaml",
+    "client-assets.json",
+    "flutter-packages.json",
     "scripts/Test Third Party Licenses.ps1",
     "scripts/Test StarBridge Version Migration.ps1",
     "SUPPORT.md",
@@ -59,9 +62,8 @@ $readmePath = Join-Path $Root "README.md"
 if (Test-Path -LiteralPath $readmePath) {
     $readme = [IO.File]::ReadAllText($readmePath)
     $requiredReadmeText = @(
-        "StarBridge-online-setup.exe",
-        "StarBridge-win-x64-setup.exe",
-        "releases/latest/download",
+        "https://scstarbridge.com/",
+        "StarBridge-0.7.0.1-20260923-04-win-x64-setup.exe",
         "SHA256SUMS.txt",
         "Apache License 2.0",
         "BINARY-DISTRIBUTION-NOTICE.md",
@@ -79,6 +81,10 @@ if (Test-Path -LiteralPath $readmePath) {
 }
 
 $forbiddenPublicPaths = @(
+    "StarBridge.Desktop",
+    "StarBridge.Server",
+    "StarBridge.CommercialAppearances",
+    ".private-ops",
     "StarBridge.Desktop/Data/ship-names-zh.txt",
     "StarBridge.Desktop/Data/ship-catalog.tsv",
     "StarBridge.Desktop/Data/ship-loaner-matrix.tsv",
@@ -161,7 +167,7 @@ if ((Test-Path -LiteralPath $shipNamePackPath -PathType Leaf) -and
     }
 }
 
-$publicProjectPath = Join-Path $Root "StarBridge.Desktop/StarBridge.Desktop.csproj"
+$publicProjectPath = Join-Path $Root "Directory.Build.props"
 if (Test-Path -LiteralPath $publicProjectPath) {
     $publicProject = [IO.File]::ReadAllText($publicProjectPath)
     if ($publicProject.Contains("Data\ship-name-pack.schema.json") -or

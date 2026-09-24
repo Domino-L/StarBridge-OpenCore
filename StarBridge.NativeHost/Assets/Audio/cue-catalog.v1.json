@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "assetId": "soft-approved-v1",
+      "cueId": "notify.soft",
+      "fileName": "notify.soft.wav",
+      "tier": "approved",
+      "priority": 320,
+      "sha256": "2ff1ead9863e3238e155d169b74d6b9aca859fe64b11e301aa0f887c25e1ef81"
+    },
+    {
+      "assetId": "action-candidate-a",
+      "cueId": "notify.action",
+      "fileName": "notify.action.candidate_a.wav",
+      "tier": "candidate",
+      "priority": 220,
+      "sha256": "97af42dbf7ca71cf278078791030e0669c1b940f065f459e70f0ed3f4e5cdb84"
+    },
+    {
+      "assetId": "operation-candidate-a",
+      "cueId": "notify.operation",
+      "fileName": "notify.operation.candidate_a.wav",
+      "tier": "candidate",
+      "priority": 220,
+      "sha256": "a50ce747bfb24189ceb4a6f3b766a3c341f9f0547dde7112f2373cdaddaed4a0"
+    },
+    {
+      "assetId": "emergency-approved-x5",
+      "cueId": "notify.emergency_broadcast",
+      "fileName": "notify.emergency_broadcast.wav",
+      "tier": "approved",
+      "priority": 350,
+      "sha256": "10a6652f4f518717246ae94bca4be1d0e7b9d5e42e13e2eceb6b9738535a82e4"
+    },
+    {
+      "assetId": "emergency-fallback-x4",
+      "cueId": "notify.emergency_broadcast",
+      "fileName": "notify.emergency_broadcast.fallback_x4.wav",
+      "tier": "fallback",
+      "priority": 140,
+      "sha256": "9c0778c3e6b22d37271bc5f34580fc483931e6a3286d5cf0fe14152f6bdee1b1"
+    }
+  ]
+}

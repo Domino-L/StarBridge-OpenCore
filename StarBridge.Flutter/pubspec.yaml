@@ -1,0 +1,52 @@
+name: starbridge_flutter
+description: "StarBridge Windows Flutter client."
+publish_to: 'none'
+version: 0.7.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  crypto: ^3.0.7
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  video_player: ^2.14.0
+  video_player_win: ^3.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    # Includes the approved startup mark and its separately animated center star.
+    - assets/brand/
+    - assets/brand/small_icons/dark_surface/
+    - assets/brand/small_icons/light_surface/
+    # Explicit entries also invalidate incremental bundles when SCM is integrated.
+    - assets/brand/scm_mark.png
+    - assets/brand/scm_wordmark.png
+    - assets/overlay-appearances/
+    - assets/font-licenses/
+    - assets/legal/
+    - assets/profile-wallpapers/
+    - assets/ships/
+    # Optional local WPF system media; the UI also supports a neutral fallback.
+    - assets/systems/
+    - assets/home-scenes/
+
+  fonts:
+    - family: Source Sans 3
+      fonts:
+        - asset: assets/fonts/SourceSans3VF-Upright.ttf
+    - family: Source Han Sans CN
+      fonts:
+        - asset: assets/fonts/SourceHanSansCN-VF.ttf
+    - family: Source Code Pro
+      fonts:
+        - asset: assets/fonts/SourceCodeVF-Upright.ttf

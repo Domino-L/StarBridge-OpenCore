@@ -1,0 +1,79 @@
+<Project>
+  <!-- Internal source remains single-owned during extraction. Public export maps
+       this exact allowlist into Rendering; no legacy application is required. -->
+  <PropertyGroup>
+    <StarBridgeWindowsRenderingSourceRoot Condition="'$(StarBridgeWindowsRenderingSourceRoot)' == '' and Exists('$(MSBuildThisFileDirectory)Rendering/NativeInformationOverlayRuntime.cs')">$(MSBuildThisFileDirectory)Rendering</StarBridgeWindowsRenderingSourceRoot>
+    <StarBridgeWindowsRenderingSourceRoot Condition="'$(StarBridgeWindowsRenderingSourceRoot)' == ''">$(MSBuildThisFileDirectory)../StarBridge.Desktop</StarBridgeWindowsRenderingSourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/CommunicationTimeFormatter.cs" Link="Rendering/CommunicationTimeFormatter.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/DesktopNotificationCard.cs" Link="Rendering/DesktopNotificationCard.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/DesktopNotificationEnvironment.cs" Link="Rendering/DesktopNotificationEnvironment.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/DesktopNotificationMotion.cs" Link="Rendering/DesktopNotificationMotion.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/DesktopRuntimeDiagnostics.cs" Link="Rendering/DesktopRuntimeDiagnostics.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/FleetLocationProjection.cs" Link="Rendering/FleetLocationProjection.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/FleetProfilePayloadBuilder.cs" Link="Rendering/FleetProfilePayloadBuilder.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/FleetRosterSearchPolicy.cs" Link="Rendering/FleetRosterSearchPolicy.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/FleetServerRelationship.cs" Link="Rendering/FleetServerRelationship.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/GameCompatibleHotkeyListener.cs" Link="Rendering/GameCompatibleHotkeyListener.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/IOverlayHost.cs" Link="Rendering/IOverlayHost.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/LagrangeWeaveGeometry.cs" Link="Rendering/LagrangeWeaveGeometry.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/LagrangeWeaveTimeline.cs" Link="Rendering/LagrangeWeaveTimeline.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/LocalPlayReminderCopyCatalog.cs" Link="Rendering/LocalPlayReminderCopyCatalog.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/LocationArrivalPresentation.cs" Link="Rendering/LocationArrivalPresentation.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/LocationCatalogIndex.cs" Link="Rendering/LocationCatalogIndex.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/LocationNameLocalizer.cs" Link="Rendering/LocationNameLocalizer.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/Models/PartyLobbyMemberPreview.cs" Link="Rendering/Models/PartyLobbyMemberPreview.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/Models/PlayerRow.cs" Link="Rendering/Models/PlayerRow.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeDesktopNotificationRuntime.cs" Link="Rendering/NativeDesktopNotificationRuntime.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Community.cs" Link="Rendering/NativeInformationOverlayRuntime.Community.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.ContinuousPlay.cs" Link="Rendering/NativeInformationOverlayRuntime.ContinuousPlay.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.cs" Link="Rendering/NativeInformationOverlayRuntime.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Language.cs" Link="Rendering/NativeInformationOverlayRuntime.Language.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Reminders.cs" Link="Rendering/NativeInformationOverlayRuntime.Reminders.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Room.cs" Link="Rendering/NativeInformationOverlayRuntime.Room.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.SharedActivity.cs" Link="Rendering/NativeInformationOverlayRuntime.SharedActivity.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Status.cs" Link="Rendering/NativeInformationOverlayRuntime.Status.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayAdaptiveFramePacer.cs" Link="Rendering/OverlayAdaptiveFramePacer.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayBarrageTextMeasurementCache.cs" Link="Rendering/OverlayBarrageTextMeasurementCache.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.AppearanceRuntime.cs" Link="Rendering/OverlayCompositionHudWindow.AppearanceRuntime.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.cs" Link="Rendering/OverlayCompositionHudWindow.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.Events.cs" Link="Rendering/OverlayCompositionHudWindow.Events.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.FrameChrome.cs" Link="Rendering/OverlayCompositionHudWindow.FrameChrome.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.LagrangeWeave.cs" Link="Rendering/OverlayCompositionHudWindow.LagrangeWeave.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.Panels.cs" Link="Rendering/OverlayCompositionHudWindow.Panels.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.RenderSupport.cs" Link="Rendering/OverlayCompositionHudWindow.RenderSupport.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionStartupTransitionWindow.cs" Link="Rendering/OverlayCompositionStartupTransitionWindow.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEntitlementPolicy.cs" Link="Rendering/OverlayEntitlementPolicy.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEventShipPresentation.cs" Link="Rendering/OverlayEventShipPresentation.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEventStackLayout.cs" Link="Rendering/OverlayEventStackLayout.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayFrameScheduler.cs" Link="Rendering/OverlayFrameScheduler.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayGameEventNotificationPolicy.cs" Link="Rendering/OverlayGameEventNotificationPolicy.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayHotkeyBindingPolicy.cs" Link="Rendering/OverlayHotkeyBindingPolicy.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayHwndDiagnostics.cs" Link="Rendering/OverlayHwndDiagnostics.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayModels.cs" Link="Rendering/OverlayModels.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayOverviewLocationLayout.cs" Link="Rendering/OverlayOverviewLocationLayout.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayOverviewProjection.cs" Link="Rendering/OverlayOverviewProjection.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayRosterSelection.cs" Link="Rendering/OverlayRosterSelection.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayScene.cs" Link="Rendering/OverlayScene.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlaySkinCatalog.cs" Link="Rendering/OverlaySkinCatalog.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlaySquadStatusRowLayout.cs" Link="Rendering/OverlaySquadStatusRowLayout.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayStartupBoundary.cs" Link="Rendering/OverlayStartupBoundary.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayStartupFocusPolicy.cs" Link="Rendering/OverlayStartupFocusPolicy.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayStartupTransitionLayer.cs" Link="Rendering/OverlayStartupTransitionLayer.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlaySurfaceLayout.cs" Link="Rendering/OverlaySurfaceLayout.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayViewModel.cs" Link="Rendering/OverlayViewModel.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/PlayerActivityNotificationCard.cs" Link="Rendering/PlayerActivityNotificationCard.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/PlayerEventSharingPolicy.cs" Link="Rendering/PlayerEventSharingPolicy.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/PlayerPresencePresentation.cs" Link="Rendering/PlayerPresencePresentation.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/ShipDisplayNamePresentation.cs" Link="Rendering/ShipDisplayNamePresentation.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/ShipNameCatalog.cs" Link="Rendering/ShipNameCatalog.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/ShipNameLocalizer.cs" Link="Rendering/ShipNameLocalizer.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/StarCitizenProcessProbe.cs" Link="Rendering/StarCitizenProcessProbe.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/StatusPalette.cs" Link="Rendering/StatusPalette.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/UiMotion.Availability.cs" Link="Rendering/UiMotion.Availability.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/UiMotionProfile.cs" Link="Rendering/UiMotionProfile.cs" />
+    <Compile Include="../shared/client-policies/GameServerRegionPresentation.cs" Link="Rendering/GameServerRegionPresentation.cs" />
+  </ItemGroup>
+</Project>
+

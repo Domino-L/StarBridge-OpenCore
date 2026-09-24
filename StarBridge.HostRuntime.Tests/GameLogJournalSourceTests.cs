@@ -137,7 +137,9 @@ internal static class GameLogJournalSourceTests
         f.Add("<Quantum Drive Arrived - Arrived at Final Destination> CSCItemNavigation::OnQuantumDriveArrived");
         f.Call();
         Check(f.Journal.Entries.Count(e => e.EventType == "ServerJoined") == 1, "Join transition not repeated state");
-        Check(f.Journal.Entries.Any(e => e.Title.Contains("罗威尔")), "Existing location catalog used");
+        var expectedLocation = GameLogLocationCatalogTests.HasPack ? "罗威尔" : "Stanton1_Lorville";
+        Check(f.Journal.Entries.Any(e => e.Title == "Pilot_A 位置更新：" + expectedLocation),
+            "Local journal uses the optional catalog, or preserves the local identifier when absent");
         Check(f.Journal.Entries.Any(e => e.Title.Contains("已抵达导航目标")), "Arrival uses preceding navigation evidence");
         var count = f.Journal.Entries.Length;
         f.Add("<RequestLocationInventory> Player[Other_Pilot] requested inventory for Location[Stanton1_Lorville]");

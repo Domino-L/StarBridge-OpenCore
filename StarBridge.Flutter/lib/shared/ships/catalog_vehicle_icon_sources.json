@@ -1,0 +1,410 @@
+{
+  "schemaVersion": 1,
+  "status": "approved-artwork-static-port",
+  "distributionLicense": "Not established by this handoff; no public redistribution grant",
+  "catalog": "vehicle-motion-catalog-v2.html",
+  "catalogSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+  "sourceRoot": "thread visualizations/2026/08/29/01a04eaa-27a6-7f72-a135-3fc1d77383a6",
+  "sourceFiles": {
+    "approved/ship-combat-v1/combat-small.svg": "c576e08caec0319ba02ba4351a95f6a79f1defb1cbafdee2129e25bee62bc909",
+    "approved/ship-combat-v1/combat-medium.svg": "012718a71c68bfcd43076293cd2693ca179d4751297d60e98af660527185b82b",
+    "approved/ship-combat-v1/combat-large.svg": "523635b1fc75ea93f2236fa3cec915573210f11b9f002ddcf6b6cccd981cf690",
+    "approved/ship-combat-v1/combat-capital.svg": "b77036792bc065b5b6740313e4e9f66585184e2351341e7d6f3cc325f056d900",
+    "approved/ship-exploration-v1/exploration-small.svg": "7612f5bfd62f3c7aa76cf240ec166fc3a4bb9214302af8bae09a8887c33317c6",
+    "approved/ship-exploration-v1/exploration-medium.svg": "5b9b93f69315f5cd5a5c5982eb25217e99441dfc7abb313bda7c3d3a0c449296",
+    "approved/ship-exploration-v1/exploration-large.svg": "d7b7235b0617aa33a0fb2959dafb9bf2554d3b821ba2dc56d86b99966e93884a",
+    "approved/ship-exploration-v1/exploration-capital.svg": "24d79ac10f752662c7fa7ba2d61dcee7b079c4ffe14472db7f6fb1d8878068a4",
+    "vehicle-motion-catalog-v2.html": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+    "approved/ship-logistics-v1/logistics-small.svg": "0f5db869aa034b58649793f7cdd159d0c76e4ae48f72f91290f1f99375fe237f",
+    "approved/ship-logistics-v1/logistics-medium.svg": "97aab6d379aebfc6d2447a58f4f080750041aa1d67d23cd46474ae7cc469f135",
+    "approved/ship-logistics-v1/logistics-large.svg": "4d6d6282821c284f748ff5ac3f000e7617d8268a20c7006cae0046393dcf2434",
+    "approved/ship-logistics-v1/logistics-capital.svg": "d4df760a79eb4da9c3d55d1c3bba5dcc2dd329785dffffbce322f1c4777f6246",
+    "approved/ship-unclassified-v1/unclassified-small.svg": "f27f4eea23e75d9c6bf5a0f8acf33afd50898b9a024fd7b0eb5819f598d7ed0e",
+    "approved/ship-unclassified-v1/unclassified-medium.svg": "0bb8ed16450b50e9e726725bc58e9a8a74d4dbcbd44af88a319c3f45d5331e06",
+    "approved/ship-unclassified-v1/unclassified-large.svg": "bd6785439c704db62388a5a02ee0818bfa99c472ef3835f3c253d0436f5becbf",
+    "approved/ship-unclassified-v1/unclassified-capital.svg": "a5612cdf555d7217e4b50b531b3625942c99186a3a808c7a4b246c3a84d2d4a5"
+  },
+  "glyphs": [
+    {
+      "key": "combat/small",
+      "viewBox": [
+        0,
+        -7,
+        32,
+        39
+      ],
+      "sourceFile": "approved/ship-combat-v1/combat-small.svg",
+      "sourceSha256": "c576e08caec0319ba02ba4351a95f6a79f1defb1cbafdee2129e25bee62bc909",
+      "sourceSelector": null,
+      "layers": 5,
+      "normalizedGeometrySha256": "989842ccad0f88ba23eeac31fd23399cced9e15bfcf949485782dc38ef982027"
+    },
+    {
+      "key": "combat/medium",
+      "viewBox": [
+        0,
+        -2,
+        32,
+        34
+      ],
+      "sourceFile": "approved/ship-combat-v1/combat-medium.svg",
+      "sourceSha256": "012718a71c68bfcd43076293cd2693ca179d4751297d60e98af660527185b82b",
+      "sourceSelector": null,
+      "layers": 6,
+      "normalizedGeometrySha256": "29f1e96c2a9ee6808df133f544f07d10c1a1f389977722cdf388d087f63fb787"
+    },
+    {
+      "key": "combat/large",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        42
+      ],
+      "sourceFile": "approved/ship-combat-v1/combat-large.svg",
+      "sourceSha256": "523635b1fc75ea93f2236fa3cec915573210f11b9f002ddcf6b6cccd981cf690",
+      "sourceSelector": null,
+      "layers": 7,
+      "normalizedGeometrySha256": "10b66b6f2d401faa7f06e26e9cfe4ffeebd192d8249208cd723a3cc71918af3b"
+    },
+    {
+      "key": "combat/capital",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        42
+      ],
+      "sourceFile": "approved/ship-combat-v1/combat-capital.svg",
+      "sourceSha256": "b77036792bc065b5b6740313e4e9f66585184e2351341e7d6f3cc325f056d900",
+      "sourceSelector": null,
+      "layers": 8,
+      "normalizedGeometrySha256": "7bdfcfbcc2fbbbb581293c50cc856a25aa36f505beecbc32b66193a49f938b62"
+    },
+    {
+      "key": "exploration/small",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        42
+      ],
+      "sourceFile": "approved/ship-exploration-v1/exploration-small.svg",
+      "sourceSha256": "7612f5bfd62f3c7aa76cf240ec166fc3a4bb9214302af8bae09a8887c33317c6",
+      "sourceSelector": null,
+      "layers": 7,
+      "normalizedGeometrySha256": "f4bb6a77eaa35f747e96369ab5491c083ddafab5d4127a73e775a1097334a28d"
+    },
+    {
+      "key": "exploration/medium",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        42
+      ],
+      "sourceFile": "approved/ship-exploration-v1/exploration-medium.svg",
+      "sourceSha256": "5b9b93f69315f5cd5a5c5982eb25217e99441dfc7abb313bda7c3d3a0c449296",
+      "sourceSelector": null,
+      "layers": 8,
+      "normalizedGeometrySha256": "80358db94ce0016d5eaebf027ed3548313431380e07c9f9c61915798286bff51"
+    },
+    {
+      "key": "exploration/large",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        42
+      ],
+      "sourceFile": "approved/ship-exploration-v1/exploration-large.svg",
+      "sourceSha256": "d7b7235b0617aa33a0fb2959dafb9bf2554d3b821ba2dc56d86b99966e93884a",
+      "sourceSelector": null,
+      "layers": 9,
+      "normalizedGeometrySha256": "bd16e191a8ae5fc78562e0d9cf17bf32eed91850f4630921f71fecdd8aeef7ba"
+    },
+    {
+      "key": "exploration/capital",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        42
+      ],
+      "sourceFile": "approved/ship-exploration-v1/exploration-capital.svg",
+      "sourceSha256": "24d79ac10f752662c7fa7ba2d61dcee7b079c4ffe14472db7f6fb1d8878068a4",
+      "sourceSelector": null,
+      "layers": 10,
+      "normalizedGeometrySha256": "88193d1370e95ad49371686a57a607a18725033fb609b1d257bbd00c6bbc602d"
+    },
+    {
+      "key": "industrial/small",
+      "viewBox": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#indu-hangar-industrial-icons-v1 .vc-native [index=0]",
+      "layers": 5,
+      "normalizedGeometrySha256": "b655acd14dc4abfb2bb28bb49ea31c8ce747b0f75113e40f42f3245603921ddc"
+    },
+    {
+      "key": "industrial/medium",
+      "viewBox": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#indu-hangar-industrial-icons-v1 .vc-native [index=1]",
+      "layers": 5,
+      "normalizedGeometrySha256": "1833815bc6718f304227613fcc762be2acdd9c4691b839b13a3ffa94bd0032e4"
+    },
+    {
+      "key": "industrial/large",
+      "viewBox": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#indu-hangar-industrial-icons-v1 .vc-native [index=2]",
+      "layers": 5,
+      "normalizedGeometrySha256": "28ecf83e8c270293f7c36b92e1e231bb5b66ce4468a0ecbb1e13d8ac16f61f74"
+    },
+    {
+      "key": "industrial/capital",
+      "viewBox": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#indu-hangar-industrial-icons-v1 .vc-native [index=3]",
+      "layers": 5,
+      "normalizedGeometrySha256": "51dc3df0096627c2ee49006a46bb734c3043a5c81e4c763a671bd71d426e1d14"
+    },
+    {
+      "key": "logistics/small",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "approved/ship-logistics-v1/logistics-small.svg",
+      "sourceSha256": "0f5db869aa034b58649793f7cdd159d0c76e4ae48f72f91290f1f99375fe237f",
+      "sourceSelector": null,
+      "layers": 3,
+      "normalizedGeometrySha256": "5e4f260b518e180bd1b7af688b957d97f684fdebc9b17c6687552d58be368755"
+    },
+    {
+      "key": "logistics/medium",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "approved/ship-logistics-v1/logistics-medium.svg",
+      "sourceSha256": "97aab6d379aebfc6d2447a58f4f080750041aa1d67d23cd46474ae7cc469f135",
+      "sourceSelector": null,
+      "layers": 4,
+      "normalizedGeometrySha256": "7c2656f4366b8ee3af2388aadab2b416b43e7300cbb5e13af6dcf3af04b85b2f"
+    },
+    {
+      "key": "logistics/large",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "approved/ship-logistics-v1/logistics-large.svg",
+      "sourceSha256": "4d6d6282821c284f748ff5ac3f000e7617d8268a20c7006cae0046393dcf2434",
+      "sourceSelector": null,
+      "layers": 5,
+      "normalizedGeometrySha256": "78fd79136718b553fec5b377b24310ac0668c731d0ede50187919f61229178b9"
+    },
+    {
+      "key": "logistics/capital",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "approved/ship-logistics-v1/logistics-capital.svg",
+      "sourceSha256": "d4df760a79eb4da9c3d55d1c3bba5dcc2dd329785dffffbce322f1c4777f6246",
+      "sourceSelector": null,
+      "layers": 6,
+      "normalizedGeometrySha256": "556f11739aaa0147f5da686ab3315c9da45756342973c09487af3902bfff81e7"
+    },
+    {
+      "key": "support/small",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#resc-rescue-motion-v1 .vc-native [index=0]",
+      "layers": 6,
+      "normalizedGeometrySha256": "e1dacb18ed1589d955f822fd8bc6082ac6b01d91880c2ca99e541cc19db20d03"
+    },
+    {
+      "key": "support/medium",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#resc-rescue-motion-v1 .vc-native [index=1]",
+      "layers": 7,
+      "normalizedGeometrySha256": "bcaad338f9f5e3041eed7d2e76b624aff312bdfe99fd0ed192d8a0c23c1d4e49"
+    },
+    {
+      "key": "support/large",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#resc-rescue-motion-v1 .vc-native [index=2]",
+      "layers": 8,
+      "normalizedGeometrySha256": "dd880d4efb8092f899b37649a4a67a39246f26f69b3388da53e0afcd4c401968"
+    },
+    {
+      "key": "support/capital",
+      "viewBox": [
+        0,
+        -4,
+        32,
+        40
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#resc-rescue-motion-v1 .vc-native [index=3]",
+      "layers": 9,
+      "normalizedGeometrySha256": "d67cf6f6f203e54026ec474b67ca2b1856cb99e454c0eb6ce490c176fdd2bf00"
+    },
+    {
+      "key": "competition/small",
+      "viewBox": [
+        -8,
+        -15,
+        48,
+        84
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#competition-motion-v6 .vc-native [index=0]",
+      "layers": 5,
+      "normalizedGeometrySha256": "e0595781f53329bfe2cf6a6c6e00e5f7704b44d7b94542b6a496564b8bbd3d08"
+    },
+    {
+      "key": "competition/medium",
+      "viewBox": [
+        -8,
+        -15,
+        48,
+        84
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#competition-motion-v6 .vc-native [index=1]",
+      "layers": 6,
+      "normalizedGeometrySha256": "6f23dbcadd24ba967bd9411c57b5a87d9ed3e24614069a59e6889b0e843b3672"
+    },
+    {
+      "key": "competition/large",
+      "viewBox": [
+        -8,
+        -15,
+        48,
+        84
+      ],
+      "sourceFile": "vehicle-motion-catalog-v2.html",
+      "sourceSha256": "1f89bacfd9fffc296a47a588a4ffad735b764f0b14918af712bc0f89c1cdfcf0",
+      "sourceSelector": "#competition-motion-v6 .vc-native [index=2]",
+      "layers": 7,
+      "normalizedGeometrySha256": "97da819d0ceee9537716710201b861abbbe737b779180f4e562638059990d9da"
+    },
+    {
+      "key": "unclassified/small",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        44
+      ],
+      "sourceFile": "approved/ship-unclassified-v1/unclassified-small.svg",
+      "sourceSha256": "f27f4eea23e75d9c6bf5a0f8acf33afd50898b9a024fd7b0eb5819f598d7ed0e",
+      "sourceSelector": null,
+      "layers": 4,
+      "normalizedGeometrySha256": "09dd53b87d1200a1eb4290930e0c38d697d778b84bbbf5abb2fadfe60dcfb89c"
+    },
+    {
+      "key": "unclassified/medium",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        44
+      ],
+      "sourceFile": "approved/ship-unclassified-v1/unclassified-medium.svg",
+      "sourceSha256": "0bb8ed16450b50e9e726725bc58e9a8a74d4dbcbd44af88a319c3f45d5331e06",
+      "sourceSelector": null,
+      "layers": 4,
+      "normalizedGeometrySha256": "71d8105b03929e0320a7138645c52b8565c7d7e45d8e5ceee340c6f2e1b2aaef"
+    },
+    {
+      "key": "unclassified/large",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        44
+      ],
+      "sourceFile": "approved/ship-unclassified-v1/unclassified-large.svg",
+      "sourceSha256": "bd6785439c704db62388a5a02ee0818bfa99c472ef3835f3c253d0436f5becbf",
+      "sourceSelector": null,
+      "layers": 4,
+      "normalizedGeometrySha256": "94ac71ea117da2d270943342d20cbc0225e11792645f9798235ce846e7258b15"
+    },
+    {
+      "key": "unclassified/capital",
+      "viewBox": [
+        0,
+        -10,
+        32,
+        44
+      ],
+      "sourceFile": "approved/ship-unclassified-v1/unclassified-capital.svg",
+      "sourceSha256": "a5612cdf555d7217e4b50b531b3625942c99186a3a808c7a4b246c3a84d2d4a5",
+      "sourceSelector": null,
+      "layers": 4,
+      "normalizedGeometrySha256": "0a92cec9ae3bc407e18e416b41d1c818be8d3a532b461bba8beefed5a38fb354"
+    }
+  ],
+  "coordinates": "Affine SVG transforms expanded into absolute coordinates; browser float32 transform noise rounded to 6 decimal places.",
+  "palette": "Original white body resolves to textPrimary; accents preserved as 8-bit sRGB from approved SVG or dark catalog final state.",
+  "validation": "See task-local static-port-qa.json; Flutter runtime rendering not yet tested."
+}

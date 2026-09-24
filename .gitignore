@@ -4,6 +4,11 @@ obj/
 .vscode/
 .artifacts/
 TestResults/
+build/
+.dart_tool/
+.flutter-plugins-dependencies
+**/ephemeral/
+**/failures/
 *.user
 *.suo
 *.log
@@ -11,6 +16,17 @@ TestResults/
 **/Generated Files/
 
 # Provenance-reviewed data and media are distributed only through official builds.
+StarBridge.Desktop/
+StarBridge.Server/
+StarBridge.CommercialAppearances/
+.private-ops/
+StarBridge.Flutter/assets/ships/*.png
+StarBridge.Flutter/assets/ships/*.jpg
+StarBridge.Flutter/assets/profile-wallpapers/*.jpg
+StarBridge.Flutter/assets/overlay-appearances/*.png
+StarBridge.Flutter/assets/home-scenes/*.mp4
+StarBridge.Flutter/assets/home-scenes/*.jpg
+StarBridge.Flutter/assets/systems/*.png
 StarBridge.Desktop/Data/location-names-zh-unverified.txt
 StarBridge.Desktop/Data/location-names-zh.txt
 StarBridge.Desktop/Data/ship-names-zh.txt
