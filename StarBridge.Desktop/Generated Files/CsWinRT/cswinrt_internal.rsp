@@ -1,7 +1,0 @@
--target net8.0
--input 10.0.22621.0
--input 
--output "Generated Files\\CsWinRT"
-
--exclude Windows
--exclude Microsoft
