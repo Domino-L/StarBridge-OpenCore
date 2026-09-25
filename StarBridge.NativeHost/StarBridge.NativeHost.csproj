@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <Content Include="Assets/Audio/cue-catalog.v1.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- The runtime reader intentionally does not search parent directories. -->
+    <Content Include="../LICENSES/OFFICIAL-BINARY-LICENSE.txt" Link="OFFICIAL-BINARY-LICENSE.txt"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Private acceptance resources are staged explicitly, not redistributed as public source. -->
     <Content Include="../.private-ops/notification-audio/*.wav" Link="Assets/Audio/%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

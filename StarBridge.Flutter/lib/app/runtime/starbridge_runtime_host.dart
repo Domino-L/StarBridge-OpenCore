@@ -36,6 +36,7 @@ import 'startup_prompt_queue.dart';
 import 'first_use_privacy_flow.dart';
 import 'test_build_notice_flow.dart';
 import 'update_startup_receipt.dart';
+import 'application_update_flow.dart';
 import '../routing/open_destination_intent.dart';
 import '../../features/settings/local_privacy_page.dart';
 import '../../features/settings/bridge_data_location_result.dart';
@@ -85,6 +86,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   late final StartupPromptQueue _prompts;
   FirstUsePrivacyFlow? _privacyFlow;
   TestBuildNoticeFlow? _noticeFlow;
+  ApplicationUpdateFlow? _updateFlow;
+  final _shownUpdateVersions = <String>{};
   final _navigationRequests = ValueNotifier<OpenDestinationIntent?>(null);
 
   bool get _promptReady =>
@@ -182,6 +185,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   void _scheduleStartupChoice() {
     _noticeFlow?.wake();
     _privacyFlow?.wake();
+    _updateFlow?.wake();
     _prompts.wake();
     if (_disposed ||
         !_startup.complete ||
@@ -401,6 +405,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   }
 
   void _toggleExampleScene() {
+    _updateFlow?.dispose();
+    _updateFlow = null;
     _noticeFlow?.dispose();
     _noticeFlow = null;
     _privacyFlow?.dispose();
@@ -625,6 +631,17 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
             )
           : null;
       _noticeFlow?.wake();
+      _updateFlow?.dispose();
+      _updateFlow = ApplicationUpdateFlow(
+        session: lease.session,
+        queue: _prompts,
+        ready: () => _promptReady && revision == _hostRevision,
+        canPresent: () =>
+            !(_noticeFlow?.blocksPrompts ?? false) &&
+            !(_privacyFlow?.blocksOptionalPrompt ?? false),
+        shownVersions: _shownUpdateVersions,
+      );
+      _updateFlow?.wake();
       _readStorageMigrationResult(lease.session, revision);
       if (lease.session.hostCapabilities.contains(
         'applicationUpdates.firstFrameReady',
@@ -684,6 +701,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     }
     _hostRevision++;
     _hasConnectedHost = false;
+    _updateFlow?.dispose();
+    _updateFlow = null;
     _privacyFlow?.dispose();
     _privacyFlow = null;
     _observeStartupAccount(null);
@@ -739,6 +758,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   @override
   void dispose() {
     _disposed = true;
+    _updateFlow?.dispose();
     _noticeFlow?.dispose();
     _navigationRequests.dispose();
     _privacyFlow?.dispose();

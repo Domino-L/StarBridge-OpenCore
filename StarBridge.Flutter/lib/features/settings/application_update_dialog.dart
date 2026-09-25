@@ -5,6 +5,12 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../app/routing/exit_application_intent.dart';
 import '../../platform/bridge/bridge_client_session.dart';
+import 'application_update_panel.dart';
+import 'application_update_status.dart';
+
+final _announcedVersions = Expando<Set<String>>();
+Set<String> applicationUpdateShownVersions(BridgeClientSession session) =>
+    _announcedVersions[session] ??= <String>{};
 
 typedef ApplicationUpdateRead = Future<Map<String, dynamic>> Function();
 typedef ApplicationUpdatePrepare = Future<Map<String, dynamic>> Function(
@@ -13,8 +19,12 @@ typedef ApplicationUpdatePrepare = Future<Map<String, dynamic>> Function(
 
 Future<void> showApplicationUpdateDialog(
   BuildContext context,
-  BridgeClientSession? session,
-) async {
+  BridgeClientSession? session, {
+  ApplicationUpdateStatus? initialStatus,
+  bool startupAnnouncement = false,
+  bool Function()? isCurrent,
+  void Function(VoidCallback dismiss)? onDismissReady,
+}) async {
   BridgeRequestOperation? checking;
   BridgeRequestOperation? preparing;
   final progress = StreamController<Map<String, dynamic>>.broadcast();
@@ -37,68 +47,94 @@ Future<void> showApplicationUpdateDialog(
       Actions.maybeFind<ExitApplicationIntent>(context) != null;
   String? ticket;
   try {
-    ticket = await showDialog<String>(
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final route = DialogRoute<String>(
       context: context,
-      builder: (_) => ApplicationUpdateDialog(
-        progress: progress.stream,
-        read:
-            session == null ||
-                !session.hostCapabilities.contains('applicationUpdates.check')
-            ? null
-            : () async {
-                if (session.activeGeneration != generation) {
-                  throw const FormatException('Update session changed');
-                }
-                checking = session.beginRequest(
-                  'applicationUpdates.check',
-                  payload: const {'schemaVersion': 1},
-                  timeout: const Duration(seconds: 35),
-                );
-                return (await checking!.future).payload;
-              },
-        cancelCheck: () {
-          final operation = checking;
-          if (operation != null) unawaited(operation.cancel());
-        },
-        prepare: !installable
-            ? null
-            : (version) async {
-                if (session.activeGeneration != generation) {
-                  throw const FormatException('Update session changed');
-                }
-                preparing = session.beginRequest(
-                  'applicationUpdates.prepare',
-                  payload: {'schemaVersion': 1, 'version': version},
-                  timeout: const Duration(minutes: 11),
-                );
-                final operation = preparing!;
-                try {
-                  return (await operation.future).payload;
-                } finally {
-                  if (identical(preparing, operation)) preparing = null;
-                }
-              },
-        cancelPreparation: () {
-          final operation = preparing;
-          preparing = null;
-          if (operation != null) unawaited(operation.cancel());
-        },
-      ),
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+      barrierDismissible: false,
+      builder: (_) {
+        return ApplicationUpdateDialog(
+          initialStatus: initialStatus,
+          startupAnnouncement: startupAnnouncement,
+          onAvailable: (version) {
+            if (session != null) {
+              applicationUpdateShownVersions(session).add(version);
+            }
+          },
+          progress: progress.stream,
+          read:
+              session == null ||
+                  !session.hostCapabilities.contains('applicationUpdates.check')
+              ? null
+              : () async {
+                  if (session.activeGeneration != generation ||
+                      isCurrent?.call() == false) {
+                    throw const FormatException('Update session changed');
+                  }
+                  checking = session.beginRequest(
+                    'applicationUpdates.check',
+                    payload: const {'schemaVersion': 1},
+                    timeout: const Duration(seconds: 35),
+                  );
+                  return (await checking!.future).payload;
+                },
+          cancelCheck: () {
+            final operation = checking;
+            if (operation != null) unawaited(operation.cancel());
+          },
+          prepare: !installable
+              ? null
+              : (version) async {
+                  if (session.activeGeneration != generation ||
+                      isCurrent?.call() == false) {
+                    throw const FormatException('Update session changed');
+                  }
+                  preparing = session.beginRequest(
+                    'applicationUpdates.prepare',
+                    payload: {'schemaVersion': 1, 'version': version},
+                    timeout: const Duration(minutes: 11),
+                  );
+                  final operation = preparing!;
+                  try {
+                    return (await operation.future).payload;
+                  } finally {
+                    if (identical(preparing, operation)) preparing = null;
+                  }
+                },
+          cancelPreparation: () {
+            final operation = preparing;
+            preparing = null;
+            if (operation != null) unawaited(operation.cancel());
+          },
+        );
+      },
     );
+    onDismissReady?.call(() {
+      if (route.isActive) route.navigator?.removeRoute(route);
+    });
+    ticket = await navigator.push(route);
   } finally {
     // Teardown is not part of installation authorization. Stop delivery now;
     // do not hold the exit intent behind a subscription's asynchronous cleanup.
     unawaited(events?.cancel());
     unawaited(progress.close());
   }
-  if (ticket == null || !context.mounted || session == null) return;
+  if (ticket == null ||
+      !context.mounted ||
+      session == null ||
+      isCurrent?.call() == false) {
+    return;
+  }
   // Close the confirmation before invoking the existing draft/leave guards.
   Actions.maybeInvoke(
     context,
     ExitApplicationIntent(
       beforeExit: () async {
         try {
-          if (session.activeGeneration != generation) return false;
+          if (session.activeGeneration != generation ||
+              isCurrent?.call() == false) {
+            return false;
+          }
           final reply = (await session.request(
             'applicationUpdates.handoff',
             payload: {'schemaVersion': 1, 'ticket': ticket},
@@ -140,12 +176,18 @@ class ApplicationUpdateDialog extends StatefulWidget {
     this.cancelPreparation,
     this.cancelCheck,
     this.progress,
+    this.initialStatus,
+    this.startupAnnouncement = false,
+    this.onAvailable,
     super.key,
   });
   final ApplicationUpdateRead? read;
   final ApplicationUpdatePrepare? prepare;
   final VoidCallback? cancelPreparation;
   final VoidCallback? cancelCheck;
+  final ApplicationUpdateStatus? initialStatus;
+  final bool startupAnnouncement;
+  final ValueChanged<String>? onAvailable;
 
   /// Broadcast updates for the currently active prepare request only.
   final Stream<Map<String, dynamic>>? progress;
@@ -168,7 +210,11 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.initialStatus case final status?) {
+      _applyStatus(status);
+    } else {
+      _load();
+    }
   }
 
   @override
@@ -273,49 +319,9 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     }
     try {
       final value = await widget.read!().timeout(const Duration(seconds: 35));
-      const states = {
-        'channel-unconfigured',
-        'up-to-date',
-        'available',
-        'configuration-invalid',
-        'channel-unavailable',
-        'verification-failed',
-      };
-      if (value.length != 5 ||
-          !value.keys.every(
-            const {
-              'schemaVersion',
-              'state',
-              'currentVersion',
-              'availableVersion',
-              'notes',
-            }.contains,
-          ) ||
-          value['schemaVersion'] != 1 ||
-          !states.contains(value['state']) ||
-          ![
-            'currentVersion',
-            'availableVersion',
-            'notes',
-          ].every((key) => value[key] == null || value[key] is String) ||
-          (value['currentVersion'] as String? ?? '').length > 96 ||
-          (value['availableVersion'] as String? ?? '').length > 96 ||
-          (value['notes'] as String? ?? '').length > 16384 ||
-          (value['state'] == 'available' &&
-              (value['availableVersion'] == null ||
-                  !RegExp(r'^\d+\.\d+\.\d+(?:\.\d+)?$')
-                      .hasMatch(value['availableVersion'] as String))) ||
-          (value['state'] != 'available' &&
-              (value['availableVersion'] != null || value['notes'] != null))) {
-        throw const FormatException('Incompatible update status');
-      }
+      final status = ApplicationUpdateStatus.parse(value);
       if (!mounted) return;
-      setState(() {
-        _state = value['state'] as String;
-        _current = value['currentVersion'] as String?;
-        _available = value['availableVersion'] as String?;
-        _notes = value['notes'] as String?;
-      });
+      setState(() => _applyStatus(status));
     } on FormatException {
       if (mounted) setState(() => _state = 'unsupported');
     } on BridgeClientException catch (error) {
@@ -329,6 +335,14 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
       if (!mounted) return;
       _scheduleRetry();
     }
+  }
+
+  void _applyStatus(ApplicationUpdateStatus status) {
+    _state = status.state;
+    _current = status.payload['currentVersion'] as String?;
+    _available = status.version;
+    _notes = status.payload['notes'] as String?;
+    if (_available != null) widget.onAvailable?.call(_available!);
   }
 
   void _scheduleRetry() {
@@ -362,6 +376,8 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
         : 0;
     return const <String, List<String>>{
       'title': ['检查更新', '檢查更新', 'Check for updates'],
+      'announcement': ['发现新版本', '發現新版本', 'A new version is available'],
+      'later': ['稍后', '稍後', 'Later'],
       'checking': ['正在检查更新…', '正在檢查更新…', 'Checking for updates…'],
       'channel-unconfigured': [
         '此版本尚未提供在线更新。你可以继续使用当前客户端。',
@@ -391,9 +407,9 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
       ],
       'retry': ['重新检查', '重新檢查', 'Check again'],
       'available': [
-        '发现新版本；安装功能尚未开放。',
-        '發現新版本；安裝功能尚未開放。',
-        'An update is available. Installation is not available yet.',
+        '此安装暂时无法在应用内更新。请从官网下载最新版安装器，保留现有资料完成升级。',
+        '此安裝暫時無法在應用程式內更新。請從官網下載最新版安裝程式，保留現有資料完成升級。',
+        'In-app installation is unavailable for this installation. Use the latest installer from the official website, keeping your existing data.',
       ],
       'available-installable': [
         '发现新版本，可以下载更新。',
@@ -444,46 +460,47 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => ApplicationUpdatePanel(
     key: const Key('application-update-dialog'),
-    scrollable: true,
-    title: Text(t('title')),
-    content: SizedBox(
-      width: 440,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_current != null) Text('${t('current')} · $_current'),
-          Text(
-            t(
-              _state == 'available' && widget.prepare != null
-                  ? 'available-installable'
-                  : _state == 'downloading' && _phase != 'downloading'
-                  ? 'verifying'
-                  : _state,
-            ),
+    title: t(_available == null ? 'title' : 'announcement'),
+    currentLabel: t('current'),
+    current: _current,
+    version: _available,
+    body: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          t(
+            _state == 'available' && widget.prepare != null
+                ? 'available-installable'
+                : _state == 'downloading' && _phase != 'downloading'
+                ? 'verifying'
+                : _state,
           ),
-          if (_state == 'downloading' && _phase == 'downloading') ...[
-            const SizedBox(height: 12),
-            // Unknown size has no invented percentage or endless animation.
-            if (_total != null)
-              LinearProgressIndicator(value: _received / _total!),
-            Text(
-              _total == null
-                  ? '${(_received / 1048576).toStringAsFixed(1)} MB'
-                  : '${(_received * 100 / _total!).floor()}% · '
-                        '${(_received / 1048576).toStringAsFixed(1)} / '
-                        '${(_total! / 1048576).toStringAsFixed(1)} MB',
-            ),
-          ],
-          if (_available != null) ...[
-            Text(_available!),
-            if (_notes?.isNotEmpty == true) Text(_notes!),
-          ],
+        ),
+        if (_state == 'downloading' && _phase == 'downloading') ...[
+          const SizedBox(height: 12),
+          // Unknown size has no invented percentage or endless animation.
+          if (_total != null)
+            LinearProgressIndicator(value: _received / _total!),
+          Text(
+            _total == null
+                ? '${(_received / 1048576).toStringAsFixed(1)} MB'
+                : '${(_received * 100 / _total!).floor()}% · '
+                      '${(_received / 1048576).toStringAsFixed(1)} / '
+                      '${(_total! / 1048576).toStringAsFixed(1)} MB',
+          ),
         ],
-      ),
+        if (_available != null) ...[
+          if (_notes?.isNotEmpty == true) UpdateReleaseNotes(_notes!),
+        ],
+      ],
     ),
     actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: Text(t(widget.startupAnnouncement ? 'later' : 'close')),
+      ),
       if (_state == 'check-failed' ||
           _state == 'channel-unavailable' ||
           _state == 'verification-failed')
@@ -503,10 +520,6 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
           onPressed: () => Navigator.of(context).pop(_ticket),
           child: Text(t('install')),
         ),
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: Text(t('close')),
-      ),
     ],
   );
 }

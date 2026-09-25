@@ -58,6 +58,22 @@ void main() {
     await h.close(tester);
   });
   testWidgets(
+    'startup account generation change rechecks the existing receipt',
+    (tester) async {
+      final h = Harness()
+        ..acknowledged = true
+        ..advanceDuringFirstRead = true;
+      await h.mount(tester);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('test-build-notice')), findsNothing);
+      expect(h.reads, 2);
+      expect(h.flow.blocksPrompts, isFalse);
+      expect(h.accepts, 0);
+      await h.close(tester);
+    },
+  );
+  testWidgets(
     'first use explicitly acknowledges, then a new flow does not repeat',
     (tester) async {
       final h = Harness();
@@ -82,6 +98,50 @@ void main() {
       await h.close(tester);
     },
   );
+  testWidgets('unknown receipt retries silently without writing acceptance', (
+    tester,
+  ) async {
+    final h = Harness()
+      ..acknowledged = true
+      ..unknownReads = 1;
+    await h.mount(tester);
+    expect(find.byKey(const Key('test-build-notice')), findsNothing);
+    expect(h.flow.blocksPrompts, isTrue);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(h.reads, 2);
+    expect(h.accepts, 0);
+    expect(h.flow.blocksPrompts, isFalse);
+    expect(find.byKey(const Key('test-build-notice')), findsNothing);
+    await h.close(tester);
+  });
+  testWidgets('persistent read failure is bounded and never grants consent', (
+    tester,
+  ) async {
+    final h = Harness()..unknownReads = 20;
+    await h.mount(tester);
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+    }
+    expect(h.reads, 3);
+    expect(h.accepts, 0);
+    expect(h.flow.blocksPrompts, isTrue);
+    expect(find.byKey(const Key('test-build-notice')), findsOneWidget);
+    await h.close(tester);
+  });
+  testWidgets('disposing a pending read retry cancels subsequent requests', (
+    tester,
+  ) async {
+    final h = Harness()..unknownReads = 20;
+    await h.mount(tester);
+    expect(h.reads, 1);
+    h.flow.dispose();
+    await tester.pump(const Duration(seconds: 3));
+    expect(h.reads, 1);
+    expect(h.accepts, 0);
+    await h.close(tester);
+  });
   testWidgets(
     'failed acknowledgement stays visible and exit does not grant consent',
     (tester) async {
@@ -114,7 +174,8 @@ class Harness {
   );
   late TestBuildNoticeFlow flow;
   bool acknowledged = false, fail = false;
-  int accepts = 0, exits = 0;
+  bool advanceDuringFirstRead = false;
+  int accepts = 0, exits = 0, reads = 0, unknownReads = 0;
   void createFlow() => flow = TestBuildNoticeFlow(
     session: session,
     queue: queue,
@@ -130,6 +191,14 @@ class Harness {
   }) async {
     viewport(tester, size);
     subscription = pair.host.incoming.listen((request) {
+      if (request.messageType != 'request') return;
+      if (request.name == 'legal.readTestBuildNotice') {
+        reads++;
+        if (advanceDuringFirstRead && reads == 1) {
+          session.advanceGeneration(session.activeGeneration + 1);
+          return;
+        }
+      }
       if (request.name == 'legal.acceptTestBuildNotice') {
         accepts++;
         if (!fail) acknowledged = true;
@@ -141,13 +210,17 @@ class Harness {
             messageType: 'response',
             name: request.name,
             correlationId: request.correlationId,
-            sessionGeneration: 1,
+            sessionGeneration: request.sessionGeneration,
             status: 'ok',
-            payload: {
-              'schemaVersion': 1,
-              'termsVersion': '2026-08-01-v3',
-              'acknowledged': acknowledged,
-            },
+            payload:
+                request.name == 'legal.readTestBuildNotice' &&
+                    reads <= unknownReads
+                ? const {'schemaVersion': 1}
+                : {
+                    'schemaVersion': 1,
+                    'termsVersion': '2026-08-01-v3',
+                    'acknowledged': acknowledged,
+                  },
           ),
         ),
       );

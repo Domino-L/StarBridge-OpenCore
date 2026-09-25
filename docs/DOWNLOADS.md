@@ -1,11 +1,11 @@
 # 下载帮助
 
-当前公开测试版为 0.7.0.2；本版保留信息浮层，不提供菜单浮层。
+当前公开测试版为 0.7.0.3；本版保留信息浮层，不提供菜单浮层。
 
 ## 推荐下载方式
 
 - [官网下载页](https://scstarbridge.com/)：查看当前公告和校验信息。
-- [0.7.0.2 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.2-20260924-03-win-x64-setup.exe)：下载后可离线安装。
+- [0.7.0.3 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe)：下载后可离线安装。
 - [全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases)：查看版本说明、历史安装包和校验文件。
 
 GitHub 自动生成的 “Source code” 压缩包只包含开放核心源码，不是应用安装包。普通用户请选择名称以 `.exe` 结尾的安装器。

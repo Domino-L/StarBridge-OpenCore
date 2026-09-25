@@ -63,7 +63,7 @@ if (Test-Path -LiteralPath $readmePath) {
     $readme = [IO.File]::ReadAllText($readmePath)
     $requiredReadmeText = @(
         "https://scstarbridge.com/",
-        "StarBridge-0.7.0.2-20260924-03-win-x64-setup.exe",
+        "StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe",
         "SHA256SUMS.txt",
         "Apache License 2.0",
         "BINARY-DISTRIBUTION-NOTICE.md",

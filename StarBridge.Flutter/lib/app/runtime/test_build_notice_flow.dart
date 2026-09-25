@@ -24,11 +24,13 @@ final class TestBuildNoticeFlow {
   final VoidCallback onChanged;
   final _key = Object();
   bool _disposed = false, _reading = false, _checked = false, _required = true;
+  Timer? _readRetry;
+  int _readAttempts = 0;
   DialogRoute<bool>? _route;
   bool get blocksPrompts => !_disposed && (!_checked || _required);
 
   void wake() {
-    if (_disposed || _reading || _route != null) return;
+    if (_disposed || _reading || _readRetry != null || _route != null) return;
     if (!_checked) {
       unawaited(_read());
       return;
@@ -45,27 +47,41 @@ final class TestBuildNoticeFlow {
 
   Future<void> _read() async {
     _reading = true;
+    _readAttempts++;
+    bool? acknowledged;
     try {
       final response = await session.request(
         'legal.readTestBuildNotice',
         payload: const {'schemaVersion': 1},
       );
-      _required = !_valid(response.payload);
-    } catch (_) {
-      _required = true;
-    }
+      acknowledged = _receipt(response.payload);
+    } catch (_) {}
     if (_disposed) return;
-    _checked = true;
     _reading = false;
+    // Account restoration can invalidate the initial device read. An unknown
+    // result is not a missing receipt: retry the read, never the consent write.
+    if (acknowledged == null && _readAttempts < 3) {
+      _readRetry = Timer(Duration(milliseconds: 300 * _readAttempts), () {
+        _readRetry = null;
+        wake();
+      });
+      return;
+    }
+    _required = acknowledged != true;
+    _checked = true;
     onChanged();
     wake();
   }
 
-  bool _valid(Map<String, Object?> p) =>
+  bool? _receipt(Map<String, Object?> p) =>
       p.length == 3 &&
-      p['schemaVersion'] == 1 &&
-      p['termsVersion'] == '2026-08-01-v3' &&
-      p['acknowledged'] == true;
+          p['schemaVersion'] == 1 &&
+          p['termsVersion'] == '2026-08-01-v3' &&
+          p['acknowledged'] is bool
+      ? p['acknowledged'] as bool
+      : null;
+
+  bool _valid(Map<String, Object?> p) => _receipt(p) == true;
 
   Future<void> _show() async {
     final nav = queue.navigator;
@@ -101,6 +117,7 @@ final class TestBuildNoticeFlow {
 
   void dispose() {
     _disposed = true;
+    _readRetry?.cancel();
     queue.cancel(_key);
     final route = _route;
     WidgetsBinding.instance.addPostFrameCallback((_) {

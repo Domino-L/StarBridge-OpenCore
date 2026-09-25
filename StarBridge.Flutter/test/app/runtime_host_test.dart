@@ -17,6 +17,42 @@ import 'package:starbridge_flutter/features/settings/settings_entry_dialog.dart'
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'normal product entry automatically announces an available update without downloading',
+    (tester) async {
+      _startupViewport(tester);
+      final requests = <BridgeEnvelope>[];
+      final lease = _createSignedOutLease(
+        startupChoiceMade: true,
+        updateRequests: requests,
+      );
+      lease.session.acceptHostCapabilities(const [
+        'applicationUpdates.check',
+        'applicationUpdates.prepare',
+        'applicationUpdates.handoff',
+      ]);
+      await tester.pumpWidget(
+        StarBridgeRuntimeHost(
+          environment: const {},
+          windowChrome: InMemoryWindowChrome(),
+          nativeHostConnector: _CallbackNativeHostConnector(() async => lease),
+          reconnectDelay: const Duration(hours: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(requests.map((r) => r.name), ['applicationUpdates.check']);
+      expect(find.text('发现新版本'), findsOneWidget);
+      expect(find.text('下载更新'), findsOneWidget);
+      await tester.tap(find.text('稍后'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 10));
+      expect(find.text('发现新版本'), findsNothing);
+      expect(requests, hasLength(1));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   for (final failFirst in [false, true]) {
     testWidgets(
       'storage migration result retries transient failures $failFirst',
@@ -412,58 +448,57 @@ void main() {
     expect(lifecycle.hideCount, 0);
   });
 
-  testWidgets(
-    'product startup never exposes the example scene switch',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1440, 900);
-      tester.binding.platformDispatcher.localesTestValue = const [
-        Locale('zh', 'CN'),
-      ];
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+  testWidgets('product startup never exposes the example scene switch', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.binding.platformDispatcher.localesTestValue = const [
+      Locale('zh', 'CN'),
+    ];
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
 
-      await tester.pumpWidget(
-        StarBridgeRuntimeHost(
-          environment: const {
-            ShellReviewConfiguration.stateEnvironmentKey: 'healthy',
-            ShellReviewConfiguration.accountEnvironmentKey: 'signedin',
-          },
-          windowChrome: InMemoryWindowChrome(),
-          nativeHostConnector: _PendingNativeHostConnector(),
-        ),
-      );
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      StarBridgeRuntimeHost(
+        environment: const {
+          ShellReviewConfiguration.stateEnvironmentKey: 'healthy',
+          ShellReviewConfiguration.accountEnvironmentKey: 'signedin',
+        },
+        windowChrome: InMemoryWindowChrome(),
+        nativeHostConnector: _PendingNativeHostConnector(),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('startup-loading-page')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('startup-enter')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('example-scene-open')), findsNothing);
-      expect(find.byKey(const Key('example-scene-exit')), findsNothing);
-      expect(find.byKey(const Key('example-scene-notice')), findsNothing);
-      expect(find.byKey(const Key('connection-status-notice')), findsOneWidget);
-      expect(find.byKey(const Key('connection-status-retry')), findsOneWidget);
-      expect(find.text('未登录'), findsOneWidget);
-      expect(find.text('Aster Lin'), findsNothing);
+    expect(find.byKey(const Key('startup-loading-page')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('startup-enter')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('example-scene-open')), findsNothing);
+    expect(find.byKey(const Key('example-scene-exit')), findsNothing);
+    expect(find.byKey(const Key('example-scene-notice')), findsNothing);
+    expect(find.byKey(const Key('connection-status-notice')), findsOneWidget);
+    expect(find.byKey(const Key('connection-status-retry')), findsOneWidget);
+    expect(find.text('未登录'), findsOneWidget);
+    expect(find.text('Aster Lin'), findsNothing);
 
-      await tester.tap(find.byKey(const Key('account-command')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('account-menu-login')));
-      await tester.pumpAndSettle();
-      expect(find.text('Aster Lin'), findsNothing);
-      expect(find.byKey(const Key('example-scene-open')), findsNothing);
-      expect(find.byKey(const Key('example-scene-exit')), findsNothing);
-      expect(find.byKey(const Key('example-scene-notice')), findsNothing);
-      expect(find.text('Aster Lin'), findsNothing);
+    await tester.tap(find.byKey(const Key('account-command')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('account-menu-login')));
+    await tester.pumpAndSettle();
+    expect(find.text('Aster Lin'), findsNothing);
+    expect(find.byKey(const Key('example-scene-open')), findsNothing);
+    expect(find.byKey(const Key('example-scene-exit')), findsNothing);
+    expect(find.byKey(const Key('example-scene-notice')), findsNothing);
+    expect(find.text('Aster Lin'), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('/rooms')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('rooms-example-directory')), findsNothing);
-      expect(find.text('示例 · 货运护航'), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    await tester.tap(find.byKey(const ValueKey('/rooms')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('rooms-example-directory')), findsNothing);
+    expect(find.text('示例 · 货运护航'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('product swaps to the real Host lease and fails closed on exit', (
     tester,
@@ -737,6 +772,7 @@ _TestNativeHostLease _createSignedOutLease({
   bool stallAccount = false,
   List<BridgeEnvelope>? reminderRequests,
   List<BridgeEnvelope>? migrationRequests,
+  List<BridgeEnvelope>? updateRequests,
   bool failMigrationOnce = false,
 }) {
   final pair = InMemoryBridgeConnection.createPair();
@@ -757,6 +793,28 @@ _TestNativeHostLease _createSignedOutLease({
   unawaited(
     pair.host.incoming.forEach((request) async {
       if (request.name == 'bridge.cancel') return;
+      if (request.name == 'applicationUpdates.check' &&
+          updateRequests != null) {
+        updateRequests.add(request);
+        await pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: request.name,
+            correlationId: request.correlationId,
+            sessionGeneration: request.sessionGeneration,
+            status: 'ok',
+            payload: const {
+              'schemaVersion': 1,
+              'state': 'available',
+              'currentVersion': '0.7.0.1',
+              'availableVersion': '0.7.0.2',
+              'notes': '## 修复\n- 更新弹窗',
+            },
+          ),
+        );
+        return;
+      }
       if (request.name == 'dataLocation.getMigrationResult') {
         migrationRequests?.add(request);
         if (failMigrationOnce && migrationReads++ == 0) {
