@@ -9,6 +9,33 @@ import 'friend_sharing_controller_test.dart' show Harness;
 import 'local_privacy_page_test.dart' show app, viewport;
 
 void main() {
+  testWidgets('first-use save retry recognizes confirmed readback without replay', (
+    tester,
+  ) async {
+    viewport(tester, const Size(1280, 1000));
+    final h = Harness()..loseWriteReceipt = true;
+    final drafts = PrivacyPageDrafts();
+    await tester.pumpWidget(app(PrivacyDraftScope(
+      drafts: drafts, child: FriendSharingSetting(session: h.session),
+    )));
+    await tester.pumpAndSettle();
+    expect(drafts.dirty, isTrue);
+    final first = drafts.save();
+    await tester.pumpAndSettle();
+    expect(await first, isFalse);
+    expect(drafts.failed, isTrue);
+    expect(h.snapshot['fields'], 63); // Server saved; only the receipt was lost.
+    h.loseWriteReceipt = false;
+    final retry = drafts.save();
+    await tester.pumpAndSettle();
+    expect(await retry, isTrue);
+    expect(drafts.failed, isFalse);
+    expect(drafts.dirty, isFalse);
+    expect(h.writes, hasLength(1)); // Readback, never a duplicate write.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(h.close);
+    drafts.dispose();
+  });
   testWidgets('periodic refresh preserves editable drafts without loading UI', (
     tester,
   ) async {
@@ -123,6 +150,35 @@ void main() {
           .every((item) => !item.value),
       isTrue,
     );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(h.close);
+    drafts.dispose();
+  });
+  testWidgets('first-use retry preserves a conflicting confirmed preference', (tester) async {
+    viewport(tester, const Size(1280, 1000));
+    final h = Harness()..fail = true;
+    final drafts = PrivacyPageDrafts();
+    await tester.pumpWidget(app(PrivacyDraftScope(
+      drafts: drafts, child: FriendSharingSetting(session: h.session),
+    )));
+    await tester.pumpAndSettle();
+    final first = drafts.save();
+    await tester.pumpAndSettle();
+    expect(await first, isFalse);
+    h.snapshot = {
+      'schemaVersion': 1, 'revision': 1, 'operationId': '0' * 32,
+      'appliedAt': '2026-01-01T00:00:00Z', 'fields': 0,
+    };
+    h.fail = false;
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    final retry = drafts.save();
+    await tester.pumpAndSettle();
+    expect(await retry, isFalse);
+    expect(drafts.failed, isTrue);
+    expect(drafts.dirty, isTrue);
+    expect(h.writes, hasLength(1));
+    expect(h.snapshot['fields'], 0); // Never turn an explicit OFF into default ON.
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(h.close);
     drafts.dispose();

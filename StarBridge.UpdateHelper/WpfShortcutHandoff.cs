@@ -63,9 +63,16 @@ internal static class WpfShortcutHandoff
             if (!Exists(path)) return true; // A deleted optional icon stays deleted.
             if (!PlainPath(path) || !File.Exists(path)) return false;
             var current = read(path);
-            if (PointsTo(current, newTarget)) return ArchiveBackup(path, oldTarget, newTarget, read, recoveryRoot);
-            if (!PointsTo(current, oldTarget)) return false;
-            var backup = path + ".starbridge-wpf-backup";
+            var inheritedIcon = HasInheritedIcon(current, oldTarget, newTarget);
+            if (PointsTo(current, newTarget))
+            {
+                if (!ArchiveBackup(path, oldTarget, newTarget, read, recoveryRoot)) return false;
+                // Resume an interrupted icon-backup archive too, without rewriting
+                // a completed link or replacing an explicit user-selected icon.
+                if (!inheritedIcon) return ArchiveBackup(path, oldTarget, newTarget, read, recoveryRoot, inheritedIcon: true);
+            }
+            else if (!PointsTo(current, oldTarget)) return false;
+            var backup = path + (inheritedIcon ? ".starbridge-icon-backup" : ".starbridge-wpf-backup");
             var stage = path + ".starbridge-new.lnk";
             var hash = Digest(path);
             // Resume only a byte-identical original backup. Foreign or changed files block.
@@ -86,7 +93,7 @@ internal static class WpfShortcutHandoff
             if (!PlainPath(path) || Digest(path) != hash || !PlainPath(backup) || Digest(backup) != hash) return false;
             (replace ?? ((source, destination) => File.Move(source, destination, overwrite: true)))(stage, path);
             return PlainPath(path) && Digest(path) == stagedHash && Equivalent(read(path), expected) &&
-                ArchiveBackup(path, oldTarget, newTarget, read, recoveryRoot);
+                ArchiveBackup(path, oldTarget, newTarget, read, recoveryRoot, inheritedIcon);
         }
         catch { return false; } // Leave original/backup/stage available for a verified retry.
     }
@@ -98,13 +105,15 @@ internal static class WpfShortcutHandoff
             shortcut.ToUpperInvariant()))) + "-" + digest + ".lnk");
 
     private static bool ArchiveBackup(string path, string oldTarget, string newTarget,
-        Func<string, ShortcutData> read, string? recoveryRoot)
+        Func<string, ShortcutData> read, string? recoveryRoot, bool inheritedIcon = false)
     {
-        var backup = path + ".starbridge-wpf-backup";
+        var backup = path + (inheritedIcon ? ".starbridge-icon-backup" : ".starbridge-wpf-backup");
         if (!Exists(backup)) return true;
         if (!PlainPath(backup) || !File.Exists(backup)) return false;
         var hash = Digest(backup);
-        if (!PointsTo(read(backup), oldTarget) || Digest(backup) != hash) return false;
+        var original = read(backup);
+        if (!(inheritedIcon ? HasInheritedIcon(original, oldTarget, newTarget) : PointsTo(original, oldTarget)) ||
+            Digest(backup) != hash) return false;
         var root = recoveryRoot ?? Path.Combine(Environment.GetFolderPath(
             Environment.SpecialFolder.LocalApplicationData), "StarBridge", "InstallerRecovery", "shortcut-handoff");
         if (!CreatePlainDirectory(root)) return false;
@@ -135,6 +144,12 @@ internal static class WpfShortcutHandoff
 
     private static bool PointsTo(ShortcutData link, string target) =>
         string.Equals(link.Target, target, StringComparison.OrdinalIgnoreCase) && link.Arguments.Length == 0;
+    private static bool HasInheritedIcon(ShortcutData link, string oldTarget, string newTarget) =>
+        PointsTo(link, newTarget) &&
+        string.Equals(link.Icon, oldTarget + ",0", StringComparison.OrdinalIgnoreCase) &&
+        (link.WorkingDirectory.Length == 0 ||
+         string.Equals(link.WorkingDirectory, Path.GetDirectoryName(oldTarget), StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(link.WorkingDirectory, Path.GetDirectoryName(newTarget), StringComparison.OrdinalIgnoreCase));
     private static bool Equivalent(ShortcutData a, ShortcutData b) => PointsTo(a, b.Target) &&
         string.Equals(a.WorkingDirectory, b.WorkingDirectory, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(a.Icon, b.Icon, StringComparison.OrdinalIgnoreCase);

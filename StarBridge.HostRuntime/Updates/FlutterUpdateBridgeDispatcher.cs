@@ -7,7 +7,8 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
     Func<string?> currentVersion, Func<long> generation,
     FlutterUpdateStartupReporter? startupReporter = null,
     FlutterUpdateInstallation? installation = null,
-    Func<long, object, BridgeEnvelope>? progressEvent = null) : IBridgeRequestDispatcher
+    Func<long, object, BridgeEnvelope>? progressEvent = null,
+    Action? firstFrameReady = null) : IBridgeRequestDispatcher
 {
     public const string RequestName = "applicationUpdates.check";
     public const string ReadyRequestName = "applicationUpdates.firstFrameReady";
@@ -85,8 +86,11 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
             }
             if (request.Name == ReadyRequestName)
             {
-                if (startupReporter is null) return Error(request);
-                await startupReporter.ReportFirstFrameAsync(cancellationToken);
+                if (startupReporter is null && firstFrameReady is null) return Error(request);
+                if (startupReporter is not null) await startupReporter.ReportFirstFrameAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_disposed || request.SessionGeneration != generation()) return Error(request);
+                firstFrameReady?.Invoke();
                 return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, reported = true },
                     preserveRequestAccountContext: false), []);
             }

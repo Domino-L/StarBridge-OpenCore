@@ -313,6 +313,7 @@ if (args is ["--game-id-settings-only"])
 }
 if (args is ["--presence-recovery-only"])
 {
+    await PrivacyPublicationRecoveryTests.SilentHeartbeat();
     await FriendSharingPublicationTests.Verify();
     await FriendSharingRuntimeTests.Run();
     await CommunitySharingTests.Verify();
@@ -583,6 +584,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Invitation send journal survives failures and restarts without automatic replay", InvitationSendWorkflowTests.Verify),
     ("Invitation account Bridge binds current identity and safely projects recovery", InvitationAccountBridgeTests.Verify),
     ("Privacy publication fails closed on invalid acknowledgements and unreadable policy", PrivacyPublicationTests.FailClosed),
+    ("Privacy publication healthy heartbeat is silent", PrivacyPublicationRecoveryTests.SilentHeartbeat),
     ("Privacy publication automatically recovers from transport loss", PrivacyPublicationRecoveryTests.TransientDisconnect),
     ("Privacy publication remembers explicit account consent across restart", PrivacyPublicationRecoveryTests.Restart),
     ("Privacy publication revoked consent stays stopped across restart", PrivacyPublicationRecoveryTests.RevokedConsentRestart),

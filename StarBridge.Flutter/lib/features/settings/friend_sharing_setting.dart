@@ -54,9 +54,12 @@ class _FriendSharingSettingState extends State<FriendSharingSetting> {
       }
       // -1 distinguishes an absent preference from an explicitly saved OFF.
       drafts.edit('friend-fields', -1, 63, (next) async {
-        if (owner != c.accountKey || !c.canEdit || c.snapshot?['revision'] != 0) {
+        if (owner != c.accountKey || !c.canEdit) {
           return false;
         }
+        // An uncertain first write can have succeeded. A same-account,
+        // authoritative readback confirms it without issuing another write.
+        if (c.snapshot?['revision'] != 0) return c.fields == next;
         await c.saveFields(next);
         return c.error == null && c.fields == next;
       });

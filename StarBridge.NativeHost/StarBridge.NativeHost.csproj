@@ -22,6 +22,7 @@
   <ItemGroup>
     <AssemblyMetadata Include="StarBridgeFlutterInstallerManifestUrl" Value="$(StarBridgeFlutterInstallerManifestUrl)" />
     <AssemblyMetadata Include="StarBridgeEnableInstalledUpdates" Value="$(StarBridgeEnableInstalledUpdates)" />
+    <AssemblyMetadata Include="StarBridgeEnableLegacyCleanup" Value="$(StarBridgeEnableLegacyCleanup)" />
   </ItemGroup>
 
   <ItemGroup>

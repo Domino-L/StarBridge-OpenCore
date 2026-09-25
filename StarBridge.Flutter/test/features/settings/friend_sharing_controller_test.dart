@@ -110,6 +110,7 @@ class Harness {
   final writes = <BridgeEnvelope>[];
   String subject = 'synthetic';
   bool fail = false;
+  bool loseWriteReceipt = false;
   Completer<void>? readGate;
   final readStarted = Completer<void>();
   Map<String, Object?> snapshot = {
@@ -137,7 +138,7 @@ class Harness {
         };
       }
     }
-    final failed = fail && request.name == 'friendSharing.save';
+    final failed = (fail || loseWriteReceipt) && request.name == 'friendSharing.save';
     await connection.send(
       BridgeEnvelope(
         protocolVersion: 1,

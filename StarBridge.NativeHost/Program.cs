@@ -55,6 +55,8 @@ using (var lifetime = new CancellationTokenSource())
             ? "windows-x64" : "unsupported");
     using var installedUpdates = !isolatedHangar && FlutterReleaseUpdateSource.InstallationEnabled(releaseAssembly)
         ? FlutterInstalledUpdateInstallation.TryCreate(updateSource, parent, HostDataRoot.CurrentRoot) : null;
+    using var legacyCleanup = isolatedHangar ? null :
+        LegacyCleanupLauncher.TryCreate(releaseAssembly, parent, HostDataRoot.CurrentRoot);
     // Shared non-UI WPF journal; no new Game.log watcher. Dispose after the pipe stops.
     using var eventJournal = isolatedHangar ? null : new LocalGameEventJournal(
         Path.Combine(HostDataRoot.CurrentRoot, "local-event-log.json"));
@@ -136,7 +138,7 @@ using (var lifetime = new CancellationTokenSource())
             .. FlutterUpdateBridgeDispatcher.AdvertisedCapabilities,
             .. installedUpdates is null ? Array.Empty<string>() : new[] { FlutterUpdateBridgeDispatcher.PrepareRequestName, FlutterUpdateBridgeDispatcher.HandoffRequestName },
             .. HelpSupportBridgeDispatcher.Capabilities,
-            .. updateReporter is null ? Array.Empty<string>() : new[] { FlutterUpdateBridgeDispatcher.ReadyRequestName },
+            .. updateReporter is null && legacyCleanup is null ? Array.Empty<string>() : new[] { FlutterUpdateBridgeDispatcher.ReadyRequestName },
             .. overlayRuntime is IRuntimeOverlayStatusReader
                 ? OverlayRuntimeStatusBridgeDispatcher.AdvertisedCapabilities
                 : Array.Empty<string>(),
@@ -195,7 +197,8 @@ using (var lifetime = new CancellationTokenSource())
         // per-user installer ownership; development/portable previews remain read-only.
         updates: new FlutterUpdateBridgeDispatcher(updateSource,
             () => new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath).Read().ApplicationVersion,
-            () => account.Generation, updateReporter, installedUpdates?.Installation, progressEvent: account.UpdateProgress),
+            () => account.Generation, updateReporter, installedUpdates?.Installation, progressEvent: account.UpdateProgress,
+            firstFrameReady: legacyCleanup is null ? null : legacyCleanup.FirstFrameReady),
         runtimeFacts: new RuntimeFactsBridgeDispatcher(
             new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath, () => account.DiagnosticsRelayUri?.AbsoluteUri),
             () => account.Generation),

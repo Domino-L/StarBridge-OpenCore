@@ -7,6 +7,62 @@ using StarBridge.HostRuntime.Account;
 
 internal static class PrivacyPublicationRecoveryTests
 {
+    public static async Task SilentHeartbeat()
+    {
+        var root = Directory.CreateTempSubdirectory("starbridge-presence-heartbeat-").FullName;
+        try
+        {
+            var owner = new BridgeAccountContext("test", "presence.invalid", "heartbeat");
+            var input = new PrivacyPublicationInput(owner, 1, "Fixture", true, null, GameLogSessionSnapshot.Empty);
+            var store = new LocalPrivacyStore(root);
+            store.Save(owner, 0, Guid.NewGuid().ToString("N"), new(true,
+                new(PlayerSharedStateFields.Presence, false, true, []),
+                new(PlayerSharedStateFields.None, false)), () => true);
+            TaskCompletionSource? pending = null;
+            using var publication = new PrivacyPublication(store, () => input,
+                (_, _, token) => pending?.Task.WaitAsync(token) ?? Task.CompletedTask, startTimer: false);
+            await publication.ApplyAsync(owner, 1, 1, default);
+            var confirmed = publication.Status;
+            pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var heartbeat = publication.TickAsync();
+            try
+            {
+                if (publication.Status != confirmed)
+                    throw new Exception($"Healthy heartbeat must retain acknowledged status while sending; observed {publication.Status.State}.");
+            }
+            finally { pending.SetResult(); await heartbeat; }
+            if (publication.Status.State != "applied") throw new Exception("Heartbeat must remain applied.");
+
+            pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var explicitApply = publication.ApplyAsync(owner, 1, 1, default);
+            try
+            {
+                if (publication.Status.State != "publishing")
+                    throw new Exception("Explicit reapply must still expose progress.");
+            }
+            finally { pending.SetResult(); await explicitApply; }
+
+            var previous = store.Read(owner);
+            store.Save(owner, 1, Guid.NewGuid().ToString("N"), previous.Settings!, () => true);
+            pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var changedPolicy = publication.TickAsync();
+            try
+            {
+                if (publication.Status.State != "publishing")
+                    throw new Exception("A new policy revision must not reuse an old success receipt.");
+            }
+            finally { pending.SetResult(); await changedPolicy; }
+
+            pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var failedHeartbeat = publication.TickAsync();
+            pending.SetException(new HttpRequestException());
+            await failedHeartbeat;
+            if (publication.Status.State != "reconnecting" || publication.Status.ErrorCode is null)
+                throw new Exception("Real heartbeat failures must remain observable.");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     public static async Task RevokedConsentRestart()
     {
         foreach (var cause in new[] { "explicit-stop", "forbidden", "response_invalid" })

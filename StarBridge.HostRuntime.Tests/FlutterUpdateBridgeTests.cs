@@ -8,6 +8,21 @@ internal static class FlutterUpdateBridgeTests
     {
         long generation = 4;
         using var dispatcher = new FlutterUpdateBridgeDispatcher(null, () => "0.6.6", () => generation);
+        var frames = 0;
+        using (var startup = new FlutterUpdateBridgeDispatcher(null, () => "0.7.0.2", () => generation,
+            firstFrameReady: () => frames++)) {
+            var frame = BridgeEnvelope.Request(FlutterUpdateBridgeDispatcher.ReadyRequestName, "first-frame", generation, new { schemaVersion = 1 });
+            if ((await startup.DispatchAsync(frame with { SessionGeneration = generation - 1 })).Response.Status != "error" || frames != 0)
+                throw new Exception("Stale first frame started maintenance.");
+            if ((await startup.DispatchAsync(frame with { AccountContext = new("test", "test", "test") })).Response.Status != "error" || frames != 0)
+                throw new Exception("Account-scoped frame started device maintenance.");
+            if ((await startup.DispatchAsync(frame, new CancellationToken(true))).Response.Status != "cancelled" || frames != 0)
+                throw new Exception("Cancelled frame started maintenance.");
+            if ((await startup.DispatchAsync(frame)).Response.Status != "ok" || frames != 1)
+                throw new Exception("Normal installed startup cannot report first frame.");
+            if ((await dispatcher.DispatchAsync(frame)).Response.Status != "error")
+                throw new Exception("Unconfigured first-frame maintenance accepted.");
+        }
         var request = BridgeEnvelope.Request(FlutterUpdateBridgeDispatcher.RequestName, Guid.NewGuid().ToString("N"), 4,
             new { schemaVersion = 1 });
         var result = (await dispatcher.DispatchAsync(request)).Response;

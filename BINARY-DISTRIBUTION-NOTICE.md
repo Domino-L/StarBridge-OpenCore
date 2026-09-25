@@ -1,10 +1,10 @@
 # 完整应用与源码许可
 
-当前公开测试版为 0.7.0.1。
+当前公开测试版为 0.7.0.2。
 
 GitHub Releases 中的安装器用于向用户分发完整的星海舰桥桌面应用。
 
-0.7.0.1 的主程序、本机 Host、更新助手和完整安装器均必须具有可信 Windows Authenticode
+0.7.0.2 的主程序、本机 Host、更新助手和完整安装器均必须具有可信 Windows Authenticode
 签名和时间戳。用户应只从官方网页或本仓库不可变 Release 下载，并核对
 `SHA256SUMS.txt` 与签名更新清单。各版本的证据格式见
 [Release 核验指南](docs/RELEASE-VERIFICATION.md)，不要用旧版本的报告替代当前文件的签名检查。

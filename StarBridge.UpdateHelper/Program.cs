@@ -6,6 +6,7 @@ using StarBridge.HostRuntime.Updates;
 // The production trust/channel is deliberately unconfigured, not taken from a
 // downloaded manifest, arbitrary UI JSON, or the retired WPF update endpoint.
 if (args is ["--start-installed-client", var installedVersion]) return await InstalledStartup.Run(installedVersion);
+if (args is ["--retire-wpf", var cleanupPipe]) return await WpfCleanup.Run(cleanupPipe);
 if (args is ["--installed-plan", var installedPlan]) return await InstalledUpdate.Run(installedPlan, recovery: false);
 if (args is ["--installed-recover", var installedRecovery]) return await InstalledUpdate.Run(installedRecovery, recovery: true);
 if (args is ["--inspect-wpf-migration"])

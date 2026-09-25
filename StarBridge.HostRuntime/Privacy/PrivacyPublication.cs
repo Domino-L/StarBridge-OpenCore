@@ -176,7 +176,7 @@ internal sealed class PrivacyPublication : IDisposable
             var input = _current();
             if (!Same(active, input)) { _active = null; Set(new("inactive")); return; }
             if (_withdrawOnly) await WithdrawAsync(active, _lifetime.Token).ConfigureAwait(false);
-            else await SendCurrentAsync(input!, _store.Read(active.Owner), _lifetime.Token).ConfigureAwait(false);
+            else await SendCurrentAsync(input!, _store.Read(active.Owner), _lifetime.Token, background: true).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -191,7 +191,8 @@ internal sealed class PrivacyPublication : IDisposable
         finally { _gate.Release(); }
     }
 
-    private async Task SendCurrentAsync(PrivacyPublicationInput input, LocalPrivacySnapshot saved, CancellationToken cancellation)
+    private async Task SendCurrentAsync(PrivacyPublicationInput input, LocalPrivacySnapshot saved, CancellationToken cancellation,
+        bool background = false)
     {
         var canResume = false;
         try
@@ -203,7 +204,14 @@ internal sealed class PrivacyPublication : IDisposable
             var clear = !consent || !settings.PublicationEnabled || !input.IdentityConfirmed || invisible;
             canResume = consent && settings.PublicationEnabled && !invisible;
             if (clear) _recovery = null;
-            Set(new("publishing"));
+            // A heartbeat renews an acknowledged policy, not a user apply action.
+            // Keep its receipt while sending; actual failures still take the
+            // withdrawal/recovery path below. New policies and explicit applies
+            // must never inherit this indication of success.
+            var acknowledged = Status;
+            if (!background || clear || acknowledged.State != "applied" ||
+                acknowledged.AppliedRevision != saved.Revision)
+                Set(new("publishing"));
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _lifetime.Token);
             deadline.CancelAfter(TimeSpan.FromSeconds(12));
             // Values are built from current Host evidence, never from a Flutter payload.

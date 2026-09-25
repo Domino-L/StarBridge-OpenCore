@@ -23,6 +23,9 @@ try {
     foreach ($project in @('Core.Tests', 'HostRuntime.Tests', 'OverlayRuntime.Windows.Tests')) {
         Invoke-Checked { dotnet run --project "StarBridge.$project/StarBridge.$project.csproj" --configuration Release --no-build $sdkArg }
     }
+    foreach ($check in @('Test StarBridge Wpf Cleanup Transaction.ps1', 'Test StarBridge Wpf Cleanup Files.ps1', 'Test StarBridge Wpf Shortcut Handoff.ps1')) {
+        & (Join-Path $Root "scripts/$check")
+    }
     Set-Location (Join-Path $Root 'StarBridge.Flutter')
     Invoke-Checked { flutter pub get --enforce-lockfile }
     Invoke-Checked { flutter test --no-pub --dart-define=STARBRIDGE_PUBLIC_SOURCE=true }
