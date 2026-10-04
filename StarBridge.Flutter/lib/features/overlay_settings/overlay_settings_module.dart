@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../platform/window/overlay_editor_window_port.dart';
 import '../../platform/window/menu_preview_window_port.dart';
+import '../../platform/window/menu_window_preferences.dart';
+import 'menu_settings_draft.dart';
 
 import 'overlay_preview_identity.dart';
 import 'overlay_scene_controller.dart';
@@ -33,6 +35,10 @@ final class OverlaySettingsModule {
                previewIdentity: previewIdentity,
                sourceScenes: scenes?.projection,
              ) {
+    if (menuPreview case MenuWindowPreferencesProvider provider) {
+      final port = provider.menuPreferences;
+      if (port != null) menuDraft = MenuSettingsDraft(port);
+    }
     if (workspace != null && scenes != null) {
       _sourceSelection = OverlaySourceSelectionCoordinator(workspace!, scenes!);
       _presetAutoSwitch = OverlayPresetAutoSwitch(
@@ -47,6 +53,7 @@ final class OverlaySettingsModule {
 
   final OverlaySettingsPort _port;
   final MenuPreviewWindowPort? menuPreview;
+  MenuSettingsDraft? menuDraft;
   final OverlaySceneController? scenes;
   final OverlayRosterPort? roster;
   final OverlayWorkspaceModule? workspace;
@@ -89,6 +96,9 @@ final class OverlaySettingsModule {
   ValueListenable<OverlaySettingsProjection> get projection => _projection;
 
   Future<void> initialize() async {
+    if (menuPreview case final MenuWindowStartupPort startup) {
+      startup.initialize();
+    }
     final futures = <Future<void>>[refresh()];
     if (workspace != null) futures.add(workspace!.initialize());
     await Future.wait(futures);
@@ -148,6 +158,7 @@ final class OverlaySettingsModule {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    menuDraft?.dispose();
     _presetAutoSwitch?.dispose();
     _sourceSelection?.dispose();
     if (menuPreview case final MenuLiveWindowPort menu) menu.dispose();

@@ -24,10 +24,12 @@ class MenuRoomsPanel extends StatelessWidget {
     required this.view,
     required this.onAction,
     this.active = false,
+    this.showRoomCode = true,
   });
   final MenuFeatureView view;
   final void Function(String, String) onAction;
   final bool active;
+  final bool showRoomCode;
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +60,7 @@ class MenuRoomsPanel extends StatelessWidget {
       );
     }
     final members = RoomMembersPanel(
+      showRoomCode: showRoomCode,
       key: ValueKey('members/${view.scope}'),
       listKey: const ValueKey('menu-room-members'),
       room: room.presentation(view.title, view.scope),

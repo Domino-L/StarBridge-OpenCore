@@ -56,12 +56,17 @@ class MenuWorkspaceController extends ChangeNotifier {
   Map<String, MenuPanelSpec> _specs;
   final _open = <String, MenuPanelLease>{};
   final _bounds = <String, Rect>{};
+  final _paintBounds = <MenuPanelLease, Rect>{};
   int _revision = 0;
   bool _visible = true;
+  bool _panelsHidden = false;
   bool _disposed = false;
   bool snapWindows = false;
+  bool restoreLastFocus = true;
 
   bool get visible => _visible;
+  bool get panelsHidden => _panelsHidden;
+  bool get panelsVisible => _visible && !_panelsHidden;
   String? get activeId => _open.isEmpty ? null : _open.keys.last;
   List<MenuPanelLease> get openPanels => List.unmodifiable(_open.values);
   bool allows(String id) => !_disposed && _specs.containsKey(id);
@@ -92,17 +97,21 @@ class MenuWorkspaceController extends ChangeNotifier {
     if (scope != _scope) {
       _open.clear();
       _bounds.clear();
+      _paintBounds.clear();
+      _panelsHidden = false;
     }
     _scope = scope;
     _specs = next;
     _open.removeWhere((id, _) => !next.containsKey(id));
+    _paintBounds.removeWhere((lease, _) => !isCurrent(lease));
     _bounds.removeWhere((id, _) => !next.containsKey(id));
     _changed();
   }
 
   bool open(String id) {
     if (!allows(id)) return false;
-    if (activeId == id) return true;
+    if (activeId == id && !_panelsHidden) return true;
+    _panelsHidden = false;
     _open[id] = _open.remove(id) ?? MenuPanelLease._(id);
     _changed();
     return true;
@@ -113,14 +122,30 @@ class MenuWorkspaceController extends ChangeNotifier {
   }
 
   void close(String id) {
-    if (_disposed || _open.remove(id) == null) return;
+    if (_disposed) return;
+    final lease = _open.remove(id);
+    if (lease == null) return;
+    _paintBounds.remove(lease);
     _changed();
   }
 
   void setVisible(bool value, {bool retainPanels = true}) {
     if (_disposed) return;
-    if (!value && !retainPanels) _open.clear();
+    if (!value && !retainPanels) {
+      _open.clear();
+      _paintBounds.clear();
+      _panelsHidden = false;
+    }
     _visible = value;
+    if (value) _fallbackFocus();
+    _changed();
+  }
+
+  /// Temporary desktop visibility only: retains leases, drafts, z-order and
+  /// placement. This is deliberately not a menu-close or persisted layout flag.
+  void togglePanelsVisibility() {
+    if (_disposed || !_visible || _open.isEmpty) return;
+    _panelsHidden = !_panelsHidden;
     _changed();
   }
 
@@ -132,6 +157,28 @@ class MenuWorkspaceController extends ChangeNotifier {
       viewport,
       spec.minimumSize,
     );
+  }
+
+  /// Optional child-painted region in panel coordinates. Presentation geometry
+  /// only: neither persisted layout nor a second panel/window owner.
+  void setPaintBounds(MenuPanelLease lease, Rect? bounds) {
+    if (!isCurrent(lease) ||
+        (bounds != null && !MenuPanelGeometry.validRect(bounds))) {
+      return;
+    }
+    if (_paintBounds[lease] == bounds) return;
+    if (bounds == null) {
+      _paintBounds.remove(lease);
+    } else {
+      _paintBounds[lease] = bounds;
+    }
+    notifyListeners();
+  }
+
+  Rect paintBoundsFor(String id, Size viewport) {
+    final panel = boundsFor(id, viewport);
+    final local = _paintBounds[_open[id]];
+    return local == null ? panel : local.shift(panel.topLeft).intersect(panel);
   }
 
   void moveTo(
@@ -254,9 +301,29 @@ class MenuWorkspaceController extends ChangeNotifier {
       for (final id in open.whereType<String>()) {
         if (_specs.containsKey(id)) _open[id] = MenuPanelLease._(id);
       }
+      _fallbackFocus();
     }
     _changed();
     return true;
+  }
+
+  void _fallbackFocus() {
+    if (restoreLastFocus || _open.isEmpty) return;
+    // WPF's normal activation priority, constrained to current registrations.
+    const priority = [
+      'browser',
+      'image',
+      'organizations',
+      'friends',
+      'comms',
+      'rooms',
+      'hud',
+      'screenshot',
+      'settings',
+    ];
+    final id =
+        priority.where(_open.containsKey).firstOrNull ?? _open.keys.first;
+    _open[id] = _open.remove(id)!;
   }
 
   static List<double> _encodeRect(Rect r) => [r.left, r.top, r.width, r.height];

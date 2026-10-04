@@ -4,6 +4,7 @@ internal static class InstalledUpdateTransactionTests
 {
     internal static async Task Verify()
     {
+        VerifySupersededCompletedUpdate();
         Require(!FlutterReleaseUpdateSource.InstallationEnabled(typeof(InstalledUpdateTransactionTests).Assembly), "Installation enabled without compiled opt-in.");
         Require(FlutterInstallerPublisherVerifier.ResourceVersion("0.7.0                                             ", false) == new Version(0, 7, 0, 0),
             "Space-padded Inno version resource was rejected.");
@@ -111,6 +112,36 @@ internal static class InstalledUpdateTransactionTests
             try { FlutterInstalledUpdateInstallation.DeleteOwnedWorkspace(fixture.Installation, Path.GetDirectoryName(fixture.Installation)!);
                 throw new Exception("Broad parent cleanup accepted."); }
             catch (InvalidDataException) { }
+        }
+    }
+
+    internal static void VerifySupersededCompletedUpdate()
+    {
+        foreach (var phase in new[] { "committed", "installing", "restored", "rolled-back" }) {
+            using var fixture = new Fixture();
+            var plan = new InstalledUpdatePlan(1, fixture.Installation, "0.7.0.1", Path.GetDirectoryName(fixture.UserData)! + "-data",
+                1, 1, 2, 2, "installer-" + new string('a', 32) + ".exe");
+            InstalledUpdateFiles.Write(Path.Combine(fixture.Root, InstalledUpdatePlan.FileName), plan);
+            InstalledUpdateFiles.Write(Path.Combine(fixture.Root, "installed-state.json"),
+                new InstalledUpdateTransaction.State(1, fixture.Installation, "0.7.0.2", new string('A', 64), phase));
+            var backup = Path.Combine(fixture.Root, "previous");
+            Directory.CreateDirectory(backup);
+            File.WriteAllText(Path.Combine(backup, "backup.txt"), "preserve-recovery");
+            var current = new InstalledUpdateRegistration(fixture.Installation, "0.7.0.3", "StarBridge.Flutter",
+                "\"" + Path.Combine(fixture.Installation, "unins000.exe") + "\"");
+            if (phase == "committed") {
+                FlutterInstalledUpdateInstallation.PruneCompleted(fixture.Installation, () => current);
+                Require(!Directory.Exists(fixture.Root), "Superseded completed transaction still blocks updates.");
+                var archives = Directory.GetDirectories(Path.GetDirectoryName(fixture.Root)!, ".starbridge-retired-update-*");
+                Require(archives.Length == 1 && File.ReadAllText(Path.Combine(archives[0], "previous", "backup.txt")) == "preserve-recovery",
+                    "Superseded recovery backup was not preserved.");
+                FlutterInstalledUpdateInstallation.PruneCompleted(fixture.Installation, () => current);
+            } else {
+                try { FlutterInstalledUpdateInstallation.PruneCompleted(fixture.Installation, () => current); throw new Exception("Unresolved transaction bypassed."); }
+                catch (IOException) { }
+                Require(Directory.Exists(fixture.Root), "Unresolved recovery was moved.");
+            }
+            Require(File.ReadAllText(fixture.Executable) == "old" && File.ReadAllText(fixture.UserData) == "do-not-touch", "Archival changed installed or user data.");
         }
     }
 

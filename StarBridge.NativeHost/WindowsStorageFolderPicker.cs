@@ -1,10 +1,31 @@
 using System.Runtime.InteropServices;
+using System.IO;
 using System.Text;
 
 namespace StarBridge.NativeHost;
 
 internal sealed class WindowsStorageFolderPicker(Func<nint> owner)
 {
+    // Only a window from the launching client can own this dialog. Never accept
+    // an HWND from an auxiliary renderer or attach the picker to another app.
+    internal static nint ClientOwner(int processId, nint fallback)
+    {
+        var foreground = GetForegroundWindow();
+        var root = foreground == 0 ? 0 : GetAncestor(foreground, 2);
+        return SelectOwner(processId, root, fallback, handle => {
+            if (handle == 0 || !IsWindow(handle)) return 0;
+            GetWindowThreadProcessId(handle, out var pid);
+            return pid;
+        });
+    }
+
+    internal static nint SelectOwner(int processId, nint foregroundRoot, nint fallback,
+        Func<nint, uint> processOf)
+    {
+        if (processId <= 0) return 0;
+        if (foregroundRoot != 0) return processOf(foregroundRoot) == (uint)processId ? foregroundRoot : 0;
+        return fallback != 0 && processOf(fallback) == (uint)processId ? fallback : 0;
+    }
     internal Task<string?> ChooseAsync(CancellationToken cancellation)
     {
         var completion = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -71,6 +92,9 @@ internal sealed class WindowsStorageFolderPicker(Func<nint> owner)
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHBrowseForFolderW")] private static extern nint SHBrowseForFolder(ref BrowseInfo info);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SHGetPathFromIDListEx(nint item, StringBuilder path, uint length, uint flags);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("ole32.dll")] private static extern int CoInitializeEx(nint reserved, uint mode);
     [DllImport("ole32.dll")] private static extern void CoUninitialize();
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindow(nint window);

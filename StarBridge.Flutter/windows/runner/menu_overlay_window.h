@@ -22,6 +22,7 @@ class MenuOverlayWindow {
   bool Reveal(uint64_t opening);
   void Hide(bool return_focus = false);
   void SetLocalModal(bool active);
+  bool local_modal() const { return local_modal_; }
   bool RegisterShortcut(UINT modifiers, UINT key);
   void UnregisterShortcut();
   HWND handle() const { return window_; }

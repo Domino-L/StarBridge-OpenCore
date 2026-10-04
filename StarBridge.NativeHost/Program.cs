@@ -104,6 +104,15 @@ using (var lifetime = new CancellationTokenSource())
         HostDataRoot.CurrentRoot,
         () => account.Generation,
         flutterExecutablePath);
+    var menuBrowserResume = new MenuBrowserResumeBridgeDispatcher(
+        HostDataRoot.CurrentRoot, () => account.CurrentOverlaySourceScope);
+    var screenshotPicker = new WindowsStorageFolderPicker(() =>
+    {
+        parent.Refresh();
+        return parent.HasExited ? 0 : WindowsStorageFolderPicker.ClientOwner(parent.Id, parent.MainWindowHandle);
+    });
+    var menuScreenshotDirectory = isolatedHangar ? null : new MenuScreenshotDirectoryBridgeDispatcher(
+        HostDataRoot.CurrentRoot, () => account.Generation, screenshotPicker.ChooseAsync);
     var localGamePresence = new StarBridge.HostRuntime.Presence.LocalGamePresenceReader(
         trustedVersion: () => account.ConfirmedGameVersion,
         journal: eventJournal?.IsWritable == true ? eventJournal : null);
@@ -119,6 +128,10 @@ using (var lifetime = new CancellationTokenSource())
         account.PrepareCommunityOverlayAsync,
         account.ReadOverlayModules);
     var reminderSink = overlayRuntime as IContinuousPlayReminderSink;
+    var menuHotkeys = !isolatedHangar && overlayRuntime is IMenuHotkeyRuntime menuRuntime
+        ? new MenuHotkeyBridgeDispatcher(menuRuntime, () => account.CurrentOverlaySourceScope,
+            account.MenuHotkeyIntent, parent.Id, applicationPreferences.MenuHotkeyPreferences) : null;
+    if (menuHotkeys is not null) account.ConfigureMenuHotkeys(menuHotkeys);
     if (!isolatedHangar && overlayRuntime is IInformationOverlayLiveUpdateSink liveOverlay)
         account.ConfigureLiveOverlayUpdates(liveOverlay);
     if (!isolatedHangar && overlayRuntime is StarBridge.HostRuntime.Privacy.ISharedActivitySink sharedActivities)
@@ -136,12 +149,15 @@ using (var lifetime = new CancellationTokenSource())
         () => account.Generation,
         [
             "host.lifecycle",
+            .. menuHotkeys is null ? Array.Empty<string>() : new[] { MenuHotkeyBridgeDispatcher.Capability },
             .. playerActivity is null ? Array.Empty<string>() : PlayerActivityRuntime.Capabilities,
             "host.gamePresence",
             "communities.logo",
             "account.avatarImages",
             .. AccountBridgeRuntime.AdvertisedCapabilities,
             .. ApplicationPreferencesBridgeDispatcher.AdvertisedCapabilities,
+            .. MenuBrowserResumeBridgeDispatcher.Capabilities,
+            .. menuScreenshotDirectory is null ? Array.Empty<string>() : MenuScreenshotDirectoryBridgeDispatcher.Capabilities,
             .. OverlayBridgeDispatcher.AdvertisedCapabilities,
             .. NotificationAudioBridgeDispatcher.AdvertisedCapabilities,
             .. NotificationSettingsBridgeDispatcher.AdvertisedCapabilities,
@@ -180,7 +196,7 @@ using (var lifetime = new CancellationTokenSource())
     var audio = NotificationAudioBridgeDispatcher.CreateDefault(HostDataRoot.CurrentRoot,
         Path.Combine(AppContext.BaseDirectory, "Assets", "Audio"), () => account.Generation,
         activityEnvironment.CanNotify,
-        activityEnvironment.CanPlaySocialSound);
+        activityEnvironment.CanPlaySocialSound, () => menuHotkeys?.IsMenuVisible == true);
     var playReminder = reminderSink is null ? null : new ContinuousPlayReminderRuntime(
         HostDataRoot.CurrentRoot, () =>
         {
@@ -203,6 +219,9 @@ using (var lifetime = new CancellationTokenSource())
         overlay,
         audio,
         notifications,
+        menuHotkeys: menuHotkeys,
+        menuBrowserResume: menuBrowserResume,
+        menuScreenshotDirectory: menuScreenshotDirectory,
         notificationPolicies: account.CreateNotificationPolicyDispatcher(notifications),
         playerActivity: playerActivity,
         localEventClear: eventJournal?.IsWritable == true ? new LocalEventClearDispatcher(eventJournal, () => account.Generation) : null,

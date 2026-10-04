@@ -2,14 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../design_system/icons/standard_icon.dart';
+import '../../platform/window/menu_browser_preferences.dart';
+import '../../platform/window/native_viewport_visibility.dart';
+import '../../features/overlay_settings/menu_browser_resume_controller.dart';
+import '../localization/app_strings.dart';
 
 import 'menu_bridge_style.dart';
 import 'menu_browser_address.dart';
 import 'menu_browser_state.dart';
 import 'menu_local_call.dart';
 import 'menu_workspace_controller.dart';
+import 'menu_workspace_viewport.dart';
+import 'menu_panel_idle.dart';
 
 /// Native WebViews own pages. The surface holds only display state/address
 /// drafts, with no browser script or account bridge.
@@ -18,9 +25,15 @@ class MenuBrowserTool extends StatefulWidget {
     super.key,
     required this.call,
     required this.workspace,
+    this.preferences = const MenuBrowserPreferences(),
+    this.resume,
+    this.safeMode = false,
   });
   final MenuLocalCall call;
   final MenuWorkspaceController workspace;
+  final MenuBrowserPreferences preferences;
+  final MenuBrowserResumeController? resume;
+  final bool safeMode;
   @override
   State<MenuBrowserTool> createState() => _MenuBrowserToolState();
 }
@@ -41,6 +54,74 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
   Rect? lastBounds;
   bool? lastVisible;
   bool? lastNativeVisible;
+  List<Rect> lastOcclusions = const [];
+  Size? workspaceSize;
+  bool routeActive = true;
+  MenuPanelIdleScope? idleScope;
+  double? lastOpacity;
+  MenuBrowserPreferences? _applied;
+  Future<void>? _configuration;
+  bool _restoreAttempted = false;
+  bool _resumeRestoreFailed = false;
+  MenuBrowserPreferences get effectivePreferences =>
+      widget.preferences.effective(safeMode: widget.safeMode);
+  void _resumeChanged() {
+    if (mounted) setState(() {});
+  }
+
+  // Serialize configuration through the same native owner before any action.
+  // A newer edit arriving during a reply is applied before the action proceeds.
+  Future<void> _configure() async {
+    if (_configuration case final pending?) return pending;
+    final work = _applyConfiguration();
+    _configuration = work;
+    try {
+      await work;
+    } finally {
+      _configuration = null;
+    }
+  }
+
+  Future<void> _applyConfiguration() async {
+    while (mounted && _applied != effectivePreferences) {
+      final options = effectivePreferences;
+      await widget
+          .call('browserConfigure', {'preferences': options.toMap()})
+          .timeout(const Duration(seconds: 3));
+      if (!mounted) return;
+      _applied = options;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant MenuBrowserTool old) {
+    super.didUpdateWidget(old);
+    if (old.resume != widget.resume) {
+      old.resume?.removeListener(_resumeChanged);
+      widget.resume?.addListener(_resumeChanged);
+    }
+    if (ready &&
+        (widget.preferences != old.preferences ||
+            widget.safeMode != old.safeMode)) {
+      unawaited(_refreshConfiguration());
+    }
+  }
+
+  Future<void> _refreshConfiguration() async {
+    try {
+      await _configure();
+      if (!mounted) return;
+      final failure = AppStrings.of(context).text('menu.browser.applyFailed');
+      if (error == failure) setState(() => error = null);
+      await _status(force: true);
+    } on Object {
+      if (mounted) {
+        setState(
+          () => error = AppStrings.of(context).text('menu.browser.applyFailed'),
+        );
+      }
+    }
+  }
 
   bool get blankPage =>
       state?.active.url == 'about:blank' &&
@@ -51,6 +132,8 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
   void initState() {
     super.initState();
     widget.workspace.addListener(_changed);
+    nativeViewportMenus.addListener(_sync);
+    widget.resume?.addListener(_resumeChanged);
     unawaited(_open());
   }
 
@@ -62,22 +145,111 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     });
     final epoch = ++_epoch;
     try {
+      await _configure();
+      if (!mounted || epoch != _epoch) return;
+      if (!_restoreAttempted && widget.resume != null) {
+        await widget.resume!.load();
+        if (!mounted || epoch != _epoch || widget.resume!.closed) return;
+      }
+      final saved = widget.resume?.saved;
       await widget
-          .call('browserOpen', const {})
+          .call('browserOpen', {
+            'url': saved?.enabled == true && saved!.url != null
+                ? saved.url
+                : menuBrowserHome(provider: effectivePreferences.provider)
+                      .toString(),
+          })
           .timeout(const Duration(seconds: 20));
       if (!mounted || epoch != _epoch) return;
+      if (!_restoreAttempted && widget.resume != null) {
+        _restoreAttempted = true;
+        final resume = widget.resume!;
+        if (!mounted || epoch != _epoch || resume.closed) return;
+        try {
+          final saved = resume.saved;
+          if (saved?.enabled == true && saved!.url != null) {
+            final current = MenuBrowserState.parse(
+              await widget
+                  .call('browserState', const {})
+                  .timeout(const Duration(seconds: 3)),
+            );
+            if (!mounted || epoch != _epoch || resume.closed) return;
+            // Never overwrite a retained page, another tab or a loading/failed
+            // view. This runs only when the user opens the browser, not startup.
+            if (current.tabs.length == 1 &&
+                current.active.url == 'about:blank' &&
+                !current.active.loading &&
+                !current.active.failed &&
+                !current.active.unavailable &&
+                identical(resume.saved, saved)) {
+              await widget
+                  .call('browserNavigate', {
+                    'tabId': current.activeId,
+                    'url': saved.url,
+                  })
+                  .timeout(const Duration(seconds: 20));
+              if (!mounted || epoch != _epoch || resume.closed) return;
+            }
+          }
+        } on Object {
+          // Optional resume failure must not disguise a working browser as a
+          // missing WebView runtime or prevent manual browsing.
+          if (mounted && epoch == _epoch) _resumeRestoreFailed = true;
+        }
+      }
       setState(() {
         ready = true;
       });
+      if (!_resumeRestoreFailed) {
+        try {
+          await _openHomeIfBlank(epoch, singleTab: true);
+        } on Object {
+          if (mounted && epoch == _epoch) {
+            setState(() => error = '搜索引擎首页未能打开，请输入网址或搜索词重试。');
+          }
+        }
+      }
+      if (!mounted || epoch != _epoch) return;
       _changed();
       await _status(force: true);
     } on Object {
       if (mounted && epoch == _epoch) {
-        setState(() => error = '浏览器无法启动。请确认已安装 WebView2，或稍后重试。');
+        setState(
+          () => error = _applied != effectivePreferences
+              ? AppStrings.of(context).text('menu.browser.applyFailed')
+              : '浏览器无法启动。请确认已安装 WebView2，或稍后重试。',
+        );
       }
     } finally {
       if (mounted && epoch == _epoch) setState(() => opening = false);
     }
+  }
+
+  Future<void> _openHomeIfBlank(int epoch, {bool singleTab = false}) async {
+    final current = MenuBrowserState.parse(
+      await widget
+          .call('browserState', const {})
+          .timeout(const Duration(seconds: 3)),
+    );
+    if (!mounted ||
+        epoch != _epoch ||
+        (singleTab && current.tabs.length != 1)) {
+      return;
+    }
+    final tab = current.active;
+    if (tab.url != 'about:blank' ||
+        tab.loading ||
+        tab.failed ||
+        tab.unavailable) {
+      return;
+    }
+    await widget
+        .call('browserNavigate', {
+          'tabId': tab.id,
+          'url': menuBrowserHome(provider: effectivePreferences.provider)
+              .toString(),
+        })
+        .timeout(const Duration(seconds: 20));
   }
 
   void _changed() {
@@ -91,17 +263,29 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     final render = viewport.currentContext?.findRenderObject();
     if (render is! RenderBox || !render.hasSize) return;
     final ratio = MediaQuery.devicePixelRatioOf(context);
-    final origin = render.localToGlobal(Offset.zero);
+    final painted = MatrixUtils.transformRect(
+      render.getTransformTo(null),
+      Offset.zero & render.size,
+    );
     final bounds = Rect.fromLTWH(
-      origin.dx * ratio,
-      origin.dy * ratio,
-      render.size.width * ratio,
-      render.size.height * ratio,
+      painted.left * ratio,
+      painted.top * ratio,
+      painted.width * ratio,
+      painted.height * ratio,
     );
     final shown =
-        widget.workspace.visible &&
+        widget.workspace.panelsVisible &&
         widget.workspace.isOpen('browser') &&
-        widget.workspace.activeId == 'browser';
+        routeActive &&
+        nativeViewportMenus.value == 0;
+    final panels = widget.workspace.openPanels;
+    final browserIndex = panels.indexWhere((panel) => panel.id == 'browser');
+    final occlusions = workspaceSize == null || browserIndex < 0
+        ? const <Rect>[]
+        : MenuWorkspaceViewport.physicalRects(context, [
+            for (final panel in panels.skip(browserIndex + 1))
+              widget.workspace.paintBoundsFor(panel.id, workspaceSize!),
+          ]).where((rect) => rect.overlaps(bounds)).toList();
     if (shown) {
       statusTimer ??= Timer.periodic(
         const Duration(seconds: 1),
@@ -114,12 +298,16 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     final nativeShown = shown && (!blankPage || busy);
     if (bounds == lastBounds &&
         shown == lastVisible &&
-        nativeShown == lastNativeVisible) {
+        nativeShown == lastNativeVisible &&
+        listEquals(occlusions, lastOcclusions) &&
+        lastOpacity == (idleScope?.opacity ?? 1)) {
       return;
     }
     lastBounds = bounds;
     lastVisible = shown;
     lastNativeVisible = nativeShown;
+    lastOcclusions = occlusions;
+    lastOpacity = idleScope?.opacity ?? 1;
     unawaited(
       widget
           .call('browserBounds', {
@@ -128,6 +316,16 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
             'y': bounds.top,
             'width': bounds.width,
             'height': bounds.height,
+            'opacity': lastOpacity,
+            'occlusions': [
+              for (final rect in occlusions)
+                {
+                  'x': rect.left,
+                  'y': rect.top,
+                  'width': rect.width,
+                  'height': rect.height,
+                },
+            ],
           })
           .catchError((Object _) {
             if (mounted) setState(() => error = '浏览器显示中断，请重新打开窗口。');
@@ -152,6 +350,11 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
         return;
       }
       final next = MenuBrowserState.parse(result);
+      idleScope?.nativeInteraction(
+        result is Map &&
+            (result['interactionActive'] == true ||
+                result['opacitySupported'] == false),
+      );
       final changed = state?.activeId != next.activeId;
       setState(() {
         state = next;
@@ -166,6 +369,11 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
               );
         }
       });
+      if (!next.active.loading &&
+          !next.active.failed &&
+          !next.active.unavailable) {
+        unawaited(widget.resume?.confirmed(next.active.url));
+      }
       if (changed) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
@@ -190,11 +398,20 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       error = null;
     });
     try {
+      await _configure();
+      if (!mounted || epoch != _epoch) return;
       await widget
-          .call(action, {'tabId': ?tabId, 'url': ?url})
+          .call(action, {
+            'tabId': ?tabId,
+            'url': ?(action == 'browserNewTab' || action == 'browserCloseTab'
+                ? menuBrowserHome(provider: effectivePreferences.provider)
+                      .toString()
+                : url),
+          })
           .timeout(const Duration(seconds: 20));
       if (!mounted || epoch != _epoch) return;
       if (action == 'browserNavigate') {
+        _resumeRestoreFailed = false;
         _drafts.remove(tabId);
         addressFocus.unfocus();
       }
@@ -223,7 +440,10 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     final input = address.text.trim();
     final tab = state?.active;
     if (input.isEmpty || tab == null) return;
-    final uri = menuBrowserAddress(input);
+    final uri = menuBrowserAddress(
+      input,
+      provider: widget.preferences.provider,
+    );
     if (uri == null) {
       setState(() => error = '请输入 HTTP/HTTPS 地址或搜索词。');
       return;
@@ -338,6 +558,8 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     toolbarScroll.dispose();
     address.dispose();
     widget.workspace.removeListener(_changed);
+    nativeViewportMenus.removeListener(_sync);
+    widget.resume?.removeListener(_resumeChanged);
     unawaited(
       widget
           .call('browserBounds', const {'visible': false})
@@ -348,6 +570,11 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
 
   @override
   Widget build(BuildContext context) {
+    idleScope = MenuPanelIdleScope.of(context);
+    workspaceSize = MenuWorkspaceViewport.sizeOf(context);
+    routeActive =
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        NativeViewportScope.isActive(context);
     _changed();
     final tab = state?.active;
     return LayoutBuilder(
@@ -367,7 +594,7 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                     _tabs(),
                     if (state != null && state!.tabs.length >= state!.limit)
                       BridgeCaption(
-                        '已打开 ${state!.limit} 个标签页，请先关闭不需要的页面再打开新页面。',
+                        '已打开 ${state!.tabs.length} 个标签页，上限为 ${state!.limit} 个。请先关闭不需要的页面再打开新页面。',
                       ),
                     Wrap(
                       spacing: 4,
@@ -408,7 +635,7 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                             onPressed: opening || busy
                                 ? null
                                 : ready
-                                ? () => _status(force: true)
+                                ? _refreshConfiguration
                                 : _open,
                             child: const Text('重试'),
                           ),
@@ -447,6 +674,11 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                       ),
                     ),
                     if (error != null) Text(error!),
+                    if (widget.resume?.failed == true || _resumeRestoreFailed)
+                      BridgeCaption(
+                        AppStrings.of(context)
+                            .text('menu.browser.resume.runtimeFailed'),
+                      ),
                     if (tab?.unavailable == true)
                       const BridgeCaption(
                         '浏览器暂时不可用，请点击刷新重新启动此标签页。若仍无法启动，请检查 WebView2 是否已安装。',

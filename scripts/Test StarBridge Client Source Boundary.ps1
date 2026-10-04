@@ -24,6 +24,9 @@ foreach ($sbProjectName in @('StarBridge.NativeHost', 'StarBridge.OverlayRuntime
 [xml]$sbRendering = Get-Content -Raw -LiteralPath (Join-Path $sbRoot 'StarBridge.OverlayRuntime.Windows/RenderingSources.props')
 foreach ($sbItem in @($sbRendering.SelectNodes('//Compile'))) {
     $sbSourcePath = [string]$sbItem.Include
+    if ($RequireStandalone -and $sbSourcePath -match 'StarBridge\.(Desktop|Server)[\\/]') {
+        throw "Standalone renderer cannot reference a private source tree: $sbSourcePath"
+    }
     if ($sbSourcePath -match '[*?]' -or $sbSourcePath -match '(^|/)(App\.|MainWindow|OverlayWindow|InGameMenu|.*\.Legacy)') {
         throw "Renderer source must be explicit and exclude legacy UI/storage: $sbSourcePath"
     }

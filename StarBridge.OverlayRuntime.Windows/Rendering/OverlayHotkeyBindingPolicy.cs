@@ -93,6 +93,28 @@ internal sealed record OverlayHotkeyBindingPlan(
 
 internal static partial class OverlayHotkeyBindingPolicy
 {
+    // Shared by the legacy window and the standalone Host. Neither caller
+    // needs to construct or migrate the other application's settings model.
+    internal static OverlayHotkeyBindingPlan Build(
+        string? informationHotkeyText,
+        bool informationEnabled,
+        string? menuHotkeyText,
+        bool menuEnabled)
+    {
+        var informationParsed = TryParse(informationHotkeyText, out var informationHotkey);
+        var informationState = !informationEnabled
+            ? OverlayHotkeyBindingState.Disabled
+            : informationParsed ? OverlayHotkeyBindingState.Ready : OverlayHotkeyBindingState.Invalid;
+        var menuParsed = TryParse(menuHotkeyText, out var menuHotkey);
+        var menuState = ResolveMenuState(
+            menuEnabled, menuParsed, menuHotkey, informationState, informationHotkey);
+
+        return new OverlayHotkeyBindingPlan(
+            informationState,
+            informationParsed ? informationHotkey : null,
+            menuState,
+            menuParsed ? menuHotkey : null);
+    }
 
     internal static bool TryCapture(
         ModifierKeys modifiers,

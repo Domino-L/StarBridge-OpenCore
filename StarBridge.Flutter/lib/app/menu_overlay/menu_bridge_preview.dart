@@ -8,21 +8,33 @@ import 'menu_bridge_panels.dart';
 import 'menu_bridge_style.dart';
 import 'menu_friends_view.dart';
 import 'menu_comms_view.dart';
-import 'menu_comms_panel.dart';
-import 'menu_overlay_workspace.dart';
+import 'menu_bridge_workspace.dart';
+import 'menu_notice_banner.dart';
+import '../../platform/window/menu_notice.dart';
 import 'menu_workspace_controller.dart';
 import 'menu_profile_view.dart';
 import 'menu_feature_view.dart';
-import 'menu_organizations_panel.dart';
-import 'menu_rooms_panel.dart';
 import 'menu_local_tools.dart';
-import 'menu_clock.dart';
+import 'menu_bridge_header.dart';
+import '../../platform/window/menu_display_preferences.dart';
+import '../../platform/window/menu_social_preferences.dart';
+import '../../platform/window/menu_browser_preferences.dart';
+import '../../platform/window/menu_image_preferences.dart';
+import '../../platform/window/menu_screenshot_preferences.dart';
+import '../../platform/window/menu_browser_resume.dart';
+import '../../platform/window/menu_screenshot_directory.dart';
+import '../../features/overlay_settings/menu_browser_resume_controller.dart';
 import 'menu_overlay_theme.dart';
-import '../composition/menu_profile_page.dart';
-import '../../design_system/icons/icon_semantic.dart';
+import 'menu_chrome_scale.dart';
 import '../../platform/window/menu_window_preferences.dart';
+import '../../platform/window/menu_restore_preferences.dart';
+import '../../platform/window/menu_shortcut_settings.dart';
+import '../../platform/window/menu_toolbar_preferences.dart';
+import '../../platform/window/menu_attention.dart';
+import '../localization/app_strings.dart';
 
-/// Explicit visual preview only. Never bootstraps an account or social adapter.
+/// Shared workspace presentation. Preview callers cannot acquire authority;
+/// live ports are supplied only by the primary owner's current opening lease.
 class MenuBridgePreview extends StatefulWidget {
   const MenuBridgePreview({
     super.key,
@@ -44,10 +56,20 @@ class MenuBridgePreview extends StatefulWidget {
     this.onFeatureVisible,
     this.onFeatureAction,
     this.localCall,
+    this.localToolsController,
     this.initialSettings,
     this.onSettingsChanged,
     this.contextValues,
     this.preferencesFailed = false,
+    this.shortcutSettings,
+    this.browserResume,
+    this.screenshotDirectory,
+    this.system24Hour,
+    this.attention = const MenuAttention(),
+    this.notice,
+    this.recoveryOverlay,
+    this.startupMode = 'normal',
+    this.settingsPreview = false,
   });
   final bool visible;
   final VoidCallback onDismiss;
@@ -69,10 +91,22 @@ class MenuBridgePreview extends StatefulWidget {
   final void Function(String tool, bool visible)? onFeatureVisible;
   final void Function(String tool, String key, String value)? onFeatureAction;
   final MenuLocalCall? localCall;
+  final MenuLocalToolsController? localToolsController;
   final Map<String, Object?>? initialSettings;
   final ValueChanged<Map<String, Object?>>? onSettingsChanged;
   final List<String>? contextValues;
   final bool preferencesFailed;
+  final MenuShortcutSettingsPort? shortcutSettings;
+  final MenuBrowserResumePort? browserResume;
+  final MenuScreenshotDirectoryPort? screenshotDirectory;
+  final bool? system24Hour;
+  final MenuAttention attention;
+  final MenuNotice? notice;
+  final Widget? recoveryOverlay;
+  final String startupMode;
+
+  /// Presentation only; does not supply any live ports or action authority.
+  final bool settingsPreview;
   @override
   State<MenuBridgePreview> createState() => _MenuBridgePreviewState();
 }
@@ -80,15 +114,6 @@ class MenuBridgePreview extends StatefulWidget {
 class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   late final MenuWorkspaceController workspace;
   bool _friendsShown = false, _commsShown = false;
-  String _commsChannel = 'private';
-  void _selectCommsChannel(String value) {
-    if (!const {'private', 'organizationChat'}.contains(value)) {
-      return;
-    }
-    setState(() => _commsChannel = value);
-    _workspaceChanged();
-  }
-
   final _featuresShown = <String>{};
   String _lastChromeState = '';
   final _scope = Object();
@@ -97,6 +122,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   bool _updatingProfiles = false;
   String? _notice;
   MenuLocalToolsController? localTools;
+  MenuBrowserResumeController? _browserResume;
   Size get _initialViewport =>
       context.getInheritedWidgetOfExactType<MediaQuery>()?.data.size ??
       const Size(1200, 800);
@@ -109,7 +135,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
 
   List<MenuPanelSpec> get _specs => [
     if (widget.onFeatureVisible != null)
-      for (final id in const ['organizations', 'rooms', 'hud'])
+      for (final id in const ['organizations', 'rooms'])
         MenuPanelSpec(
           id: id,
           initialBounds: id == 'organizations'
@@ -176,25 +202,41 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   @override
   void initState() {
     super.initState();
-    if (widget.localCall != null) {
-      localTools = MenuLocalToolsController(widget.localCall!)
-        ..addListener(_localChanged);
+    if (widget.localToolsController != null || widget.localCall != null) {
+      localTools =
+          widget.localToolsController ??
+          MenuLocalToolsController(widget.localCall!);
+      localTools!.addListener(_localChanged);
       final settings = widget.initialSettings;
       if (settings != null) {
-        localTools!.showClock = settings['showClock'] == true;
-        localTools!.showContext = settings['showContext'] == true;
+        localTools!.display =
+            MenuDisplayPreferences.fromSettings(settings) ??
+            const MenuDisplayPreferences();
         localTools!.dimming = (settings['dimming'] as num).toDouble();
-        localTools!.restoreDesktop = settings['restoreDesktop'] == true;
+        localTools!.social = MenuSocialPreferences.fromSettings(settings)!;
+        localTools!.restore = MenuRestorePreferences.fromSettings(settings)!;
+        localTools!.browser = MenuBrowserPreferences.fromSettings(settings)!;
+        localTools!.imagePreferences = MenuImagePreferences.fromSettings(
+          settings,
+        )!;
+        localTools!.screenshotPreferences =
+            MenuScreenshotPreferences.fromSettings(settings)!;
         localTools!.snapWindows = settings['snapWindows'] == true;
+        localTools!.toolbar =
+            MenuToolbarPreferences.parse(settings['toolbar']) ??
+            const MenuToolbarPreferences();
       }
     }
     workspace = MenuWorkspaceController(scope: _scope, panels: _specs);
     workspace.snapWindows = localTools?.snapWindows ?? false;
+    workspace.restoreLastFocus = localTools?.restore.lastFocus ?? true;
     if (widget.initialLayout != null) {
       workspace.restoreLayout(
         widget.initialLayout,
         lease: workspace.captureLayoutLease(),
-        reopenPanels: localTools?.restoreDesktop ?? false,
+        reopenPanels:
+            widget.startupMode == 'normal' &&
+            (localTools?.restore.remembersWindows ?? false),
       );
     }
     workspace.setVisible(widget.visible);
@@ -213,20 +255,17 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
         _notice = null;
       }
     }
-    final friends = widget.visible && workspace.isOpen('friends');
-    for (final id in const [
-      'organizations',
-      'rooms',
-      'hud',
-      'organizationChat',
-    ]) {
-      final shown = widget.visible && workspace.isOpen(id);
+    final friends = workspace.panelsVisible && workspace.isOpen('friends');
+    for (final id in const ['organizations', 'rooms', 'hud']) {
+      final shown = id == 'hud'
+          ? widget.visible
+          : workspace.panelsVisible && workspace.isOpen(id);
       if (shown != _featuresShown.contains(id)) {
         shown ? _featuresShown.add(id) : _featuresShown.remove(id);
         widget.onFeatureVisible?.call(id, shown);
       }
     }
-    final comms = widget.visible && workspace.isOpen('comms');
+    final comms = workspace.panelsVisible && workspace.isOpen('comms');
     if (friends != _friendsShown) {
       _friendsShown = friends;
       widget.onFriendsVisible?.call(friends);
@@ -254,14 +293,14 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
             ].contains(p['id']),
           )
           .toList(),
-      'open': localTools?.restoreDesktop == true
+      'open': localTools?.restore.remembersWindows == true
           ? (layout['open'] as List)
                 .where(MenuWindowPreferences.panelIds.contains)
                 .toList()
           : <String>[],
     });
     final chromeState =
-        '${workspace.visible}:${workspace.activeId}:${workspace.openPanels.map((p) => p.id).join(',')}';
+        '${workspace.visible}:${workspace.panelsHidden}:${workspace.activeId}:${workspace.openPanels.map((p) => p.id).join(',')}';
     if (_lastChromeState != chromeState) {
       _lastChromeState = chromeState;
       setState(() {});
@@ -270,8 +309,9 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
 
   @override
   void dispose() {
+    _browserResume?.dispose();
     localTools?.removeListener(_localChanged);
-    localTools?.dispose();
+    if (widget.localToolsController == null) localTools?.dispose();
     workspace.removeListener(_workspaceChanged);
     workspace.dispose();
     super.dispose();
@@ -280,6 +320,10 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   @override
   void didUpdateWidget(MenuBridgePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.browserResume != widget.browserResume) {
+      _browserResume?.dispose();
+      _browserResume = null;
+    }
     if (widget.visible != oldWidget.visible) {
       workspace.setVisible(
         widget.visible,
@@ -289,6 +333,14 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   }
 
   void toggle(BridgePreviewPanel panel) {
+    if (panel == BridgePreviewPanel.hud) {
+      if (!widget.settingsPreview &&
+          widget.visible &&
+          !(widget.features['hud']?.busy ?? false)) {
+        widget.onFeatureAction?.call('hud', 'toggle', '');
+      }
+      return;
+    }
     final wasOpen = workspace.isOpen(panel.name);
     workspace.open(panel.name);
     final size = MediaQuery.sizeOf(context);
@@ -298,7 +350,9 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
     )) {
       workspace.recover(panel.name, size);
     }
-    if (panel == BridgePreviewPanel.screenshot && !wasOpen) {
+    if (panel == BridgePreviewPanel.screenshot &&
+        !wasOpen &&
+        localTools?.screenshot == null) {
       unawaited(localTools?.image(capture: true));
     }
   }
@@ -306,12 +360,17 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   void _localChanged() {
     if (localTools case final tools?) {
       workspace.snapWindows = tools.snapWindows;
+      workspace.restoreLastFocus = tools.restore.lastFocus;
       widget.onSettingsChanged?.call({
-        'showClock': tools.showClock,
-        'showContext': tools.showContext,
+        ...tools.display.toSettingsPatch(),
+        ...tools.social.toSettingsPatch(),
         'dimming': tools.dimming,
-        'restoreDesktop': tools.restoreDesktop,
+        ...tools.restore.toSettingsPatch(),
         'snapWindows': tools.snapWindows,
+        'toolbar': tools.toolbar.toMap(),
+        ...tools.browser.toSettingsPatch(),
+        ...tools.imagePreferences.toSettingsPatch(),
+        ...tools.screenshotPreferences.toSettingsPatch(),
       });
       _workspaceChanged();
     }
@@ -321,8 +380,13 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   @override
   Widget build(BuildContext context) {
     if (!widget.visible) return const SizedBox.expand();
-    return Theme(
-      data: buildMenuOverlayTheme(Localizations.localeOf(context)),
+    return MenuPresentation(
+      highContrast: localTools?.display.highContrast ?? false,
+      tooltipDelayMilliseconds:
+          localTools?.display.tooltipDelayMilliseconds ?? 500,
+      reduceMotion: localTools?.display.reduceMotion ?? false,
+      textScalePercent: localTools?.display.textScalePercent ?? 100,
+      safeMode: widget.startupMode == 'safe',
       child: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.escape): widget.onDismiss,
@@ -342,136 +406,291 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ColoredBox(
-                    key: const ValueKey('menu-game-scrim'),
-                    color: localTools == null
-                        ? BridgeInk.scrim
-                        : BridgeInk.scrim.withValues(
-                            alpha: localTools!.dimming,
-                          ),
-                  ),
-                  SafeArea(
-                    child: LayoutBuilder(
-                      builder: (context, bounds) {
-                        final largeText =
-                            MediaQuery.textScalerOf(context).scale(14) > 21;
-                        final contextStrip = BridgeContextPreview(
-                          live: widget.friends != null,
-                          values: widget.contextValues,
-                        );
-                        return Padding(
-                          padding: EdgeInsets.all(
-                            bounds.maxWidth >= 1100 ? 28 : 16,
-                          ),
-                          child: Column(
-                            children: [
-                              _Header(
-                                onDismiss: widget.onDismiss,
-                                showClock: localTools?.showClock ?? true,
-                                onSettings: localTools == null
-                                    ? null
-                                    : () {
-                                        workspace.recover(
-                                          'settings',
-                                          MediaQuery.sizeOf(context),
-                                        );
-                                      },
-                                onHud: widget.onFeatureVisible == null
-                                    ? null
-                                    : () => workspace.open('hud'),
-                              ),
-                              if (_notice != null) BridgeCaption(_notice!),
-                              if (widget.preferencesFailed)
-                                const BridgeCaption(
-                                  '菜单设置未保存或未读取成功；本次调整仅在当前运行中生效。',
-                                ),
-                              const SizedBox(height: 22),
-                              const Spacer(),
-                              const SizedBox(height: 16),
-                              if (localTools?.showContext ?? true)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Center(
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        maxWidth: 980,
-                                      ),
-                                      child: largeText
-                                          ? SingleChildScrollView(
-                                              scrollDirection: Axis.horizontal,
-                                              child: contextStrip,
-                                            )
-                                          : contextStrip,
+                  ExcludeSemantics(
+                    excluding: widget.recoveryOverlay != null,
+                    child: IgnorePointer(
+                      ignoring: widget.recoveryOverlay != null,
+                      child: ExcludeFocus(
+                        excluding: widget.recoveryOverlay != null,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ColoredBox(
+                              key: const ValueKey('menu-game-scrim'),
+                              color: localTools == null
+                                  ? BridgeInk.scrim
+                                  : BridgeInk.scrim.withValues(
+                                      alpha: localTools!.dimming,
                                     ),
+                            ),
+                            RepaintBoundary(
+                              key: const ValueKey('menu-chrome-paint-boundary'),
+                              child: MenuChromeScale(
+                                percent:
+                                    localTools?.display.interfaceScalePercent ??
+                                    0,
+                                child: SafeArea(
+                                  child: LayoutBuilder(
+                                    builder: (context, bounds) {
+                                      final largeText =
+                                          MediaQuery.textScalerOf(context)
+                                              .scale(14) >
+                                          21;
+                                      final contextStrip = BridgeContextPreview(
+                                        live: widget.friends != null,
+                                        values: widget.contextValues,
+                                        preferences:
+                                            localTools?.display ??
+                                            const MenuDisplayPreferences(),
+                                      );
+                                      return Padding(
+                                        padding: EdgeInsets.all(
+                                          !largeText && bounds.maxWidth >= 1100
+                                              ? 28
+                                              : 16,
+                                        ),
+                                        child: Column(
+                                          children: [
+                                            MenuBridgeHeader(
+                                              windowsHidden:
+                                                  workspace.panelsHidden,
+                                              onToggleWindows:
+                                                  workspace.openPanels.isEmpty
+                                                  ? null
+                                                  : workspace
+                                                        .togglePanelsVisibility,
+                                              onDismiss: widget.onDismiss,
+                                              system24Hour: widget.system24Hour,
+                                              display:
+                                                  localTools?.display ??
+                                                  const MenuDisplayPreferences(),
+                                              presenceKey:
+                                                  widget.contextValues !=
+                                                          null &&
+                                                      widget
+                                                              .contextValues!
+                                                              .length >
+                                                          5
+                                                  ? widget.contextValues![5]
+                                                  : 'presence.unknown',
+                                              onSettings: localTools == null
+                                                  ? null
+                                                  : () {
+                                                      workspace.recover(
+                                                        'settings',
+                                                        MediaQuery.sizeOf(
+                                                          context,
+                                                        ),
+                                                      );
+                                                    },
+                                              onHud:
+                                                  widget.onFeatureVisible ==
+                                                      null
+                                                  ? (widget.settingsPreview
+                                                        ? () {}
+                                                        : null)
+                                                  : () => toggle(
+                                                      BridgePreviewPanel.hud,
+                                                    ),
+                                              hudEnabled: widget
+                                                  .features['hud']
+                                                  ?.hudEnabled,
+                                              hudBusy:
+                                                  widget
+                                                      .features['hud']
+                                                      ?.busy ??
+                                                  false,
+                                            ),
+                                            if (_notice != null)
+                                              BridgeCaption(_notice!),
+                                            if (!widget.settingsPreview &&
+                                                widget.onFeatureVisible !=
+                                                    null &&
+                                                (widget
+                                                        .features['hud']
+                                                        ?.notice
+                                                        .isNotEmpty ??
+                                                    false))
+                                              Semantics(
+                                                liveRegion: true,
+                                                child: BridgeCaption(
+                                                  widget
+                                                      .features['hud']!
+                                                      .notice,
+                                                  key: const ValueKey(
+                                                    'menu-hud-notice',
+                                                  ),
+                                                ),
+                                              ),
+                                            if (widget.startupMode != 'normal')
+                                              BridgeCaption(
+                                                AppStrings.of(context).text(
+                                                  'menu.startup.${widget.startupMode}',
+                                                ),
+                                                key: const Key(
+                                                  'menu-startup-status',
+                                                ),
+                                              ),
+                                            if (widget.preferencesFailed)
+                                              const BridgeCaption(
+                                                '菜单设置未保存或未读取成功；本次调整仅在当前运行中生效。',
+                                              ),
+                                            const SizedBox(height: 22),
+                                            const Spacer(),
+                                            const SizedBox(height: 16),
+                                            if (localTools
+                                                    ?.display
+                                                    .hasContext ??
+                                                true)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 10,
+                                                ),
+                                                child: Center(
+                                                  child: ConstrainedBox(
+                                                    constraints:
+                                                        const BoxConstraints(
+                                                          maxWidth: 980,
+                                                        ),
+                                                    child: largeText
+                                                        ? SingleChildScrollView(
+                                                            scrollDirection:
+                                                                Axis.horizontal,
+                                                            child: contextStrip,
+                                                          )
+                                                        : contextStrip,
+                                                  ),
+                                                ),
+                                              ),
+                                            BridgePreviewDock(
+                                              attention: widget.attention,
+                                              preferences:
+                                                  localTools?.toolbar ??
+                                                  const MenuToolbarPreferences(),
+                                              localToolsEnabled:
+                                                  localTools != null,
+                                              featuresEnabled:
+                                                  widget.settingsPreview ||
+                                                  widget.onFeatureVisible !=
+                                                      null,
+                                              selected: switch (workspace
+                                                  .activeId) {
+                                                'friends' =>
+                                                  BridgePreviewPanel.friends,
+                                                'comms' =>
+                                                  BridgePreviewPanel.comms,
+                                                'organizations' =>
+                                                  BridgePreviewPanel
+                                                      .organizations,
+                                                'rooms' =>
+                                                  BridgePreviewPanel.rooms,
+                                                'hud' => BridgePreviewPanel.hud,
+                                                'screenshot' =>
+                                                  BridgePreviewPanel.screenshot,
+                                                'image' =>
+                                                  BridgePreviewPanel.image,
+                                                'browser' =>
+                                                  BridgePreviewPanel.browser,
+                                                _ => null,
+                                              },
+                                              openPanels: {
+                                                if (widget
+                                                        .features['hud']
+                                                        ?.hudEnabled ==
+                                                    true)
+                                                  BridgePreviewPanel.hud,
+                                                for (final panel
+                                                    in BridgePreviewPanel
+                                                        .values)
+                                                  if (panel !=
+                                                          BridgePreviewPanel
+                                                              .hud &&
+                                                      workspace.isOpen(
+                                                        panel.name,
+                                                      ))
+                                                    panel,
+                                              },
+                                              onToggle: toggle,
+                                              hudBusy:
+                                                  widget
+                                                      .features['hud']
+                                                      ?.busy ??
+                                                  false,
+                                              onRecover: (panel) =>
+                                                  workspace.recover(
+                                                    panel.name,
+                                                    MediaQuery.sizeOf(context),
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            BridgeCaption(
+                                              widget.friends == null &&
+                                                      !widget.settingsPreview
+                                                  ? '视觉预览 · 好友与通讯可展开 · 演示数据'
+                                                  : AppStrings.of(context).text(
+                                                      'overlay.sections.menu',
+                                                    ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                              BridgePreviewDock(
-                                localToolsEnabled: localTools != null,
-                                featuresEnabled:
-                                    widget.onFeatureVisible != null,
-                                selected: switch (workspace.activeId) {
-                                  'friends' => BridgePreviewPanel.friends,
-                                  'comms' => BridgePreviewPanel.comms,
-                                  'organizations' =>
-                                    BridgePreviewPanel.organizations,
-                                  'rooms' => BridgePreviewPanel.rooms,
-                                  'hud' => BridgePreviewPanel.hud,
-                                  'screenshot' => BridgePreviewPanel.screenshot,
-                                  'image' => BridgePreviewPanel.image,
-                                  'browser' => BridgePreviewPanel.browser,
-                                  _ => null,
-                                },
-                                openPanels: {
-                                  for (final panel in BridgePreviewPanel.values)
-                                    if (workspace.isOpen(panel.name)) panel,
-                                },
-                                onToggle: toggle,
-                                onRecover: (panel) => workspace.recover(
-                                  panel.name,
-                                  MediaQuery.sizeOf(context),
-                                ),
                               ),
-                              const SizedBox(height: 12),
-                              BridgeCaption(
-                                widget.friends == null
-                                    ? '视觉预览 · 好友与通讯可展开 · 演示数据'
-                                    : widget.comms == null
-                                    ? '好友只读试用 · 其他功能尚未接入'
-                                    : '菜单浮层 · 本机试用',
+                            ),
+                            // Desktop chrome is behind every floating window, including
+                            // hit testing. Empty workspace space still reaches the dock.
+                            MenuBridgeWorkspace(
+                              safeMode: widget.startupMode == 'safe',
+                              controller: workspace,
+                              shortcutSettings: widget.shortcutSettings,
+                              screenshotDirectory: widget.screenshotDirectory,
+                              browserResume: widget.browserResume == null
+                                  ? null
+                                  : (_browserResume ??=
+                                        MenuBrowserResumeController(
+                                          widget.browserResume!,
+                                        )),
+                              localTools: localTools,
+                              features: widget.features,
+                              onFeatureAction: widget.onFeatureAction,
+                              friends: widget.friends,
+                              onFriendsAction: widget.onFriendsAction,
+                              comms: widget.comms,
+                              onCommsAction: widget.onCommsAction,
+                              onCommsCompose: widget.onCommsCompose,
+                              commsDisconnected: widget.commsDisconnected,
+                              onProfile: widget.onProfileAction == null
+                                  ? null
+                                  : _openProfile,
+                              profiles: {
+                                for (final id in _profileTargets.keys)
+                                  id:
+                                      widget.profiles[id] ??
+                                      const MenuProfileView('loading'),
+                              },
+                              onRefresh: (id) => widget.onProfileAction?.call(
+                                'refresh',
+                                id,
+                                '',
+                                '',
                               ),
-                            ],
-                          ),
-                        );
-                      },
+                            ),
+                            if (widget.notice case final notice?)
+                              PositionedDirectional(
+                                top: 64,
+                                end: 16,
+                                width: (MediaQuery.sizeOf(context).width - 32)
+                                    .clamp(0, 360),
+                                child: MenuNoticeBanner(notice: notice),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  // Desktop chrome is behind every floating window, including
-                  // hit testing. Empty workspace space still reaches the dock.
-                  _Workspace(
-                    controller: workspace,
-                    localTools: localTools,
-                    features: widget.features,
-                    onFeatureAction: widget.onFeatureAction,
-                    friends: widget.friends,
-                    onFriendsAction: widget.onFriendsAction,
-                    comms: widget.comms,
-                    commsChannel: _commsChannel,
-                    onCommsChannel: _selectCommsChannel,
-                    onCommsAction: widget.onCommsAction,
-                    onCommsCompose: widget.onCommsCompose,
-                    commsDisconnected: widget.commsDisconnected,
-                    onProfile: widget.onProfileAction == null
-                        ? null
-                        : _openProfile,
-                    profiles: {
-                      for (final id in _profileTargets.keys)
-                        id:
-                            widget.profiles[id] ??
-                            const MenuProfileView('loading'),
-                    },
-                    onRefresh: (id) =>
-                        widget.onProfileAction?.call('refresh', id, '', ''),
-                  ),
+                  if (widget.recoveryOverlay != null) widget.recoveryOverlay!,
                 ],
               ),
             ),
@@ -480,252 +699,4 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
       ),
     );
   }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({
-    required this.onDismiss,
-    this.onSettings,
-    this.onHud,
-    this.showClock = true,
-  });
-  final VoidCallback onDismiss;
-  final VoidCallback? onSettings, onHud;
-  final bool showClock;
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, bounds) {
-      final actions = Wrap(
-        spacing: 18,
-        runSpacing: 12,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          BridgeMenuAction(
-            label: '设置',
-            onPressed: onSettings,
-            child: const BridgeLabel(MenuGlyph.settings, '设置'),
-          ),
-          BridgeMenuAction(
-            label: '打开信息浮层',
-            onPressed: onHud,
-            child: const BridgeLabel(MenuGlyph.overlay, '打开信息浮层'),
-          ),
-          BridgeMenuAction(
-            key: const ValueKey('menu-return'),
-            label: '返回游戏',
-            onPressed: onDismiss,
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('返回游戏'),
-                SizedBox(width: 16),
-                BridgeCaption('ESC'),
-              ],
-            ),
-          ),
-        ],
-      );
-      if (bounds.maxWidth < 800 ||
-          MediaQuery.textScalerOf(context).scale(14) > 21) {
-        // Preserve readable controls without consuming the entire tool area
-        // when accessibility text is large. No text scaling override.
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              if (showClock) const MenuClock(),
-              const SizedBox(width: 24),
-              actions,
-            ],
-          ),
-        );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          if (showClock) const MenuClock() else const SizedBox.shrink(),
-          actions,
-        ],
-      );
-    },
-  );
-}
-
-class _Workspace extends StatelessWidget {
-  const _Workspace({
-    required this.controller,
-    this.friends,
-    this.onFriendsAction,
-    this.comms,
-    this.commsChannel = 'private',
-    this.onCommsChannel,
-    this.onCommsAction,
-    this.onCommsCompose,
-    this.commsDisconnected = false,
-    this.onProfile,
-    this.profiles = const {},
-    required this.onRefresh,
-    this.features = const {},
-    this.onFeatureAction,
-    this.localTools,
-  });
-  final MenuWorkspaceController controller;
-  final MenuFriendsView? friends;
-  final void Function(String action, String key, String value)? onFriendsAction;
-  final MenuCommsView? comms;
-  final String commsChannel;
-  final ValueChanged<String>? onCommsChannel;
-  final void Function(String, String)? onCommsAction;
-  final void Function(String action, String key, String text, int revision)?
-  onCommsCompose;
-  final bool commsDisconnected;
-  final void Function(String source, String key)? onProfile;
-  final Map<String, MenuProfileView> profiles;
-  final ValueChanged<String> onRefresh;
-  final Map<String, MenuFeatureView> features;
-  final void Function(String tool, String key, String value)? onFeatureAction;
-  final MenuLocalToolsController? localTools;
-  @override
-  Widget build(BuildContext context) => MenuOverlayWorkspace(
-    controller: controller,
-    bridgeStyle: true,
-    closeLabel: '关闭窗口',
-    moveLabel: '拖动窗口',
-    resizeLabel: '调整窗口大小',
-    panels: [
-      if (onFeatureAction != null)
-        for (final entry in const {
-          'organizations': '组织',
-          'rooms': '房间',
-          'hud': '信息浮层',
-        }.entries)
-          MenuPanelContent(
-            id: entry.key,
-            title: entry.value,
-            icon: StarBridgeIconSemantic.friends,
-            builder: (_, _) => entry.key == 'organizations'
-                ? MenuOrganizationsPanel(
-                    active:
-                        controller.activeId == 'organizations' &&
-                        controller.visible,
-                    view:
-                        features[entry.key] ?? const MenuFeatureView('loading'),
-                    onProfile: onProfile == null
-                        ? null
-                        : (key) => onProfile!('organizations', key),
-                    onAction: (key, value) =>
-                        onFeatureAction!(entry.key, key, value),
-                  )
-                : entry.key == 'rooms'
-                ? MenuRoomsPanel(
-                    view:
-                        features[entry.key] ?? const MenuFeatureView('loading'),
-                    active:
-                        controller.activeId == 'rooms' && controller.visible,
-                    onAction: (key, value) =>
-                        onFeatureAction!(entry.key, key, value),
-                  )
-                : MenuFeaturePanel(
-                    view:
-                        features[entry.key] ?? const MenuFeatureView('loading'),
-                    onAction: (key, value) =>
-                        onFeatureAction!(entry.key, key, value),
-                  ),
-          ),
-      if (localTools != null) ...[
-        MenuPanelContent(
-          id: 'screenshot',
-          title: '截图',
-          icon: StarBridgeIconSemantic.friends,
-          builder: (_, _) => MenuImageTool(tools: localTools!, capture: true),
-        ),
-        MenuPanelContent(
-          id: 'image',
-          title: '参考图',
-          icon: StarBridgeIconSemantic.friends,
-          builder: (_, _) => MenuImageTool(tools: localTools!),
-        ),
-        MenuPanelContent(
-          id: 'browser',
-          title: '浏览器',
-          icon: StarBridgeIconSemantic.friends,
-          builder: (_, _) =>
-              MenuBrowserTool(call: localTools!.call, workspace: controller),
-        ),
-        MenuPanelContent(
-          id: 'settings',
-          title: '菜单设置',
-          icon: StarBridgeIconSemantic.friends,
-          builder: (_, _) =>
-              MenuLocalSettings(tools: localTools!, workspace: controller),
-        ),
-      ],
-      for (final entry in profiles.entries)
-        MenuPanelContent(
-          id: entry.key,
-          title: '个人页面',
-          icon: StarBridgeIconSemantic.friends,
-          builder: (_, _) => MenuProfileWindowPage(
-            view: entry.value,
-            onRefresh: () => onRefresh(entry.key),
-          ),
-        ),
-      MenuPanelContent(
-        id: 'friends',
-        title: '好友',
-        icon: StarBridgeIconSemantic.friends,
-        builder: (_, _) => friends == null
-            ? SingleChildScrollView(
-                key: const ValueKey('menu-scroll-friends'),
-                child: BridgeFriendsPreview(
-                  embedded: true,
-                  onClose: () => controller.close('friends'),
-                ),
-              )
-            : MenuFriendsPanel(
-                onAction: onFriendsAction,
-                onChat: onCommsAction == null
-                    ? null
-                    : (key) {
-                        onCommsChannel?.call('private');
-                        controller.open('comms');
-                        onCommsAction!('friend', key);
-                      },
-                embedded: true,
-                view: friends!,
-                onClose: () => controller.close('friends'),
-                onProfile: onProfile == null
-                    ? null
-                    : (key) => onProfile!('friends', key),
-              ),
-      ),
-      MenuPanelContent(
-        id: 'comms',
-        title: '通讯',
-        icon: StarBridgeIconSemantic.notifications,
-        builder: (_, _) => friends == null
-            ? SingleChildScrollView(
-                child: BridgeCommsPreview(
-                  embedded: true,
-                  onClose: () => controller.close('comms'),
-                ),
-              )
-            : comms != null && onCommsAction != null
-            ? MenuCommsPanel(
-                active: controller.activeId == 'comms' && controller.visible,
-                embedded: true,
-                view: comms!,
-                onClose: () => controller.close('comms'),
-                onAction: onCommsAction!,
-                onCompose: onCommsCompose,
-                disconnected: commsDisconnected,
-                onProfile: onProfile == null
-                    ? null
-                    : (key) => onProfile!('comms', key),
-              )
-            : const BridgePlate(framed: false, child: BridgeCaption('通讯尚未接入。')),
-      ),
-    ],
-  );
 }

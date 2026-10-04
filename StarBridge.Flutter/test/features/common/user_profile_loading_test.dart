@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +11,7 @@ import 'package:starbridge_flutter/features/personal_profile/personal_profile_mo
 import '../communities/community_visitor_profile_test.dart'
     show VisitorPort, visitorPayload;
 import '../friends/social_layout_test.dart' show app;
+import '../../support/synthetic_image.dart';
 
 void main() {
   testWidgets('a pending background cannot return after account invalidation', (
@@ -40,7 +40,7 @@ void main() {
     p.changes.add(null);
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      bundle.pending.complete(_wallpaperFixture());
+      bundle.pending.complete(syntheticImageData());
       await Future<void>.delayed(const Duration(milliseconds: 30));
     });
     await tester.pumpAndSettle();
@@ -153,7 +153,7 @@ void main() {
       expect(bundle.reads, 1);
       expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNull);
       await tester.runAsync(() async {
-        bundle.pending.complete(_wallpaperFixture());
+        bundle.pending.complete(syntheticImageData());
       });
       for (var i = 0; i < 40; i++) {
         if (tester.widget<RawImage>(find.byType(RawImage)).image != null) break;
@@ -175,13 +175,6 @@ void main() {
 }
 
 const _wallpaperPath = 'assets/profile-wallpapers/formation-flight.jpg';
-
-// Synthetic one-pixel PNG: loading tests must not require optional artwork.
-ByteData _wallpaperFixture() => ByteData.sublistView(
-  base64Decode(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  ),
-);
 
 class _HeldWallpaperBundle extends CachingAssetBundle {
   final pending = Completer<ByteData>();
@@ -221,7 +214,7 @@ class _RetryWallpaperBundle extends CachingAssetBundle {
     if (key == _wallpaperPath) {
       reads++;
       if (fail) throw StateError('Synthetic asset read failure');
-      return Future.value(_wallpaperFixture());
+      return Future.value(syntheticImageData());
     }
     return rootBundle.load(key);
   }

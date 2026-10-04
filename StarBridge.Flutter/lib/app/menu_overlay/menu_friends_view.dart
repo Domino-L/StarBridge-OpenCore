@@ -339,12 +339,14 @@ class MenuFriendsPanel extends StatefulWidget {
     this.embedded = false,
     this.onAction,
     this.onChat,
+    this.sort = 'onlineFirst',
   });
   final MenuFriendsView view;
   final VoidCallback onClose;
   final ValueChanged<String>? onProfile;
   final ValueChanged<String>? onChat;
   final bool embedded;
+  final String sort;
   final void Function(String action, String key, String value)? onAction;
   @override
   State<MenuFriendsPanel> createState() => _MenuFriendsPanelState();
@@ -372,9 +374,26 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
     final onlineCount = view.rows
         .where((r) => ['online', 'inGame', 'away'].contains(r.presence))
         .length;
-    final rows = view.rows.where(
-      (r) => r.name.toLowerCase().contains(query.toLowerCase()),
-    );
+    final ordered = view.rows.indexed.toList();
+    if (view.section == 'friends') {
+      int rank(String presence) => switch (presence) {
+        'inGame' => 0,
+        'online' => 1,
+        'away' => 2,
+        _ => 3,
+      };
+      ordered.sort((a, b) {
+        final status = widget.sort == 'alphabetical'
+            ? 0
+            : rank(a.$2.presence).compareTo(rank(b.$2.presence));
+        if (status != 0) return status;
+        final name = a.$2.name.toLowerCase().compareTo(b.$2.name.toLowerCase());
+        return name != 0 ? name : a.$1.compareTo(b.$1);
+      });
+    }
+    final rows = ordered
+        .map((entry) => entry.$2)
+        .where((r) => r.name.toLowerCase().contains(query.toLowerCase()));
     final content = <Widget>[
       if (!widget.embedded)
         Row(

@@ -158,7 +158,8 @@ internal static class OverlayComprehensiveAuditTests
         var type = typeof(NativeInformationOverlayRuntime);
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
         type.GetField("_dispatcher", flags)!.SetValue(runtime, Dispatcher.CurrentDispatcher);
-        type.GetField("_snapshot", flags)!.SetValue(runtime, InformationOverlayRuntimeSnapshot.Unavailable with { IsVisible = true });
+        // Display demand follows the window lifecycle, not the visibility bit alone.
+        type.GetField("_snapshot", flags)!.SetValue(runtime, InformationOverlayRuntimeSnapshot.Unavailable with { IsVisible = true, WindowState = "open" });
         for (var i = 0; i < 2000; i++) runtime.RequestContentRefresh();
         Check((int)type.GetField("_contentRefreshQueued", flags)!.GetValue(runtime)! == 1, "a burst schedules only one native content refresh");
         var frame = new DispatcherFrame();

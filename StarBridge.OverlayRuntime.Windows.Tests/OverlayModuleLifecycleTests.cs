@@ -89,6 +89,10 @@ internal static class OverlayModuleLifecycleTests
         // A passing expiry assertion must come from the deadline timer, not the
         // 750 ms game-window poll or a subsequent explicit refresh.
         await runtime.PausePeriodicRefreshForTestAsync();
+        var menu = new MenuHotkeyRegistration("Alt+M", false, true, Environment.ProcessId, () => true, _ => { });
+        await runtime.ConfigureMenuHotkeyAsync(menu);
+        await runtime.UpdateMenuWindowAsync(menu, 1, "opening", 0);
+        Check(runtime.IsVisible && runtime.HasDisplayDemand, "Menu preserves the HUD and authorized source demand beneath its own window.");
         var realtimeDeadline = fixture.ExpireRealtimeSoon();
         runtime.RequestContentRefresh();
         await RequireScheduledBeforeExpiry(deadlines, realtimeDeadline);
@@ -122,6 +126,10 @@ internal static class OverlayModuleLifecycleTests
         fixture.FailRead("overlay.sources_limit_exceeded");
         runtime.RequestContentRefresh();
         await WaitFor(observations, item => item.Frame.ScopeKey == "unavailable");
+        await runtime.UpdateMenuWindowAsync(menu, 1, "closed", 0);
+        // Closing the menu only removes the stacking boundary; it does not
+        // reconstruct the HUD or needlessly replay an unchanged frame.
+        Check(runtime.IsVisible, "Menu close keeps current authority after expiry/revocation, not cached content.");
         var failedContent = await runtime.ExecuteAsync(InformationOverlayRuntimeCommand.Sync, workspace);
         Check(failedContent.IsVisible && failedContent.FailureCode == "overlay.sources_limit_exceeded" && !failedContent.Retryable,
             "Content failure is reported, without showing unrelated legacy data or closing the layout.");

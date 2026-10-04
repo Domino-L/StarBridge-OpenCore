@@ -233,6 +233,21 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     public event EventHandler? Closed;
 
     public bool IsVisible => _isVisible;
+    private readonly OverlayMenuZOrder _menuZOrder = new();
+    internal IntPtr NativeHandle => _source?.Handle ?? IntPtr.Zero;
+    internal bool StartupTransitionEnabled => _settings.EnableStartupTransition;
+    internal void StopStartupCover()
+    {
+        _compositionStartupTransition?.Dispose();
+        _compositionStartupTransition = null;
+    }
+    internal void SetMenuAbove(IntPtr menu)
+    {
+        _menuZOrder.Set(menu);
+        var dispatcher = _renderDispatcher;
+        if (dispatcher is { HasShutdownStarted: false, HasShutdownFinished: false })
+            dispatcher.BeginInvoke(() => _menuZOrder.Apply(_source?.Handle ?? IntPtr.Zero), DispatcherPriority.Send);
+    }
 
     public void Show()
     {
@@ -347,6 +362,14 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             _isVisible = visible;
         }
 
+        if (!visible)
+        {
+            // The optional startup cover owns a separate HWND; hiding only
+            // the HUD must not leave that cover above the menu.
+            _compositionStartupTransition?.Dispose();
+            _compositionStartupTransition = null;
+        }
+
         var dispatcher = _renderDispatcher;
         if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
         {
@@ -355,18 +378,24 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
 
         dispatcher.BeginInvoke(() =>
         {
+            if (_disposed || _isVisible != visible) return;
             if (_source?.Handle is not { } handle || handle == IntPtr.Zero)
             {
                 return;
             }
 
+            if (visible)
+            {
+                // Owner publishes refreshed authorized state at Render priority
+                // before this reveal. Draw it while hidden, then show the HWND.
+                DrawFrame();
+            }
             ShowWindow(handle, visible ? SwShowna : SwHide);
             if (visible)
             {
                 OverlayHwndDiagnostics.EnsureTopmost(handle, "experimental-hud-show", force: true);
-                DrawFrame();
             }
-        }, DispatcherPriority.Send);
+        }, visible ? DispatcherPriority.Render : DispatcherPriority.Send);
     }
 
     public void QueueGameEventNotification(OverlayEventNotificationTypes eventType, string title, string detail,
@@ -1572,6 +1601,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
 
     private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        _menuZOrder.Constrain(msg, lParam);
         if (msg == WmNcHitTest)
         {
             OverlayHwndDiagnostics.LogMessage(hwnd, "experimental-hud", "WM_NCHITTEST", ++_hitTestDiagnosticsCount);

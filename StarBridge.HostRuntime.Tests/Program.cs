@@ -8,6 +8,20 @@ using StarBridge.Core.Profiles;
 using System.Net;
 using System.Net.Http.Json;
 
+if (args is ["--overlay-preset-sharing-only"])
+{
+    await OverlaySharedPresetTests.Sharing();
+    Console.WriteLine("PASS legacy and source-aware preset sharing");
+    return 0;
+}
+
+if (args is ["--menu-hotkeys-only"])
+{
+    await OverlaySettingsTests.DefaultHotkeyPreservesSavedBindings();
+    await MenuHotkeyBridgeTests.Run();
+    return 0;
+}
+
 if (args is ["--overlay-source-build-gate", var expectedSourceGate])
 {
     await OverlaySourceBuildGateTests.Run(bool.Parse(expectedSourceGate));
@@ -252,6 +266,10 @@ if (args is ["--local-chat-history-only"])
 if (args is ["--menu-preferences-only"])
 {
     await MenuPreferencesTests.Verify();
+    await MenuStartupTests.Verify();
+    await MenuRecoveryTests.Verify();
+    await MenuBrowserResumeTests.Verify();
+    await MenuScreenshotDirectoryTests.Verify();
     return 0;
 }
 
@@ -702,6 +720,9 @@ if (args.Length == 2 && args[0] == "--hangar-catalog-bundle")
 
 var tests = new (string Name, Func<Task> Test)[]
 {
+    ("Browser resume has encrypted explicit consent and current account isolation", MenuBrowserResumeTests.Verify),
+    ("Screenshot directory uses native selection, encrypted local persistence and current-generation CAS", MenuScreenshotDirectoryTests.Verify),
+    ("Menu hotkey lease lifecycle", MenuHotkeyBridgeTests.Run),
     ("Handle correction from existing offline game log", LegacyPasswordLoginTests.OfflineHandleChange),
     ("Handle mismatch remains actionable without inventing SCM binding", LegacyPasswordLoginTests.HandleMismatchProjection),
     ("Compatibility Handle change uses explicit one-use confirmation and verified readback", LegacyPasswordLoginTests.HandleChangeCompatibility),
@@ -952,6 +973,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Overlay and client page share in-flight roster HTTP", LegacyPasswordLoginTests.OverlayAndPageShareInflightRoster),
     ("Overlay multi-community resources update and revoke independently", OverlayCommunityModuleRefreshTests.Run),
     ("Overlay shared workspace does not swallow new chat", OverlayCommunityModuleRefreshTests.WorkspaceObservationDoesNotSwallowChat),
+    ("Overlay default Alt+O preserves saved bindings", OverlaySettingsTests.DefaultHotkeyPreservesSavedBindings),
     ("Overlay workspace reads every WPF setting and preset without mutation", OverlaySettingsTests.ReadsFullLegacyWorkspaceWithoutMutation),
     ("Overlay workspace defaults without creating legacy files", OverlaySettingsTests.DefaultsFullWorkspaceWithoutWriting),
     ("Overlay workspace saves legacy experimental render mode", OverlaySettingsTests.SavesWorkspaceLoadedFromLegacyExperimentalRenderMode),

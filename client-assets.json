@@ -1,7 +1,31 @@
 {
   "schemaVersion": 1,
-  "description": "Exact reviewed runtime assets only. No masters, game media, captures, caches or commercial artwork.",
+  "description": "Exact reviewed runtime assets and synthetic UI test baselines. No personal captures, game media, caches or commercial artwork.",
   "files": [
+    {
+      "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-color-picker-dark.png",
+      "sha256": "12cffcda9070c6a9420e12676bf64444913f0896c61387b726f762315fd1365e",
+      "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
+      "licenseFile": "docs/UI_TEST_FIXTURES.md"
+    },
+    {
+      "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-color-picker-light.png",
+      "sha256": "9b4a6ed559a563f67413761cd78a402d8abbdb3dbc649e6a2eb9f1775d53feed",
+      "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
+      "licenseFile": "docs/UI_TEST_FIXTURES.md"
+    },
+    {
+      "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-import-1280.png",
+      "sha256": "97e0fe60906cb84558500fe064bca3274ce7c676a75b19921d8a277202b8cea1",
+      "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
+      "licenseFile": "docs/UI_TEST_FIXTURES.md"
+    },
+    {
+      "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-import-1440.png",
+      "sha256": "f56a0e146662fcc980efe5a93c002277a2d688add311d15e3b75a82e125a7bfe",
+      "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
+      "licenseFile": "docs/UI_TEST_FIXTURES.md"
+    },
     {
       "path": "StarBridge.Flutter/assets/brand/scm_mark.png",
       "sha256": "7025b5b097df2d67796ecfebd8e14f8e82986c100b07b237a7037ccc11ef582e",

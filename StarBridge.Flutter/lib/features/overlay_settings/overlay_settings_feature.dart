@@ -6,6 +6,7 @@ import '../../app/localization/app_strings.dart';
 import '../game_log/game_log_controller.dart';
 import 'overlay_settings_module.dart';
 import 'overlay_settings_page.dart';
+import 'menu_additional_settings_editors.dart';
 
 FeatureDescriptor createOverlaySettingsFeature(
   OverlaySettingsModule module, {
@@ -29,6 +30,49 @@ Future<bool> confirmOverlayWorkspaceLeave(
   BuildContext context,
   OverlaySettingsModule module,
 ) async {
+  final menu = module.menuDraft;
+  if (menu != null && menu.dirty) {
+    if (menu.busy) return false;
+    final strings = AppStrings.of(context);
+    final choice = await showDialog<_OverlayWorkspaceLeaveChoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        key: const Key('menu-unsaved-leave-dialog'),
+        title: Text(strings.text('menu.workspace.leaveTitle')),
+        content: Text(strings.text('menu.workspace.leaveBody')),
+        actions: [
+          TextButton(
+            key: const Key('menu-unsaved-leave-cancel'),
+            onPressed: () =>
+                Navigator.pop(context, _OverlayWorkspaceLeaveChoice.cancel),
+            child: Text(strings.text('menu.workspace.stay')),
+          ),
+          TextButton(
+            key: const Key('menu-unsaved-leave-discard'),
+            onPressed: () =>
+                Navigator.pop(context, _OverlayWorkspaceLeaveChoice.discard),
+            child: Text(strings.text('menu.workspace.discard')),
+          ),
+          FilledButton(
+            key: const Key('menu-unsaved-leave-save'),
+            onPressed: () =>
+                Navigator.pop(context, _OverlayWorkspaceLeaveChoice.save),
+            child: Text(strings.text('menu.workspace.save')),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted) return false;
+    if (choice == _OverlayWorkspaceLeaveChoice.discard) {
+      menu.discard();
+    } else if (choice == _OverlayWorkspaceLeaveChoice.save) {
+      if (!await confirmMenuSettingsSave(context, menu)) return false;
+    } else {
+      return false;
+    }
+    if (!context.mounted) return false;
+  }
   final workspace = module.workspace;
   if (workspace == null || !workspace.projection.value.dirty) return true;
   final strings = AppStrings.of(context);

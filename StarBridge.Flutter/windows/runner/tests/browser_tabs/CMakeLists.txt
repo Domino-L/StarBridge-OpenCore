@@ -7,7 +7,7 @@ set(WEBVIEW_SDK "$ENV{USERPROFILE}/.nuget/packages/microsoft.web.webview2/1.0.31
 if(NOT EXISTS "${WEBVIEW_SDK}/build/native/include/WebView2.h")
   message(FATAL_ERROR "Requires the existing local WebView2 SDK; never downloads it")
 endif()
-add_executable(menu_browser_tabs_test ../menu_browser_tabs_test.cpp ../../menu_local_tools.cpp)
+add_executable(menu_browser_tabs_test ../menu_browser_tabs_test.cpp ../../menu_local_tools.cpp ../../runner.exe.manifest)
 target_include_directories(menu_browser_tabs_test PRIVATE ../.. "${EPHEMERAL}/cpp_client_wrapper/include" "${WEBVIEW_SDK}/build/native/include")
 target_compile_features(menu_browser_tabs_test PRIVATE cxx_std_17)
 target_compile_definitions(menu_browser_tabs_test PRIVATE NOMINMAX UNICODE _UNICODE STARBRIDGE_HAS_HANGAR_WEBVIEW STARBRIDGE_MENU_BROWSER_TEST)

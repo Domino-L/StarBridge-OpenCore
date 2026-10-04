@@ -30,15 +30,8 @@ contracts may remain public so settings can migrate safely.
 3. Run:
 
    ```powershell
-   dotnet build StarBridge.sln
-   dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj
    powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Test Repository Safety.ps1"
-   powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Test StarBridge Client Source Boundary.ps1" -RequireStandalone
-   powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Test StarBridge Flutter Licenses.ps1"
-   cd StarBridge.Flutter
-   flutter pub get
-   flutter test --dart-define=STARBRIDGE_PUBLIC_SOURCE=true
-   flutter build windows --release --dart-define=STARBRIDGE_ENABLE_MENU_OVERLAY=false
+   pwsh -NoProfile -File ".\scripts\Test StarBridge Public Client.ps1" -MenuOverlay
    ```
 
 4. Keep changes focused and explain any assumptions about the game log format.

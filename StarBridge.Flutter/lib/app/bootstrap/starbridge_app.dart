@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../platform/window/menu_notice.dart';
 import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
 
 import '../../features/common/user_interaction.dart';
@@ -256,8 +258,14 @@ class _StarBridgeAppState extends State<StarBridgeApp> {
       child: LocalNotificationListener(
         events: widget.composition.notificationReminders,
         settings: widget.composition.notificationSettings,
+        menuOwnsNotices: () =>
+            switch (widget.composition.overlaySettings.menuPreview) {
+              MenuNoticeDeliveryOwner owner => owner.menuNoticeDeliveryActive,
+              _ => false,
+            },
         desktop: widget.composition.desktopNotifications,
-        visibleConversationKey: () => widget.composition.friends.visibleConversationKey,
+        visibleConversationKey: () =>
+            widget.composition.friends.visibleConversationKey,
         child: StarBridgeShell(
           userNavigation: _userNavigation,
           navigationRequests: _navigationRequests,

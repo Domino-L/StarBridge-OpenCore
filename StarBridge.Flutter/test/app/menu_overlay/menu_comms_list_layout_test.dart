@@ -4,6 +4,7 @@ import 'package:starbridge_flutter/app/menu_overlay/menu_comms_panel.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_bridge_preview.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_friends_view.dart';
+import 'package:starbridge_flutter/app/menu_overlay/menu_overlay_workspace.dart';
 
 import 'menu_comms_maturity_test.dart' show fixture;
 import 'menu_comms_channels_test.dart' show channel;
@@ -157,7 +158,18 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('menu-tool-chat')));
       await tester.pumpAndSettle();
-      expect(leases, isEmpty);
+      expect(leases, ['hud']); // Headless runtime state only; no chat lease.
+      final workspace = tester
+          .widget<MenuOverlayWorkspace>(find.byType(MenuOverlayWorkspace))
+          .controller;
+      expect(workspace.allows('organizationChat'), false);
+      expect(workspace.open('organizationChat'), false);
+      workspace.close('comms');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('menu-tool-chat')));
+      await tester.pumpAndSettle();
+      expect(leases, ['hud']);
+      expect(workspace.isOpen('comms'), true);
       expect(find.text('房间聊天'), findsNothing);
       expect(
         find.byKey(const ValueKey('menu-comms-tab-private')),

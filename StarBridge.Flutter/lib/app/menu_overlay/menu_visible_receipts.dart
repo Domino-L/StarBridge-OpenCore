@@ -51,8 +51,14 @@ class _MenuVisibleReceiptsState extends State<MenuVisibleReceipts> {
         if (rawViewport is! RenderBox) continue;
         final viewport = rawViewport as RenderBox;
         if (!viewport.hasSize) continue;
-        final bounds = box.localToGlobal(Offset.zero) & box.size;
-        var clip = viewport.localToGlobal(Offset.zero) & viewport.size;
+        final bounds = MatrixUtils.transformRect(
+          box.getTransformTo(null),
+          Offset.zero & box.size,
+        );
+        var clip = MatrixUtils.transformRect(
+          viewport.getTransformTo(null),
+          Offset.zero & viewport.size,
+        );
         // Tiny tool windows scroll around the inner history viewport. A message
         // visible to that inner list may still be clipped by the outer window.
         RenderObject? ancestor = viewport.parent;
@@ -61,7 +67,10 @@ class _MenuVisibleReceiptsState extends State<MenuVisibleReceipts> {
             final outer = ancestor as RenderBox;
             if (!outer.hasSize) break;
             clip = clip.intersect(
-              outer.localToGlobal(Offset.zero) & outer.size,
+              MatrixUtils.transformRect(
+                outer.getTransformTo(null),
+                Offset.zero & outer.size,
+              ),
             );
           }
           ancestor = ancestor.parent;

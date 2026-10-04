@@ -1,4 +1,11 @@
 #include "menu_local_tools.h"
+#include "menu_browser_options.h"
+#include "menu_image_native.h"
+#include "menu_reference_identity.h"
+#include "menu_reference_decode.h"
+#include "menu_screenshot_export.h"
+#include "menu_screenshot_storage.h"
+#include "menu_screenshot_capture.h"
 #include <dwmapi.h>
 #include <gdiplus.h>
 #include <shlobj.h>
@@ -21,9 +28,9 @@ constexpr size_t kMaxBytes = 32 * 1024 * 1024;
 const Value* Field(const Map& m, const char* k) {
   const auto i = m.find(Value(k)); return i == m.end() ? nullptr : &i->second;
 }
-std::string Text(const Map& m, const char* k) {
+std::string Text(const Map& m, const char* k, size_t byte_limit = 4096) {
   const auto* v = Field(m, k); const auto* s = v ? std::get_if<std::string>(v) : nullptr;
-  return s && s->size() <= 4096 ? *s : "";
+  return s && s->size() <= byte_limit ? *s : "";
 }
 bool Flag(const Map& m, const char* k) {
   const auto* v = Field(m, k); const auto* b = v ? std::get_if<bool>(v) : nullptr; return b && *b;
@@ -63,29 +70,12 @@ ComPtr<IStream> Stream(const std::vector<uint8_t>& bytes) {
   if (!bytes.empty() && (FAILED(stream->Write(bytes.data(), static_cast<ULONG>(bytes.size()), &written)) || written != bytes.size())) return nullptr;
   LARGE_INTEGER zero{}; stream->Seek(zero, STREAM_SEEK_SET, nullptr); return stream;
 }
-std::vector<uint8_t> Png(Gdiplus::Image& image) {
-  if (image.GetLastStatus() != Gdiplus::Ok || image.GetWidth() == 0 || image.GetHeight() == 0 ||
-      image.GetWidth() > 16384 || image.GetHeight() > 16384 ||
-      static_cast<uint64_t>(image.GetWidth()) * image.GetHeight() > 64000000) return {};
-  UINT count = 0, size = 0; Gdiplus::GetImageEncodersSize(&count, &size);
-  if (!size) return {};
-  std::vector<uint8_t> info(size);
-  auto* codecs = reinterpret_cast<Gdiplus::ImageCodecInfo*>(info.data());
-  if (Gdiplus::GetImageEncoders(count, size, codecs) != Gdiplus::Ok) return {};
-  CLSID codec{}; bool found = false;
-  for (UINT i = 0; i < count; ++i) if (wcscmp(codecs[i].MimeType, L"image/png") == 0) { codec = codecs[i].Clsid; found = true; break; }
-  auto stream = Stream({}); if (!found || !stream || image.Save(stream.Get(), &codec) != Gdiplus::Ok) return {};
-  STATSTG stat{}; if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || stat.cbSize.QuadPart > kMaxBytes) return {};
-  std::vector<uint8_t> bytes(static_cast<size_t>(stat.cbSize.QuadPart));
-  LARGE_INTEGER zero{}; stream->Seek(zero, STREAM_SEEK_SET, nullptr);
-  ULONG read = 0; if (FAILED(stream->Read(bytes.data(), static_cast<ULONG>(bytes.size()), &read)) || read != bytes.size()) return {};
-  return bytes;
-}
-std::vector<uint8_t> PickImage(HWND owner, bool& cancelled) {
+std::vector<uint8_t> Png(Gdiplus::Bitmap& image) { return MenuEncodeScreenshot(image); }
+std::vector<uint8_t> PickImage(HWND owner, bool& cancelled, std::optional<menu_image::ReferenceFileKey>& identity) {
   cancelled = false;
   ComPtr<IFileOpenDialog> dialog;
   if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return {};
-  const COMDLG_FILTERSPEC filters[] = {{L"图片 (PNG, JPEG, BMP)", L"*.png;*.jpg;*.jpeg;*.bmp"}};
+  const COMDLG_FILTERSPEC filters[] = {{L"图片 (PNG, JPEG, BMP, GIF, TIFF)", kMenuReferenceFilter}};
   dialog->SetFileTypes(1, filters);
   dialog->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT);
   const HRESULT shown = dialog->Show(owner);
@@ -95,18 +85,20 @@ std::vector<uint8_t> PickImage(HWND owner, bool& cancelled) {
   // Open only the file selected by this dialog; never accept a path from Dart.
   HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   CoTaskMemFree(path); if (file == INVALID_HANDLE_VALUE) return {};
+  identity = menu_image::ReferenceKey(file);
   LARGE_INTEGER length{}; std::vector<uint8_t> bytes;
   if (GetFileSizeEx(file, &length) && length.QuadPart > 0 && length.QuadPart <= kMaxBytes) {
     bytes.resize(static_cast<size_t>(length.QuadPart)); DWORD read = 0;
     if (!ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) || read != bytes.size()) bytes.clear();
   }
   CloseHandle(file); auto stream = Stream(bytes); if (!stream || bytes.empty()) return {};
-  Gdiplus::Bitmap bitmap(stream.Get()); return Png(bitmap);
+  return MenuDecodeReference(stream.Get());
 }
 std::vector<uint8_t> Capture(HWND owner) {
   MONITORINFO info{sizeof(info)};
   if (!GetMonitorInfoW(MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST), &info)) return {};
   const int width = info.rcMonitor.right - info.rcMonitor.left, height = info.rcMonitor.bottom - info.rcMonitor.top;
+  if (width <= 0 || height <= 0 || !menu_image::Bounded(static_cast<UINT>(width), static_cast<UINT>(height))) return {};
   HDC screen = GetDC(nullptr), memory = CreateCompatibleDC(screen);
   HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
   if (!memory || !bitmap) { if (memory) DeleteDC(memory); if (bitmap) DeleteObject(bitmap); ReleaseDC(nullptr, screen); return {}; }
@@ -117,27 +109,176 @@ std::vector<uint8_t> Capture(HWND owner) {
   if (ok) { Gdiplus::Bitmap image(bitmap, nullptr); bytes = Png(image); }
   DeleteObject(bitmap); return bytes;
 }
-bool SaveImage(HWND owner, const std::vector<uint8_t>& bytes) {
-  if (bytes.empty()) return false;
+bool SaveImage(HWND owner, Gdiplus::Bitmap& image, MenuScreenshotExport options, bool& cancelled, bool& mismatch,
+    const std::function<bool()>& current, const SYSTEMTIME& time) {
+  cancelled = false;
+  mismatch = false;
   ComPtr<IFileSaveDialog> dialog;
   if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return false;
-  const COMDLG_FILTERSPEC filters[] = {{L"PNG 图片", L"*.png"}};
-  dialog->SetFileTypes(1, filters); dialog->SetDefaultExtension(L"png"); dialog->SetFileName(L"StarBridge-screenshot.png");
-  dialog->SetOptions(FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT);
-  if (FAILED(dialog->Show(owner))) return false;
+  const COMDLG_FILTERSPEC filters[] = {{L"PNG (*.png)", L"*.png"}, {L"JPEG (*.jpg; *.jpeg)", L"*.jpg;*.jpeg"}};
+  if (FAILED(dialog->SetFileTypes(2, filters)) || FAILED(dialog->SetFileTypeIndex(options.jpeg ? 2 : 1)) ||
+      FAILED(dialog->SetDefaultExtension(options.Extension()))) return false;
+  wchar_t name[80]{};
+  swprintf_s(name, L"StarBridge_%04u%02u%02u_%02u%02u%02u_%03u.%ls", static_cast<unsigned>(time.wYear),
+      static_cast<unsigned>(time.wMonth), static_cast<unsigned>(time.wDay), static_cast<unsigned>(time.wHour),
+      static_cast<unsigned>(time.wMinute), static_cast<unsigned>(time.wSecond), static_cast<unsigned>(time.wMilliseconds), options.Extension());
+  if (FAILED(dialog->SetFileName(name)) ||
+      FAILED(dialog->SetOptions(FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT))) return false;
+  const HRESULT shown = dialog->Show(owner);
+  if (FAILED(shown)) { cancelled = shown == HRESULT_FROM_WIN32(ERROR_CANCELLED); return false; }
+  // A modal dialog pumps messages, so account reset can retire this operation
+  // while it is open. Never export the retired account's retained image.
+  if (!current()) return false;
   ComPtr<IShellItem> item; PWSTR path = nullptr;
   if (FAILED(dialog->GetResult(&item)) || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) return false;
-  HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-  CoTaskMemFree(path); if (file == INVALID_HANDLE_VALUE) return false;
-  DWORD written = 0; const bool ok = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) && written == bytes.size();
-  CloseHandle(file); return ok;
+  const std::wstring destination(path); CoTaskMemFree(path);
+  UINT selected = 0;
+  if (FAILED(dialog->GetFileTypeIndex(&selected)) || (selected != 1 && selected != 2)) return false;
+  options.jpeg = selected == 2;
+  if (!options.MatchesExtension(std::filesystem::path(destination).extension().wstring())) {
+    mismatch = true; return false;
+  }
+  const auto bytes = MenuEncodeScreenshot(image, options);
+  if (bytes.empty() || !current()) return false;
+  return menu_screenshot::WriteAtomic(destination, bytes, current, true);
 }
+bool StrictNumber(const Map& args, const char* key, double& number) {
+  const auto* value = Field(args, key);
+  if (!value) return false;
+  if (const auto* n = std::get_if<double>(value)) number = *n;
+  else if (const auto* integer = std::get_if<int32_t>(value)) number = *integer;
+  else return false;
+  return std::isfinite(number);
+}
+bool ParseEdit(const Map& args, menu_image::Edit& edit) {
+  // Legacy Save without editing fields still means the complete screenshot.
+  const char* keys[]{"cropLeft", "cropTop", "cropRight", "cropBottom", "turns"};
+  bool any = false;
+  for (const auto* key : keys) any = any || Field(args, key);
+  if (!any) return true;
+  double turns = 0;
+  if (!StrictNumber(args, keys[0], edit.left) || !StrictNumber(args, keys[1], edit.top) ||
+      !StrictNumber(args, keys[2], edit.right) || !StrictNumber(args, keys[3], edit.bottom) ||
+      !StrictNumber(args, keys[4], turns) || turns < 0 || turns > 3 || std::floor(turns) != turns) return false;
+  edit.turns = static_cast<int>(turns); return edit.Valid();
+}
+bool CopyImage(HWND owner, Gdiplus::Bitmap& image) {
+  const auto bytes = menu_image::ClipboardDib(image);
+  if (bytes.empty()) return false;
+  HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE, bytes.size());
+  if (!block) return false;
+  void* buffer = GlobalLock(block);
+  if (!buffer) { GlobalFree(block); return false; }
+  memcpy(buffer, bytes.data(), bytes.size()); GlobalUnlock(block);
+  if (!OpenClipboard(owner)) { GlobalFree(block); return false; }
+  const bool copied = EmptyClipboard() && SetClipboardData(CF_DIBV5, block);
+  CloseClipboard(); if (!copied) GlobalFree(block); return copied;
+}
+class ReferencePin {
+ public:
+  explicit ReferencePin(std::function<bool()> menu) : menu_(std::move(menu)) {}
+  ~ReferencePin() { Clear(); }
+  void Clear() {
+    if (window_) { KillTimer(window_, 1); DestroyWindow(window_); window_ = nullptr; }
+    suppressed_ = false;
+  }
+  void Suppress(bool value) { suppressed_ = value; Sync(); }
+  bool Set(HWND owner, const Map& args, bool enabled = true) {
+    const auto* value = Field(args, "bytes");
+    const auto* bytes = value ? std::get_if<std::vector<uint8_t>>(value) : nullptr;
+    UINT image_width = 0, image_height = 0;
+    double x = 0, y = 0, width = 0, height = 0;
+    RECT client{}; GetClientRect(owner, &client);
+    if (!bytes || !menu_image::PngSize(*bytes, image_width, image_height) ||
+        !menu_image::Bounded(image_width, image_height, 4096, 16000000) ||
+        !StrictNumber(args, "x", x) || !StrictNumber(args, "y", y) ||
+        !StrictNumber(args, "width", width) || !StrictNumber(args, "height", height) ||
+        x < 0 || y < 0 || width < 1 || height < 1 || width > 4096 || height > 4096 ||
+        width*height > 16000000 || x+width > client.right+1 || y+height > client.bottom+1 ||
+        std::abs(width-image_width) > 1 || std::abs(height-image_height) > 1) return false;
+    auto stream = Stream(*bytes);
+    if (!stream) return false;
+    Gdiplus::Bitmap image(stream.Get());
+    if (image.GetLastStatus() != Gdiplus::Ok || image.GetWidth() != image_width || image.GetHeight() != image_height) return false;
+    const auto pixels = menu_image::Pixels(image, true);
+    if (pixels.empty()) return false;
+    WNDCLASSW cls{}; cls.hInstance = GetModuleHandleW(nullptr); cls.lpfnWndProc = Proc;
+    cls.lpszClassName = L"StarBridgeMenuReferencePin";
+    if (!RegisterClassW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
+    // Prepare a replacement completely before retiring the existing pin.
+    // Decoder, GDI and timer failures must keep the last confirmed image.
+    const HWND candidate = CreateWindowExW(menu_image::kPinStyle, cls.lpszClassName, L"", WS_POPUP,
+        0, 0, 0, 0, nullptr, nullptr, cls.hInstance, this);
+    if (!candidate) return false;
+    BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = static_cast<LONG>(image_width); info.bmiHeader.biHeight = -static_cast<LONG>(image_height);
+    info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
+    HDC screen = GetDC(nullptr); HDC memory = screen ? CreateCompatibleDC(screen) : nullptr;
+    void* target = nullptr;
+    HBITMAP bitmap = memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &target, nullptr, 0) : nullptr;
+    bool updated = false;
+    if (bitmap && target) {
+      memcpy(target, pixels.data(), pixels.size());
+      const auto old = SelectObject(memory, bitmap);
+      POINT location{static_cast<LONG>(std::lround(x)), static_cast<LONG>(std::lround(y))};
+      ClientToScreen(owner, &location);
+      SIZE size{static_cast<LONG>(image_width), static_cast<LONG>(image_height)}; POINT origin{};
+      BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+      updated = UpdateLayeredWindow(candidate, screen, &location, &size, memory, &origin, 0, &blend, ULW_ALPHA) != FALSE;
+      SelectObject(memory, old);
+    }
+    if (bitmap) DeleteObject(bitmap); if (memory) DeleteDC(memory); if (screen) ReleaseDC(nullptr, screen);
+    if (!updated || !SetTimer(candidate, 1, 250, nullptr)) { DestroyWindow(candidate); return false; }
+    Clear(); window_ = candidate; enabled_ = enabled;
+    Sync(); return true;
+  }
+  bool active() const { return window_ && enabled_; }
+  void Adopt(ReferencePin& prepared) {
+    Clear();
+    window_ = prepared.window_; prepared.window_ = nullptr;
+    enabled_ = true;
+    if (window_) SetWindowLongPtrW(window_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    Sync();
+  }
+  void Sync() {
+    if (!window_) return;
+    bool game = false;
+    if (!menu_() && !suppressed_) {
+      DWORD pid = 0; GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+      HANDLE process = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+      if (process) {
+        wchar_t path[32768]{}; DWORD size = static_cast<DWORD>(std::size(path));
+        game = QueryFullProcessImageNameW(process, 0, path, &size) && menu_image::IsGame(std::wstring(path, size));
+        CloseHandle(process);
+      }
+    }
+    if (menu_image::PinVisible(enabled_, menu_(), suppressed_, game))
+      SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    else ShowWindow(window_, SW_HIDE);
+  }
+ private:
+  static LRESULT CALLBACK Proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams));
+    }
+    const auto self = reinterpret_cast<ReferencePin*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_TIMER && self) { self->Sync(); return 0; }
+    if (message == WM_NCHITTEST) return HTTRANSPARENT;
+    if (message == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+    if (message == WM_NCDESTROY) SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+    return DefWindowProcW(window, message, wparam, lparam);
+  }
+  HWND window_ = nullptr;
+  std::function<bool()> menu_;
+  bool suppressed_ = false;
+  bool enabled_ = true;
+};
 }
 
 class MenuLocalTools::Impl {
  public:
   Impl(HWND owner, std::function<bool()> current, std::function<void(bool)> modal, std::function<void()> dismiss)
-    : owner_(owner), current_(std::move(current)), modal_(std::move(modal)), dismiss_(std::move(dismiss)), alive_(std::make_shared<std::atomic_bool>(true)) {
+    : owner_(owner), current_(std::move(current)), modal_(std::move(modal)), dismiss_(std::move(dismiss)), alive_(std::make_shared<std::atomic_bool>(true)), pin_(current_) {
     Gdiplus::GdiplusStartupInput input; Gdiplus::GdiplusStartup(&gdiplus_, &input, nullptr);
   }
   ~Impl() { *alive_ = false; Reset();
@@ -147,12 +288,21 @@ class MenuLocalTools::Impl {
     if (gdiplus_) Gdiplus::GdiplusShutdown(gdiplus_);
   }
   void Hide() {
+    screenshot_directory_.clear();
     browser_visible_ = false;
+    if (!current_() && prepared_pin_) {
+      pin_.Adopt(*prepared_pin_);
+      prepared_pin_.reset();
+    }
+    pin_.Sync();
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
     SyncBrowser();
 #endif
   }
   void Reset() {
+    ++image_epoch_;
+    prepared_pin_.reset();
+    pin_.Clear();
     Hide();
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
     for (const auto& tab : tabs_) CloseController(tab);
@@ -160,33 +310,171 @@ class MenuLocalTools::Impl {
     if (viewport_) { DestroyWindow(viewport_); viewport_ = nullptr; }
 #endif
     screenshot_.clear();
+    screenshot_time_ = {};
+    reference_.clear();
+    reference_identities_.Clear();
+  }
+  bool AuthorizeScreenshotDirectory(const std::string& value) {
+    screenshot_directory_.clear();
+    if (!current_() || value.size() > 131068) return false;
+    const auto directory = Wide(value);
+    if (!menu_screenshot::ValidDirectory(directory)) return false;
+    screenshot_directory_ = directory;
+    return true;
   }
   void Handle(const Map& args, MenuLocalTools::Result result) {
     const auto action = Text(args, "action");
     if (!current_()) { result->Error("menu.closed", "Menu is closed"); return; }
-    if (action == "image" || action == "capture" || action == "save") {
-      modal_(true); Hide();
-      if (action == "save") {
-        const bool saved = SaveImage(owner_, screenshot_); modal_(false); result->Success(Value(saved)); return;
+    pin_.Sync();
+#ifdef STARBRIDGE_MENU_IMAGE_TEST
+    // Synthetic hidden fixture only; production never accepts a screenshot
+    // from Flutter or exposes the captured/selected source through this seam.
+    if (action == "imageTestLoad") {
+      const auto* data = Field(args, "bytes");
+      const auto* bytes = data ? std::get_if<std::vector<uint8_t>>(data) : nullptr;
+      UINT width = 0, height = 0;
+      if (!bytes || !menu_image::PngSize(*bytes, width, height)) { result->Error("fixture.invalid", "Invalid fixture"); return; }
+      reference_ = *bytes; screenshot_ = *bytes; GetLocalTime(&screenshot_time_); result->Success(); return;
+    }
+    if (action == "imageTestSelect") {
+      const auto* data = Field(args, "bytes"), *file = Field(args, "fixtureFile");
+      const auto* bytes = data ? std::get_if<std::vector<uint8_t>>(data) : nullptr;
+      const auto* id = file ? std::get_if<int32_t>(file) : nullptr;
+      UINT width = 0, height = 0;
+      if (!bytes || !menu_image::PngSize(*bytes, width, height) || !id || *id < 1 || *id > 1000) {
+        result->Error("fixture.invalid", "Invalid fixture"); return;
       }
+      ReplyReference(*bytes, menu_image::ReferenceFileKey{1,0,static_cast<DWORD>(*id),0,1,0,1,0,1}, std::move(result));
+      return;
+    }
+#endif
+    if (action == "imageClear" || action == "imageUnpin" || action == "screenshotClear") {
+      if (action != "screenshotClear") prepared_pin_.reset();
+      if (action != "imageUnpin") ++image_epoch_;
+      if (action == "screenshotClear") { screenshot_.clear(); screenshot_time_ = {}; }
+      else { pin_.Clear(); if (action == "imageClear") reference_.clear(); }
+      result->Success(); return;
+    }
+    if (action == "imagePreparePin") {
+      auto next = std::make_unique<ReferencePin>(current_);
+      if (reference_.empty() || !next->Set(owner_, args, false)) {
+        prepared_pin_.reset();
+        result->Error("menu.image_pin_failed", "Reference image could not be prepared");
+      } else { prepared_pin_ = std::move(next); result->Success(Value(true)); }
+      return;
+    }
+    if (action == "imageCancelPreparedPin") { prepared_pin_.reset(); result->Success(); return; }
+    if (action == "imagePinState") { result->Success(Value(pin_.active())); return; }
+    if (action == "imagePin") {
+      prepared_pin_.reset();
+      if (reference_.empty() || !pin_.Set(owner_, args)) result->Error("menu.image_pin_failed", "Reference image could not be pinned");
+      else result->Success(Value(true));
+      return;
+    }
+    if (action == "save" || action == "saveToDirectory" || action == "screenshotCopy" || action == "screenshotEdit" || action == "imageEdit") {
+      std::wstring directory;
+      if (action == "saveToDirectory") {
+        directory = std::move(screenshot_directory_); screenshot_directory_.clear();
+        // Never permit a surface-selected path, bytes or extra native intent.
+        for (const auto& field : args) {
+          const auto* key = std::get_if<std::string>(&field.first);
+          if (!key || (*key != "action" && *key != "opening" && *key != "export" && *key != "cropLeft" &&
+              *key != "cropTop" && *key != "cropRight" && *key != "cropBottom" && *key != "turns")) {
+            result->Error("menu.screenshot_export_invalid", "Invalid direct save intent"); return;
+          }
+        }
+        if (directory.empty()) { result->Error("menu.screenshot_directory_unavailable", "Screenshot directory unavailable"); return; }
+      }
+      MenuScreenshotExport options;
+      if (action == "save" || action == "saveToDirectory") {
+        if (const auto value = Field(args, "export")) {
+          const auto parsed = MenuScreenshotExport::Parse(*value);
+          if (!parsed) { result->Error("menu.screenshot_export_invalid", "Invalid export options"); return; }
+          options = *parsed;
+        }
+      }
+      const bool reference = action == "imageEdit";
+      const auto& source = reference ? reference_ : screenshot_;
+      const auto error = reference ? "menu.image_edit_failed" : "menu.screenshot_edit_failed";
+      menu_image::Edit edit;
+      if (source.empty() || !ParseEdit(args, edit)) {
+        result->Error(error, "Image or edit is invalid"); return;
+      }
+      auto stream = Stream(source);
+      if (!stream) { result->Error(error, "Image could not be read"); return; }
+      Gdiplus::Bitmap original(stream.Get());
+      auto edited = menu_image::Edited(original, edit);
+      if (!edited || edited->GetLastStatus() != Gdiplus::Ok) { result->Error(error, "Image could not be edited"); return; }
+      if (action == "screenshotCopy") {
+        if (CopyImage(owner_, *edited)) result->Success(Value(true));
+        else result->Error("menu.screenshot_copy_failed", "Clipboard is unavailable");
+      } else {
+        if (action == "screenshotEdit" || reference) {
+          const auto bytes = Png(*edited);
+          if (bytes.empty()) result->Error(error, "Image could not be encoded");
+          else result->Success(Value(bytes));
+        }
+        else if (action == "saveToDirectory") {
+          const auto epoch = image_epoch_;
+          const auto bytes = MenuEncodeScreenshot(*edited, options);
+          const auto saved = menu_screenshot::SaveUnique(directory, bytes, options.jpeg, screenshot_time_,
+              [this, epoch] { return current_() && epoch == image_epoch_; });
+          if (!current_() || epoch != image_epoch_) result->Error("menu.closed", "Menu session was retired");
+          else if (saved.empty()) result->Error("menu.screenshot_save_failed", "Screenshot could not be saved");
+          else result->Success(Value(true)); // No filename or path leaves native ownership.
+        } else {
+          const auto epoch = image_epoch_;
+          modal_(true); Hide(); bool cancelled = false, mismatch = false;
+          const bool saved = SaveImage(owner_, *edited, options, cancelled, mismatch,
+              [this, epoch] { return current_() && epoch == image_epoch_; }, screenshot_time_);
+          modal_(false);
+          if (!current_() || epoch != image_epoch_) { result->Error("menu.closed", "Menu session was retired"); return; }
+          if (saved || cancelled) result->Success(Value(saved));
+          else if (mismatch) result->Error("menu.screenshot_extension_mismatch", "Extension does not match selected format");
+          else result->Error("menu.screenshot_save_failed", "Screenshot could not be saved");
+        }
+      }
+      return;
+    }
+    if (action == "image" || action == "capture") {
+      const auto epoch = image_epoch_;
       std::vector<uint8_t> bytes;
       bool cancelled = false;
+      std::optional<menu_image::ReferenceFileKey> identity;
       if (action == "capture") {
-        // Only this overlay is hidden; no keys injected and no desktop raised.
-        ShowWindow(owner_, SW_HIDE); DwmFlush(); bytes = Capture(owner_);
-        if (current_()) ShowWindow(owner_, SW_SHOWNOACTIVATE);
-      } else bytes = PickImage(owner_, cancelled);
-      modal_(false);
-      if (!current_()) { result->Error("menu.closed", "Menu was dismissed"); return; }
+        const auto hide = MenuCaptureHidesMenu(args);
+        if (!hide) { result->Error("menu.screenshot_preferences_invalid", "Invalid screenshot preferences"); return; }
+        bytes = RunMenuCapture(*hide, [this](bool hidden) {
+          modal_(true);
+          if (hidden) {
+            Hide(); pin_.Suppress(true);
+            ShowWindow(owner_, SW_HIDE); DwmFlush();
+          }
+        }, [this, epoch, hidden = *hide]() {
+          if (epoch != image_epoch_) return;
+          if (hidden) {
+            if (current_()) ShowWindow(owner_, SW_SHOWNOACTIVATE);
+            pin_.Suppress(false);
+          }
+          if (current_()) modal_(false);
+        }, [this] { return Capture(owner_); });
+      } else {
+        modal_(true); Hide();
+        bytes = PickImage(owner_, cancelled, identity);
+        modal_(false);
+      }
+      if (!current_() || epoch != image_epoch_) { result->Error("menu.closed", "Menu session was retired"); return; }
       if (bytes.empty()) {
         if (cancelled) result->Success(); else result->Error("menu.image_failed", "Image could not be read");
       } else {
-        if (action == "capture") screenshot_ = bytes;
-        result->Success(Value(bytes));
+        if (action == "capture") { screenshot_ = bytes; GetLocalTime(&screenshot_time_); result->Success(Value(bytes)); }
+        else ReplyReference(bytes, identity, std::move(result));
       }
       return;
     }
     if (action == "browserBounds") {
+      browser_opacity_ = Field(args, "opacity") ? Number(args, "opacity") : 1.0;
+      if (!std::isfinite(browser_opacity_) || browser_opacity_ < 0.7 || browser_opacity_ > 1.0) browser_opacity_ = 1.0;
       RECT parent{}; GetClientRect(owner_, &parent);
       const double x = Number(args,"x"), y = Number(args,"y"), w = Number(args,"width"), h = Number(args,"height");
       // The child is clipped by its parent HWND; crossing an edge must not
@@ -195,14 +483,53 @@ class MenuLocalTools::Impl {
           std::abs(x) <= 1000000 && std::abs(y) <= 1000000 && w >= 1 && h >= 1 && w <= 1000000 && h <= 1000000;
       browser_visible_ = Flag(args,"visible") && valid && x < parent.right && y < parent.bottom && x+w > 0 && y+h > 0;
       if (valid) bounds_ = RECT{static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x+w), static_cast<LONG>(y+h)};
+      browser_occlusions_.clear();
+      if (const auto* occlusions_value = Field(args, "occlusions")) {
+        const auto* rects = std::get_if<flutter::EncodableList>(occlusions_value);
+        bool clips_valid = rects && rects->size() <= 32;
+        if (clips_valid) for (const auto& value : *rects) {
+          const auto* rect = std::get_if<Map>(&value);
+          if (!rect) { clips_valid = false; break; }
+          const auto finite_number = [](const Map& rect, const char* key) {
+            const auto* value = Field(rect, key);
+            if (!value) return false;
+            if (const auto* number = std::get_if<double>(value)) return std::isfinite(*number);
+            return std::get_if<int32_t>(value) != nullptr;
+          };
+          if (!finite_number(*rect, "x") || !finite_number(*rect, "y") ||
+              !finite_number(*rect, "width") || !finite_number(*rect, "height")) { clips_valid = false; break; }
+          const double cx = Number(*rect, "x"), cy = Number(*rect, "y"),
+              cw = Number(*rect, "width"), ch = Number(*rect, "height");
+          if (std::abs(cx) > 1000000 || std::abs(cy) > 1000000 || cw < 0 || ch < 0 || cw > 1000000 || ch > 1000000) {
+            clips_valid = false; break;
+          }
+          // Outward rounding avoids a one-physical-pixel browser strip over
+          // Flutter chrome at fractional scale/DPI. Region is viewport-local.
+          browser_occlusions_.push_back(RECT{
+            static_cast<LONG>(std::floor(cx)) - bounds_.left,
+            static_cast<LONG>(std::floor(cy)) - bounds_.top,
+            static_cast<LONG>(std::ceil(cx + cw)) - bounds_.left,
+            static_cast<LONG>(std::ceil(cy + ch)) - bounds_.top});
+        }
+        // A malformed clipping message must not expose the child over Flutter.
+        if (!clips_valid) { browser_visible_ = false; browser_occlusions_.clear(); }
+      }
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
       SyncBrowser();
 #endif
       result->Success(); return;
     }
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
+    if (action == "browserConfigure") {
+      const auto it = args.find(Value("preferences"));
+      const auto options = it == args.end() ? std::nullopt : MenuBrowserOptions::Parse(it->second);
+      if (!options) { result->Error("menu.browser_preferences_invalid", "Invalid browser preferences"); return; }
+      browser_options_ = *options; SyncBrowser(); result->Success(); return;
+    }
 #ifdef STARBRIDGE_MENU_BROWSER_TEST
     if (action == "browserTestVisualState") {
+      BYTE alpha = 255; DWORD alpha_flags = 0; COLORREF alpha_key = 0;
+      if (viewport_) GetLayeredWindowAttributes(viewport_, &alpha_key, &alpha, &alpha_flags);
       flutter::EncodableList visual;
       for (const auto& tab : tabs_) {
         RECT bounds{}; BOOL visible = FALSE, suspended = FALSE;
@@ -225,7 +552,14 @@ class MenuLocalTools::Impl {
           {Value("right"), Value(static_cast<int32_t>(bounds.right))}, {Value("bottom"), Value(static_cast<int32_t>(bounds.bottom))}});
       }
       result->Success(Value(Map{{Value("requestedVisible"), Value(browser_visible_)},
+        {Value("alpha"), Value(static_cast<int32_t>(alpha))},
         {Value("controllers"), Value(visual)}, {Value("children"), Value(children)}})); return;
+    }
+    if (action == "browserTestInteraction") {
+      POINT point{static_cast<LONG>(Number(args, "x")), static_cast<LONG>(Number(args, "y"))};
+      ClientToScreen(viewport_, &point);
+      result->Success(Value(BrowserInteractionAt(point, viewport_, Flag(args, "focused") ? viewport_ : nullptr)));
+      return;
     }
     // Exercise NavigationStarting itself, rather than only command validation.
     // The fixture can request one fixed inert URL; no script or arbitrary URI.
@@ -236,14 +570,30 @@ class MenuLocalTools::Impl {
       } else result->Error("menu.browser_unavailable", "Browser not ready");
       return;
     }
+    // Fixed inert inputs exercise the exact new-window event consumer, never
+    // expose arbitrary scripts/URLs to the production surface.
+    if (action == "browserTestNewWindow" || action == "browserTestPopup" || action == "browserTestUnsafeWindow") {
+      const auto tab = FindTab(active_tab_);
+      if (tab) RequestNewWindow(tab, action != "browserTestPopup",
+          action == "browserTestUnsafeWindow" ? L"data:text/plain,blocked" : L"http://127.0.0.1:9/menu-fixture");
+      result->Success(); return;
+    }
 #endif
+    std::wstring initial_url = L"about:blank";
+    if (action == "browserOpen" || action == "browserNewTab" || action == "browserCloseTab") {
+      const auto requested = Text(args, "url", 16384);
+      if (!requested.empty()) {
+        initial_url = Wide(requested);
+        if (!WebUrl(initial_url)) { result->Error("menu.browser_failed", "Invalid initial page"); return; }
+      }
+    }
     if (action == "browserOpen") {
-      if (tabs_.empty()) NewTab(L"about:blank");
+      if (tabs_.empty()) NewTab(initial_url);
       SyncBrowser(); result->Success(); return;
     }
     if (action == "browserNewTab") {
-      if (tabs_.size() >= kTabLimit) { result->Error("menu.browser_tab_limit", "Tab limit reached"); return; }
-      NewTab(L"about:blank"); result->Success(); return;
+      if (tabs_.size() >= static_cast<size_t>(browser_options_.limit)) { result->Error("menu.browser_tab_limit", "Tab limit reached"); return; }
+      NewTab(initial_url); result->Success(); return;
     }
     if (action == "browserSelectTab" || action == "browserCloseTab") {
       const auto tab = FindTab(Text(args, "tabId"));
@@ -253,7 +603,7 @@ class MenuLocalTools::Impl {
         const auto index = static_cast<size_t>(std::find(tabs_.begin(), tabs_.end(), tab) - tabs_.begin());
         const bool active = active_tab_ == tab->id;
         CloseController(tab); tabs_.erase(tabs_.begin() + index);
-        if (tabs_.empty()) NewTab(L"about:blank");
+        if (tabs_.empty()) NewTab(initial_url);
         else if (active) active_tab_ = tabs_[std::min(index, tabs_.size() - 1)]->id;
       }
       SyncBrowser(); result->Success(); return;
@@ -267,7 +617,11 @@ class MenuLocalTools::Impl {
       auto state = TabState(active);
       state.emplace(Value("tabs"), Value(entries));
       state.emplace(Value("activeTabId"), Value(active_tab_));
-      state.emplace(Value("tabLimit"), Value(static_cast<int32_t>(kTabLimit)));
+      state.emplace(Value("tabLimit"), Value(browser_options_.limit));
+      POINT pointer{};
+      const HWND hovered = GetCursorPos(&pointer) ? WindowFromPoint(pointer) : nullptr;
+      state.emplace(Value("interactionActive"), Value(BrowserInteractionAt(pointer, hovered, GetFocus())));
+      state.emplace(Value("opacitySupported"), Value(browser_opacity_supported_));
       result->Success(Value(state)); return;
     }
     if (action == "browserNavigate" || action == "browserBack" || action == "browserForward" || action == "browserReload" || action == "browserStop" || action == "browserFocus") {
@@ -279,7 +633,9 @@ class MenuLocalTools::Impl {
       }
       if (!tab->browser || !tab->controller || tab->broken) { result->Error("menu.browser_unavailable", "Browser not ready"); return; }
       HRESULT hr = E_INVALIDARG;
-      if (action == "browserNavigate") { const auto url = Wide(Text(args,"url")); if (WebUrl(url)) hr = tab->browser->Navigate(url.c_str()); }
+      // A bounded UTF-8 transport can use several bytes per UTF-16 character.
+      // Keep WebUrl's existing 4096-character cap after strict conversion.
+      if (action == "browserNavigate") { const auto url = Wide(Text(args,"url", 16384)); if (WebUrl(url)) hr = tab->browser->Navigate(url.c_str()); }
       if (action == "browserBack") hr = tab->browser->GoBack();
       if (action == "browserForward") hr = tab->browser->GoForward();
       if (action == "browserReload") hr = tab->browser->Reload();
@@ -298,7 +654,7 @@ class MenuLocalTools::Impl {
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
   // Match the existing WPF default; tab identities and controller ownership
   // remain native. Neither URLs nor the open-page collection are persisted.
-  static constexpr size_t kTabLimit = 8;
+  MenuBrowserOptions browser_options_;
   struct BrowserTab {
     std::string id;
     std::wstring resume_url;
@@ -355,12 +711,51 @@ class MenuLocalTools::Impl {
 #endif
     return state;
   }
+  bool BrowserInteractionAt(POINT screen_point, HWND hovered, HWND focused) const {
+    if (!viewport_ || !browser_visible_ || !current_()) return false;
+    // WebView's focus crosses a native child boundary. Conservatively keep it
+    // readable while that subtree owns keyboard focus; never inspect page DOM.
+    if (focused && (focused == viewport_ || IsChild(viewport_, focused))) return true;
+    if (!hovered || (hovered != viewport_ && !IsChild(viewport_, hovered))) return false;
+    ScreenToClient(viewport_, &screen_point);
+    RECT client{};
+    if (!GetClientRect(viewport_, &client) || !PtInRect(&client, screen_point)) return false;
+    HRGN region = CreateRectRgn(0, 0, 0, 0);
+    if (!region) return false;
+    const int complexity = GetWindowRgn(viewport_, region);
+    const bool inside = complexity != ERROR && PtInRegion(region, screen_point.x, screen_point.y);
+    DeleteObject(region);
+    return inside;
+  }
   void SyncBrowser() {
     const auto active = FindTab(active_tab_);
-    const bool show = active && active->controller && Visible(active);
+    bool show = active && active->controller && Visible(active);
     const LONG width = std::max(0L, bounds_.right - bounds_.left);
     const LONG height = std::max(0L, bounds_.bottom - bounds_.top);
     if (viewport_) {
+      const auto style = GetWindowLongPtrW(viewport_, GWL_EXSTYLE);
+      if ((style & WS_EX_LAYERED) == 0) SetWindowLongPtrW(viewport_, GWL_EXSTYLE, style | WS_EX_LAYERED);
+      browser_opacity_supported_ = SetLayeredWindowAttributes(viewport_, 0,
+          static_cast<BYTE>(std::lround(browser_opacity_ * 255)), LWA_ALPHA) != FALSE;
+      // An unsupported compositor stays readable; Dart keeps its chrome opaque
+      // too after the next existing status reply, rather than a half-faded panel.
+      if (!browser_opacity_supported_) SetWindowLongPtrW(viewport_, GWL_EXSTYLE, style & ~WS_EX_LAYERED);
+      HRGN region = CreateRectRgn(0, 0, width, height);
+      bool clipped = region != nullptr;
+      int complexity = width > 0 && height > 0 ? SIMPLEREGION : NULLREGION;
+      for (const auto& rect : browser_occlusions_) {
+        HRGN hole = CreateRectRgn(rect.left, rect.top, rect.right, rect.bottom);
+        if (!hole || !region) { clipped = false; if (hole) DeleteObject(hole); break; }
+        complexity = CombineRgn(region, region, hole, RGN_DIFF);
+        DeleteObject(hole);
+        if (complexity == ERROR) { clipped = false; break; }
+      }
+      if (clipped && SetWindowRgn(viewport_, region, TRUE)) {
+        // Windows owns the region after a successful SetWindowRgn.
+        region = nullptr;
+      } else { clipped = false; }
+      if (region) DeleteObject(region);
+      show = show && clipped && complexity != NULLREGION;
       // Reuse the hangar reader's bounded child viewport pattern. Only our
       // explicit child is raised: Flutter chrome and other panels keep their
       // own ordering, and the browser cannot cover outside its content rect.
@@ -371,13 +766,13 @@ class MenuLocalTools::Impl {
     const RECT child_bounds{0, 0, width, height};
     for (const auto& tab : tabs_) {
       if (!tab->controller) continue;
-      const bool visible = Visible(tab);
+      const bool visible = show && Visible(tab);
       tab->controller->put_Bounds(child_bounds);
       tab->controller->put_IsVisible(visible ? TRUE : FALSE);
       tab->controller->NotifyParentWindowPositionChanged();
       ComPtr<ICoreWebView2_3> suspension;
       if (!tab->browser || FAILED(tab->browser.As(&suspension))) continue;
-      if (visible) { suspension->Resume(); continue; }
+      if (visible || (!browser_options_.pause_hidden && current_())) { suspension->Resume(); continue; }
       if (tab->suspend_pending) continue;
       BOOL suspended = FALSE; suspension->get_IsSuspended(&suspended);
       if (suspended) continue;
@@ -393,19 +788,25 @@ class MenuLocalTools::Impl {
           // A tab can become active while TrySuspend is outstanding. Resume
           // after completion too, so a late suspension cannot freeze it.
           ComPtr<ICoreWebView2_3> resume;
-          if (Visible(live) && SUCCEEDED(live->browser.As(&resume))) resume->Resume();
+          if ((Visible(live) || (!browser_options_.pause_hidden && current_())) &&
+              SUCCEEDED(live->browser.As(&resume))) resume->Resume();
           return S_OK;
         }).Get());
       if (FAILED(hr)) tab->suspend_pending = false;
     }
   }
   void NewTab(const std::wstring& url) {
-    if (tabs_.size() >= kTabLimit) return;
+    if (tabs_.size() >= static_cast<size_t>(browser_options_.limit)) return;
     auto tab = std::make_shared<BrowserTab>();
     tab->id = "t" + std::to_string(++next_tab_); tab->resume_url = url;
     tabs_.push_back(tab); active_tab_ = tab->id;
     // Hide the old page before beginning asynchronous controller creation.
     SyncBrowser(); StartTab(tab);
+  }
+  void RequestNewWindow(const std::shared_ptr<BrowserTab>& tab, bool initiated, const std::wstring& url) {
+    if (!Visible(tab) || !initiated || !WebUrl(url) || url == L"about:blank") return;
+    if (browser_options_.new_tab) NewTab(url);
+    else tab->browser->Navigate(url.c_str());
   }
   void StartTab(const std::shared_ptr<BrowserTab>& tab) {
     if (tab->opening || tab->browser) return;
@@ -510,7 +911,7 @@ class MenuLocalTools::Impl {
         BOOL initiated = FALSE; args->get_IsUserInitiated(&initiated);
         PWSTR uri = nullptr; args->get_Uri(&uri);
         const std::wstring url = uri ? uri : L""; CoTaskMemFree(uri);
-        if (initiated && WebUrl(url) && url != L"about:blank") NewTab(url);
+        RequestNewWindow(live, initiated != FALSE, url);
         return S_OK;
       }).Get(), &token))) return false;
     if (FAILED(tab->browser->add_PermissionRequested(Microsoft::WRL::Callback<ICoreWebView2PermissionRequestedEventHandler>(
@@ -554,13 +955,31 @@ class MenuLocalTools::Impl {
   std::shared_ptr<std::atomic_bool> alive_;
   ULONG_PTR gdiplus_ = 0;
   bool browser_visible_ = false;
+  double browser_opacity_ = 1.0;
+  bool browser_opacity_supported_ = true;
+  std::vector<RECT> browser_occlusions_;
   RECT bounds_{};
   std::vector<uint8_t> screenshot_;
+  SYSTEMTIME screenshot_time_{};
+  std::wstring screenshot_directory_;
+  std::vector<uint8_t> reference_;
+  ReferencePin pin_;
+  std::unique_ptr<ReferencePin> prepared_pin_;
+  uint64_t image_epoch_ = 0;
+  menu_image::ReferenceIdentityCache reference_identities_;
+  void ReplyReference(const std::vector<uint8_t>& bytes,
+      const std::optional<menu_image::ReferenceFileKey>& identity, MenuLocalTools::Result result) {
+    reference_ = bytes; prepared_pin_.reset(); pin_.Clear();
+    const auto id = reference_identities_.Resolve(identity);
+    result->Success(Value(Map{{Value("bytes"), Value(bytes)},
+      {Value("imageId"), id ? Value(*id) : Value()}}));
+  }
 };
 
 MenuLocalTools::MenuLocalTools(HWND owner, std::function<bool()> current, std::function<void(bool)> modal, std::function<void()> dismiss)
   : impl_(std::make_unique<Impl>(owner, std::move(current), std::move(modal), std::move(dismiss))) {}
 MenuLocalTools::~MenuLocalTools() = default;
 void MenuLocalTools::Handle(const Map& args, Result result) { impl_->Handle(args, std::move(result)); }
+bool MenuLocalTools::AuthorizeScreenshotDirectory(const std::string& directory) { return impl_->AuthorizeScreenshotDirectory(directory); }
 void MenuLocalTools::Hide() { impl_->Hide(); }
 void MenuLocalTools::Reset() { impl_->Reset(); }

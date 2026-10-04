@@ -230,20 +230,22 @@ CIG/RSI 的用户协议对未获授权的第三方软件、信息收集、客户
 或系统允许创建目录符号链接。无需生产密钥、私有数据或托管服务源码。
 
 ```powershell
-dotnet build StarBridge.sln --configuration Release
-dotnet run --project StarBridge.Core.Tests/StarBridge.Core.Tests.csproj --configuration Release --no-build
-cd StarBridge.Flutter
-flutter pub get
-flutter test --dart-define=STARBRIDGE_PUBLIC_SOURCE=true
-flutter build windows --release --dart-define=STARBRIDGE_ENABLE_MENU_OVERLAY=false
+pwsh -NoProfile -File "scripts/Test StarBridge Public Client.ps1" -MenuOverlay
 ```
 
-客户端输出位于 `StarBridge.Flutter/build/windows/x64/runner/Release/`。
-公开源码不附带游戏截图、背景媒体及内部视觉基线；上述公开测试模式仅省略内部
-截图比较和专有素材解码验收，功能及缺图降级断言仍运行。缺少可选媒体使用中性占位，
-不需要从其他仓库复制素材。运行时品牌文件保持单独许可；修改版或分支版本必须更换品牌。
+此入口会还原固定依赖和 WebView2 SDK，执行完整 .NET／Flutter 回归，并构建
+启用菜单浮层的 Windows 客户端。源码版本为 0.7.0.5；官方安装包发布状态以
+本页下载区和 Releases 为准，源码构建通过不代表已经发布。
 
-内置 RSI 机库读取器可选使用 WebView2 SDK 1.0.3179.45。Runner 读取已还原到
+客户端输出位于 `StarBridge.Flutter/build/windows/x64/runner/Release/`。
+公开源码不附带游戏截图、背景媒体及专有素材视觉基线；上述公开测试模式仅省略内部
+截图比较和专有素材解码验收，功能及缺图降级断言仍运行。缺少可选媒体使用中性占位，
+不需要从其他仓库复制素材。少量由控件和合成数据生成的测试图见
+[测试图说明](docs/UI_TEST_FIXTURES.md)，不含真实聊天或账号截图。
+运行时品牌文件保持单独许可；修改版或分支版本必须更换品牌。
+
+菜单浏览器与内置 RSI 机库读取器使用 WebView2 SDK 1.0.3179.45。上述构建入口
+自动从官方 NuGet 源还原 SDK；Runner 读取已还原到
 NuGet 缓存的该版本，也可通过 CMake `STARBRIDGE_WEBVIEW2_SDK_ROOT` 指向合法安装的 SDK。
 未提供时客户端仍可构建，读取器会明确显示不可用，不会下载或复制私有组件。
 
@@ -260,7 +262,8 @@ NuGet 缓存的该版本，也可通过 CMake `STARBRIDGE_WEBVIEW2_SDK_ROOT` 指
 
 当前树不包含旧客户端 UI、云端业务实现、服务端数据库、生产部署或签名私钥。
 远端功能仍需要合法账号及相应服务权限；公开客户端不会绕过授权。
-0.7.0.4 默认关闭菜单浮层，保留信息浮层。
+0.7.0.5 的标准验证入口启用菜单浮层与信息浮层来源预设；自行调用 Flutter 构建时，
+需显式传入 `--dart-define=STARBRIDGE_ENABLE_MENU_OVERLAY=true`。
 
 ## 许可与名称
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../tokens/starbridge_tokens.dart';
 
 abstract final class BridgeInk {
@@ -25,18 +26,30 @@ abstract final class BridgeInk {
 /// menu keeps its explicitly dark theme and original translucent palette.
 class MenuBridgeColors {
   MenuBridgeColors.of(BuildContext context)
-    : tokens = Theme.of(context).extension<StarBridgeTokens>();
+    : tokens = Theme.of(context).extension<StarBridgeTokens>(),
+      highContrast = MediaQuery.highContrastOf(context);
   final StarBridgeTokens? tokens;
+  final bool highContrast;
   bool get light => tokens?.isDark == false;
   Color get text => light ? tokens!.colors.textPrimary : BridgeInk.text;
   Color get muted => light ? tokens!.colors.textSecondary : BridgeInk.muted;
-  Color get blue => light ? tokens!.colors.accent : BridgeInk.blue;
+  Color get blue => highContrast
+      ? text
+      : light
+      ? tokens!.colors.accent
+      : BridgeInk.blue;
   Color get green => light ? tokens!.colors.success : BridgeInk.green;
   Color get amber => light ? tokens!.colors.warning : BridgeInk.amber;
   Color get danger => light ? tokens!.colors.danger : BridgeInk.danger;
-  Color get line => light ? tokens!.surfaces.windowFrame : BridgeInk.line;
+  Color get line => highContrast
+      ? text
+      : light
+      ? tokens!.surfaces.windowFrame
+      : BridgeInk.line;
   Color get ground => light ? tokens!.surfaces.ground.fill : BridgeInk.ground;
   Color get panel => light ? tokens!.surfaces.panel.fill : BridgeInk.panel;
-  Color get selected => light ? tokens!.surfaces.selected.fill : BridgeInk.selected;
-  Color get divider => light ? tokens!.surfaces.panel.border : BridgeInk.divider;
+  Color get selected =>
+      light ? tokens!.surfaces.selected.fill : BridgeInk.selected;
+  Color get divider =>
+      light ? tokens!.surfaces.panel.border : BridgeInk.divider;
 }

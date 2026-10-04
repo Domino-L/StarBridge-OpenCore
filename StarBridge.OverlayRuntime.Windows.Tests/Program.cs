@@ -3,6 +3,24 @@ using StarBridge.Desktop.Tests;
 using StarBridge.OverlayRuntime.Windows;
 
 var rendering = typeof(WindowsInformationOverlayRuntimeFactory).Assembly;
+if (args.Contains("--menu-dialog-owner-only"))
+{
+    MenuDialogOwnerTests.Run();
+    return;
+}
+if (args.Length == 0) MenuDialogOwnerTests.Run();
+if (args.Contains("--menu-hud-lifecycle-only"))
+{
+    await MenuHudLifecycleTests.Run();
+    return;
+}
+if (args.Length == 0) await MenuHudLifecycleTests.Run();
+if (args.Contains("--shared-hotkeys-only"))
+{
+    OverlaySharedHotkeyTests.RunAll();
+    return;
+}
+if (args.Length == 0) OverlaySharedHotkeyTests.RunAll();
 if (args.Contains("--module-lifecycle-only"))
 {
     try { await OverlayModuleLifecycleTests.Run(); }

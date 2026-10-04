@@ -14,7 +14,7 @@ public sealed partial class AccountBridgeRuntime
     {
         var sink = _liveOverlaySink;
         var owner = GameplayOwner();
-        if (_disposed || owner.Context is null || sink?.IsVisible != true || sink.ModuleDemand is not { Sources: { } preset } demand ||
+        if (_disposed || owner.Context is null || sink?.HasDisplayDemand != true || sink.ModuleDemand is not { Sources: { } preset } demand ||
             demand.ActiveModules.Count == 0 || _overlayCommunities is null) return null;
         var evidence = _moduleSourceBudget.EvidenceVersion;
         var room = (_host as ScmAccountBridgeHost)?.CurrentRoomOverlaySource;

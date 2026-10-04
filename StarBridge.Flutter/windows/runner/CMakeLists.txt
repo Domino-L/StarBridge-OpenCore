@@ -66,6 +66,9 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 # Optional existing SDK, no build-time download. Without it the reader reports
 # unavailable; public builds remain possible without additional dependencies.
 set(STARBRIDGE_WEBVIEW2_SDK_ROOT "" CACHE PATH "Existing WebView2 SDK directory")
+if(NOT STARBRIDGE_WEBVIEW2_SDK_ROOT AND DEFINED ENV{STARBRIDGE_WEBVIEW2_SDK_ROOT})
+  set(STARBRIDGE_WEBVIEW2_SDK_ROOT "$ENV{STARBRIDGE_WEBVIEW2_SDK_ROOT}")
+endif()
 if(NOT STARBRIDGE_WEBVIEW2_SDK_ROOT)
   set(STARBRIDGE_WEBVIEW2_SDK_ROOT "$ENV{USERPROFILE}/.nuget/packages/microsoft.web.webview2/1.0.3179.45")
 endif()

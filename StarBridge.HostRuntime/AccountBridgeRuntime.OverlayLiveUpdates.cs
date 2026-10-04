@@ -25,7 +25,7 @@ public sealed partial class AccountBridgeRuntime
         _liveRoomRefresh = new(() =>
         {
             var owner = GameplayOwner();
-            var enabled = !_disposed && sink.IsVisible && (sink.ModuleDemand is { } demand
+            var enabled = !_disposed && sink.HasDisplayDemand && (sink.ModuleDemand is { } demand
                 ? ModuleRequestsRoomRefresh(demand, owner.Context, owner.Generation)
                 : CurrentOverlaySceneMode == "room" || CurrentOverlaySceneMode == "auto" && CurrentRoomOverlay is not null);
             return (owner.Context, owner.Generation, enabled);

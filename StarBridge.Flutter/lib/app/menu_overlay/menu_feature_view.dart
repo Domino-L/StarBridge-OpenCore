@@ -41,11 +41,13 @@ final class MenuFeatureView {
     this.chat,
     this.channels = const [],
     this.rejectedAction,
+    this.hudEnabled,
   });
   final String state, title, notice, scope;
   final bool busy;
   final bool refreshing;
   final String? rejectedAction;
+  final bool? hudEnabled;
   final List<MenuFeatureRow> rows;
   final List<MenuFeatureButton> buttons;
   final MenuOrganizationView? organization;
@@ -121,6 +123,9 @@ final class MenuFeatureView {
         title: text(value, 'title', 512),
         notice: text(value, 'notice', 512),
         busy: value['busy'] == true,
+        hudEnabled: value['hudEnabled'] is bool
+            ? value['hudEnabled'] as bool
+            : null,
         refreshing: value['refreshing'] == true,
         scope: text(value, 'scope', 32),
         rejectedAction: MenuChannelOutbox.action(value['rejectedAction']),

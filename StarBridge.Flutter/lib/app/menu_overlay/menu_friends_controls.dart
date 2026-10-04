@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'menu_native_popup.dart';
 import 'package:flutter/services.dart';
 
 import 'menu_bridge_style.dart';
@@ -120,7 +121,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                           color: ink.muted,
                         ),
                       ),
-                    MenuAnchor(
+                    MenuNativePopup(
                       style: MenuStyle(
                         backgroundColor: WidgetStatePropertyAll(
                           ink.ground,
@@ -296,7 +297,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                       ),
                     ),
             ),
-            MenuAnchor(
+            MenuNativePopup(
               style: MenuStyle(
                 backgroundColor: WidgetStatePropertyAll(ink.ground),
               ),

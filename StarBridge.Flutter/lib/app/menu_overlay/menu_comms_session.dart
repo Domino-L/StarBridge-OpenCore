@@ -3,6 +3,8 @@ import 'dart:async';
 import '../../features/direct_messages/direct_messages_module.dart';
 import '../../platform/window/menu_preview_window_port.dart';
 import '../../platform/window/menu_profile_navigation.dart';
+import '../../platform/window/menu_notice.dart';
+import '../../platform/window/menu_avatar_presentation.dart';
 import 'menu_message_drafts.dart';
 import 'menu_organization_avatars.dart';
 import 'menu_comms_invitations.dart';
@@ -16,12 +18,14 @@ import 'menu_conversation_snapshot.dart';
 final class MenuCommsSession
     implements
         MenuCommsReadLease,
+        MenuAvatarPresentation,
+        MenuConversationVisibility,
         MenuCommsComposeLease,
         MenuProfileTargets,
         MenuChatOpener {
   MenuCommsSession(
     this._port,
-    this._publish, {
+    this._sendView, {
     this.archive,
     this.ownAvatar,
     MenuCommsInvitations Function(void Function(Map<String, Object?>))?
@@ -51,7 +55,18 @@ final class MenuCommsSession
   Map<String, Object?>? _invitationView;
   final _attachmentCodes = <String, String>{};
   int _attachmentSerial = 0;
-  final void Function(Map<String, Object?>) _publish;
+  final void Function(Map<String, Object?>) _sendView;
+  void _publish(Map<String, Object?> view) =>
+      _sendView(_avatars.enabled ? view : withoutMenuAvatars(view));
+  @override
+  set showAvatars(bool value) {
+    if (_disposed || _avatars.enabled == value) return;
+    _avatars.enabled = value;
+    _ownPhoto.enabled = value;
+    _portraits.clear();
+    if (_visible) _emit(_view);
+  }
+
   late final StreamSubscription<void> _subscription;
   Timer? _timer;
   bool _visible = false, _disposed = false, _reading = false;
@@ -64,6 +79,15 @@ final class MenuCommsSession
   Map<String, Conversation> _targets = {};
   Conversation? _selected;
   String? _selectedKey;
+  @override
+  String? get visibleConversationKey =>
+      !_disposed &&
+          _visible &&
+          _before == 0 &&
+          _view['state'] == 'ready' &&
+          _view['pageKey'] == '$_selectedKey/0'
+      ? _selected?.conversationKey
+      : null;
   final _drafts = MenuMessageDrafts();
   final _avatars = MenuOrganizationAvatars();
   final _portraits = <String, String?>{};
@@ -145,8 +169,8 @@ final class MenuCommsSession
           for (final row in _targets.entries)
             {
               'key': row.key,
-              'name': _text(row.value.name, 128),
-              'preview': _text(row.value.preview, 256),
+              'name': menuChatText(row.value.name, 128),
+              'preview': menuChatText(row.value.preview, 256),
               'avatar': _portraits[row.key],
               'time': row.value.time.toUtc().toIso8601String(),
               'unread': row.value.unread,
@@ -247,7 +271,7 @@ final class MenuCommsSession
       source: 'conversation',
       reference: row.ref,
       query: row.gameId,
-      avatar: _inlineAvatar(row.avatar),
+      avatar: menuInlineAvatar(row.avatar),
       isAccountCurrent: () => !_disposed && identity == _identityEpoch,
       isCurrent: () =>
           _current(epoch) &&
@@ -437,7 +461,7 @@ final class MenuCommsSession
             for (final row in _targets.entries)
               {
                 'key': row.key,
-                'name': _text(row.value.name, 128),
+                'name': menuChatText(row.value.name, 128),
                 'time': row.value.time.toUtc().toIso8601String(),
                 'unread': row.value.unread,
                 'request': row.value.request,
@@ -459,7 +483,8 @@ final class MenuCommsSession
                 'state': 'ready',
                 'name': selected.name,
                 'avatar':
-                    _portraits[_selectedKey] ?? _inlineAvatar(selected.avatar),
+                    _portraits[_selectedKey] ??
+                    menuInlineAvatar(selected.avatar),
                 'profileKey': _selectedKey,
                 'pageKey': '$_selectedKey/0',
                 'request': false,
@@ -555,7 +580,7 @@ final class MenuCommsSession
           'notice': page.localHistoryUnavailable
               ? '消息已读取，但本机记录保存失败；重启后可能需要重新读取。'
               : '',
-          'name': _text(selected.name, 128),
+          'name': menuChatText(selected.name, 128),
           'profileKey': _selectedKey,
           'pageKey': '$_selectedKey/$_before',
           'conversationState': page.state,
@@ -571,13 +596,14 @@ final class MenuCommsSession
             for (final (index, message) in page.messages.indexed)
               {
                 'attachmentKey': attachmentKeys[index],
-                'incoming': message.incoming, 'text': _text(message.text, 4096),
+                'incoming': message.incoming,
+                'text': menuChatText(message.text, 4096),
                 'time': message.time.toUtc().toIso8601String(),
                 // No attachment targets, invitation codes, URLs or action grants.
                 'attachment': message.attachment != null,
                 'attachmentDetail': message.communityInvitation == null
                     ? ''
-                    : _text(
+                    : menuChatText(
                         '${message.communityInvitation!.title}\n${message.communityInvitation!.summary}',
                         512,
                       ),
@@ -748,21 +774,6 @@ final class MenuCommsSession
       throw const DirectReadFailure('unavailable');
     },
   );
-  static String _text(String value, int limit) {
-    final text = value.replaceAll(
-      RegExp(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]'),
-      '',
-    );
-    return text.length <= limit ? text : text.substring(0, limit);
-  }
-
-  static String? _inlineAvatar(String? value) =>
-      value != null &&
-          value.length <= 128 * 1024 &&
-          (value.startsWith('data:image/png;base64,') ||
-              value.startsWith('data:image/jpeg;base64,'))
-      ? value
-      : null;
 
   @override
   void dispose() {

@@ -72,6 +72,8 @@ const overlayWorkspaceZhCn = <String, String>{
   'overlay.workspace.description': '调整浮层显示的内容和位置。设置只保存在这台电脑上。',
   'overlay.runtime.open': '信息浮层正在显示',
   'overlay.runtime.closed': '信息浮层已关闭',
+  'overlay.runtime.suppressed': '信息浮层暂时隐藏',
+  'overlay.runtime.suppressedDescription': '菜单打开时暂时隐藏，关闭菜单后恢复显示。在这里关闭则不再恢复。',
   'overlay.runtime.failed': '信息浮层未能打开',
   'overlay.runtime.unavailable': '当前无法使用信息浮层',
   'overlay.runtime.checking': '正在检查信息浮层…',

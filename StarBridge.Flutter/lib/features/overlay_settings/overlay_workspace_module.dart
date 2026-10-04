@@ -39,6 +39,7 @@ final class OverlayWorkspaceModule {
   final List<_OverlayWorkspaceDraft> _redoHistory = [];
   String? _lastHistoryKey;
   String _runtimeLanguage = 'zh';
+  String get runtimeLanguage => _runtimeLanguage;
   int _manualPresetSelection = 0;
   int get manualPresetSelection => _manualPresetSelection;
 
@@ -700,7 +701,7 @@ final class OverlayWorkspaceModule {
 
   void _queueLiveRuntimeSync() {
     final current = _projection.value;
-    if (_disposed || !current.available || !current.runtime.isVisible) return;
+    if (_disposed || !current.available || !current.runtime.enabled) return;
     _liveSyncRequested = true;
     if (!_liveSyncInFlight) unawaited(_drainLiveRuntimeSync());
   }
@@ -712,7 +713,7 @@ final class OverlayWorkspaceModule {
       while (_liveSyncRequested && !_disposed) {
         _liveSyncRequested = false;
         final current = _projection.value;
-        if (!current.available || !current.runtime.isVisible) break;
+        if (!current.available || !current.runtime.enabled) break;
         final runtime = await _port.executeRuntime(
           OverlayRuntimeAction.getState,
           language: _runtimeLanguage,

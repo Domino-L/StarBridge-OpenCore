@@ -68,6 +68,15 @@ internal static class StarCitizenProcessProbe
         return foregroundHandle != IntPtr.Zero && IsGameWindow(foregroundHandle);
     }
 
+    internal static bool TryCaptureForeground(out IntPtr handle, out uint processId)
+    {
+        handle = GetForegroundWindow();
+        processId = 0;
+        if (handle == IntPtr.Zero || !IsGameWindow(handle)) return false;
+        _ = GetWindowThreadProcessId(handle, out processId);
+        return processId != 0 && handle == GetForegroundWindow();
+    }
+
     public static IntPtr FindMainWindow()
     {
         foreach (var processName in ProcessNames)

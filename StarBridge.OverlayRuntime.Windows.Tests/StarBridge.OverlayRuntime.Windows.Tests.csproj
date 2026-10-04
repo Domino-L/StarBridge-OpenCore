@@ -11,6 +11,7 @@
     <ProjectReference Include="../StarBridge.OverlayRuntime.Windows/StarBridge.OverlayRuntime.Windows.csproj" />
     <Using Include="StarBridge.Core.Overlay" />
     <Compile Include="../StarBridge.NativeHost/WindowsNotificationActivity.cs" Link="NativeHost/WindowsNotificationActivity.cs" />
+    <Compile Include="../StarBridge.NativeHost/WindowsStorageFolderPicker.cs" Link="NativeHost/WindowsStorageFolderPicker.cs" />
     <!-- Only the regression harness links the old pure producer seam. The
          standalone renderer must still exclude MainWindow and its application. -->
     <Compile Include="../StarBridge.Desktop/FleetEventShipNormalizer.cs" Link="Legacy/FleetEventShipNormalizer.cs"

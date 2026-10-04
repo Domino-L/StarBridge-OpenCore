@@ -88,6 +88,11 @@ void main() {
       );
       expect(connection.sent.single.payload, {'schemaVersion': 1});
       expect(connection.sent.single.accountContext, isNull);
+      connection.payload['windowState'] = 'suppressed';
+      expect(
+        (await BridgeRuntimeOverlayStatus(session).read()).windowState,
+        'suppressed',
+      );
       connection.payload['windowState'] = 'invented';
       await expectLater(
         BridgeRuntimeOverlayStatus(session).read(),

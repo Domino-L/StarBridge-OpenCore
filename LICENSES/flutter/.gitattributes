@@ -1,0 +1,2 @@
+# These reviewed third-party texts are pinned by byte-level SHA-256.
+*.txt -text

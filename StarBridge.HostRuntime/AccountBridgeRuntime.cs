@@ -24,7 +24,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
     {
         var owner = GameplayOwner();
         if (_disposed) return new(null, owner.Generation, null, null);
-        if (_liveOverlaySink?.IsVisible == false)
+        if (_liveOverlaySink?.HasDisplayDemand == false)
         {
             _overlayCommunities?.SuspendDisplayDemand();
             return new(null, owner.Generation, null, null);
@@ -119,6 +119,16 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         _dispatcher.DomainInvalidation("notificationSettings.activated", generation) with { Payload = BridgePayload.From(payload) };
     public BridgeEnvelope SocialNotification(long generation, object payload) =>
         _dispatcher.DomainInvalidation("notificationSettings.social", generation) with { Payload = BridgePayload.From(payload) };
+    public BridgeEnvelope MenuHotkeyIntent(long generation, object payload) =>
+        _dispatcher.DomainInvalidation(Overlay.MenuHotkeyBridgeDispatcher.IntentEvent, generation) with { Payload = BridgePayload.From(payload) };
+    private Overlay.MenuHotkeyBridgeDispatcher? _menuHotkeys;
+    public void ConfigureMenuHotkeys(Overlay.MenuHotkeyBridgeDispatcher dispatcher)
+    {
+        if (_menuHotkeys is not null) throw new InvalidOperationException("Menu hotkeys already configured.");
+        _menuHotkeys = dispatcher;
+        _host.AccountChanged += InvalidateMenuHotkeys;
+    }
+    private void InvalidateMenuHotkeys(long _) => _menuHotkeys?.Invalidate();
     public async Task<Notifications.GameIdentityNotificationPolicy> ReadGameIdentityNotificationPolicyAsync(
         BridgeAccountContext context, CancellationToken token)
     {
@@ -754,6 +764,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         }
 
         _disposed = true;
+        _host.AccountChanged -= InvalidateMenuHotkeys;
+        _menuHotkeys?.Invalidate();
         _host.AccountChanged -= InvalidateCommunityNotifications;
         _communityNotifications?.Dispose();
         _overlayCommunities?.Dispose();

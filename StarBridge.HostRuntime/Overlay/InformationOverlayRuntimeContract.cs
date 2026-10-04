@@ -110,6 +110,9 @@ public interface IInformationOverlayRuntime : IDisposable
 public interface IInformationOverlayLiveUpdateSink
 {
     bool IsVisible { get; }
+    // A menu may temporarily hide an enabled HUD. Keep the existing authorized
+    // source driver alive without claiming the HWND is visible.
+    bool HasDisplayDemand => IsVisible;
     // Null means legacy single-source mode, not a missing v2 source grant.
     InformationOverlayModuleDemand? ModuleDemand => null;
     void RequestContentRefresh();

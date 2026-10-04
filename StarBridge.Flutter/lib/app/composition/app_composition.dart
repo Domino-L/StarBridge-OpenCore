@@ -1,5 +1,10 @@
 import 'dart:async';
 
+import '../../platform/window/menu_attention.dart';
+import 'menu_social_notice_source.dart';
+
+import '../localization/app_strings.dart';
+
 import 'app_feature_registry.dart';
 import '../menu_overlay/menu_friends_session.dart';
 import '../../features/common/bridge_user_interaction.dart';
@@ -77,6 +82,7 @@ import '../../features/settings/sync_privacy_port.dart';
 import '../../platform/host/native_host_connector.dart';
 import '../../platform/host/desktop_notification_port.dart';
 import '../../platform/window/method_channel_window_chrome.dart';
+import '../../platform/window/method_channel_menu_preview_window.dart';
 import '../../platform/window/window_chrome_port.dart';
 import '../feature_registry.dart';
 import '../preferences/app_preferences_port.dart';
@@ -222,9 +228,11 @@ final class AppComposition {
 
   factory AppComposition.forProductShell({
     required AppPreferencesPort preferences,
+    MenuWindowLifetime? menuLifetime,
     WindowChromePort? windowChrome,
   }) {
     return AppComposition._withAdapters(
+      menuLifetime: menuLifetime,
       windowChrome: windowChrome ?? MethodChannelWindowChrome(),
       shellChrome: InMemoryShellChrome(
         initial: InMemoryShellChrome.disconnectedProjection,
@@ -247,11 +255,13 @@ final class AppComposition {
 
   factory AppComposition.forConnectedProduct({
     required NativeHostLease nativeHost,
+    MenuWindowLifetime? menuLifetime,
     required AppPreferencesPort preferences,
     WindowChromePort? windowChrome,
   }) {
     final notifications = BridgeNotificationSettingsAdapter(nativeHost.session);
     return AppComposition._withAdapters(
+      menuLifetime: menuLifetime,
       windowChrome: windowChrome ?? MethodChannelWindowChrome(),
       shellChrome: InMemoryShellChrome(
         initial: InMemoryShellChrome.hostConnectedProjection,
@@ -282,6 +292,7 @@ final class AppComposition {
   }
 
   factory AppComposition.forShellReview({
+    MenuWindowLifetime? menuLifetime,
     WindowChromePort? windowChrome,
     ShellChromePort? shellChrome,
     AppPreferencesPort? preferences,
@@ -299,6 +310,7 @@ final class AppComposition {
     // Keep read receipts across page navigation within this example session.
     final exampleMessages = ExampleDirectMessages();
     return AppComposition._withAdapters(
+      menuLifetime: menuLifetime,
       partyRoomsPort: ExamplePartyRoomsAdapter(),
       friendsPortFactory: ExampleFriendsAdapter.new,
       communitiesPortFactory: ExampleCommunities.new,
@@ -392,6 +404,7 @@ final class AppComposition {
   }
 
   factory AppComposition._withAdapters({
+    MenuWindowLifetime? menuLifetime,
     DesktopNotificationPort? desktopNotificationsOverride,
     required WindowChromePort windowChrome,
     required ShellChromePort shellChrome,
@@ -456,16 +469,91 @@ final class AppComposition {
     ConnectedManualPresence? manualPresence;
     GameLogController? gameLog;
     late final CommunitiesModule communities;
+    late final FriendsModule friends;
+    late final DirectMessageRefresh? directMessageRefresh;
     final overlaySettings = composeOverlaySettings(
       overlaySettingsPort,
+      menuLifetime: menuLifetime ?? MenuWindowLifetime(),
       workspacePort: overlayWorkspacePort,
       session: nativeHost?.session,
       account: account,
       profile: personalProfile,
       rooms: partyRooms,
       menuCommunities: () => communities,
+      menuNotices:
+          notificationSettingsPort is! BridgeNotificationSettingsAdapter
+          ? null
+          : () {
+              final generation = account.projection.value.generation;
+              return MenuSocialNoticeSource(
+                events: notificationSettingsPort.reminders,
+                settings: notificationSettings.projection,
+                authorization: account.projection,
+                invalidations: nativeHost?.session.events
+                    .where(
+                      (event) =>
+                          event.name == 'account.changed' ||
+                          event.name == 'bootstrap.invalidated',
+                    )
+                    .map((_) {}),
+                isCurrent: () {
+                  final current = account.projection.value;
+                  return current.generation == generation &&
+                      current.generation ==
+                          nativeHost?.session.activeGeneration &&
+                      (current.isSignedIn ||
+                          current.sessionState ==
+                              AccountSessionState.legacySignedIn);
+                },
+                strings: () => AppStrings.resolve(
+                  preferences.projection.value.effective.locale,
+                ),
+              );
+            },
+      menuAttention: () {
+        final generation = account.projection.value.generation;
+        return MenuAttentionSource(
+          changes: [
+            account.projection,
+            friends.incomingAttention,
+            if (directMessageRefresh != null) directMessageRefresh.unread,
+            partyRooms.activityCount,
+            communities.chatAttention,
+          ],
+          isCurrent: () {
+            final current = account.projection.value;
+            return current.generation == generation &&
+                current.generation == nativeHost?.session.activeGeneration &&
+                (current.isSignedIn ||
+                    current.sessionState == AccountSessionState.legacySignedIn);
+          },
+          invalidations: nativeHost?.session.events
+              .where(
+                (event) =>
+                    event.name == 'account.changed' ||
+                    event.name == 'bootstrap.invalidated',
+              )
+              .map((_) {}),
+          read: () => MenuAttention(
+            friends: friends.incomingAttention.value,
+            comms: directMessageRefresh?.unread.value ?? 0,
+            rooms: partyRooms.activityCount.value,
+            organizations: communities.chatAttention.totalCount,
+          ),
+        );
+      },
       menuPresence: () => manualPresence?.source.controller,
       menuGame: () => gameLog?.value ?? const GameLogView(),
+      menuLabels: () {
+        final strings = AppStrings.resolve(
+          preferences.projection.value.effective.locale,
+        );
+        return (
+          contextLabel: strings.text('overlay.sections.menu'),
+          returnLabel: strings.text('overlay.menu.return'),
+          settingsLabel: strings.text('overlay.sections.menu'),
+        );
+      },
     );
     final gamePresence = nativeHost == null
         ? null
@@ -546,7 +634,7 @@ final class AppComposition {
         () => nativeHost != null
             ? BridgeFriendsAdapter(nativeHost.session)
             : UnavailableFriendsPort())();
-    final friends = FriendsModule(
+    friends = FriendsModule(
       friendsPort,
       isExample: friendsPort is ExampleFriendsAdapter,
     );
@@ -558,7 +646,7 @@ final class AppComposition {
     unawaited(notificationSettings.initialize());
     unawaited(overlaySettings.initialize());
     final directMessageRequests = ValueNotifier<int>(0);
-    final directMessageRefresh = nativeHost == null
+    directMessageRefresh = nativeHost == null
         ? null
         : DirectMessageRefresh(
             BridgeDirectMessages(nativeHost.session),

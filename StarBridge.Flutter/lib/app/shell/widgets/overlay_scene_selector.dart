@@ -52,7 +52,7 @@ class OverlaySceneSelector extends StatelessWidget {
             maximumSize: WidgetStatePropertyAll(
               Size(
                 mode == ShellLayoutMode.wide
-                    ? tokens.density.navigationCompact
+                    ? double.infinity
                     : tokens.density.controlHeight,
                 tokens.density.controlHeight,
               ),

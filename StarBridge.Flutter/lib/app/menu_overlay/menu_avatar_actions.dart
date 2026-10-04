@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'menu_bridge_style.dart';
+import 'menu_native_popup.dart';
 
 /// The same profile-first avatar interaction as the client, with no account or
 /// social command adapter installed in the secondary engine.
@@ -19,7 +20,7 @@ class MenuAvatarActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) => onProfile == null && actions.isEmpty
       ? child
-      : MenuAnchor(
+      : MenuNativePopup(
           style: MenuStyle(
             backgroundColor: WidgetStatePropertyAll(MenuBridgeColors.of(context).ground),
             surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),

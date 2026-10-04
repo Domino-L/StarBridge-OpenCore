@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <StarBridgeVersion>0.7.0.4</StarBridgeVersion>
+    <StarBridgeVersion>0.7.0.5</StarBridgeVersion>
     <Version>$(StarBridgeVersion)</Version>
     <FileVersion>$(StarBridgeVersion)</FileVersion>
     <AssemblyVersion>$(StarBridgeVersion)</AssemblyVersion>

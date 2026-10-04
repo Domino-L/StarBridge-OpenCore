@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Native headers and static loader for the existing browser integration. -->
+    <PackageDownload Include="Microsoft.Web.WebView2" Version="[1.0.3179.45]" />
+  </ItemGroup>
+</Project>

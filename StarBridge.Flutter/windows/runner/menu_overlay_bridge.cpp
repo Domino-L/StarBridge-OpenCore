@@ -1,9 +1,11 @@
 #include "menu_overlay_bridge.h"
 #include "menu_overlay_window.h"
 #include "menu_local_tools.h"
+#include "menu_screenshot_settings_intent.h"
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
+#include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 #include <atomic>
 
@@ -45,22 +47,55 @@ class MenuOverlayBridge::Impl {
         const auto* version = args ? Field(*args, "schemaVersion") : nullptr;
         const auto* schema = version ? std::get_if<int32_t>(version) : nullptr;
         if (!schema || *schema != 1 ||
+            (Field(*args, "request") && (Integer(*args, "request") <= 0 || Integer(*args, "request") > 9007199254740991LL)) ||
             !ReadText(*args, "contextLabel", next) || !ReadText(*args, "returnLabel", next) ||
             !ReadText(*args, "settingsLabel", next)) {
           result->Error("menu.invalid_configuration", "Invalid menu configuration."); return;
         }
         // Only presentation labels and explicitly selected live mode cross here. Never forward arbitrary
         // account/Host snapshots or credentials through a generic map.
+        HWND target = nullptr;
+        DWORD target_pid = 0;
+        if (Field(*args, "targetWindow") || Field(*args, "targetProcessId")) {
+          const auto handle = Integer(*args, "targetWindow"), pid = Integer(*args, "targetProcessId");
+          if (!preview || handle <= 0 || handle > 9007199254740991LL || pid <= 0 || pid > MAXDWORD) {
+            result->Error("menu.invalid_configuration", "Invalid foreground target."); return;
+          }
+          target = reinterpret_cast<HWND>(static_cast<intptr_t>(handle));
+          target_pid = static_cast<DWORD>(pid);
+          if (!TargetIsForeground(target, target_pid)) {
+            result->Error("menu.foreground_changed", "Foreground target changed."); return;
+          }
+        }
         window_.Hide();
+        request_ = Field(*args, "request") ? Integer(*args, "request") : 0;
         const auto* live = Field(*args, "liveFriends");
         live_friends_ = preview && live && std::get_if<bool>(live) && std::get<bool>(*live);
         next[Value("liveFriends")] = Value(live_friends_);
         next[Value("nativeTools")] = Value(live_friends_);
+        const auto* screenshot_directory = Field(*args, "screenshotDirectory");
+        next[Value("screenshotDirectory")] = Value(live_friends_ && screenshot_directory &&
+            std::get_if<bool>(screenshot_directory) && std::get<bool>(*screenshot_directory));
+        // Read the user's Windows 12/24-hour preference rather than inferring it
+        // from the application language. No user locale data is persisted.
+        wchar_t clock_format[2]{};
+        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_ITIME, clock_format, 2) == 2)
+          next[Value("system24Hour")] = Value(clock_format[0] == L'1');
+        const auto* shortcut = Field(*args, "shortcutSettings");
+        next[Value("shortcutSettings")] = Value(live_friends_ && shortcut && std::get_if<bool>(shortcut) && std::get<bool>(*shortcut));
+        const auto* resume = Field(*args, "browserResume");
+        next[Value("browserResume")] = Value(live_friends_ && resume && std::get_if<bool>(resume) && std::get<bool>(*resume));
         const auto* prefs_raw = Field(*args, "preferences");
         const auto* prefs = prefs_raw ? std::get_if<std::string>(prefs_raw) : nullptr;
         if (prefs && prefs->size() <= 32768) next[Value("preferences")] = Value(*prefs);
         const auto* prefs_failed = Field(*args, "preferencesFailed");
         next[Value("preferencesFailed")] = Value(prefs_failed && std::get_if<bool>(prefs_failed) && std::get<bool>(*prefs_failed));
+        const auto* startup_raw = Field(*args, "startupMode");
+        const auto* startup = startup_raw ? std::get_if<std::string>(startup_raw) : nullptr;
+        if (startup && (*startup == "normal" || *startup == "safe" || *startup == "unverified"))
+          next[Value("startupMode")] = Value(*startup);
+        const auto* recovery = Field(*args, "recoveryPending");
+        next[Value("recoveryPending")] = Value(live_friends_ && recovery && std::get_if<bool>(recovery) && std::get<bool>(*recovery));
         const auto* comms = Field(*args, "liveComms");
         live_comms_ = live_friends_ && comms && std::get_if<bool>(comms) && std::get<bool>(*comms);
         next[Value("liveComms")] = Value(live_comms_);
@@ -70,15 +105,17 @@ class MenuOverlayBridge::Impl {
         workspace_preview_ = preview;
         configured_ = true;
         if (preview) {
-          const auto opening = Open();
+          const auto opening = Open(target, target_pid);
           if (!opening) result->Error("menu.unavailable", "Menu could not prepare a frame.");
           else result->Success(Value(static_cast<int64_t>(opening)));
         } else result->Success();
-      } else if (call.method_name() == "friendsView" || call.method_name() == "commsView" || call.method_name() == "profileView" || call.method_name() == "featureView" || call.method_name() == "preferencesState" || call.method_name() == "contextView") {
+      } else if (call.method_name() == "friendsView" || call.method_name() == "commsView" || call.method_name() == "profileView" || call.method_name() == "featureView" || call.method_name() == "preferencesState" || call.method_name() == "contextView" || call.method_name() == "attentionView" || call.method_name() == "noticeView") {
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto* raw = args ? Field(*args, "payload") : nullptr;
         const auto* payload = raw ? std::get_if<std::string>(raw) : nullptr;
         if (!args || !payload || payload->size() > 1048576 ||
+            (call.method_name() == "attentionView" && payload->size() > 256) ||
+            (call.method_name() == "noticeView" && payload->size() > 65536) ||
             (call.method_name() != "preferencesState" && !(call.method_name() == "commsView" ? live_comms_ : live_friends_)) || !window_.session().wanted() ||
             Integer(*args, "opening") != static_cast<int64_t>(window_.session().generation()) ||
             Integer(*args, "revision") < 0) {
@@ -98,6 +135,7 @@ class MenuOverlayBridge::Impl {
         if (!opening) result->Error("menu.unavailable", "Menu could not prepare a frame.");
         else result->Success(Value(static_cast<int64_t>(opening)));
       } else if (call.method_name() == "close") {
+        if (!OwnsRequest(call.arguments())) { result->Success(); return; }
         window_.Hide(true); result->Success();
       } else if (call.method_name() == "status") {
         result->Success(Value(Map{
@@ -105,10 +143,13 @@ class MenuOverlayBridge::Impl {
           {Value("dartReady"), Value(dart_ready_)},
           {Value("wanted"), Value(window_.session().wanted())}}));
       } else if (call.method_name() == "detach") {
+        if (!OwnsRequest(call.arguments())) { result->Success(); return; }
         configured_ = false;
         window_.UnregisterShortcut();
         window_.Hide();
+        live_friends_ = live_comms_ = workspace_preview_ = false;
         if (local_tools_) local_tools_->Reset();
+        ++local_tools_epoch_;
         snapshot_.clear();
         Update();
         result->Success();
@@ -116,7 +157,7 @@ class MenuOverlayBridge::Impl {
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto* mods = args && Field(*args,"modifiers") ? std::get_if<int32_t>(Field(*args,"modifiers")) : nullptr;
         const auto* key = args && Field(*args,"key") ? std::get_if<int32_t>(Field(*args,"key")) : nullptr;
-        if (!configured_ || !mods || !key || !window_.Create() ||
+        if (live_friends_ || !configured_ || !mods || !key || !window_.Create() ||
             !window_.RegisterShortcut(static_cast<UINT>(*mods), static_cast<UINT>(*key))) {
           result->Error("menu.shortcut_unavailable", "Shortcut is invalid or already in use."); return;
         }
@@ -125,17 +166,17 @@ class MenuOverlayBridge::Impl {
     });
     window_.on_shortcut = [this]() {
       if (window_.session().wanted()) window_.Hide(true);
-      else if (!Open()) primary_.InvokeMethod("state", std::make_unique<Value>("unavailable"));
+      else if (!Open()) NotifyState("unavailable");
     };
     window_.on_hidden = [this]() {
       if (local_tools_) local_tools_->Hide();
       Update();
-      primary_.InvokeMethod("state", std::make_unique<Value>("hidden"));
+      NotifyState("hidden");
     };
     window_.on_message = [this](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
       if (msg == kFrameReady) {
         if (window_.Reveal(static_cast<uint64_t>(wp)))
-          primary_.InvokeMethod("state", std::make_unique<Value>("visible"));
+          NotifyState("visible");
         return 0;
       }
       if (controller_) return controller_->HandleTopLevelWindowProc(hwnd, msg, wp, lp);
@@ -157,12 +198,32 @@ class MenuOverlayBridge::Impl {
   }
 
  private:
-  uint64_t Open() {
+  int64_t request_ = 0;
+  bool OwnsRequest(const Value* value) const {
+    const auto* args = value ? std::get_if<Map>(value) : nullptr;
+    // Unscoped control is reserved for the internal configure-only fixture.
+    return request_ == 0 ? !args || !Field(*args, "request")
+                         : args && Integer(*args, "request") == request_;
+  }
+  void NotifyState(const char* state) {
+    primary_.InvokeMethod("state", std::make_unique<Value>(Map{
+      {Value("request"), Value(request_)}, {Value("state"), Value(state)},
+      {Value("window"), Value(static_cast<int64_t>(reinterpret_cast<intptr_t>(window_.handle())))}}));
+  }
+  static bool TargetIsForeground(HWND target, DWORD pid) {
+    DWORD actual = 0;
+    if (!target || !IsWindow(target) || GetForegroundWindow() != target) return false;
+    GetWindowThreadProcessId(target, &actual);
+    return actual == pid && GetForegroundWindow() == target;
+  }
+  uint64_t Open(HWND target = nullptr, DWORD target_pid = 0) {
     if (!configured_) return 0;
     if (window_.session().wanted()) return window_.session().generation();
     const HWND foreground = GetForegroundWindow();
     if (!foreground) return 0;
+    if (target && !TargetIsForeground(target, target_pid)) return 0;
     if (!window_.Create() || !EnsureEngine()) return 0;
+    if (target && !TargetIsForeground(target, target_pid)) return 0;
     const auto opening = window_.Begin(foreground);
     if (opening) Update();
     return opening;
@@ -190,11 +251,97 @@ class MenuOverlayBridge::Impl {
       if (call.method_name() == "ready") {
         dart_ready_ = true;
         result->Success(Value(Snapshot()));
+      } else if (call.method_name() == "shortcutSettings" || call.method_name() == "recoveryAction" || call.method_name() == "browserResume" || call.method_name() == "screenshotDirectory") {
+        const bool recovery = call.method_name() == "recoveryAction";
+        const bool resume = call.method_name() == "browserResume";
+        const bool directory = call.method_name() == "screenshotDirectory";
+        const std::string prefix = directory ? "menuScreenshotDirectory" : recovery ? "menuRecovery" : resume ? "menuBrowserResume" : "menuHotkey";
+        const std::string unavailable = prefix + ".session_unavailable";
+        const std::string failed = prefix + ".unavailable";
+        const size_t reply_limit = directory ? 262144 : recovery ? 32768 : resume ? 24576 : 1024;
+        const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+        const auto* action_raw = args ? Field(*args, "action") : nullptr;
+        const auto* action = action_raw ? std::get_if<std::string>(action_raw) : nullptr;
+        const auto* payload_raw = args ? Field(*args, "payload") : nullptr;
+        const auto* payload = payload_raw ? std::get_if<std::string>(payload_raw) : nullptr;
+        const auto opening = window_.session().generation();
+        const auto* directory_capability = Field(snapshot_, "screenshotDirectory");
+        const bool directory_allowed = directory_capability && std::get_if<bool>(directory_capability) && std::get<bool>(*directory_capability);
+        if (!args || !action || !live_friends_ || !window_.session().wanted() ||
+            Integer(*args, "opening") != static_cast<int64_t>(opening) ||
+            !(directory ? (directory_allowed && !window_.local_modal() && ValidScreenshotSettingsIntent(*args)) :
+              recovery ? (args->size() == 2 && (*action == "restore" || *action == "startClean")) :
+              ((*action == "get" && args->size() == 2) ||
+              ((*action == "update" || (resume && *action == "remember")) && args->size() == 3 && payload && payload->size() <= reply_limit)))) {
+          result->Error(unavailable, "Menu settings unavailable"); return;
+        }
+        const auto life = alive_;
+        const auto owner = request_;
+        auto pending = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
+        auto current = [this, life, opening, owner]() {
+          return *life && request_ == owner && live_friends_ && window_.session().wanted() &&
+              window_.session().generation() == opening;
+        };
+        const bool choosing = directory && *action == "choose";
+        if (choosing) window_.SetLocalModal(true);
+        auto finish_modal = [this, current, choosing]() {
+          if (choosing && current()) window_.SetLocalModal(false);
+        };
+        primary_.InvokeMethod(call.method_name(), std::make_unique<Value>(*args),
+          std::make_unique<flutter::MethodResultFunctions<Value>>(
+            [pending, current, life, unavailable, failed, reply_limit, finish_modal](const Value* value) {
+              if (!*life) return;
+              finish_modal();
+              const auto* text = value ? std::get_if<std::string>(value) : nullptr;
+              if (!current()) pending->Error(unavailable, "Menu session changed");
+              else if (!text || text->size() > reply_limit) pending->Error(failed, "Invalid settings reply");
+              else pending->Success(*value);
+            },
+            [pending, current, life, unavailable, finish_modal](const std::string& code, const std::string&, const Value*) {
+              if (!*life) return;
+              finish_modal();
+              pending->Error(current() ? code : unavailable, "Menu settings unavailable");
+            },
+            [pending, life, failed, finish_modal]() { if (*life) { finish_modal(); pending->Error(failed, "Menu settings unavailable"); } }));
       } else if (call.method_name() == "localTool") {
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
-          if (!args || !local_tools_ || !live_friends_ || !window_.session().wanted() ||
+          if (!args || !local_tools_ || !live_friends_ || window_.local_modal() || !window_.session().wanted() ||
             Integer(*args, "opening") != static_cast<int64_t>(window_.session().generation())) {
           result->Error("menu.closed", "Menu is closed"); return;
+        }
+        const auto* action_raw = Field(*args, "action");
+        const auto* action = action_raw ? std::get_if<std::string>(action_raw) : nullptr;
+        if (action && *action == "screenshotDestination") {
+          local_tools_->AuthorizeScreenshotDirectory("");
+          const auto* capability = Field(snapshot_, "screenshotDirectory");
+          if (args->size() != 2 || !capability || !std::get_if<bool>(capability) || !std::get<bool>(*capability)) {
+            result->Error("menu.screenshot_directory_unavailable", "Screenshot directory unavailable"); return;
+          }
+          const auto life = alive_;
+          const auto opening = window_.session().generation();
+          const auto epoch = local_tools_epoch_;
+          const auto owner = request_;
+          auto pending = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
+          auto current = [this, life, opening, epoch, owner]() {
+            return *life && local_tools_ && local_tools_epoch_ == epoch && request_ == owner &&
+                live_friends_ && window_.session().wanted() && window_.session().generation() == opening;
+          };
+          primary_.InvokeMethod("screenshotDestination", std::make_unique<Value>(Map{
+              {Value("opening"), Value(static_cast<int64_t>(opening))}}),
+            std::make_unique<flutter::MethodResultFunctions<Value>>(
+              [this, pending, current, life](const Value* value) {
+                if (!*life) return;
+                const auto* directory = value ? std::get_if<std::string>(value) : nullptr;
+                if (!current()) pending->Error("menu.closed", "Menu session changed");
+                else if (!directory || !local_tools_->AuthorizeScreenshotDirectory(*directory))
+                  pending->Error("menu.screenshot_directory_unavailable", "Screenshot directory unavailable");
+                else pending->Success(Value(true)); // The surface receives no path.
+              },
+              [pending, current, life](const std::string&, const std::string&, const Value*) {
+                if (*life) pending->Error(current() ? "menu.screenshot_directory_unavailable" : "menu.closed", "Screenshot directory unavailable");
+              },
+              [pending, life]() { if (*life) pending->Error("menu.screenshot_directory_unavailable", "Screenshot directory unavailable"); }));
+          return;
         }
         local_tools_->Handle(*args, std::move(result));
       } else if (call.method_name() == "preferencesChanged") {
@@ -349,6 +496,7 @@ class MenuOverlayBridge::Impl {
     value[Value("opening")] = Value(static_cast<int64_t>(window_.session().generation()));
     value[Value("wanted")] = Value(window_.session().wanted());
     value[Value("workspacePreview")] = Value(workspace_preview_);
+    value[Value("localToolsEpoch")] = Value(local_tools_epoch_);
     return value;
   }
   void Update() {
@@ -364,6 +512,7 @@ class MenuOverlayBridge::Impl {
   bool workspace_preview_ = false;
   bool live_friends_ = false;
   bool live_comms_ = false;
+  int64_t local_tools_epoch_ = 0;
   std::unique_ptr<flutter::FlutterViewController> controller_;
   std::unique_ptr<Channel> secondary_;
   std::unique_ptr<MenuLocalTools> local_tools_;

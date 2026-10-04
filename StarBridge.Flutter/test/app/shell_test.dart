@@ -9,6 +9,7 @@ import '../features/communities/community_visitor_profile_test.dart'
 import '../features/friends/social_layout_test.dart' show capture, loadFonts;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +30,48 @@ import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart'
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'source label uses spare title-bar space and truncates only when needed',
+    (tester) async {
+      const source = '由预设绑定：星海舰桥远航协作组织';
+      final chrome = InMemoryShellChrome(
+        initial: InMemoryShellChrome.connectedProjection.copyWith(
+          overlay: const OverlaySceneProjection(
+            options: [
+              OverlaySceneOption(id: 'fleet', labelKey: '', label: source),
+            ],
+            preferredSceneId: 'fleet',
+            actualSceneId: 'fleet',
+            canChange: true,
+          ),
+        ),
+      );
+      await _pumpShell(tester, shellChrome: chrome);
+      tester.view.physicalSize = const Size(2560, 1440);
+      await tester.pumpAndSettle();
+      final label = find.descendant(
+        of: find.byKey(const Key('overlay-scene-selector')),
+        matching: find.text(source),
+      );
+      expect(
+        tester.renderObject<RenderParagraph>(label).didExceedMaxLines,
+        false,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('overlay-scene-selector'))).width,
+        greaterThan(160),
+      );
+      tester.view.physicalSize = const Size(1280, 720);
+      await tester.pumpAndSettle();
+      expect(
+        tester.renderObject<RenderParagraph>(label).didExceedMaxLines,
+        false,
+      );
+      tester.view.physicalSize = const Size(800, 720);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets(
     'Windows social buttons open independent singleton windows without leaving the workspace',
     (tester) async {

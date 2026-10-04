@@ -13,6 +13,9 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
     private readonly IBridgeRequestDispatcher _applicationPreferences;
     private readonly IBridgeRequestDispatcher? _hangarSandbox;
     private readonly IBridgeRequestDispatcher? _overlay;
+    private readonly IBridgeRequestDispatcher? _menuHotkeys;
+    private readonly IBridgeRequestDispatcher? _menuBrowserResume;
+    private readonly IBridgeRequestDispatcher? _menuScreenshotDirectory;
     private readonly IBridgeRequestDispatcher? _audio;
     private readonly IBridgeRequestDispatcher? _support;
     private readonly IBridgeRequestDispatcher? _runtimeFacts;
@@ -50,7 +53,10 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         IBridgeRequestDispatcher? updates = null,
         IBridgeRequestDispatcher? storageMigration = null,
         IBridgeRequestDispatcher? notificationPolicies = null,
-        IBridgeRequestDispatcher? helpSupport = null)
+        IBridgeRequestDispatcher? helpSupport = null,
+        IBridgeRequestDispatcher? menuHotkeys = null,
+        IBridgeRequestDispatcher? menuBrowserResume = null,
+        IBridgeRequestDispatcher? menuScreenshotDirectory = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _account = account ?? throw new ArgumentNullException(nameof(account));
@@ -59,6 +65,10 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         _host.EventReady += Publish;
         _hangarSandbox = hangarSandbox;
         _overlay = overlay;
+        _menuHotkeys = menuHotkeys;
+        _menuBrowserResume = menuBrowserResume;
+        _menuScreenshotDirectory = menuScreenshotDirectory;
+        if (_menuHotkeys != null) _menuHotkeys.EventReady += Publish;
         _audio = audio;
         _support = support;
         _runtimeFacts = runtimeFacts;
@@ -88,6 +98,12 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (_menuScreenshotDirectory != null && Settings.MenuScreenshotDirectoryBridgeDispatcher.Capabilities.Contains(request.Name))
+            return _menuScreenshotDirectory.DispatchAsync(request, cancellationToken);
+        if (_menuBrowserResume != null && Settings.MenuBrowserResumeBridgeDispatcher.Capabilities.Contains(request.Name))
+            return _menuBrowserResume.DispatchAsync(request, cancellationToken);
+        if (_menuHotkeys != null && request.Name.StartsWith("menuHotkey.", StringComparison.Ordinal))
+            return _menuHotkeys.DispatchAsync(request, cancellationToken);
         if (_helpSupport != null && Support.HelpSupportBridgeDispatcher.Capabilities.Contains(request.Name))
             return _helpSupport.DispatchAsync(request, cancellationToken);
         if (_storageMigration != null && request.Name is Storage.StorageMigrationBridgeDispatcher.ChooseRequest or Storage.StorageMigrationBridgeDispatcher.ConfirmRequest
@@ -219,6 +235,10 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         }
 
         _disposed = true;
+        if (_menuHotkeys != null) _menuHotkeys.EventReady -= Publish;
+        _menuHotkeys?.Dispose();
+        _menuBrowserResume?.Dispose();
+        _menuScreenshotDirectory?.Dispose();
         _playerActivity?.Dispose();
         _runtimeFacts?.Dispose();
         _clientLicense?.Dispose();

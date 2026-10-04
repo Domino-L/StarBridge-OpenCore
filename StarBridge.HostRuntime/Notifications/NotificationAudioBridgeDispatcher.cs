@@ -21,21 +21,24 @@ public sealed class NotificationAudioBridgeDispatcher : IBridgeRequestDispatcher
     private readonly TimeProvider _time;
     private readonly Func<bool> _canNotify;
     private readonly Func<bool> _canPlaySocial;
+    private readonly Func<bool> _menuVisible;
+    private readonly Settings.MenuPreferencesStore _menuPreferences;
     private long? _lastPlayback;
     private readonly NotificationDeliveryJournal _delivery;
     private void Record(NotificationDeliveryStage stage) => _delivery.Record(NotificationDeliveryChannel.Audio, stage);
     internal NotificationAudioBridgeDispatcher(string dataRoot, NotificationAudioCatalog? catalog,
-        INotificationAudioOutput output, Func<long> generation, Func<bool>? canNotify = null, TimeProvider? time = null, Func<bool>? canPlaySocial = null)
+        INotificationAudioOutput output, Func<long> generation, Func<bool>? canNotify = null, TimeProvider? time = null, Func<bool>? canPlaySocial = null, Func<bool>? menuVisible = null)
     { _delivery = new(dataRoot); _store = new(dataRoot); _policies = new(dataRoot); _catalog = catalog; _output = output; _generation = generation; _canNotify = canNotify ?? (() => false);
         _canPlaySocial = canPlaySocial ?? _canNotify;
+        _menuVisible = menuVisible ?? (() => false); _menuPreferences = new(dataRoot);
         _time = time ?? TimeProvider.System; _rooms = new(_time); _direct = new(_time); }
 
-    public static NotificationAudioBridgeDispatcher CreateDefault(string dataRoot, string assetRoot, Func<long> generation, Func<bool>? canNotify = null, Func<bool>? canPlaySocial = null)
+    public static NotificationAudioBridgeDispatcher CreateDefault(string dataRoot, string assetRoot, Func<long> generation, Func<bool>? canNotify = null, Func<bool>? canPlaySocial = null, Func<bool>? menuVisible = null)
     {
         NotificationAudioCatalog? catalog = null;
         try { catalog = NotificationAudioCatalog.Load(assetRoot); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException) { }
-        return new(dataRoot, catalog, new WindowsWaveAudioOutput(), generation, canNotify, canPlaySocial: canPlaySocial);
+        return new(dataRoot, catalog, new WindowsWaveAudioOutput(), generation, canNotify, canPlaySocial: canPlaySocial, menuVisible: menuVisible);
     }
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
     public ValueTask<BridgeDispatchBatch> DispatchAsync(BridgeEnvelope request, CancellationToken cancellationToken = default)
@@ -131,6 +134,7 @@ public sealed class NotificationAudioBridgeDispatcher : IBridgeRequestDispatcher
                 // DoNotDisturb is retained only for v1 compatibility; Enabled is the sole sound switch.
                 var social = direct || friend;
                 if (!settings.Enabled || settings.Volume == 0) { Record(NotificationDeliveryStage.ChannelDisabled); return; }
+                if (social && _menuVisible() && !MenuSoundEnabled()) { Record(NotificationDeliveryStage.ChannelDisabled); return; }
                 if (!(social ? _canPlaySocial() : _canNotify())) { Record(NotificationDeliveryStage.EnvironmentSuppressed); return; }
                 if (_lastPlayback is { } last && _time.GetElapsedTime(last) < TimeSpan.FromSeconds(social ? 1 : 10)) { Record(NotificationDeliveryStage.Throttled); return; }
                 var asset = _catalog?.Resolve(NotificationAudioCueIds.Soft);
@@ -147,6 +151,14 @@ public sealed class NotificationAudioBridgeDispatcher : IBridgeRequestDispatcher
             }
         }
     }
+    private bool MenuSoundEnabled()
+    {
+        var settings = _menuPreferences.Read().Settings;
+        return settings.TryGetProperty("social", out var social) &&
+            (!social.TryGetProperty("notifications", out var notices) || notices.GetBoolean()) &&
+            social.TryGetProperty("sound", out var sound) && sound.GetBoolean();
+    }
+
     private static ValueTask<BridgeDispatchBatch> Reply(BridgeEnvelope r, object value) =>
         ValueTask.FromResult(new BridgeDispatchBatch(BridgeEnvelope.Response(r, value, preserveRequestAccountContext: false), []));
     private static ValueTask<BridgeDispatchBatch> ReplyError(BridgeEnvelope r, string code) =>

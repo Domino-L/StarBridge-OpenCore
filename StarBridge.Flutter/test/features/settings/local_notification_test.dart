@@ -223,6 +223,50 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+  testWidgets('menu ownership suppresses duplicate notices without replay', (
+    tester,
+  ) async {
+    final f = Fixture();
+    await f.start();
+    addTearDown(f.close);
+    var menuOwns = true;
+    await tester.pumpWidget(
+      app(
+        LocalNotificationListener(
+          events: f.adapter.reminders,
+          settings: f.module,
+          menuOwnsNotices: () => menuOwns,
+          child: const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Future<void> emit(int sequence) => f.pair.host.send(
+      BridgeEnvelope(
+        protocolVersion: 1,
+        messageType: 'event',
+        name: 'notificationSettings.social',
+        sessionGeneration: 3,
+        sequence: sequence,
+        payload: {
+          'schemaVersion': 1,
+          'revision': 0,
+          'kind': 'friend',
+          'count': 1,
+        },
+      ),
+    );
+    await emit(1);
+    await tester.pumpAndSettle();
+    expect(find.text('新的好友申请'), findsNothing);
+    menuOwns = false;
+    await tester.pumpAndSettle();
+    expect(find.text('新的好友申请'), findsNothing);
+    await emit(2);
+    await tester.pumpAndSettle();
+    expect(find.text('新的好友申请'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
   for (final mode in NotificationPreviewMode.values) {
     testWidgets('private-message in-app notice respects $mode', (tester) async {
       final f = Fixture()..value['preview'] = mode.name;

@@ -31,7 +31,9 @@ final class MenuBrowserState {
     }
     final limit = value['tabLimit'] as int;
     final rows = value['tabs'] as List;
-    if (limit < 1 || limit > 12 || rows.isEmpty || rows.length > limit) {
+    // Lowering a limit never destroys already-open pages. The absolute native
+    // cap remains twelve, even while more pages than the new limit are kept.
+    if (limit < 1 || limit > 12 || rows.isEmpty || rows.length > 12) {
       throw const FormatException('Invalid browser tabs');
     }
     final ids = <String>{};

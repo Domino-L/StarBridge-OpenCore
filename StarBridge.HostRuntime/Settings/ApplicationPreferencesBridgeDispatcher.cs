@@ -6,7 +6,7 @@ using System.Text.Json;
 public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } =
-        ["applicationPreferences.read", "applicationPreferences.write", "applicationPreferences.menu"];
+        ["applicationPreferences.read", "applicationPreferences.write", "applicationPreferences.menu", "applicationPreferences.menu.recovery", "applicationPreferences.menu.startup"];
 
     private readonly IApplicationPreferencesStore _store;
     private readonly IApplicationStartupRegistration _startupRegistration;
@@ -14,6 +14,8 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ApplicationPreferencesReadResult? _current;
     private readonly MenuPreferencesStore? _menu;
+    private readonly MenuSessionRecoveryStore? _menuRecovery;
+    public IMenuHotkeyPreferences? MenuHotkeyPreferences => _menu;
     private readonly Lazy<string?> _initialLocale;
 
     // Native presentation reads the committed immutable snapshot, never a Flutter
@@ -40,6 +42,7 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
             generation)
     {
         _menu = new MenuPreferencesStore(dataRoot);
+        _menuRecovery = new MenuSessionRecoveryStore(dataRoot);
     }
 
     internal ApplicationPreferencesBridgeDispatcher(
@@ -82,6 +85,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
                 ApplicationPreferencesRequestNames.Update => Update(request),
                 "applicationPreferences.menu.get" => ReadMenu(request),
                 "applicationPreferences.menu.update" => WriteMenu(request),
+                "applicationPreferences.menu.begin" => BeginMenu(request),
+                "applicationPreferences.menu.finish" => FinishMenu(request),
+                "applicationPreferences.menu.startup" => StartupMenu(request),
                 _ => throw new BridgeProtocolException(
                     BridgeErrorCodes.InvalidEnvelope,
                     "Unsupported application preferences request.")
@@ -155,6 +161,33 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
         var revision = RequireNonNegativeInt64(request.Payload, "expectedRevision");
         var value = _menu.Save(revision, RequireObject(request.Payload, "layout"), RequireObject(request.Payload, "settings"));
         return MenuResponse(request, value);
+    }
+
+    private BridgeEnvelope BeginMenu(BridgeEnvelope request)
+    {
+        RejectUnknownProperties(request.Payload, "schemaVersion");
+        if (_menuRecovery is null) throw new ApplicationPreferencesException("menuRecovery.unavailable", "Storage unavailable");
+        var session = _menuRecovery.Begin();
+        return BridgeEnvelope.Response(request, new { schemaVersion = 1, token = session.Token, previousInterrupted = session.PreviousInterrupted }, preserveRequestAccountContext: false);
+    }
+
+    private BridgeEnvelope FinishMenu(BridgeEnvelope request)
+    {
+        RejectUnknownProperties(request.Payload, "schemaVersion", "token");
+        if (_menuRecovery is null || !request.Payload.TryGetProperty("token", out var token) ||
+            token.ValueKind != JsonValueKind.String || !MenuSessionRecoveryStore.ValidToken(token.GetString()))
+            throw new ApplicationPreferencesException("menuRecovery.invalid_value", "Invalid session token");
+        _menuRecovery.Finish(token.GetString()!);
+        return BridgeEnvelope.Response(request, new { schemaVersion = 1, clean = true }, preserveRequestAccountContext: false);
+    }
+
+    private BridgeEnvelope StartupMenu(BridgeEnvelope request)
+    {
+        RejectUnknownProperties(request.Payload, "schemaVersion", "token");
+        if (_menu is null || !request.Payload.TryGetProperty("token", out var token) ||
+            token.ValueKind != JsonValueKind.String || !MenuSessionRecoveryStore.ValidToken(token.GetString()))
+            throw new ApplicationPreferencesException("menuStartup.invalid_value", "Invalid startup request");
+        return BridgeEnvelope.Response(request, new { schemaVersion = 1, safe = _menu.BeginStartup(token.GetString()!) }, preserveRequestAccountContext: false);
     }
 
     private static BridgeEnvelope MenuResponse(BridgeEnvelope request, MenuPreferencesStore.Snapshot value) =>

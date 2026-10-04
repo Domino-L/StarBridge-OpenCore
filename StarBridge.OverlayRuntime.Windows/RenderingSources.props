@@ -6,6 +6,7 @@
     <StarBridgeWindowsRenderingSourceRoot Condition="'$(StarBridgeWindowsRenderingSourceRoot)' == ''">$(MSBuildThisFileDirectory)../StarBridge.Desktop</StarBridgeWindowsRenderingSourceRoot>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayMenuZOrder.cs" Link="Rendering/OverlayMenuZOrder.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/CommunicationTimeFormatter.cs" Link="Rendering/CommunicationTimeFormatter.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/DesktopNotificationCard.cs" Link="Rendering/DesktopNotificationCard.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/DesktopNotificationEnvironment.cs" Link="Rendering/DesktopNotificationEnvironment.cs" />
@@ -31,6 +32,7 @@
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.ContinuousPlay.cs" Link="Rendering/NativeInformationOverlayRuntime.ContinuousPlay.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.LocalGameEvents.cs" Link="Rendering/NativeInformationOverlayRuntime.LocalGameEvents.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.cs" Link="Rendering/NativeInformationOverlayRuntime.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.MenuHotkey.cs" Link="Rendering/NativeInformationOverlayRuntime.MenuHotkey.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Language.cs" Link="Rendering/NativeInformationOverlayRuntime.Language.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.LocalSelf.cs" Link="Rendering/NativeInformationOverlayRuntime.LocalSelf.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Reminders.cs" Link="Rendering/NativeInformationOverlayRuntime.Reminders.cs" />

@@ -20,6 +20,13 @@ final class MenuOrganizationAvatars {
   var _bindings = Expando<(String, String, String)>();
   int _epoch = 0;
   final _logos = <String, Future<String?>>{};
+  bool _enabled = true;
+  bool get enabled => _enabled;
+  set enabled(bool value) {
+    if (_enabled == value) return;
+    _enabled = value;
+    clear();
+  }
 
   /// Primary-engine-only association. No member reference is serialized into
   /// the presentation or used to guess which visible row owns a late image.
@@ -28,7 +35,7 @@ final class MenuOrganizationAvatars {
     String target,
     CommunityWorkspaceMember member,
   ) {
-    if (member.hasAvatar) {
+    if (_enabled && member.hasAvatar) {
       _bindings[row] = (target, member.memberRef, member.avatarVersion ?? '');
     }
     return row;
@@ -58,7 +65,8 @@ final class MenuOrganizationAvatars {
   }
 
   Future<String?> logo(String? source, {bool background = false}) {
-    if (source == null ||
+    if (!_enabled ||
+        source == null ||
         source.length > 699120 ||
         !RegExp(r'^data:image/(png|jpeg|bmp|gif|webp);base64,')
             .hasMatch(source)) {
@@ -67,6 +75,7 @@ final class MenuOrganizationAvatars {
     if (!_logos.containsKey(source) && _logos.length >= 32) {
       _logos.remove(_logos.keys.first);
     }
+    final epoch = _epoch;
     final pending = _logos.putIfAbsent(source, () async {
       try {
         final image = await decoder(
@@ -85,6 +94,7 @@ final class MenuOrganizationAvatars {
       }
     });
     final decoded = pending.then((value) {
+      if (!_enabled || epoch != _epoch) return null;
       if (value == null && identical(_logos[source], pending)) {
         _logos.remove(source);
       }
@@ -102,7 +112,7 @@ final class MenuOrganizationAvatars {
     String target,
     CommunityWorkspaceMember member,
   ) {
-    if (!member.hasAvatar) return Future.value(null);
+    if (!_enabled || !member.hasAvatar) return Future.value(null);
     final key = (target, member.memberRef, member.avatarVersion ?? '');
     final epoch = _epoch;
     if (!_encoded.containsKey(key) && _encoded.length >= 96) {

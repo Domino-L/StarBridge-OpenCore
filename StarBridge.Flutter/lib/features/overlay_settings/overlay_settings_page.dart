@@ -10,6 +10,7 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import '../game_log/game_log_controller.dart';
 import 'overlay_settings_models.dart';
 import 'overlay_settings_module.dart';
+import 'overlay_settings_loading.dart';
 import 'overlay_settings_refresh_scope.dart';
 import 'overlay_settings_sections.dart';
 import 'overlay_workspace_page.dart';
@@ -21,21 +22,28 @@ class OverlaySettingsPage extends StatelessWidget {
   final ValueListenable<GameLogView>? gameLog;
 
   @override
-  Widget build(BuildContext context) =>
-      OverlaySettingsRefreshScope(
-        module: module,
-        child: OverlaySettingsSections(menuPreview: module.menuPreview, child: _content(context)),
-      );
+  Widget build(BuildContext context) => OverlaySettingsRefreshScope(
+    module: module,
+    child: OverlaySettingsSections(
+      menuPreview: module.menuPreview,
+      menuDraft: module.menuDraft,
+      child: _content(context),
+    ),
+  );
 
   Widget _content(BuildContext context) {
     final workspace = module.workspace;
     if (workspace != null) {
-      return OverlayWorkspacePage(module: workspace, scenes: module.scenes, roster: module.roster);
+      return OverlayWorkspacePage(
+        module: workspace,
+        scenes: module.scenes,
+        roster: module.roster,
+      );
     }
     return ValueListenableBuilder<OverlaySettingsProjection>(
       valueListenable: module.projection,
       builder: (context, projection, _) => switch (projection.availability) {
-        OverlaySettingsAvailability.loading => const _OverlayLoading(),
+        OverlaySettingsAvailability.loading => const OverlaySettingsLoading(),
         OverlaySettingsAvailability.unavailable => _OverlayUnavailable(
           failure: projection.failure,
           onRetry: module.refresh,
@@ -722,29 +730,6 @@ class _FailureBanner extends StatelessWidget {
             child: Text(strings.text('overlay.retry')),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _OverlayLoading extends StatelessWidget {
-  const _OverlayLoading();
-
-  @override
-  Widget build(BuildContext context) {
-    final strings = AppStrings.of(context);
-    final tokens = context.tokens;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 320),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            SizedBox(height: tokens.space.md),
-            Text(strings.text('overlay.loading')),
-          ],
-        ),
       ),
     );
   }

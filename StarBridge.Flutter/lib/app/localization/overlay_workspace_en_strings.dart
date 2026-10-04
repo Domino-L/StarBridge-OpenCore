@@ -82,6 +82,8 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.description': 'Adjust what the overlay shows and where it appears. Settings stay on this computer.',
   'overlay.runtime.open': 'Information overlay is visible',
   'overlay.runtime.closed': 'Information overlay is closed',
+  'overlay.runtime.suppressed': 'Information overlay is temporarily hidden',
+  'overlay.runtime.suppressedDescription': 'Hidden while the menu is open. It returns when you close the menu, unless you turn it off here.',
   'overlay.runtime.failed': 'Information overlay could not open',
   'overlay.runtime.unavailable': 'Information overlay is currently unavailable',
   'overlay.runtime.checking': 'Checking the information overlay…',

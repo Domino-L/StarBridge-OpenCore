@@ -7,6 +7,29 @@ using System.Text;
 
 internal static class OverlaySettingsTests
 {
+    internal static Task DefaultHotkeyPreservesSavedBindings()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "starbridge-hotkey-default-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new OverlayWorkspaceStore(root);
+            Require(store.Load().Hotkey.Binding == "Alt+O", "new workspace defaults to Alt+O");
+            Require(!File.Exists(Path.Combine(root, "desktop.config")), "default read does not write config");
+            foreach (var binding in new[] { "", "Ctrl+Shift+O", "Alt+F9" })
+            {
+                var content = string.Join(Environment.NewLine, new[] { "", "", "", "", binding });
+                Write(root, "desktop.config", content);
+                Require(store.Load().Hotkey.Binding == (binding.Length == 0 ? "Alt+O" : binding),
+                    "empty binding defaults, existing binding is preserved");
+                Require(File.ReadAllText(Path.Combine(root, "desktop.config")) == content,
+                    "reading shortcut never migrates saved config");
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+        return Task.CompletedTask;
+    }
+
     internal static async Task ReadsFullLegacyWorkspaceWithoutMutation()
     {
         var root = Path.Combine(Path.GetTempPath(), "starbridge-overlay-workspace-" + Guid.NewGuid().ToString("N"));

@@ -50,8 +50,9 @@ internal static class SocialNotificationAudioTests
             File.WriteAllText(Path.Combine(root, "cue-catalog.v1.json"), NotificationAudioTests.Manifest(wave));
             new NotificationAudioSettingsStore(root).Save(0, true, .5);
             var output = new Output(); var domain = new Domain(); var clock = new Clock(); var allowed = true; var socialAllowed = true;
+            var menuVisible = false;
             using var audio = new NotificationAudioBridgeDispatcher(root, NotificationAudioCatalog.Load(root), output, () => 1,
-                () => allowed, clock, canPlaySocial: () => socialAllowed);
+                () => allowed, clock, canPlaySocial: () => socialAllowed, menuVisible: () => menuVisible);
             using var composite = new CompositeBridgeDispatcher(domain, domain, domain, audio: audio);
             var start = DateTimeOffset.UtcNow;
             async Task Read(int second, int sequence) {
@@ -97,6 +98,33 @@ internal static class SocialNotificationAudioTests
             await Friend(13, 'd');
             if (output.Plays != 5)
                 throw new Exception("Fullscreen visual suppression must not mute enabled private and friend audio.");
+            menuVisible = true;
+            await Read(14, 7);
+            if (output.Plays != 5) throw new Exception("Menu sound defaults to silent without disabling ordinary audio.");
+            var menuStore = new StarBridge.HostRuntime.Settings.MenuPreferencesStore(root);
+            void MenuSound(bool sound, bool notifications = true) {
+                var current = menuStore.Read();
+                var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(current.Settings.GetRawText())!;
+                data["social"] = System.Text.Json.JsonSerializer.SerializeToElement(new { friendSort = "onlineFirst", sound, notifications });
+                menuStore.Save(current.Revision, current.Layout, System.Text.Json.JsonSerializer.SerializeToElement(data));
+            }
+            MenuSound(true);
+            await Read(15, 7);
+            if (output.Plays != 5) throw new Exception("Menu opt-in must not replay a consumed message.");
+            await Read(16, 8);
+            if (output.Plays != 6) throw new Exception("Menu opt-in uses exactly one existing audio delivery.");
+            MenuSound(true, false);
+            await Read(17, 9);
+            if (output.Plays != 6) throw new Exception("Disabled menu notifications suppress menu sound.");
+            MenuSound(true);
+            store.Save(store.Read().Revision, false, .5);
+            await Read(18, 10);
+            if (output.Plays != 6) throw new Exception("Menu cannot override global sound mute.");
+            store.Save(store.Read().Revision, true, .5);
+            MenuSound(false);
+            menuVisible = false;
+            await Read(19, 11);
+            if (output.Plays != 7) throw new Exception("Closed menu does not mute ordinary notification audio.");
             var journal = File.ReadAllText(Path.Combine(root, "notification-delivery-diagnostics.log"));
             if (!journal.Contains("trace=") || !journal.Contains("transport=unknown") || !journal.Contains("result=acceptedUnverified"))
                 throw new Exception("Automatic audio must retain a private trace and truthful output result.");

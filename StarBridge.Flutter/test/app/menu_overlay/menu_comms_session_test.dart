@@ -54,15 +54,17 @@ class Port
   }
 }
 
-Conversation peer(String name, {String? avatar}) => Conversation(
-  'secret-$name',
-  name,
-  'not-for-directory-preview',
-  DateTime.utc(2026),
-  3,
-  'active',
-  avatar: avatar,
-);
+Conversation peer(String name, {String? avatar, String? conversationKey}) =>
+    Conversation(
+      'secret-$name',
+      name,
+      'not-for-directory-preview',
+      DateTime.utc(2026),
+      3,
+      'active',
+      avatar: avatar,
+      conversationKey: conversationKey,
+    );
 DirectPage page(
   String ref, {
   int oldest = 10,
@@ -88,6 +90,32 @@ DirectPage page(
 );
 
 void main() {
+  testWidgets(
+    'notice context stays primary-only and retires with visible chat',
+    (tester) async {
+      final port = Port(), views = <Map<String, Object?>>[];
+      final lease = MenuCommsSession(port, views.add);
+      expect(lease.visibleConversationKey, isNull);
+      lease.show(true);
+      port.directories.single.complete([
+        peer('A', conversationKey: 'opaque-fixture'),
+      ]);
+      await tester.pump();
+      expect(lease.visibleConversationKey, isNull);
+      final key = MenuCommsView.parse(jsonEncode(views.last)).rows.single.key;
+      lease.act('select', key);
+      expect(lease.visibleConversationKey, isNull);
+      port.histories.single.reply.complete(page('secret-A'));
+      await tester.pump();
+      expect(lease.visibleConversationKey, 'opaque-fixture');
+      expect(jsonEncode(views), isNot(contains('opaque-fixture')));
+      lease.show(false);
+      expect(lease.visibleConversationKey, isNull);
+      lease.dispose();
+      expect(port.receipts, 0);
+      await tester.pump();
+    },
+  );
   testWidgets(
     'profile targets retire on selection, close and account invalidation',
     (tester) async {

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../platform/window/method_channel_menu_preview_window.dart';
+
 import '../../features/settings/notification_editor_frame.dart';
 
 import '../routing/exit_application_intent.dart';
@@ -65,6 +67,7 @@ class StarBridgeRuntimeHost extends StatefulWidget {
 }
 
 class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
+  final MenuWindowLifetime _menuLifetime = MenuWindowLifetime();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final StartupSession _startup = StartupSession();
   late final WindowChromePort _windowChrome;
@@ -317,12 +320,14 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
             return;
           }
         }
+        await _menuLifetime.completeExit();
         await _applicationLifecycle.exitApplication();
         return;
       }
       final projection = _preferences.projection.value;
       final confirmed = projection.confirmed;
       if (confirmed == null) {
+        await _menuLifetime.completeExit();
         await _applicationLifecycle.exitApplication();
         return;
       }
@@ -370,6 +375,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
           );
         }
       } else {
+        await _menuLifetime.completeExit();
         await _applicationLifecycle.exitApplication();
       }
     } finally {
@@ -609,6 +615,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         return;
       }
       _startup.readingPreferences();
+      await _menuLifetime.prepareStartup(lease.session);
       await _preferences.attachStore(BridgeAppPreferencesStore(lease.session));
       if (_disposed || _exampleScene || revision != _hostRevision) {
         _preferences.detachStore();
@@ -617,6 +624,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       }
       _hasConnectedHost = true;
       final nextComposition = AppComposition.forConnectedProduct(
+        menuLifetime: _menuLifetime,
         nativeHost: lease,
         preferences: _preferences,
         windowChrome: _windowChrome,
@@ -743,6 +751,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
 
   AppComposition _createProductComposition() {
     return AppComposition.forProductShell(
+      menuLifetime: _menuLifetime,
       preferences: _preferences,
       windowChrome: _windowChrome,
     );
@@ -751,6 +760,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   AppComposition _createExampleComposition() {
     final review = ShellReviewConfiguration.forExampleScene(widget.environment);
     return AppComposition.forShellReview(
+      menuLifetime: _menuLifetime,
       windowChrome: _windowChrome,
       preferences: InMemoryAppPreferences(initial: review.preferences),
       shellChrome: InMemoryShellChrome(initial: review.projection),

@@ -1,8 +1,10 @@
 import 'overlay_workspace_strings.dart';
 import 'overlay_preview_strings.dart';
 import 'overlay_scene_strings.dart';
+import 'menu_product_strings.dart';
 
 const overlaySettingsZhCn = <String, String>{
+  ...menuProductZhCn,
   'overlay.sections.info': '信息浮层',
   'overlay.sections.menu': '菜单浮层',
   'overlay.sections.menuUnavailable': '改造中，暂时无法使用',
@@ -81,6 +83,7 @@ const overlaySettingsZhCn = <String, String>{
 };
 
 const overlaySettingsZhTw = <String, String>{
+  ...menuProductZhTw,
   'overlay.sections.info': '資訊浮層',
   'overlay.sections.menu': '選單浮層',
   'overlay.sections.menuUnavailable': '改造中，暫時無法使用',
@@ -159,6 +162,7 @@ const overlaySettingsZhTw = <String, String>{
 };
 
 const overlaySettingsEn = <String, String>{
+  ...menuProductEn,
   'overlay.sections.info': 'Information overlay',
   'overlay.sections.menu': 'Menu overlay',
   'overlay.sections.menuUnavailable': 'Being rebuilt · currently unavailable',

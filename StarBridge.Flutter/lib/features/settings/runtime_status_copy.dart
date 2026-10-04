@@ -31,6 +31,7 @@ const _copy = <String, (String, String, String)>{
   'server': ('服务器地址', '伺服器位址', 'Server address'),
   'cacheMissing': ('未找到或无法访问', '找不到或無法存取', 'Not found or inaccessible'),
   'open': ('正在显示', '正在顯示', 'Visible'),
+  'suppressed': ('菜单打开时暂时隐藏', '選單開啟時暫時隱藏', 'Hidden while the menu is open'),
   'closed': ('未显示', '未顯示', 'Hidden'),
   'failed': ('运行异常', '執行異常', 'Error'),
   'registered': ('已注册，可全局使用', '已註冊，可全域使用', 'Registered for global use'),

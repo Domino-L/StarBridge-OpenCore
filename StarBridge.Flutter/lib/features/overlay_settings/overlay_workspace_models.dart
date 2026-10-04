@@ -84,6 +84,8 @@ final class OverlayRuntimeSnapshot {
 
   bool get available => windowState != 'unavailable';
   bool get failed => windowState == 'failed';
+  bool get temporarilyHidden => windowState == 'suppressed';
+  bool get enabled => isVisible || temporarilyHidden;
 
   factory OverlayRuntimeSnapshot.fromMap(Map<String, Object?> source) {
     const requiredFields = <String>{
@@ -119,6 +121,7 @@ final class OverlayRuntimeSnapshot {
           'closed',
           'opening',
           'open',
+          'suppressed',
           'failed',
         }.contains(windowState) ||
         isVisible is! bool ||

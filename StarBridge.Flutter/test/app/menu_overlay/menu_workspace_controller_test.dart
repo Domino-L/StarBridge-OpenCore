@@ -19,6 +19,66 @@ void main() {
     );
   });
   tearDown(() => controller.dispose());
+  test(
+    'temporary hide preserves leases, layout and z-order without closing menu',
+    () {
+      controller.open('friends');
+      controller.open('chat');
+      final before = controller.exportLayout();
+      final leases = controller.openPanels;
+      controller.togglePanelsVisibility();
+      expect(controller.visible, true);
+      expect(controller.panelsVisible, false);
+      expect(controller.openPanels, orderedEquals(leases));
+      expect(controller.exportLayout(), before);
+      controller.togglePanelsVisibility();
+      expect(controller.panelsVisible, true);
+      expect(controller.openPanels, orderedEquals(leases));
+      expect(controller.exportLayout(), before);
+      controller.togglePanelsVisibility();
+      controller.reconcile(scope: 'other', panels: [spec('friends')]);
+      expect(controller.panelsHidden, false);
+      expect(controller.openPanels, isEmpty);
+    },
+  );
+  test('disabled last focus uses WPF tool priority without losing leases or geometry', () {
+    controller.reconcile(
+      scope: 'owner-a',
+      panels: [spec('browser'), spec('friends'), spec('rooms')],
+    );
+    controller.restoreLastFocus = false;
+    final value = {
+      'version': 1,
+      'panels': <Object?>[],
+      'open': ['browser', 'friends', 'rooms'],
+    };
+    expect(
+      controller.restoreLayout(
+        value,
+        lease: controller.captureLayoutLease(),
+        reopenPanels: true,
+      ),
+      true,
+    );
+    expect(controller.activeId, 'browser');
+    final browser = controller.openPanels.last;
+    controller.activate('rooms');
+    controller.setVisible(false);
+    controller.setVisible(true);
+    expect(controller.activeId, 'browser');
+    expect(controller.openPanels.last, same(browser));
+    controller.close('browser');
+    controller.setVisible(false);
+    controller.setVisible(true);
+    expect(controller.activeId, 'friends');
+    controller.restoreLastFocus = true;
+    controller.activate('rooms');
+    controller.setVisible(false);
+    controller.setVisible(true);
+    expect(controller.activeId, 'rooms');
+    controller.reconcile(scope: 'owner-b', panels: [spec('browser')]);
+    expect(controller.openPanels, isEmpty);
+  });
 
   test(
     'responsive defaults use live viewport and persist only manual placements',

@@ -18,6 +18,50 @@ import 'package:starbridge_flutter/features/settings/settings_entry_dialog.dart'
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
+    'menu one-shot request runs at app startup without opening menu or reading account data',
+    (tester) async {
+      _startupViewport(tester);
+      final events = <String>[];
+      final requests = <BridgeEnvelope>[];
+      final lease = _createSignedOutLease(
+        startupChoiceMade: true,
+        menuStartupRequests: requests,
+        startupEvents: events,
+      );
+      lease.session.acceptHostCapabilities([
+        'applicationPreferences.menu.startup',
+      ]);
+      await tester.pumpWidget(
+        StarBridgeRuntimeHost(
+          environment: const {},
+          windowChrome: InMemoryWindowChrome(),
+          nativeHostConnector: _CallbackNativeHostConnector(() async => lease),
+          reconnectDelay: const Duration(hours: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(requests, hasLength(1));
+      expect(requests.single.accountContext, isNull);
+      expect(
+        requests.single.payload.keys,
+        unorderedEquals(['schemaVersion', 'token']),
+      );
+      expect(
+        events.indexOf('applicationPreferences.menu.startup'),
+        lessThan(events.indexOf('applicationPreferences.get')),
+      );
+      expect(
+        events.where(
+          (n) =>
+              n == 'applicationPreferences.menu.begin' ||
+              n.startsWith('menuHotkey.'),
+        ),
+        isEmpty,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+  testWidgets(
     'normal product entry automatically announces an available update without downloading',
     (tester) async {
       _startupViewport(tester);
@@ -774,6 +818,8 @@ _TestNativeHostLease _createSignedOutLease({
   List<BridgeEnvelope>? migrationRequests,
   List<BridgeEnvelope>? updateRequests,
   bool failMigrationOnce = false,
+  List<BridgeEnvelope>? menuStartupRequests,
+  List<String>? startupEvents,
 }) {
   final pair = InMemoryBridgeConnection.createPair();
   final preferenceState = _TestPreferenceState(
@@ -792,7 +838,23 @@ _TestNativeHostLease _createSignedOutLease({
   var migrationAcks = 0;
   unawaited(
     pair.host.incoming.forEach((request) async {
+      startupEvents?.add(request.name);
       if (request.name == 'bridge.cancel') return;
+      if (request.name == 'applicationPreferences.menu.startup') {
+        menuStartupRequests?.add(request);
+        await pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: request.name,
+            correlationId: request.correlationId,
+            sessionGeneration: request.sessionGeneration,
+            status: 'ok',
+            payload: const {'schemaVersion': 1, 'safe': true},
+          ),
+        );
+        return;
+      }
       if (request.name == 'applicationUpdates.check' &&
           updateRequests != null) {
         updateRequests.add(request);

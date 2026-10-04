@@ -5,16 +5,19 @@ import '../../app/product_features.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../platform/window/menu_preview_window_port.dart';
 import 'menu_overlay_settings.dart';
+import 'menu_settings_draft.dart';
 
 class OverlaySettingsSections extends StatefulWidget {
   const OverlaySettingsSections({
     required this.child,
     this.menuPreview,
+    this.menuDraft,
     super.key,
   });
 
   final Widget child;
   final MenuPreviewWindowPort? menuPreview;
+  final MenuSettingsDraft? menuDraft;
 
   @override
   State<OverlaySettingsSections> createState() =>
@@ -23,6 +26,7 @@ class OverlaySettingsSections extends StatefulWidget {
 
 class _OverlaySettingsSectionsState extends State<OverlaySettingsSections> {
   bool _menu = false;
+  bool _menuVisited = false;
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +52,10 @@ class _OverlaySettingsSectionsState extends State<OverlaySettingsSections> {
                 key: const Key('overlay-menu-settings'),
                 selected: _menu,
                 label: Text(strings.text('overlay.sections.menu')),
-                onSelected: (_) => setState(() => _menu = true),
+                onSelected: (_) => setState(() {
+                  _menu = true;
+                  _menuVisited = true;
+                }),
               ),
             ],
           ),
@@ -58,7 +65,16 @@ class _OverlaySettingsSectionsState extends State<OverlaySettingsSections> {
             index: _menu ? 1 : 0,
             children: [
               widget.child,
-              MenuOverlaySettings(preview: widget.menuPreview),
+              if (_menuVisited)
+                TickerMode(
+                  enabled: _menu,
+                  child: MenuOverlaySettings(
+                    preview: widget.menuPreview,
+                    draft: widget.menuDraft,
+                  ),
+                )
+              else
+                const SizedBox.shrink(),
             ],
           ),
         ),

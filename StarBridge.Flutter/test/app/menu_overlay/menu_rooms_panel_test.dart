@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_rooms_panel.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_rooms_session.dart';
@@ -88,6 +89,54 @@ class Chat implements RoomChatPort {
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets('privacy hides room code and rejects a retired copy callback', (
+    tester,
+  ) async {
+    size(tester, const Size(1200, 900));
+    final port = RoomPort(), views = <Map<String, Object?>>[];
+    final session = MenuRoomsSession(port, views.add)..show(true);
+    addTearDown(session.dispose);
+    await tester.pump();
+    final raw = views.last;
+    (raw['room'] as Map)['code'] = 'TEST42';
+    final view = MenuFeatureView.parse(raw);
+    var copies = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') copies++;
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    Widget page(bool visible) => app(
+      MenuRoomsPanel(view: view, showRoomCode: visible, onAction: (_, _) {}),
+    );
+    await tester.pumpWidget(page(true));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('TEST42'), findsOneWidget);
+    final oldCopy = tester
+        .widget<TextButton>(find.widgetWithText(TextButton, '复制房间码'))
+        .onPressed!;
+    await tester.pumpWidget(page(false));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('TEST42'), findsNothing);
+    expect(find.text('复制房间码'), findsNothing);
+    oldCopy();
+    await tester.pump();
+    expect(copies, 0);
+    await tester.pumpWidget(page(true));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('复制房间码'));
+    await tester.pump();
+      expect(copies, 1);
+      session.dispose();
+  });
   for (final memberFallback in [false, true]) {
     test('own room message avatar, member fallback=$memberFallback', () async {
       const avatar =

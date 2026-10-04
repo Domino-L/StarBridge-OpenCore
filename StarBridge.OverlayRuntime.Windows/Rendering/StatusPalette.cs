@@ -111,4 +111,3 @@ internal static class StatusPalette
     }
 
 }
-

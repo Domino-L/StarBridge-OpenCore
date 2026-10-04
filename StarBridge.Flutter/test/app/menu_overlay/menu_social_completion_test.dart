@@ -14,6 +14,52 @@ import 'menu_comms_session_test.dart' as dm;
 import 'menu_friend_commands_test.dart' as friends;
 
 void main() {
+  testWidgets('scaled viewport does not mark a clipped message read', (
+    tester,
+  ) async {
+    final reads = <String>[];
+    final scroll = ScrollController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: Transform.scale(
+            scale: .85,
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 320,
+              height: 200,
+              child: SingleChildScrollView(
+                controller: scroll,
+                child: MenuVisibleReceipts(
+                  active: true,
+                  tokens: const {0: 'scaled'},
+                  onRead: reads.add,
+                  builder: (keys) => Column(
+                    children: [
+                      const SizedBox(height: 215),
+                      SizedBox(
+                        key: keys[0],
+                        height: 60,
+                        child: const Text('clipped'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reads, isEmpty);
+    scroll.jumpTo(75);
+    await tester.pumpAndSettle();
+    expect(reads, ['scaled']);
+    await tester.pumpWidget(const SizedBox());
+    scroll.dispose();
+  });
   testWidgets(
     'friend chat uses current opaque source and never sends on open',
     (tester) async {

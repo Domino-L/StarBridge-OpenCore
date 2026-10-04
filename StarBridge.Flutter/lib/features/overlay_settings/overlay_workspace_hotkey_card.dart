@@ -14,12 +14,18 @@ class OverlayWorkspaceHotkeyCard extends StatefulWidget {
     required this.hotkey,
     required this.onBindingChanged,
     required this.onEnabledChanged,
+    this.defaultBinding = 'Alt+O',
+    this.enabledLabel,
+    this.embedded = false,
     super.key,
   });
 
   final OverlayWorkspaceHotkey hotkey;
   final ValueChanged<String> onBindingChanged;
   final ValueChanged<bool> onEnabledChanged;
+  final String defaultBinding;
+  final String? enabledLabel;
+  final bool embedded;
 
   @override
   State<OverlayWorkspaceHotkeyCard> createState() =>
@@ -102,120 +108,136 @@ class _OverlayWorkspaceHotkeyCardState
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return StarBridgeSurface(
-      role: SurfaceRole.panel,
-      padding: EdgeInsets.all(tokens.space.md),
-      child: Material(
-        type: MaterialType.transparency,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final binding = Focus(
-              focusNode: _captureFocus,
-              onKeyEvent: _handleKey,
-              child: Container(
-                key: ValueKey('overlay-hotkey-${widget.hotkey.binding}'),
-                padding: EdgeInsets.all(tokens.space.md),
-                decoration: BoxDecoration(
-                  color: tokens.surfaces.ground.fill,
-                  border: Border.all(
-                    color: _capturing
-                        ? tokens.colors.accent
-                        : tokens.surfaces.panel.border,
+    final content = Material(
+      type: MaterialType.transparency,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final binding = Focus(
+            focusNode: _captureFocus,
+            onKeyEvent: _handleKey,
+            child: Container(
+              key: ValueKey('overlay-hotkey-${widget.hotkey.binding}'),
+              padding: widget.embedded
+                  ? EdgeInsets.zero
+                  : EdgeInsets.all(tokens.space.md),
+              decoration: widget.embedded
+                  ? null
+                  : BoxDecoration(
+                      color: tokens.surfaces.ground.fill,
+                      border: Border.all(
+                        color: _capturing
+                            ? tokens.colors.accent
+                            : tokens.surfaces.panel.border,
+                      ),
+                      borderRadius: tokens.shape.medium,
+                    ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _copy(context, 'overlay.workspace.hotkey'),
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
-                  borderRadius: tokens.shape.medium,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                  SizedBox(height: tokens.space.sm),
+                  if (_capturing)
                     Text(
-                      _copy(context, 'overlay.workspace.hotkey'),
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    SizedBox(height: tokens.space.sm),
-                    if (_capturing)
-                      Text(
-                        _copy(context, 'overlay.workspace.hotkeyCapturing'),
-                        key: const Key('overlay-hotkey-capturing'),
-                        style: TextStyle(color: tokens.colors.accent),
-                      )
-                    else
-                      Wrap(
-                        spacing: tokens.space.xs,
-                        runSpacing: tokens.space.xs,
-                        children: widget.hotkey.binding
-                            .split('+')
-                            .map((part) => _HotkeyKeycap(label: part))
-                            .toList(growable: false),
-                      ),
-                    if (_captureError != null) ...[
-                      SizedBox(height: tokens.space.xs),
-                      Text(
-                        _captureError!,
-                        style: TextStyle(color: tokens.colors.danger),
-                      ),
-                    ],
-                    SizedBox(height: tokens.space.sm),
+                      _copy(context, 'overlay.workspace.hotkeyCapturing'),
+                      key: const Key('overlay-hotkey-capturing'),
+                      style: TextStyle(color: tokens.colors.accent),
+                    )
+                  else
                     Wrap(
-                      spacing: tokens.space.sm,
-                      children: [
-                        OutlinedButton.icon(
-                          key: const Key('overlay-hotkey-record'),
-                          onPressed: _capturing ? null : _startCapture,
-                          icon: const StarBridgeIcon(
-                            StarBridgeIconSemantic.tools,
-                          ),
-                          label: Text(
-                            _copy(context, 'overlay.workspace.hotkeyRecord'),
-                          ),
-                        ),
-                        TextButton(
-                          key: const Key('overlay-hotkey-reset'),
-                          onPressed: _capturing
-                              ? null
-                              : () => widget.onBindingChanged('Ctrl+Shift+O'),
-                          child: Text(
-                            _copy(context, 'overlay.workspace.hotkeyReset'),
-                          ),
-                        ),
-                      ],
+                      spacing: tokens.space.xs,
+                      runSpacing: tokens.space.xs,
+                      children: widget.hotkey.binding
+                          .split('+')
+                          .map((part) => _HotkeyKeycap(label: part))
+                          .toList(growable: false),
                     ),
+                  if (_captureError != null) ...[
+                    SizedBox(height: tokens.space.xs),
                     Text(
-                      _copy(context, 'overlay.workspace.hotkeyHelp'),
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: tokens.colors.textSecondary),
+                      _captureError!,
+                      style: TextStyle(color: tokens.colors.danger),
                     ),
                   ],
-                ),
-              ),
-            );
-            final enabled = SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(_copy(context, 'overlay.workspace.hotkeyEnabled')),
-              subtitle: Text(_hotkeyState(context, widget.hotkey.runtimeState)),
-              value: widget.hotkey.enabled,
-              onChanged: widget.onEnabledChanged,
-            );
-            if (constraints.maxWidth < 640) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  binding,
                   SizedBox(height: tokens.space.sm),
-                  enabled,
+                  Wrap(
+                    spacing: tokens.space.sm,
+                    children: [
+                      OutlinedButton.icon(
+                        key: const Key('overlay-hotkey-record'),
+                        onPressed: _capturing ? null : _startCapture,
+                        icon: const StarBridgeIcon(
+                          StarBridgeIconSemantic.tools,
+                        ),
+                        label: Text(
+                          _copy(context, 'overlay.workspace.hotkeyRecord'),
+                        ),
+                      ),
+                      TextButton(
+                        key: const Key('overlay-hotkey-reset'),
+                        onPressed: _capturing
+                            ? null
+                            : () => widget.onBindingChanged(
+                                widget.defaultBinding,
+                              ),
+                        child: Text(
+                          _copy(context, 'overlay.workspace.hotkeyReset'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    _copy(context, 'overlay.workspace.hotkeyHelp'),
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: tokens.colors.textSecondary),
+                  ),
                 ],
-              );
-            }
-            return Row(
+              ),
+            ),
+          );
+          final enabled = SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              widget.enabledLabel ??
+                  _copy(context, 'overlay.workspace.hotkeyEnabled'),
+            ),
+            subtitle: Text(
+              _hotkeyState(context, widget.hotkey.runtimeState),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: tokens.colors.textSecondary),
+            ),
+            value: widget.hotkey.enabled,
+            onChanged: widget.onEnabledChanged,
+          );
+          if (constraints.maxWidth < 640) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: binding),
-                SizedBox(width: tokens.space.md),
-                Expanded(child: enabled),
+                binding,
+                SizedBox(height: tokens.space.sm),
+                enabled,
               ],
             );
-          },
-        ),
+          }
+          return Row(
+            children: [
+              Expanded(child: binding),
+              SizedBox(width: tokens.space.md),
+              Expanded(child: enabled),
+            ],
+          );
+        },
       ),
     );
+    return widget.embedded
+        ? content
+        : StarBridgeSurface(
+            role: SurfaceRole.panel,
+            padding: EdgeInsets.all(tokens.space.md),
+            child: content,
+          );
   }
 }
 

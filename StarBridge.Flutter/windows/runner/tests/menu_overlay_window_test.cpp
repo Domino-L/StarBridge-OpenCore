@@ -48,7 +48,10 @@ int main() {
     check(opening > 0 && window.session().wanted(), "opening lease created");
     check(!IsWindowVisible(created), "await first frame hidden");
     check(window.Begin() == 0, "duplicate begin refused");
+    window.SetLocalModal(true);
+    check(window.local_modal(), "native picker protects menu focus lifetime");
     window.Hide(true);
+    check(!window.local_modal(), "hidden menu retires picker modal protection");
     check(hidden == 1 && !window.session().wanted(), "hide dispatches once");
     check(!window.Reveal(opening), "cancelled frame cannot reveal HWND");
     window.Hide();

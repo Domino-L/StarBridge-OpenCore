@@ -435,6 +435,30 @@ abstract final class BridgeRequestPolicy {
     'account.cancelLogin',
     'applicationPreferences.get',
     'applicationPreferences.update',
+    'applicationPreferences.menu.get',
+    'applicationPreferences.menu.update',
+    'applicationPreferences.menu.startup',
+    'applicationPreferences.menu.begin',
+    'applicationPreferences.menu.finish',
+    // Host verifies its current authenticated owner and generation; no account
+    // credentials are copied into this process-local shortcut registration.
+    'menuHotkey.attach',
+    'menuHotkey.window',
+    'menuHotkey.detach',
+    'menuHotkey.settings.get',
+    'menuHotkey.settings.update',
+    // Host derives the current authenticated owner; these are NOT anonymous
+    // actions, despite carrying no renderer account identifiers.
+    'menuBrowserResume.read',
+    'menuBrowserResume.update',
+    'menuBrowserResume.remember',
+    // Device-local native picker intents, never renderer-supplied paths.
+    'menuScreenshotDirectory.read',
+    'menuScreenshotDirectory.choose',
+    'menuScreenshotDirectory.reset',
+    'menuScreenshotDirectory.open',
+    'menuScreenshotDirectory.chooseDraft',
+    'menuScreenshotDirectory.commitDraft',
     'notificationAudio.read',
     'playerActivity.read',
     'playerActivity.save',

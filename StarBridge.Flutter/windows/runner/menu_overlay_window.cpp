@@ -121,6 +121,7 @@ void MenuOverlayWindow::Hide(bool return_focus) {
   const bool was_wanted = session_.wanted();
   const bool may_return = return_focus && Owns(GetForegroundWindow());
   session_.Dismiss(); // Do this before ShowWindow dispatches WM_ACTIVATE.
+  local_modal_ = false;
   if (window_) {
     KillTimer(window_, kFrameTimeout);
     if (Owns(GetCapture())) ReleaseCapture();

@@ -144,6 +144,26 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
             if (!InstalledUpdateRegistration.Same(plan.Installation, installation)) continue;
             var state = InstalledUpdateFiles.Read<InstalledUpdateTransaction.State>(Path.Combine(directory, "installed-state.json"), 8192);
             var current = (readRegistration ?? InstalledUpdateRegistration.Read)();
+            current.RequireShape();
+            if (!InstalledUpdateRegistration.Same(current.Directory, installation) ||
+                state.SchemaVersion != 1 || state.Installation != installation)
+                throw new IOException("Previous update requires recovery.");
+            // A later independently installed version can supersede a committed
+            // transaction. Preserve its entire recovery tree outside the active
+            // transaction namespace; never treat incomplete/rolled-back work as such.
+            if (state.Phase == "committed" &&
+                ApplicationUpdateVersion.Parse(state.Version) > ApplicationUpdateVersion.Parse(plan.CurrentVersion) &&
+                ApplicationUpdateVersion.Parse(current.Version) > ApplicationUpdateVersion.Parse(state.Version)) {
+                using var idleArchive = AcquireGate(installation, "");
+                if (current != (readRegistration ?? InstalledUpdateRegistration.Read)())
+                    throw new IOException("Installation registration changed.");
+                InstalledUpdateFiles.Tree(directory);
+                var archive = Path.Combine(Path.GetDirectoryName(installation)!, ".starbridge-retired-update-" + Guid.NewGuid().ToString("N"));
+                InstalledUpdateFiles.Plain(archive);
+                if (Directory.Exists(archive) || File.Exists(archive)) throw new IOException("Recovery archive already exists.");
+                Directory.Move(directory, archive);
+                continue;
+            }
             var final = state.Phase == "committed" && ApplicationUpdateVersion.Parse(state.Version) == ApplicationUpdateVersion.Parse(current.Version) ||
                 state.Phase == "rolled-back" && current.Version == plan.CurrentVersion;
             var untouched = state.Phase is "prepared" or "not-started" && current.Version == plan.CurrentVersion &&

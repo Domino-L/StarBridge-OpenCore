@@ -1,6 +1,14 @@
 import '../../features/direct_messages/direct_messages_module.dart';
 import 'menu_organization_avatars.dart';
 
+String menuChatText(String value, int limit) {
+  final text = value.replaceAll(
+    RegExp(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]'),
+    '',
+  );
+  return text.length <= limit ? text : text.substring(0, limit);
+}
+
 bool sameMenuConversation(Conversation a, Conversation b) =>
     a.ref == b.ref ||
     (a.conversationKey != null && a.conversationKey == b.conversationKey);

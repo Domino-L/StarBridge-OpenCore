@@ -35,6 +35,7 @@ final class CommunityChatAttention extends ChangeNotifier {
   bool _closed = false;
 
   int count(String target) => _counts[target] ?? 0;
+  int get totalCount => _counts.values.fold(0, (total, count) => total + count);
   bool get needsReconciliation => _retry.isNotEmpty;
 
   void bind(Iterable<String> targets) {

@@ -43,6 +43,56 @@ void main() {
         .clearAccessibilityFeaturesTestValue(),
   );
   setUpAll(loadFonts);
+  testWidgets('HUD dock toggles directly without opening a settings window', (
+    tester,
+  ) async {
+    size(tester, const Size(1600, 1100));
+    final actions = <String>[];
+    await tester.pumpWidget(
+      app(
+        MenuBridgePreview(
+          visible: true,
+          onDismiss: () {},
+          onFeatureVisible: (_, _) {},
+          onFeatureAction: (tool, key, value) =>
+              actions.add('$tool:$key:$value'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-tool-overlay')));
+    await tester.pumpAndSettle();
+    expect(actions, ['hud:toggle:']);
+    expect(find.byKey(const ValueKey('menu-panel-hud')), findsNothing);
+  });
+  testWidgets('header hides and restores opened panels with their drafts', (
+    tester,
+  ) async {
+    size(tester, const Size(1600, 1100));
+    await tester.pumpWidget(
+      app(MenuBridgePreview(visible: true, onDismiss: () {})),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-tool-friends')));
+    await tester.pumpAndSettle();
+    final panel = find.byKey(const ValueKey('menu-panel-friends'));
+    final before = tester.getRect(panel);
+    final toggle = find.byKey(const ValueKey('menu-toggle-all-windows'));
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+    expect(
+      find.byKey(const ValueKey('menu-panel-friends'), skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(find.text('显示所有窗口'), findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    expect(tester.getRect(panel), before);
+    expect(find.byKey(const ValueKey('menu-panel-comms')), findsNothing);
+    expect(find.text('隐藏所有窗口'), findsOneWidget);
+  });
   testWidgets(
     'V1 windows coexist, move, resize, refocus and retain geometry without rereading',
     (tester) async {

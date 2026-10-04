@@ -15,7 +15,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
     private const string RenderModeFile = "overlay.render-mode";
     private const string DesktopConfigFile = "desktop.config";
     private const string BackupDirectory = "overlay.workspace-backup-v1";
-    private const string DefaultHotkey = "Ctrl+Shift+O";
+    private const string DefaultHotkey = "Alt+O";
     private static readonly IReadOnlySet<string> LayoutKeys = new HashSet<string>(
         ["Notice", "Squads", "Members", "Chat"],
         StringComparer.OrdinalIgnoreCase);

@@ -35,9 +35,17 @@ import '../menu_overlay/menu_organizations_session.dart';
 import '../menu_overlay/menu_hud_session.dart';
 import '../../platform/window/menu_window_preferences.dart';
 import '../../features/game_log/game_log_controller.dart';
+import '../../platform/window/menu_hotkey_port.dart';
+import '../../platform/window/bridge_menu_hotkeys.dart';
+import '../../platform/window/menu_attention.dart';
+import '../../platform/window/menu_notice.dart';
+import '../../platform/window/menu_recovery.dart';
+import '../../platform/window/menu_browser_resume.dart';
+import '../../platform/window/menu_screenshot_directory.dart';
 
 OverlaySettingsModule composeOverlaySettings(
   OverlaySettingsPort port, {
+  required MenuWindowLifetime menuLifetime,
   required OverlayWorkspacePort? workspacePort,
   required BridgeClientSession? session,
   required AccountModule account,
@@ -46,7 +54,26 @@ OverlaySettingsModule composeOverlaySettings(
   CommunitiesModule Function()? menuCommunities,
   ManualPresenceController? Function()? menuPresence,
   GameLogView Function()? menuGame,
+  MenuOpenLabels Function()? menuLabels,
+  MenuAttentionSource Function()? menuAttention,
+  MenuNoticeSource Function()? menuNotices,
 }) {
+  int? settingsGeneration;
+  BridgeMenuBrowserResume? resumeSettings;
+  BridgeMenuScreenshotDirectory? directorySettings;
+  void bindSettingsGeneration() {
+    if (session == null || settingsGeneration == session.activeGeneration) {
+      return;
+    }
+    // Composition exists before account restoration. Acquire these ports only
+    // when consumed, retaining identity within a generation while invalidating
+    // old account scopes and any old pending directory picker.
+    directorySettings?.dispose();
+    settingsGeneration = session.activeGeneration;
+    resumeSettings = BridgeMenuBrowserResume(session);
+    directorySettings = BridgeMenuScreenshotDirectory(session);
+  }
+
   String? ownAvatar() {
     final current = account.projection.value;
     return current.generation == session?.activeGeneration &&
@@ -64,6 +91,56 @@ OverlaySettingsModule composeOverlaySettings(
     menuPreview: !menuOverlayEnabled
         ? null
         : MethodChannelMenuPreviewWindow(
+            lifetime: menuLifetime,
+            screenshotDirectoryProvider:
+                session != null &&
+                    const {
+                      'menuScreenshotDirectory.read',
+                      'menuScreenshotDirectory.choose',
+                      'menuScreenshotDirectory.reset',
+                      'menuScreenshotDirectory.open',
+                    }.every(session.hostCapabilities.contains)
+                ? () {
+                    bindSettingsGeneration();
+                    return directorySettings;
+                  }
+                : null,
+            browserResumeProvider:
+                session != null &&
+                    const {
+                      'menuBrowserResume.read',
+                      'menuBrowserResume.update',
+                      'menuBrowserResume.remember',
+                    }.every(session.hostCapabilities.contains)
+                ? () {
+                    bindSettingsGeneration();
+                    return resumeSettings;
+                  }
+                : null,
+            attention: menuAttention,
+            notices: menuNotices,
+            recovery:
+                session?.hostCapabilities.contains(
+                      'applicationPreferences.menu.recovery',
+                    ) ==
+                    true
+                ? BridgeMenuRecovery(session!)
+                : null,
+            hotkeyLabels: menuLabels,
+            hotkeys:
+                session?.hostCapabilities.contains('menuHotkey.runtime') == true
+                ? BridgeMenuHotkeys(
+                    session!,
+                    activation: account.projection,
+                    isActive: () {
+                      final current = account.projection.value;
+                      return current.generation == session.activeGeneration &&
+                          (current.isSignedIn ||
+                              current.sessionState ==
+                                  AccountSessionState.legacySignedIn);
+                    },
+                  )
+                : null,
             contextValues: () {
               final game = menuGame?.call() ?? const GameLogView();
               final scene = module.scenes?.projection.value;
@@ -97,6 +174,7 @@ OverlaySettingsModule composeOverlaySettings(
                           .where((v) => v.isNotEmpty)
                           .join(' · ')
                     : '未进入游戏',
+                menuPresence?.call()?.snapshot.selfKey ?? 'presence.unknown',
               ];
             },
             preferences:
@@ -119,12 +197,6 @@ OverlaySettingsModule composeOverlaySettings(
                     'rooms': (publish) => MenuRoomsSession(
                       BridgePartyRoomsAdapter(session),
                       publish,
-                    ),
-                    'organizationChat': (publish) => MenuOrganizationsSession(
-                      BridgeCommunities(session, ownAvatar: ownAvatar),
-                      publish,
-                      chatOnly: true,
-                      archive: BridgeMenuChatArchive(session),
                     ),
                     if (workspacePort != null)
                       'hud': (publish) => MenuHudSession(

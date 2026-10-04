@@ -224,6 +224,7 @@ void main() {
         (tester) async {
           size(tester, bounds);
           final calls = <String>[];
+          final hudActions = <String>[];
           await tester.pumpWidget(
             app(
               MediaQuery(
@@ -236,7 +237,8 @@ void main() {
                   visible: true,
                   onDismiss: () {},
                   onFeatureVisible: (_, _) {},
-                  onFeatureAction: (_, _, _) {},
+                  onFeatureAction: (tool, key, value) =>
+                      hudActions.add('$tool:$key:$value'),
                   localCall: (action, _) async {
                     calls.add(action);
                     return null;
@@ -259,13 +261,20 @@ void main() {
             await tester.tap(find.byKey(ValueKey('menu-tool-$tool')));
             await tester.pumpAndSettle();
             expect(tester.takeException(), isNull, reason: tool);
+            if (tool == 'overlay') {
+              expect(hudActions, ['hud:toggle:']);
+              expect(
+                find.byKey(const ValueKey('menu-panel-hud')),
+                findsNothing,
+              );
+              continue;
+            }
             // Windows now occlude the desktop dock. Move each newly opened
             // window clear before using another desktop shortcut.
             final id =
                 const {
                   'group': 'organizations',
                   'room': 'rooms',
-                  'overlay': 'hud',
                   'camera': 'screenshot',
                 }[tool] ??
                 tool;
@@ -283,7 +292,6 @@ void main() {
           for (final tool in [
             'organizations',
             'rooms',
-            'hud',
             'image',
             'browser',
             'screenshot',

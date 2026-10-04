@@ -1,9 +1,24 @@
 /// Resolve explicit web addresses and ordinary searches without dispatching
 /// external protocols. This does not navigate or retain browsing history.
-Uri? menuBrowserAddress(String value) {
+Uri menuBrowserHome({String provider = 'bing-global'}) =>
+    Uri.https(switch (provider) {
+      'bing-cn' => 'cn.bing.com',
+      'baidu' => 'www.baidu.com',
+      'google' => 'www.google.com',
+      'duckduckgo' => 'duckduckgo.com',
+      _ => 'www.bing.com',
+    }, '/');
+
+Uri? menuBrowserAddress(String value, {String provider = 'bing-global'}) {
   final input = value.trim();
   if (input.isEmpty) return null;
-  Uri search() => Uri.https('www.bing.com', '/search', {'q': input});
+  Uri search() => switch (provider) {
+    'bing-cn' => Uri.https('cn.bing.com', '/search', {'q': input}),
+    'baidu' => Uri.https('www.baidu.com', '/s', {'wd': input}),
+    'google' => Uri.https('www.google.com', '/search', {'q': input}),
+    'duckduckgo' => Uri.https('duckduckgo.com', '/', {'q': input}),
+    _ => Uri.https('www.bing.com', '/search', {'q': input}),
+  };
   final explicit = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(input);
   final hostPort = RegExp(
     r'^(localhost|[a-zA-Z0-9.-]+\.[a-zA-Z0-9-]+):[0-9]+(?:[/\?#]|$)',

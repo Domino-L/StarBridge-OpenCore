@@ -13,17 +13,27 @@ class OverlayWorkspaceGroupNavigation extends StatelessWidget {
   const OverlayWorkspaceGroupNavigation({
     required this.selected,
     required this.onSelected,
+    this.groups = overlayWorkspaceNavigationGroupOrder,
+    this.label,
+    this.icon,
+    this.title,
+    this.keyPrefix = 'overlay-group',
     super.key,
   });
 
   final String selected;
   final ValueChanged<String> onSelected;
+  final List<String> groups;
+  final String Function(String)? label;
+  final StarBridgeIconSemantic Function(String)? icon;
+  final String? title;
+  final String keyPrefix;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     return StarBridgeSurface(
-      key: const Key('overlay-group-navigation'),
+      key: Key('$keyPrefix-navigation'),
       role: SurfaceRole.panel,
       padding: EdgeInsets.zero,
       child: Material(
@@ -34,7 +44,7 @@ class OverlayWorkspaceGroupNavigation extends StatelessWidget {
             Padding(
               padding: EdgeInsets.all(tokens.space.md),
               child: Text(
-                _copy(context, 'overlay.workspace.sections'),
+                title ?? _copy(context, 'overlay.workspace.sections'),
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: tokens.colors.textSecondary,
                   letterSpacing: 0.8,
@@ -45,10 +55,13 @@ class OverlayWorkspaceGroupNavigation extends StatelessWidget {
             Expanded(
               child: ListView(
                 padding: EdgeInsets.symmetric(vertical: tokens.space.xs),
-                children: overlayWorkspaceNavigationGroupOrder
+                children: groups
                     .map(
                       (group) => _GroupNavigationItem(
                         group: group,
+                        label: label?.call(group),
+                        icon: icon?.call(group),
+                        keyPrefix: keyPrefix,
                         selected: selected == group,
                         onTap: () => onSelected(group),
                       ),
@@ -68,11 +81,17 @@ class _GroupNavigationItem extends StatelessWidget {
     required this.group,
     required this.selected,
     required this.onTap,
+    this.label,
+    this.icon,
+    required this.keyPrefix,
   });
 
   final String group;
   final bool selected;
   final VoidCallback onTap;
+  final String? label;
+  final StarBridgeIconSemantic? icon;
+  final String keyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +103,7 @@ class _GroupNavigationItem extends StatelessWidget {
       selected: selected,
       button: true,
       child: InkWell(
-        key: Key('overlay-group-nav-$group'),
+        key: Key('$keyPrefix-nav-$group'),
         onTap: onTap,
         hoverColor: tokens.colors.accent.withValues(alpha: 0.08),
         focusColor: tokens.colors.accent.withValues(alpha: 0.10),
@@ -108,11 +127,15 @@ class _GroupNavigationItem extends StatelessWidget {
             ),
             child: Row(
               children: [
-                StarBridgeIcon(_groupIcon(group), size: 18, color: accent),
+                StarBridgeIcon(
+                  icon ?? _groupIcon(group),
+                  size: 18,
+                  color: accent,
+                ),
                 SizedBox(width: tokens.space.sm),
                 Expanded(
                   child: Text(
-                    overlayWorkspaceGroupName(context, group),
+                    label ?? overlayWorkspaceGroupName(context, group),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(

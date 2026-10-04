@@ -12,6 +12,37 @@ import 'menu_organization_ships_test.dart' show FleetPort;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'disabled avatar work stays off and retired decodes cannot reappear',
+    () async {
+      final gate = Completer<void>();
+      var decodes = 0;
+      final avatars = MenuOrganizationAvatars(
+        decoder: (bytes, width) async {
+          decodes++;
+          await gate.future;
+          return decodeCommunityImage(bytes, width);
+        },
+      );
+      addTearDown(avatars.dispose);
+      avatars.enabled = false;
+      expect(await avatars.logo(photo), isNull);
+      expect(decodes, 0);
+      avatars.enabled = true;
+      final stale = avatars.logo(photo, background: true);
+      expect(decodes, 1);
+      avatars.enabled = false;
+      avatars.enabled = true;
+      gate.complete();
+      expect(await stale, isNull);
+      expect(await avatars.logo(photo), isNotNull);
+      expect(decodes, 2);
+      avatars.clear();
+      final pending = avatars.logo(photo, background: true);
+      avatars.clear();
+      expect(await pending, isNull);
+    },
+  );
   test('full logo cache does not evict a hit', () async {
     var decodes = 0;
     final avatars = MenuOrganizationAvatars(

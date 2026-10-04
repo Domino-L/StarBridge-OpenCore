@@ -44,6 +44,8 @@ public sealed partial class NativeInformationOverlayRuntime :
     // Regression harness only: exercise the real HWND/render lifecycle outside
     // every desktop surface, without replacing the maintainer's visible client.
     internal Rect? TestSurfaceBounds;
+    internal IntPtr TestWindowHandle => _window?.NativeHandle ?? IntPtr.Zero;
+    internal bool TestStartupTransitionEnabled => _window?.StartupTransitionEnabled ?? false;
     private readonly Func<string?> _sceneModeProvider;
     private readonly Func<string?>? _languageProvider;
     private readonly Func<InformationOverlayRosterPreferences> _rosterPreferences;
@@ -70,6 +72,9 @@ public sealed partial class NativeInformationOverlayRuntime :
     private bool _windowsHotkeyRegistered;
     private long _nextHotkeyRegistrationAttempt;
     private string _hotkeyState = "disabled";
+    private OverlayHotkeyBindingPlan? _hotkeyPlan;
+    private long _hotkeyConfigurationRevision;
+    internal long HotkeyConfigurationRevision => Interlocked.Read(ref _hotkeyConfigurationRevision);
     private string _followGameState = "manual";
     private bool? _previousGameRunning;
     private bool? _previousGameForeground;
@@ -280,6 +285,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         var settings = OverlayStartupTransitionPolicy.ResolveForOpen(
             resolution.Settings,
             StarCitizenProcessProbe.IsForeground());
+        if (MenuActive) settings = settings with { EnableStartupTransition = false };
         _surfaceBounds = ResolveTargetSurfaceBounds(out var targetDpiScale);
         var room = !workspace.UsesModuleSources ? SafeReadRoom() : null;
         var sourceMode = SafeReadSourceMode();
@@ -320,6 +326,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             content.Scene.Context, targetDpiScale, modules);
         overlay.Closed += OverlayClosed;
         _window = overlay;
+        overlay.SetMenuAbove(_menuWindow);
         Exception? failure = null;
         var opened = OverlayStartupBoundary.TryShow(
             overlay.Show,
@@ -348,7 +355,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         ScheduleModuleValidation(modules);
         if (modules is not null) ModulesPresented?.Invoke(modules, overlay.ObserveModules());
 
-        if (settings.AutoFocusGameWindowOnOpen)
+        if (settings.AutoFocusGameWindowOnOpen && !MenuActive)
         {
             ScheduleAppearanceFocus(overlay, settings);
         }
@@ -439,10 +446,10 @@ public sealed partial class NativeInformationOverlayRuntime :
         timer.Start();
     }
 
-    private void RefreshWindow(bool force = false)
+    private void RefreshWindow(bool force = false, bool allowHidden = false)
     {
         force |= RefreshPresentationLanguage();
-        if (_window is not { IsVisible: true } window || _workspace is null)
+        if (_window is not { } window || (!window.IsVisible && !allowHidden) || _workspace is null)
         {
             return;
         }
@@ -517,6 +524,7 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private void EvaluateGameWindowRules(bool initialSync = false)
     {
+        if (ValidateMenuInformationLayer()) return;
         if (_workspace is null)
         {
             return;
@@ -591,31 +599,53 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private void ConfigureHotkey(string binding, bool enabled)
     {
+        var menu = _menuHotkey;
+        var plan = OverlayHotkeyBindingPolicy.Build(binding, enabled,
+            menu?.Binding, menu is { Enabled: true } && menu.IsCurrent());
+        if (plan.InformationState != OverlayHotkeyBindingState.Ready)
+            plan = plan with { InformationHotkey = null };
+        if (plan.MenuState != OverlayHotkeyBindingState.Ready)
+            plan = plan with { MenuHotkey = null };
+        // Workspace/content refresh is not a hotkey configuration change.
+        // Preserve the raw-input key-down filter and the duplicate-trigger gate,
+        // and avoid stopping its message thread on every source refresh.
+        if (plan == _hotkeyPlan &&
+            ((plan.InformationHotkey is null && plan.MenuHotkey is null) || _gameCompatibleHotkey.IsRunning))
+            return;
+
         var previousState = _hotkeyState;
         UnregisterHotkey();
-        if (!enabled)
+        _hotkeyPlan = plan;
+        Interlocked.Increment(ref _hotkeyConfigurationRevision);
+        if (_messageWindow is null)
         {
-            _hotkeyState = "disabled";
-            return;
-        }
-        if (_messageWindow is null || !OverlayHotkeyBindingPolicy.TryParse(binding, out var chord))
-        {
-            _hotkeyState = "invalid";
+            _hotkeyState = _menuHotkeyState = "unavailable";
             return;
         }
 
-        _windowsHotkeyRegistered = RegisterHotKey(
-            _messageWindow.Handle,
-            HotkeyId,
-            chord.Modifiers | ModNoRepeat,
-            chord.VirtualKey);
-        var windowsError = _windowsHotkeyRegistered ? 0 : Marshal.GetLastWin32Error();
+        var windowsError = 0;
+        if (plan.InformationHotkey is { } chord)
+        {
+            _windowsHotkeyRegistered = RegisterHotKey(_messageWindow.Handle,
+                HotkeyId, chord.Modifiers | ModNoRepeat, chord.VirtualKey);
+            windowsError = _windowsHotkeyRegistered ? 0 : Marshal.GetLastWin32Error();
+        }
         _nextHotkeyRegistrationAttempt = Environment.TickCount64 + 5000;
-        var gameCompatible = _gameCompatibleHotkey.Start(
-            _messageWindow.Handle,
-            WmGameCompatibleHotkey,
-            chord.ToGameCompatibleBinding());
-        _hotkeyState = (_windowsHotkeyRegistered, gameCompatible) switch
+        var routes = plan.CreateGameCompatibleRoutes(0, MenuHotkeyCommand);
+        var gameCompatible = routes.Count > 0 && _gameCompatibleHotkey.Start(
+            _messageWindow.Handle, WmGameCompatibleHotkey, routes);
+        _menuHotkeyState = plan.MenuState switch
+        {
+            OverlayHotkeyBindingState.Ready => gameCompatible ? "registered" : "failed",
+            OverlayHotkeyBindingState.Disabled => "disabled",
+            OverlayHotkeyBindingState.ConflictWithInformation => "conflictWithInformation",
+            OverlayHotkeyBindingState.ModifierRequired => "modifierRequired",
+            OverlayHotkeyBindingState.Reserved => "reserved",
+            _ => "invalid"
+        };
+        _hotkeyState = plan.InformationState == OverlayHotkeyBindingState.Disabled ? "disabled" :
+            plan.InformationState != OverlayHotkeyBindingState.Ready ? "invalid" :
+            (_windowsHotkeyRegistered, gameCompatible) switch
         {
             (true, true) => "registered",
             (false, true) => "gameCompatibleOnly",
@@ -631,10 +661,9 @@ public sealed partial class NativeInformationOverlayRuntime :
     {
         // Startup overlap or another program can temporarily own the chord.
         // Retry on the HWND's STA without restarting the working game listener.
-        if (_windowsHotkeyRegistered || _workspace is not { HotkeyEnabled: true } workspace ||
+        if (_windowsHotkeyRegistered || _hotkeyPlan?.InformationHotkey is not { } chord ||
             _messageWindow is null || _hotkeyState is "disabled" or "invalid" ||
-            Environment.TickCount64 < _nextHotkeyRegistrationAttempt ||
-            !OverlayHotkeyBindingPolicy.TryParse(workspace.HotkeyBinding, out var chord))
+            Environment.TickCount64 < _nextHotkeyRegistrationAttempt)
             return;
 
         _nextHotkeyRegistrationAttempt = Environment.TickCount64 + 5000;
@@ -649,19 +678,23 @@ public sealed partial class NativeInformationOverlayRuntime :
     }
 
     public bool IsVisible => !_disposed && Volatile.Read(ref _snapshot).IsVisible;
+    public bool HasDisplayDemand => !_disposed && Volatile.Read(ref _snapshot).WindowState is "open" or "suppressed";
     public InformationOverlayModuleDemand? ModuleDemand => Volatile.Read(ref _moduleDemand);
 
     public void RequestContentRefresh()
     {
         var dispatcher = _dispatcher;
-        if ((!IsVisible && _snapshot.WindowState != "opening") || dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished ||
+        if ((!HasDisplayDemand && _snapshot.WindowState != "opening") || dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished ||
             Interlocked.CompareExchange(ref _contentRefreshQueued, 1, 0) != 0) return;
         try
         {
             dispatcher.BeginInvoke(() =>
             {
                 Interlocked.Exchange(ref _contentRefreshQueued, 0);
-                if (!_disposed && !FinishPreparedOpenIfReady() && IsVisible) RefreshWindow();
+                if (!_disposed && !FinishPreparedOpenIfReady() && HasDisplayDemand)
+                {
+                    if (!ValidateMenuInformationLayer()) RefreshWindow();
+                }
             }, DispatcherPriority.DataBind);
         }
         catch (InvalidOperationException) { Interlocked.Exchange(ref _contentRefreshQueued, 0); }
@@ -669,6 +702,7 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private void UnregisterHotkey()
     {
+        _hotkeyPlan = null;
         _gameCompatibleHotkey.Stop();
         _hotkeyTriggerGate.Reset();
         if (_windowsHotkeyRegistered && _messageWindow is not null)
@@ -695,7 +729,12 @@ public sealed partial class NativeInformationOverlayRuntime :
         else if (message == WmGameCompatibleHotkey)
         {
             handled = true;
-            HandleHotkeyTrigger(requireGameForeground: true);
+            if (wParam.ToInt32() == MenuHotkeyCommand)
+            {
+                try { HandleMenuHotkeyTrigger(); }
+                catch { DesktopRuntimeDiagnostics.WriteDiagnosticLog("menu-hotkey-intent-unavailable"); }
+            }
+            else if (wParam.ToInt32() == 0) HandleHotkeyTrigger(requireGameForeground: true);
         }
         return IntPtr.Zero;
     }

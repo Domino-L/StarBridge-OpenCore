@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../features/notifications/starbridge_notification_toast.dart';
+import '../../features/notifications/local_notification_content.dart';
 import '../../features/settings/bridge_notification_settings_adapter.dart';
 import '../../features/settings/notification_settings_models.dart';
 import '../../features/settings/notification_settings_module.dart';
@@ -16,6 +17,7 @@ class LocalNotificationListener extends StatefulWidget {
     required this.child,
     this.desktop,
     this.visibleConversationKey,
+    this.menuOwnsNotices,
     super.key,
   });
   final Stream<LocalRoomReminder?> events;
@@ -23,6 +25,7 @@ class LocalNotificationListener extends StatefulWidget {
   final Widget child;
   final DesktopNotificationPort? desktop;
   final String? Function()? visibleConversationKey;
+  final bool Function()? menuOwnsNotices;
   @override
   State<LocalNotificationListener> createState() =>
       _LocalNotificationListenerState();
@@ -58,48 +61,18 @@ class _LocalNotificationListenerState extends State<LocalNotificationListener>
     if (!mounted ||
         event == null ||
         event.overlayHandled ||
+        ((event.kind == 'direct' || event.kind == 'friend') &&
+            widget.menuOwnsNotices?.call() == true) ||
         !projection.canEdit ||
         value == null ||
         event.revision != projection.revision) {
       return;
     }
-    final strings = AppStrings.of(context);
-    final hidden = value.previewMode == NotificationPreviewMode.hiddenDetails;
-    final full = value.previewMode == NotificationPreviewMode.fullContent;
-    final genericTitle = strings.text(
-      hidden
-          ? 'settings.notification.local.genericTitle'
-          : event.kind == 'direct'
-          ? 'settings.notification.local.directTitle'
-          : event.kind == 'friend'
-          ? 'settings.notification.local.friendTitle'
-          : 'settings.notification.local.roomTitle',
+    final content = localNotificationContent(
+      AppStrings.of(context),
+      event,
+      value.previewMode,
     );
-    final title =
-        event.kind == 'direct' &&
-            !hidden &&
-            event.senderName?.isNotEmpty == true
-        ? strings
-              .text('settings.notification.local.directFrom')
-              .replaceAll('{sender}', event.senderName!)
-        : genericTitle;
-    final message = strings
-        .text(
-          hidden
-              ? 'settings.notification.local.hiddenBody'
-              : event.kind == 'direct' &&
-                    full &&
-                    event.messagePreview?.isNotEmpty == true
-              ? 'settings.notification.local.directPreview'
-              : event.kind != 'room'
-              ? 'settings.notification.local.socialBody'
-              : full
-              ? 'settings.notification.local.fullBody'
-              : 'settings.notification.local.sourceBody',
-        )
-        .replaceAll('{invitations}', '${event.invitations}')
-        .replaceAll('{applications}', '${event.applications}')
-        .replaceAll('{message}', event.messagePreview ?? '');
     final activeKey = widget.visibleConversationKey?.call();
     if (event.kind == 'direct' &&
         activeKey != null &&
@@ -112,7 +85,11 @@ class _LocalNotificationListenerState extends State<LocalNotificationListener>
           value.desktopDeliveryAvailable &&
           value.channels.windowsDesktopEnabled) {
         unawaited(
-          widget.desktop?.show(title, message, ticket: event.desktopTicket),
+          widget.desktop?.show(
+            content.title,
+            content.message,
+            ticket: event.desktopTicket,
+          ),
         );
       }
       return;
@@ -126,8 +103,8 @@ class _LocalNotificationListenerState extends State<LocalNotificationListener>
         DesktopNotificationPosition.bottomLeft => Alignment.bottomLeft,
         DesktopNotificationPosition.bottomRight => Alignment.bottomRight,
       },
-      title: title,
-      message: message,
+      title: content.title,
+      message: content.message,
     );
   }
 

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +9,7 @@ import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_wallpaper_backdrop.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_wallpaper_catalog.dart';
+import '../../support/synthetic_image.dart';
 
 void main() {
   testWidgets(
@@ -158,14 +157,7 @@ class _FailOnceBundle extends CachingAssetBundle {
       if (++imageReads == 1 || alwaysFail) {
         throw StateError('Synthetic transient asset read failure');
       }
-      // Synthetic one-pixel PNG keeps retry coverage independent of artwork.
-      return Future.value(
-        ByteData.sublistView(
-          base64Decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-          ),
-        ),
-      );
+      return Future.value(syntheticImageData());
     }
     return rootBundle.load(key);
   }

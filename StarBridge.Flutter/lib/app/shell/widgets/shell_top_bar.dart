@@ -60,52 +60,73 @@ class ShellTopBar extends StatelessWidget {
         textDirection: TextDirection.ltr,
         children: [
           Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => unawaited(windowChrome.beginDrag()),
-              onDoubleTap: () => unawaited(windowChrome.toggleMaximize()),
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: tokens.space.lg),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: AnimatedSwitcher(
-                    duration: tokens.motion.pointerMicro,
-                    switchInCurve: tokens.motion.enterCurve,
-                    switchOutCurve: tokens.motion.exitCurve,
-                    layoutBuilder: (currentChild, previousChildren) {
-                      return Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [...previousChildren, ?currentChild],
-                      );
-                    },
-                    child: Column(
-                      key: ValueKey(selected.route),
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          strings.text(selected.labelKey),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
+            child: LayoutBuilder(
+              builder: (context, constraints) => Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (_) => unawaited(windowChrome.beginDrag()),
+                      onDoubleTap: () =>
+                          unawaited(windowChrome.toggleMaximize()),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: tokens.space.lg,
                         ),
-                        Text(
-                          strings.text(selected.descriptionKey),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: AnimatedSwitcher(
+                            duration: tokens.motion.pointerMicro,
+                            switchInCurve: tokens.motion.enterCurve,
+                            switchOutCurve: tokens.motion.exitCurve,
+                            layoutBuilder: (currentChild, previousChildren) {
+                              return Stack(
+                                alignment: Alignment.centerLeft,
+                                children: [...previousChildren, ?currentChild],
+                              );
+                            },
+                            child: Column(
+                              key: ValueKey(selected.route),
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  strings.text(selected.labelKey),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
+                                ),
+                                Text(
+                                  strings.text(selected.descriptionKey),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: (constraints.maxWidth - 160).clamp(
+                        tokens.density.controlHeight,
+                        double.infinity,
+                      ),
+                    ),
+                    child: OverlaySceneSelector(
+                      projection: projection.overlay,
+                      port: shellChrome,
+                      mode: mode,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          OverlaySceneSelector(
-            projection: projection.overlay,
-            port: shellChrome,
-            mode: mode,
           ),
           SizedBox(width: tokens.space.xs),
           TopBarActions(

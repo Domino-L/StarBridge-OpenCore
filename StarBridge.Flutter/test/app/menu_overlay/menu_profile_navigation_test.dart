@@ -49,14 +49,21 @@ class OrganizationTargets extends Targets implements MenuFeatureLease {
 }
 
 void main() {
+  final lifetime = MenuWindowLifetime();
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('starbridge/menu-primary');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  int? requestId;
   Future<void> event(String method, Object data) =>
       messenger.handlePlatformMessage(
         channel.name,
-        const StandardMethodCodec().encodeMethodCall(MethodCall(method, data)),
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall(
+            method,
+            method == 'state' ? {'request': requestId, 'state': data} : data,
+          ),
+        ),
         (_) {},
       );
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
@@ -66,11 +73,14 @@ void main() {
       '$source profile source requires an open authorized feature lease',
       () async {
         final targets = OrganizationTargets(), profiles = Profiles();
-        messenger.setMockMethodCallHandler(
-          channel,
-          (call) async => call.method == 'preview' ? 9 : null,
-        );
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'preview') {
+            requestId = (call.arguments as Map)['request'] as int;
+          }
+          return call.method == 'preview' ? 9 : null;
+        });
         final window = MethodChannelMenuPreviewWindow(
+          lifetime: lifetime,
           friends: (_) => Targets(),
           features: {source: (_) => targets},
           profiles: (_) => profiles,
@@ -114,6 +124,9 @@ void main() {
     final targets = Targets(), calls = <MethodCall>[];
     final profiles = Profiles();
     messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'preview') {
+        requestId = (call.arguments as Map)['request'] as int;
+      }
       calls.add(call);
       return switch (call.method) {
         'preview' => 5,
@@ -122,6 +135,7 @@ void main() {
       };
     });
     final window = MethodChannelMenuPreviewWindow(
+      lifetime: lifetime,
       friends: (_) => targets,
       profiles: (_) => profiles,
     );
@@ -183,10 +197,14 @@ void main() {
     final targets = Targets(), calls = <MethodCall>[];
     final profiles = Profiles();
     messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'preview') {
+        requestId = (call.arguments as Map)['request'] as int;
+      }
       calls.add(call);
       return call.method == 'preview' ? 8 : null;
     });
     final window = MethodChannelMenuPreviewWindow(
+      lifetime: lifetime,
       friends: (_) => targets,
       profiles: (_) => profiles,
     );

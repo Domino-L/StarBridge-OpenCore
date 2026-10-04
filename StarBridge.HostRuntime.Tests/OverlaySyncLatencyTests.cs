@@ -23,7 +23,7 @@ internal static class OverlaySyncLatencyTests
             ReceiverDoesNotWaitFiveSeconds, ReceiverBackoffAndCancellation, ReceiverMembershipChurnPreservesBackoff,
             ReceiverContextFailureCancelsRead, ReceiverLatestProbeClassifiesCancellation, RoomRefreshRequiresVisibleDemand,
             RoomReadCancelsOldScope, NativeCompositionHonorsVisibleDemand, ModuleRoomDemandWithoutFirstFrame,
-            ModuleRoomDemandCancelsOldScope, ModuleAutomaticDiscoveryIsBounded, RoomDiscoverySchedule,
+            ModuleRoomDemandCancelsOldScope, ModuleCommunityDemandWithoutFirstFrame, ModuleAutomaticDiscoveryIsBounded, RoomDiscoverySchedule,
             RoomRefreshRecoversFromScopeFailure, LegacyPasswordLoginTests.OverlayLiveChangeAdapter,
             SlowRecoveryStillExpiresAuthority, AnonymousModulesStayLocal })
         {
@@ -455,9 +455,11 @@ internal static class OverlaySyncLatencyTests
     private sealed class LiveSink : IInformationOverlayLiveUpdateSink, ISharedActivitySink
     {
         internal bool Visible;
+        internal bool TemporarilyHidden;
         internal int Refreshes;
         internal InformationOverlayModuleDemand? Demand;
         public bool IsVisible => Volatile.Read(ref Visible);
+        public bool HasDisplayDemand => IsVisible || Volatile.Read(ref TemporarilyHidden);
         public InformationOverlayModuleDemand? ModuleDemand => Volatile.Read(ref Demand);
         public void RequestContentRefresh() => Interlocked.Increment(ref Refreshes);
         public ValueTask<bool> TryPresentActivityAsync(SharedActivityNotice notice, CancellationToken token) => ValueTask.FromResult(true);
@@ -522,7 +524,7 @@ internal static class OverlaySyncLatencyTests
     private static async Task ModuleRoomDemandWithoutFirstFrame()
     {
         var host = new CompositionHost { HasRoom = false };
-        var sink = new LiveSink { Visible = true, Demand = new(
+        var sink = new LiveSink { TemporarilyHidden = true, Demand = new(
             new OverlayPresetSources(new(OverlaySourceMode.Room)),
             [OverlaySourceModule.Members, OverlaySourceModule.Chat]) };
         using var runtime = new AccountBridgeRuntime(host);
@@ -531,7 +533,7 @@ internal static class OverlaySyncLatencyTests
         runtime.ConfigureOverlayCommunitySource(Path.Combine(Path.GetTempPath(), "starbridge-module-demand-unused"), startDriver: false);
         runtime.ConfigureLiveOverlayUpdates(sink);
         await host.RoomRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Check(host.RoomReads == 1, "two modules share the existing room driver");
+        Check(host.RoomReads == 1, "temporarily hidden modules retain one shared room driver");
         host.HasRoom = true; // Legacy auto would keep reading now; v2 hidden intent must win.
         sink.Demand = new(OverlayPresetSources.Default, []);
         await Task.Delay(1300);
@@ -580,6 +582,8 @@ internal static class OverlaySyncLatencyTests
         Check(host.MaximumChangeWaits == 1, "All visible organizations share one change subscription, never one per module.");
         Console.WriteLine($"MEASURE module invalidation -> refreshed notice: {changeAt.Elapsed.TotalMilliseconds:F1}ms");
         host.NoticeVersion = 2;
+        sink.TemporarilyHidden = true;
+        sink.Visible = false;
         host.CommunityChanges.Writer.TryWrite(new("module-fixture", 2, true));
         until = DateTime.UtcNow.AddSeconds(3);
         while (DateTime.UtcNow < until && runtime.ReadOverlayModules(sources, activeModules: sink.Demand.ActiveModules)
@@ -587,7 +591,8 @@ internal static class OverlaySyncLatencyTests
             await Task.Delay(20);
         Check(runtime.ReadOverlayModules(sources, activeModules: sink.Demand.ActiveModules)
             .Frame?.ReadModules(DateTimeOffset.UtcNow)[OverlaySourceModule.Notice].Snapshot?.Community?.AnnouncementText == "Notice B-2",
-            "Established multi-source subscriptions deliver later changes too, not only their initial cursor refresh.");
+            "Menu-hidden multi-source subscriptions still deliver later changes without a second driver.");
+        sink.TemporarilyHidden = false;
         sink.Visible = false;
         var count = host.CommunityReads.Values.Sum();
         await Task.Delay(350);

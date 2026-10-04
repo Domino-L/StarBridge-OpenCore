@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdio>
 #include <set>
+#include <limits>
 
 namespace {
 using Value = flutter::EncodableValue;
@@ -24,13 +25,45 @@ Response Call(MenuLocalTools& tools, const std::string& action, const std::strin
   return response;
 }
 Map State(MenuLocalTools& tools) { return std::get<Map>(Call(tools, "browserState").value); }
+Response ConfigureOptions(MenuLocalTools& tools, const Map& options) {
+  Response response;
+  tools.Handle(Map{{Value("action"), Value("browserConfigure")}, {Value("preferences"), Value(options)}}, std::make_unique<Result>(response));
+  return response;
+}
+Response Configure(MenuLocalTools& tools, int32_t limit, bool links, bool pause) {
+  return ConfigureOptions(tools, Map{
+    {Value("provider"), Value("bing-global")}, {Value("tabLimit"), Value(limit)},
+    {Value("openLinksInNewTab"), Value(links)}, {Value("pauseWhenHidden"), Value(pause)}});
+}
 std::string Active(const Map& state) { return std::get<std::string>(state.at(Value("activeTabId"))); }
 List Tabs(const Map& state) { return std::get<List>(state.at(Value("tabs"))); }
 Map Visual(MenuLocalTools& tools) { return std::get<Map>(Call(tools, "browserTestVisualState").value); }
-void Bounds(MenuLocalTools& tools, double x, double y, double width, double height, bool visible) {
+void Bounds(MenuLocalTools& tools, double x, double y, double width, double height, bool visible, const List& occlusions = {}, double opacity = 1) {
   Response response;
   tools.Handle(Map{{Value("action"), Value("browserBounds")}, {Value("x"), Value(x)}, {Value("y"), Value(y)},
-    {Value("width"), Value(width)}, {Value("height"), Value(height)}, {Value("visible"), Value(visible)}}, std::make_unique<Result>(response));
+    {Value("width"), Value(width)}, {Value("height"), Value(height)}, {Value("visible"), Value(visible)},
+    {Value("occlusions"), Value(occlusions)}, {Value("opacity"), Value(opacity)}}, std::make_unique<Result>(response));
+}
+bool Interaction(MenuLocalTools& tools, double x, double y, bool focused = false) {
+  Response response;
+  tools.Handle(Map{{Value("action"), Value("browserTestInteraction")}, {Value("x"), Value(x)},
+    {Value("y"), Value(y)}, {Value("focused"), Value(focused)}}, std::make_unique<Result>(response));
+  return std::get<bool>(response.value);
+}
+bool ViewportContains(HWND parent, MenuLocalTools& tools, int x, int y) {
+  const auto visual = Visual(tools);
+  HWND child = GetWindow(parent, GW_CHILD);
+  for (const auto& value : std::get<List>(visual.at(Value("children")))) {
+    if (std::get<bool>(std::get<Map>(value).at(Value("browserViewport")))) {
+      HRGN region = CreateRectRgn(0, 0, 0, 0);
+      const int kind = GetWindowRgn(child, region);
+      const bool inside = kind != ERROR && PtInRegion(region, x, y);
+      DeleteObject(region);
+      return inside;
+    }
+    child = GetWindow(child, GW_HWNDNEXT);
+  }
+  return false;
 }
 Map Controller(MenuLocalTools& tools, const std::string& id) {
   const auto visual = Visual(tools);
@@ -79,6 +112,30 @@ int main() {
   int failed = 0;
   const auto check = [&failed](bool ok, const char* name) { printf("%s|%s\n", ok ? "PASS" : "FAIL", name); if (!ok) ++failed; };
   {
+    MenuLocalTools tools(window, [] { return true; }, [](bool) {}, [] {});
+    const std::string home = "http://127.0.0.1:9/search-home";
+    check(Call(tools, "browserOpen", "", "javascript:alert(1)").error == "menu.browser_failed",
+        "unsafe initial homepage rejected before tab creation");
+    Call(tools, "browserOpen", "", home);
+    auto state = State(tools);
+    const auto first = Active(state);
+    check(std::get<std::string>(state.at(Value("url"))) == home,
+        "initial homepage is queued before asynchronous controller creation");
+    Call(tools, "browserOpen", "", "http://127.0.0.1:9/other");
+    check(Active(State(tools)) == first && std::get<std::string>(State(tools).at(Value("url"))) == home,
+        "reopening never overwrites retained page with homepage");
+    Call(tools, "browserNewTab", "", home);
+    check(std::get<std::string>(State(tools).at(Value("url"))) == home && Tabs(State(tools)).size() == 2,
+        "new tab queues selected homepage without a followup navigate race");
+    const auto second = Active(State(tools));
+    Call(tools, "browserCloseTab", first, home);
+    Call(tools, "browserCloseTab", second, home);
+    check(Tabs(State(tools)).size() == 1 && std::get<std::string>(State(tools).at(Value("url"))) == home,
+        "closing final tab creates replacement with selected homepage");
+    check(Call(tools, "browserNewTab", "", "file:///C:/private").error == "menu.browser_failed" && Tabs(State(tools)).size() == 1,
+        "unsafe new-tab URL cannot add a page");
+  }
+  {
     bool current = true;
     MenuLocalTools tools(window, [&current] { return current; }, [](bool) {}, [] {});
     check(Call(tools, "browserOpen").replies == 1, "open replies once without blocking controller creation");
@@ -87,12 +144,36 @@ int main() {
     Call(tools, "browserOpen");
     check(Active(State(tools)) == first && Tabs(State(tools)).size() == 1, "open is idempotent while pending");
     for (int i = 0; i < 7; ++i) Call(tools, "browserNewTab");
-    const auto full = State(tools); const auto last = Active(full);
+    const auto full = State(tools);
     std::set<std::string> ids;
     for (const auto& value : Tabs(full)) ids.insert(std::get<std::string>(std::get<Map>(value).at(Value("id"))));
     check(ids.size() == 8 && std::get<int32_t>(full.at(Value("tabLimit"))) == 8, "eight unique native IDs and WPF default cap");
     check(Call(tools, "browserNewTab").error == "menu.browser_tab_limit" && Tabs(State(tools)).size() == 8, "ninth tab rejected");
-    check(Call(tools, "browserCloseTab", first).error.empty() && Active(State(tools)) == last, "background close preserves active while creation pending");
+    check(Configure(tools, 1, true, true).error.empty() && Tabs(State(tools)).size() == 8 &&
+        std::get<int32_t>(State(tools).at(Value("tabLimit"))) == 1, "lowering limit retains eight existing native identities");
+    check(Call(tools, "browserNewTab").error == "menu.browser_tab_limit", "lowered cap blocks new tab");
+    check(Configure(tools, 0, true, true).error == "menu.browser_preferences_invalid" &&
+        std::get<int32_t>(State(tools).at(Value("tabLimit"))) == 1, "invalid cap preserves current options");
+    check(Configure(tools, 13, true, true).error == "menu.browser_preferences_invalid", "absolute cap remains twelve");
+    const Map valid{{Value("provider"), Value("bing-global")}, {Value("tabLimit"), Value(1)},
+        {Value("openLinksInNewTab"), Value(true)}, {Value("pauseWhenHidden"), Value(true)}};
+    for (const auto& field : Map{{Value("provider"), Value("unknown")}, {Value("tabLimit"), Value(1.5)},
+        {Value("openLinksInNewTab"), Value("true")}, {Value("pauseWhenHidden"), Value(1)}}) {
+      auto invalid = valid; invalid[field.first] = field.second;
+      check(ConfigureOptions(tools, invalid).error == "menu.browser_preferences_invalid" &&
+          std::get<int32_t>(State(tools).at(Value("tabLimit"))) == 1,
+          "invalid native preference type or provider preserves existing settings");
+    }
+    auto extra = valid; extra.emplace(Value("url"), Value("https://example.invalid/"));
+    check(ConfigureOptions(tools, extra).error == "menu.browser_preferences_invalid", "browser preferences cannot carry a URL");
+    auto missing = valid; missing.erase(Value("pauseWhenHidden"));
+    check(ConfigureOptions(tools, missing).error == "menu.browser_preferences_invalid", "partial native preferences rejected");
+    Configure(tools, 12, true, true);
+    for (int i = 0; i < 4; ++i) Call(tools, "browserNewTab");
+    check(Tabs(State(tools)).size() == 12 && Call(tools, "browserNewTab").error == "menu.browser_tab_limit", "configured twelve native tabs, thirteenth denied");
+    Configure(tools, 8, true, true);
+    const auto active_after_growth = Active(State(tools));
+    check(Call(tools, "browserCloseTab", first).error.empty() && Active(State(tools)) == active_after_growth, "background close preserves active while creation pending");
     check(Call(tools, "browserSelectTab", first).error == "menu.browser_tab_stale", "closed identity cannot be selected");
     for (const auto* action : {"browserNavigate", "browserBack", "browserForward", "browserReload", "browserStop", "browserFocus"}) {
       check(Call(tools, action, first, "about:blank").error == "menu.browser_tab_stale", action);
@@ -111,6 +192,42 @@ int main() {
     check(std::get<int32_t>(visible.at(Value("left"))) == 0 && std::get<int32_t>(visible.at(Value("top"))) == 0 &&
         std::get<int32_t>(visible.at(Value("right"))) == 500 && std::get<int32_t>(visible.at(Value("bottom"))) == 300,
         "controller bounds fill only their bounded viewport");
+    const auto cover = [](double x, double y, double width, double height) {
+      return Value(Map{{Value("x"), Value(x)}, {Value("y"), Value(y)},
+        {Value("width"), Value(width)}, {Value("height"), Value(height)}});
+    };
+    Bounds(tools, 100, 120, 500, 300, true, {cover(100, 120, 220, 300)});
+    check(std::get<bool>(Controller(tools, reset_id).at(Value("visible"))) &&
+        !ViewportContains(window, tools, 50, 100) && ViewportContains(window, tools, 300, 100),
+        "background browser retains uncovered pixels and excludes foreground panel hit area");
+    Bounds(tools, 100, 120, 500, 300, true, {cover(100, 120, 220, 300)}, .7);
+    printf("IDLE|alpha=%d|supported=%d\n", std::get<int32_t>(Visual(tools).at(Value("alpha"))), std::get<bool>(State(tools).at(Value("opacitySupported"))));
+    check(std::get<int32_t>(Visual(tools).at(Value("alpha"))) == 179 &&
+        std::get<bool>(State(tools).at(Value("opacitySupported"))), "idle opacity reaches actual child HWND alpha");
+    check(!Interaction(tools, 50, 100) && Interaction(tools, 300, 100) &&
+        !Interaction(tools, 600, 100), "native hover uses viewport bounds and clipped region");
+    check(Interaction(tools, 600, 100, true), "native keyboard focus conservatively protects editing");
+    check(!ViewportContains(window, tools, 50, 100) && ViewportContains(window, tools, 300, 100) &&
+        std::get<bool>(Controller(tools, reset_id).at(Value("visible"))), "faded viewport keeps clipping and controller visibility");
+    Bounds(tools, 100, 120, 500, 300, false, {}, .7);
+    check(!Interaction(tools, 300, 100, true), "hidden browser never reports active interaction");
+    for (const double opacity : {1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -1.0}) {
+      Bounds(tools, 100, 120, 500, 300, true, {}, opacity);
+      check(std::get<int32_t>(Visual(tools).at(Value("alpha"))) == 255, "opaque restore and invalid opacity use safe full alpha");
+    }
+    Bounds(tools, 100, 120, 500, 300, true, {cover(300.5, 180.5, 80.25, 100.25), cover(500, 120, 100, 300)});
+    check(ViewportContains(window, tools, 50, 100) && !ViewportContains(window, tools, 200, 60) &&
+        !ViewportContains(window, tools, 280, 160) && !ViewportContains(window, tools, 450, 100),
+        "moving multiple occluders updates region with outward physical pixel rounding");
+    Bounds(tools, 100, 120, 500, 300, true, {cover(0, 0, 1000, 1000)});
+    check(!std::get<bool>(Controller(tools, reset_id).at(Value("visible"))) &&
+        !ViewportContains(window, tools, 100, 100), "fully covered viewport hides native controller");
+    Bounds(tools, 100, 120, 500, 300, true, {Value("invalid")});
+    check(!std::get<bool>(Visual(tools).at(Value("requestedVisible"))),
+        "malformed occlusion fails closed instead of covering Flutter controls");
+    Bounds(tools, 100, 120, 500, 300, true);
+    check(ViewportContains(window, tools, 50, 100) && ViewportContains(window, tools, 450, 100),
+        "activation clears stale clipped regions");
     std::string top_at_center;
     bool viewport_at_center = false;
     const auto children = std::get<List>(Visual(tools).at(Value("children")));
@@ -175,10 +292,48 @@ int main() {
         "NavigationStarting rejection preserves the current successful page");
     check(Call(tools, "browserReload", reset_id).error.empty(), "reload targets selected initialized tab");
     check(Call(tools, "browserStop", reset_id).error.empty(), "stop targets selected initialized tab");
+    check(Ready(tools), "page settles before resource policy checks");
+    Bounds(tools, 100, 120, 500, 300, false);
+    const auto suspend_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!std::get<bool>(Controller(tools, reset_id).at(Value("suspended"))) && std::chrono::steady_clock::now() < suspend_deadline) {
+      Pump(); MsgWaitForMultipleObjects(0, nullptr, FALSE, 20, QS_ALLINPUT);
+    }
+    check(std::get<bool>(Controller(tools, reset_id).at(Value("suspended"))), "hidden real WebView suspends with pause enabled");
+    Configure(tools, 8, true, false); Pump();
+    check(!std::get<bool>(Controller(tools, reset_id).at(Value("suspended"))) &&
+        !std::get<bool>(Controller(tools, reset_id).at(Value("visible"))), "turning pause off resumes hidden page without showing it");
+    Configure(tools, 8, true, true); Configure(tools, 8, true, false); Pump();
+    check(!std::get<bool>(Controller(tools, reset_id).at(Value("suspended"))), "late suspension cannot freeze disabled pause policy");
+    Bounds(tools, 100, 120, 500, 300, true);
+    Call(tools, "browserTestPopup"); Call(tools, "browserTestUnsafeWindow");
+    check(Tabs(State(tools)).size() == 1 && Active(State(tools)) == reset_id, "automatic popups and unsafe new-window schemes still denied");
+    Configure(tools, 8, false, true);
+    Call(tools, "browserTestNewWindow");
+    check(Tabs(State(tools)).size() == 1 && Active(State(tools)) == reset_id, "new-window event consumer navigates current identity when option is off");
+    Call(tools, "browserNavigate", reset_id, "about:blank"); Ready(tools);
+    Configure(tools, 8, true, true);
+    Call(tools, "browserTestNewWindow");
+    const auto requested_tab = Active(State(tools));
+    check(Tabs(State(tools)).size() == 2 && requested_tab != reset_id, "new-window event consumer creates native tab when option is on");
+    Call(tools, "browserCloseTab", requested_tab);
+    Configure(tools, 1, true, true);
+    Call(tools, "browserTestNewWindow");
+    check(Tabs(State(tools)).size() == 1 && Active(State(tools)) == reset_id, "new-window request at limit does not replace current page");
+    Configure(tools, 8, true, true);
     tools.Hide(); current = false;
     check(Call(tools, "browserNewTab").error == "menu.closed", "closed menu rejects new pages");
     Pump(); current = true; Call(tools, "browserOpen");
     check(Active(State(tools)) == reset_id && Tabs(State(tools)).size() == 1, "ordinary hide preserves page identity");
+    std::string multilingual = "https://example.invalid/";
+    for (int i = 0; i < 1800; ++i) multilingual += "\xE6\x98\x9F";
+    check(multilingual.size() > 4096 && Call(tools, "browserNavigate", reset_id, multilingual).error.empty(),
+        "bounded multilingual resume URL uses UTF-16 character limit, not UTF-8 byte truncation");
+    Call(tools, "browserStop", reset_id);
+    Call(tools, "browserNavigate", reset_id, "about:blank");
+    check(Ready(tools), "multilingual navigation leaves initialized browser usable");
+    for (int i = 0; i < 2400; ++i) multilingual += "\xE6\x98\x9F";
+    check(Call(tools, "browserNavigate", reset_id, multilingual).error == "menu.browser_failed",
+        "multilingual URL still respects existing 4096 UTF-16 character cap");
     Call(tools, "browserNewTab");
     const auto retired = Active(State(tools));
     tools.Reset();

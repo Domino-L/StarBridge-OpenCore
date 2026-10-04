@@ -9,6 +9,7 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_layout_editor.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_module.dart';
+import 'overlay_shortcut_summary.dart';
 
 class OverlayWorkspaceRuntimeCard extends StatelessWidget {
   const OverlayWorkspaceRuntimeCard({
@@ -49,6 +50,7 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
           }
         : switch (runtime.windowState) {
             'open' => 'overlay.runtime.open',
+            'suppressed' => 'overlay.runtime.suppressed',
             'opening' => 'overlay.runtime.opening',
             'failed' => 'overlay.runtime.failed',
             'unavailable' => 'overlay.runtime.unavailable',
@@ -56,13 +58,14 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
           };
     final descriptionKey = switch (runtime.windowState) {
       'open' => 'overlay.runtime.openDescription',
+      'suppressed' => 'overlay.runtime.suppressedDescription',
       'opening' => 'overlay.runtime.preparingDescription',
       'failed' => _runtimeFailureDescription(runtime.failureCode),
       'unavailable' => _runtimeFailureDescription(runtime.failureCode),
       _ => 'overlay.runtime.closedDescription',
     };
     final actionKey = switch (runtime.windowState) {
-      'open' => 'overlay.runtime.closeAction',
+      'open' || 'suppressed' => 'overlay.runtime.closeAction',
       'opening' => 'overlay.runtime.cancelOpenAction',
       'failed' => 'overlay.runtime.retryAction',
       'unavailable' => 'overlay.runtime.checkAction',
@@ -70,10 +73,19 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
     };
 
     if (compact) {
-      return Row(
+      return Wrap(
         key: const Key('overlay-runtime-card'),
-        mainAxisSize: MainAxisSize.min,
+        spacing: 12,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          if (projection.snapshot?.hotkey case final hotkey?)
+            OverlayShortcutSummary(
+              key: const Key('information-header-shortcut'),
+              binding: hotkey.binding,
+              enabled: hotkey.enabled,
+              state: runtime.hotkeyState,
+            ),
           Tooltip(
             message:
                 '${_copy(context, descriptionKey)}\n${_copy(context, 'overlay.runtime.hotkey.${runtime.hotkeyState}')}\n${_copy(context, 'overlay.runtime.follow.${runtime.followGameState}')}'
@@ -97,7 +109,6 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 12),
           FilledButton(
             key: const Key('overlay-runtime-action'),
             onPressed: projection.busy ? null : onAction,

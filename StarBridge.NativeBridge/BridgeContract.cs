@@ -167,6 +167,28 @@ public static class BridgeRequestPolicy
         "account.cancelLogin",
         "applicationPreferences.get",
         "applicationPreferences.update",
+        "applicationPreferences.menu.get",
+        "applicationPreferences.menu.update",
+        "applicationPreferences.menu.startup",
+        // Generation and current signed-in owner are checked by the Host menu
+        // dispatcher; the renderer must not copy account credentials here.
+        "menuHotkey.attach",
+        "menuHotkey.window",
+        "menuHotkey.detach",
+        "menuHotkey.settings.get",
+        "menuHotkey.settings.update",
+        // The resume dispatcher derives the authenticated owner inside Host,
+        // never from a renderer-supplied account context or file key.
+        "menuBrowserResume.read",
+        "menuBrowserResume.update",
+        "menuBrowserResume.remember",
+        // Device-local destination intents; no renderer paths or account context.
+        "menuScreenshotDirectory.read",
+        "menuScreenshotDirectory.choose",
+        "menuScreenshotDirectory.reset",
+        "menuScreenshotDirectory.open",
+        "menuScreenshotDirectory.chooseDraft",
+        "menuScreenshotDirectory.commitDraft",
         "notificationAudio.read",
         "playReminder.read",
         "playReminder.save",

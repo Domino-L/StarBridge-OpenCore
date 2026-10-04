@@ -98,6 +98,53 @@ class Fixture {
 Finder keyed(String key) => find.byKey(ValueKey(key));
 
 void main() {
+  for (final lastFocus in [false, true]) {
+    testWidgets(
+      'restored and reopened windows receive actual keyboard focus lastFocus=$lastFocus',
+      (tester) async {
+        size(tester, const Size(1280, 720));
+        final f = Fixture();
+        addTearDown(f.controller.dispose);
+        f.controller.restoreLastFocus = lastFocus;
+        f.controller.restoreLayout(
+          const {
+            'version': 1,
+            'panels': [],
+            'open': ['friends', 'chat'],
+          },
+          lease: f.controller.captureLayoutLease(),
+          reopenPanels: true,
+        );
+        await tester.pumpWidget(f.view());
+        await tester.pumpAndSettle();
+        final selected = lastFocus ? 'chat' : 'friends';
+        bool focused(String id) => tester
+            .widget<FocusScope>(
+              find.byKey(ValueKey('menu-panel-focus-$id'), skipOffstage: false),
+            )
+            .focusNode!
+            .hasFocus;
+        expect(f.controller.activeId, selected);
+        expect(focused(selected), true);
+        expect(focused(lastFocus ? 'friends' : 'chat'), false);
+        f.controller.activate('chat');
+        await tester.pumpAndSettle();
+        expect(focused('chat'), true);
+        f.controller.setVisible(false);
+        await tester.pumpAndSettle();
+        expect(focused('chat'), false);
+        f.controller.setVisible(true);
+        await tester.pumpAndSettle();
+        expect(f.controller.activeId, selected);
+        expect(focused(selected), true);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(focused(selected), true);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
   testWidgets(
     'dock opens once, preserves body when raised and closes explicitly',
     (tester) async {

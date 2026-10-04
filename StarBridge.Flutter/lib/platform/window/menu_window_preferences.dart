@@ -1,6 +1,14 @@
 import 'dart:convert';
 
 import '../bridge/bridge_client_session.dart';
+import 'menu_settings_read.dart';
+import 'menu_toolbar_preferences.dart';
+import 'menu_display_preferences.dart';
+import 'menu_social_preferences.dart';
+import 'menu_restore_preferences.dart';
+import 'menu_browser_preferences.dart';
+import 'menu_image_preferences.dart';
+import 'menu_screenshot_preferences.dart';
 
 class MenuWindowPreferences {
   const MenuWindowPreferences(this.revision, this.layout, this.settings);
@@ -44,7 +52,17 @@ class MenuWindowPreferences {
             'showContext',
             'dimming',
             'restoreDesktop',
+            'restoreAfterRestart',
+            'restoreLastFocus',
+            'safeModeNextLaunch',
+            'crashRecovery',
             'snapWindows',
+            'toolbar',
+            'display',
+            'social',
+            'browser',
+            'image',
+            'screenshot',
           }.contains(key),
         ) ||
         layout['version'] != 1 ||
@@ -54,12 +72,16 @@ class MenuWindowPreferences {
     }
     final panels = layout['panels'] as List;
     final open = layout['open'] as List;
-    if (open.length > panelIds.length ||
+    if (MenuRestorePreferences.fromSettings(settings) == null ||
+        open.length > panelIds.length ||
         open.any((id) => !panelIds.contains(id)) ||
         open.toSet().length != open.length ||
-        (open.isNotEmpty && settings['restoreDesktop'] != true) ||
+        (open.isNotEmpty &&
+            MenuRestorePreferences.fromSettings(settings)?.remembersWindows !=
+                true) ||
         const [
           'restoreDesktop',
+          'restoreAfterRestart',
           'snapWindows',
         ].any((key) => settings.containsKey(key) && settings[key] is! bool)) {
       return null;
@@ -72,6 +94,16 @@ class MenuWindowPreferences {
     }
     final dim = settings['dimming'] as num;
     if (!dim.isFinite || dim < .3 || dim > .9) return null;
+    if (MenuDisplayPreferences.fromSettings(settings) == null) return null;
+    if (MenuSocialPreferences.fromSettings(settings) == null) return null;
+    if (MenuBrowserPreferences.fromSettings(settings) == null) return null;
+    if (MenuImagePreferences.fromSettings(settings) == null) return null;
+    if (MenuScreenshotPreferences.fromSettings(settings) == null) return null;
+    if (settings.containsKey('toolbar') &&
+        (settings['toolbar'] == null ||
+            MenuToolbarPreferences.parse(settings['toolbar']) == null)) {
+      return null;
+    }
     final ids = <String>{};
     for (final panel in panels) {
       if (panel is! Map ||
@@ -104,6 +136,15 @@ class MenuWindowPreferences {
     'layout': layout,
     'settings': settings,
   };
+  MenuWindowPreferences withSettingsPatch(Map<String, Object?> patch) {
+    final next = {...settings, ...patch};
+    return MenuWindowPreferences(revision, {
+      ...layout,
+      if (MenuRestorePreferences.fromSettings(next)?.remembersWindows != true)
+        'open': <String>[],
+    }, next);
+  }
+
   String encode() => jsonEncode(toMap());
 }
 
@@ -112,15 +153,19 @@ abstract interface class MenuWindowPreferencesPort {
   Future<MenuWindowPreferences> save(MenuWindowPreferences value);
 }
 
+abstract interface class MenuWindowPreferencesProvider {
+  MenuWindowPreferencesPort? get menuPreferences;
+}
+
 final class BridgeMenuWindowPreferences implements MenuWindowPreferencesPort {
   const BridgeMenuWindowPreferences(this.session);
   final BridgeClientSession session;
   @override
   Future<MenuWindowPreferences> read() async {
-    final result = await session.request(
+    final result = await readMenuSettings(
+      session,
       'applicationPreferences.menu.get',
       payload: const {'schemaVersion': 1},
-      timeout: const Duration(seconds: 3),
     );
     return MenuWindowPreferences.parse(result.payload) ??
         (throw const FormatException('Invalid menu preferences'));

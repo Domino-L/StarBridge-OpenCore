@@ -1,8 +1,18 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+
+import 'dart:convert';
+
+import 'package:starbridge_flutter/platform/window/menu_attention.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/platform/window/method_channel_menu_preview_window.dart';
 import 'package:starbridge_flutter/platform/window/menu_preview_window_port.dart';
 import 'package:starbridge_flutter/platform/window/menu_window_preferences.dart';
+
+class _Counter extends ValueNotifier<int> {
+  _Counter(super.value);
+  bool get observed => hasListeners;
+}
 
 class MemoryMenuPreferences implements MenuWindowPreferencesPort {
   MenuWindowPreferences value = MenuWindowPreferences.defaults;
@@ -51,13 +61,26 @@ class FriendActionLease extends Lease implements MenuFriendsActionLease {
 }
 
 void main() {
+  final lifetime = MenuWindowLifetime();
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('starbridge/menu-primary');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  int? request;
+  void mock(Future<Object?> Function(MethodCall) handler) {
+    messenger.setMockMethodCallHandler(channel, (call) {
+      if (call.method == 'preview') {
+        request = (call.arguments as Map)['request'] as int;
+      }
+      return handler(call);
+    });
+  }
+
   Future<void> state(String value) => messenger.handlePlatformMessage(
     channel.name,
-    const StandardMethodCodec().encodeMethodCall(MethodCall('state', value)),
+    const StandardMethodCodec().encodeMethodCall(
+      MethodCall('state', {'request': request, 'state': value}),
+    ),
     (_) {},
   );
   Future<bool> open(MethodChannelMenuPreviewWindow preview) => preview.open(
@@ -67,12 +90,137 @@ void main() {
   );
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
+  for (final earlyVisible in [false, true]) {
+    testWidgets(
+      'attention works with closed panels and visible acknowledgement early=$earlyVisible',
+      (tester) async {
+        final count = _Counter(2);
+        final calls = <MethodCall>[];
+        final lease = Lease();
+        var generation = 7;
+        final window = MethodChannelMenuPreviewWindow(
+          lifetime: lifetime,
+          friends: (_) => lease,
+          attention: () => MenuAttentionSource(
+            changes: [count],
+            isCurrent: () => true,
+            read: () => MenuAttention(comms: count.value),
+          ),
+        );
+        mock((call) async {
+          calls.add(call);
+          if (call.method == 'preview') {
+            if (earlyVisible) await state('visible');
+            return generation;
+          }
+          return null;
+        });
+        Future<bool> live() => window.openLive(
+          contextLabel: 'Menu',
+          returnLabel: 'Return',
+          settingsLabel: 'Settings',
+        );
+        Future<void> show() async {
+          final pending = live();
+          await tester.pump();
+          if (!earlyVisible) await state('visible');
+          expect(await pending, true);
+          await tester.pump();
+        }
+
+        List<Map> views() => calls
+            .where((c) => c.method == 'attentionView')
+            .map((c) => c.arguments as Map)
+            .toList();
+        await show();
+        expect(jsonDecode(views().last['payload'] as String)['comms'], 2);
+        expect(
+          lease.visibility,
+          isEmpty,
+        ); // No social port acquired/read for badges.
+        count.value = 105;
+        await tester.pump();
+        expect(jsonDecode(views().last['payload'] as String)['comms'], 105);
+        expect(views().last['opening'], 7);
+        await state('hidden');
+        expect(count.observed, false);
+        final sent = views().length;
+        count.value = 0;
+        await tester.pump();
+        expect(views().length, sent);
+        generation = 8;
+        await show();
+        expect(views().last['opening'], 8);
+        expect(jsonDecode(views().last['payload'] as String)['comms'], 0);
+        window.dispose();
+        expect(count.observed, false);
+        count.dispose();
+        await tester.pump();
+      },
+    );
+  }
+  testWidgets(
+    'replacement owner removes old badge subscription; late disposal cannot detach new counts',
+    (tester) async {
+      final oldCounter = _Counter(3), newCounter = _Counter(9);
+      final calls = <MethodCall>[];
+      var generation = 1;
+      mock((call) async {
+        calls.add(call);
+        return call.method == 'preview' ? generation : null;
+      });
+      MethodChannelMenuPreviewWindow create(ValueNotifier<int> counter) =>
+          MethodChannelMenuPreviewWindow(
+            lifetime: lifetime,
+            friends: (_) => Lease(),
+            attention: () => MenuAttentionSource(
+              changes: [counter],
+              isCurrent: () => true,
+              read: () => MenuAttention(friends: counter.value),
+            ),
+          );
+      Future<void> show(MethodChannelMenuPreviewWindow window) async {
+        final pending = window.openLive(
+          contextLabel: 'Menu',
+          returnLabel: 'Return',
+          settingsLabel: 'Settings',
+        );
+        await tester.pump();
+        await state('visible');
+        expect(await pending, true);
+        await tester.pump();
+      }
+
+      final old = create(oldCounter), next = create(newCounter);
+      await show(old);
+      generation = 2;
+      await show(next);
+      expect(oldCounter.observed, false);
+      old.dispose();
+      oldCounter.value = 7;
+      newCounter.value = 11;
+      await tester.pump();
+      final view =
+          calls.lastWhere((c) => c.method == 'attentionView').arguments as Map;
+      expect(view['opening'], 2);
+      expect(jsonDecode(view['payload'] as String)['friends'], 11);
+      next.dispose();
+      expect(newCounter.observed, false);
+      oldCounter.dispose();
+      newCounter.dispose();
+      await tester.pump();
+    },
+  );
+
   testWidgets('demo preview cannot overwrite the remembered live desktop', (
     tester,
   ) async {
     final store = MemoryMenuPreferences();
-    final window = MethodChannelMenuPreviewWindow(preferences: store);
-    messenger.setMockMethodCallHandler(channel, (_) async => 8);
+    final window = MethodChannelMenuPreviewWindow(
+      lifetime: lifetime,
+      preferences: store,
+    );
+    mock((_) async => 8);
     final opening = open(window);
     await tester.pump();
     await state('visible');
@@ -98,10 +246,11 @@ void main() {
     (tester) async {
       final store = MemoryMenuPreferences();
       final window = MethodChannelMenuPreviewWindow(
+        lifetime: lifetime,
         preferences: store,
         friends: (_) => Lease(),
       );
-      messenger.setMockMethodCallHandler(channel, (_) async => 8);
+      mock((_) async => 8);
       final opening = window.openLive(
         contextLabel: 'Trial',
         returnLabel: 'Return',
@@ -148,8 +297,11 @@ void main() {
     'friend commands require a live lease, bounded fields and current opening',
     () async {
       final lease = FriendActionLease();
-      messenger.setMockMethodCallHandler(channel, (_) async => 6);
-      final window = MethodChannelMenuPreviewWindow(friends: (_) => lease);
+      mock((_) async => 6);
+      final window = MethodChannelMenuPreviewWindow(
+        lifetime: lifetime,
+        friends: (_) => lease,
+      );
       Future<void> event(String method, Map<String, Object?> args) =>
           messenger.handlePlatformMessage(
             channel.name,
@@ -199,8 +351,9 @@ void main() {
     'compose bridge whitelists payload and rejects stale or hidden opening',
     () async {
       final lease = ComposeLease();
-      messenger.setMockMethodCallHandler(channel, (_) async => 5);
+      mock((_) async => 5);
       final window = MethodChannelMenuPreviewWindow(
+        lifetime: lifetime,
         friends: (_) => Lease(),
         comms: (_) => lease,
       );
@@ -255,11 +408,12 @@ void main() {
       final lease = Lease();
       var creations = 0;
       final calls = <MethodCall>[];
-      messenger.setMockMethodCallHandler(channel, (call) async {
+      mock((call) async {
         calls.add(call);
         return call.method == 'preview' ? 5 : null;
       });
       final window = MethodChannelMenuPreviewWindow(
+        lifetime: lifetime,
         friends: (publish) {
           creations++;
           return lease;
@@ -305,11 +459,11 @@ void main() {
     'request success alone is not display success; waits for native visible',
     () async {
       final calls = <String>[];
-      messenger.setMockMethodCallHandler(channel, (call) async {
+      mock((call) async {
         calls.add(call.method);
         return 7;
       });
-      final preview = MethodChannelMenuPreviewWindow();
+      final preview = MethodChannelMenuPreviewWindow(lifetime: lifetime);
       var completed = false;
       final result = open(preview)..then((_) => completed = true);
       await Future<void>.delayed(Duration.zero);
@@ -322,8 +476,8 @@ void main() {
   );
 
   test('hidden opening reports failure and can retry', () async {
-    messenger.setMockMethodCallHandler(channel, (_) async => 1);
-    final preview = MethodChannelMenuPreviewWindow();
+    mock((_) async => 1);
+    final preview = MethodChannelMenuPreviewWindow(lifetime: lifetime);
     final first = open(preview);
     await Future<void>.delayed(Duration.zero);
     await state('hidden');
@@ -337,11 +491,11 @@ void main() {
   test(
     'missing native implementation does not launch external process',
     () async {
-      messenger.setMockMethodCallHandler(
-        channel,
-        (_) async => throw MissingPluginException(),
+      mock((_) async => throw MissingPluginException());
+      expect(
+        await open(MethodChannelMenuPreviewWindow(lifetime: lifetime)),
+        false,
       );
-      expect(await open(MethodChannelMenuPreviewWindow()), false);
     },
   );
 
@@ -349,11 +503,11 @@ void main() {
     tester,
   ) async {
     final calls = <String>[];
-    messenger.setMockMethodCallHandler(channel, (call) async {
+    mock((call) async {
       calls.add(call.method);
       return 1;
     });
-    final result = open(MethodChannelMenuPreviewWindow());
+    final result = open(MethodChannelMenuPreviewWindow(lifetime: lifetime));
     await tester.pump();
     await tester.pump(const Duration(seconds: 7));
     expect(await result, false);

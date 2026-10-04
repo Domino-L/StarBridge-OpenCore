@@ -64,4 +64,4 @@ jobs:
       - name: Build and validate the complete public client
         shell: pwsh
         run: |
-          & "./scripts/Test StarBridge Public Client.ps1"
+          & "./scripts/Test StarBridge Public Client.ps1" -MenuOverlay

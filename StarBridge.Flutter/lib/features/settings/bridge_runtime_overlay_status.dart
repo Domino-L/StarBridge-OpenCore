@@ -28,6 +28,7 @@ final class BridgeRuntimeOverlayStatus {
         !const {
           'open',
           'closed',
+          'suppressed',
           'failed',
           'unavailable',
         }.contains(p['windowState']) ||

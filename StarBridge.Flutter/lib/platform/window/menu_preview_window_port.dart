@@ -16,6 +16,10 @@ abstract interface class MenuLiveWindowPort implements MenuPreviewWindowPort {
   void dispose();
 }
 
+abstract interface class MenuWindowStartupPort {
+  void initialize();
+}
+
 abstract interface class MenuFriendsReadLease {
   void show(bool visible);
   void dispose();

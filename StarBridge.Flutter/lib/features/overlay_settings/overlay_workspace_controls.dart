@@ -9,6 +9,7 @@ import 'overlay_workspace_rules.dart';
 import 'overlay_workspace_schema.dart';
 import 'overlay_workspace_value_format.dart';
 import 'overlay_color_picker.dart';
+import 'overlay_settings_help.dart';
 
 export 'overlay_workspace_hotkey_card.dart';
 
@@ -54,11 +55,9 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
             if (group == 'appearance' &&
                 overlayWorkspaceAppearanceRule(settings).locksTheme) ...[
               SizedBox(height: tokens.space.sm),
-              Text(
+              OverlaySettingsHelp(
                 _copy(context, 'overlay.workspace.fixedPalette'),
                 key: const Key('overlay-appearance-fixed-palette'),
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(color: tokens.colors.textSecondary),
               ),
             ],
             if (group == 'startup' && onExperiencePreset != null) ...[
@@ -161,10 +160,8 @@ class _ExperiencePresetPicker extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         SizedBox(height: tokens.space.xs),
-        Text(
+        OverlaySettingsHelp(
           _copy(context, 'overlay.workspace.experience.$selected'),
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: tokens.colors.textSecondary),
         ),
         SizedBox(height: tokens.space.sm),
         Wrap(

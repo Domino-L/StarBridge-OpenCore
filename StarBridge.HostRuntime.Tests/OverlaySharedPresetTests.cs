@@ -14,7 +14,11 @@ internal static class OverlaySharedPresetTests
         try
         {
             var runtime = new UntouchedRuntime();
-            using var host = new OverlayBridgeDispatcher(root, () => 1, () => GameLogSessionSnapshot.Empty, runtime);
+            // This scenario proves legacy v1 compatibility independently of
+            // the product rollout switch; SourcesV2 below explicitly tests v2.
+            using var host = new OverlayBridgeDispatcher(new OverlaySettingsStore(root),
+                new OverlayWorkspaceStore(root, enableSourcePresets: false),
+                () => 1, () => GameLogSessionSnapshot.Empty, runtime);
             async Task<BridgeEnvelope> Request(string name, object data) =>
                 (await host.DispatchAsync(BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 1, data))).Response;
             async Task<JsonElement> Read() => (await Request("overlay.getWorkspace", new { schemaVersion = 1 })).Payload;

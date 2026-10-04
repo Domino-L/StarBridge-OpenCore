@@ -28,6 +28,7 @@ class UnreadPort extends NavigationPort
   final activity = StreamController<void>.broadcast(sync: true);
   final chat = FakeChat()..next = page([], latest: 0, unread: 0, older: false);
   int previewReads = 0;
+  final previews = <String, CommunityChatPage>{};
   @override
   bool get chatSendAvailable => true;
   @override
@@ -53,6 +54,9 @@ class UnreadPort extends NavigationPort
     int before = 0,
   }) {
     previewReads++;
+    if (previews.containsKey(targetRef)) {
+      return Future.value(previews[targetRef]!);
+    }
     return chat.readChat(targetRef, after: after, before: before);
   }
 
@@ -154,6 +158,22 @@ void main() {
     await drain();
     expect(attention.count(card.targetRef), 0);
     expect(attention.needsReconciliation, isFalse);
+  });
+  test('total unread uses only bound authorized organizations and clears on invalidation', () async {
+    for (final target in [card.targetRef, 'b' * 32]) {
+      source.previews[target] = CommunityChatPage.parse({
+        ...chatPage(),
+        'targetRef': target,
+      });
+    }
+    attention.bind([card.targetRef, 'b' * 32]);
+    await drain();
+    expect(attention.totalCount, 4);
+    attention.bind([card.targetRef]);
+    expect(attention.totalCount, 2);
+    source.changes.add(null);
+    await drain();
+    expect(attention.totalCount, 0);
   });
   test(
     'membership list updates do not flash unchanged unread badges',

@@ -6,18 +6,20 @@ import 'menu_account_avatar.dart';
 import '../../features/friends/friends_module.dart';
 import '../../platform/window/menu_preview_window_port.dart';
 import '../../platform/window/menu_profile_navigation.dart';
+import '../../platform/window/menu_avatar_presentation.dart';
 
 /// Primary-engine account-scoped directory and explicit, confirmed commands.
 /// No credentials, Host target refs or command authority cross to the renderer.
 final class MenuFriendsSession
     implements
         MenuFriendsReadLease,
+        MenuAvatarPresentation,
         MenuFriendsActionLease,
         MenuChatTargets,
         MenuProfileTargets {
   MenuFriendsSession(
     this._port,
-    this._publish, {
+    this._send, {
     DateTime Function()? now,
     this.presence,
     this.identity,
@@ -49,6 +51,23 @@ final class MenuFriendsSession
   late final _ownAvatar = MenuAccountAvatar(() => _emit(_view));
   final _peerAvatars = <String, MenuAccountAvatar>{};
   FriendsSnapshot? _lastSnapshot;
+  bool _showAvatars = true;
+  @override
+  set showAvatars(bool value) {
+    if (_disposed || value == _showAvatars) return;
+    _showAvatars = value;
+    _ownAvatar.enabled = value;
+    for (final avatar in _peerAvatars.values) {
+      avatar.dispose();
+    }
+    _peerAvatars.clear();
+    final snapshot = _lastSnapshot;
+    if (snapshot != null && _active) {
+      _project(snapshot, mediaOnly: true);
+    } else {
+      _emit(_view);
+    }
+  }
 
   void _clearPeerAvatars() {
     _lastSnapshot = null;
@@ -59,6 +78,7 @@ final class MenuFriendsSession
   }
 
   String? _peerAvatar(FriendRow row) {
+    if (!_showAvatars) return null;
     final inline = _avatar(row.avatar);
     if (inline != null) return inline;
     final ref = row.targetRef;
@@ -97,7 +117,9 @@ final class MenuFriendsSession
   }
 
   final DateTime Function() _now;
-  final void Function(Map<String, Object?>) _publish;
+  final void Function(Map<String, Object?>) _send;
+  void _publish(Map<String, Object?> view) =>
+      _send(_showAvatars ? view : withoutMenuAvatars(view));
   late final StreamSubscription<void> _subscription;
   StreamSubscription<void>? _activity;
   bool _activityPending = false;

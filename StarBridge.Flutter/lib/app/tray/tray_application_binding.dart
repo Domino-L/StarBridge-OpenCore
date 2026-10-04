@@ -42,7 +42,8 @@ class TrayApplicationBinding {
         if (workspace != null) {
           final state = workspace.projection.value;
           final language = preferences.value.effective.locale.languageCode;
-          final completed = state.runtime.isVisible || state.runtime.windowState == 'opening'
+          final completed =
+              state.runtime.enabled || state.runtime.windowState == 'opening'
               ? await workspace.closeRuntime(language)
               : state.runtime.failed
               ? await workspace.retryRuntime(language)
@@ -109,12 +110,15 @@ class TrayApplicationBinding {
       state: TrayQuickPanelState(
         runtime: TrayRuntimeState.running,
         scene: scene == null
-            ? c.overlay.fallbackReasonKey?.startsWith('overlay.source.') != true ? null : AppStrings.resolve(p.locale).text(c.overlay.fallbackReasonKey!)
+            ? c.overlay.fallbackReasonKey?.startsWith('overlay.source.') != true
+                  ? null
+                  : AppStrings.resolve(p.locale)
+                        .text(c.overlay.fallbackReasonKey!)
             : scene.label ?? AppStrings.resolve(p.locale).text(scene.labelKey),
         overlay: workspace != null
             ? !workspace.available || !workspace.runtime.available
                   ? TrayOverlayState.unavailable
-                  : workspace.runtime.isVisible
+                  : workspace.runtime.enabled
                   ? TrayOverlayState.enabled
                   : workspace.runtime.windowState == 'opening'
                   ? TrayOverlayState.opening

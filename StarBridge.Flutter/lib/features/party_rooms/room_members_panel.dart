@@ -22,6 +22,7 @@ class RoomMembersPanel extends StatefulWidget {
     this.onTransfer,
     this.memberBuilder,
     this.listKey,
+    this.showRoomCode = true,
   });
   final PartyRoom room;
   final DateTime serverTime;
@@ -32,6 +33,7 @@ class RoomMembersPanel extends StatefulWidget {
   /// giving this presentation widget command tokens or account references.
   final Widget Function(BuildContext, int, RoomMember)? memberBuilder;
   final Key? listKey;
+  final bool showRoomCode;
   @override
   State<RoomMembersPanel> createState() => _RoomMembersPanelState();
 }
@@ -61,7 +63,7 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
               ),
             ],
           ),
-          if (room.roomCode.isNotEmpty)
+          if (widget.showRoomCode && room.roomCode.isNotEmpty)
             Wrap(
               spacing: 10,
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -70,8 +72,12 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
                   '${roomActionText(context, 'code')}：${room.roomCode}',
                 ),
                 TextButton(
-                  onPressed: () =>
-                      Clipboard.setData(ClipboardData(text: room.roomCode)),
+                  onPressed: () {
+                    if (!mounted || !widget.showRoomCode) return;
+                    Clipboard.setData(
+                      ClipboardData(text: widget.room.roomCode),
+                    );
+                  },
                   child: Text(roomActionText(context, 'copyCode')),
                 ),
               ],

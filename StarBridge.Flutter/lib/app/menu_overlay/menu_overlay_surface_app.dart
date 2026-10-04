@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -11,11 +13,23 @@ import '../localization/app_strings.dart';
 import 'menu_overlay_theme.dart';
 import 'menu_overlay_frame.dart';
 import 'menu_bridge_preview.dart';
+import 'menu_local_tools.dart';
+import 'menu_native_popup.dart';
 import 'menu_friends_view.dart';
 import 'menu_comms_view.dart';
 import 'menu_profile_view.dart';
 import 'menu_feature_view.dart';
 import '../../platform/window/menu_window_preferences.dart';
+import '../../platform/window/menu_restore_preferences.dart';
+import 'menu_recovery_prompt.dart';
+import '../../platform/window/menu_shortcut_settings.dart';
+import '../../platform/window/surface_menu_shortcut_settings.dart';
+import '../../platform/window/menu_attention.dart';
+import '../../platform/window/menu_notice.dart';
+import '../../platform/window/menu_browser_resume.dart';
+import '../../platform/window/surface_menu_browser_resume.dart';
+import '../../platform/window/menu_screenshot_directory.dart';
+import '../../platform/window/surface_menu_screenshot_directory.dart';
 
 // Auxiliary entry point: no account/bootstrap, disk access, plugins or Host.
 void runMenuOverlaySurface({bool workspacePreview = false}) {
@@ -32,6 +46,7 @@ class MenuOverlaySurfaceApp extends StatefulWidget {
 }
 
 class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
+  final _nativePopups = MenuNativePopupObserver();
   static const _channel = MethodChannel('starbridge/menu-surface');
   int _opening = -1;
   bool _wanted = false;
@@ -52,13 +67,76 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
   final _featureVisible = <String>{};
   MenuWindowPreferences _preferences = MenuWindowPreferences.defaults;
   bool _preferencesFailed = false;
+  bool _recoveryPending = false, _recoveryBusy = false, _recoveryFailed = false;
+  int _recoveryRevision = 0;
   List<String>? _contextValues;
+  int _contextRevision = -1;
+  MenuAttention _attention = const MenuAttention();
+  int _attentionRevision = -1;
+  MenuNotice? _notice;
+  int _noticeRevision = -1;
+  MenuLocalToolsController? _localTools;
+  int? _localToolsEpoch;
+  MenuShortcutSettingsPort? _shortcutSettings;
+  MenuBrowserResumePort? _browserResume;
+  MenuScreenshotDirectoryPort? _screenshotDirectory;
+
+  Future<Object?> _localToolCall(
+    String action,
+    Map<String, Object?> arguments,
+  ) async {
+    if (!_wanted || _labels['nativeTools'] != true) {
+      throw PlatformException(code: 'menu.closed');
+    }
+    final epoch = _localToolsEpoch;
+    final result = await _channel.invokeMethod<Object?>('localTool', {
+      'opening': _opening,
+      'action': action,
+      ...arguments,
+    });
+    if (!mounted || epoch != _localToolsEpoch) {
+      throw PlatformException(code: 'menu.closed');
+    }
+    return result;
+  }
 
   @override
   void initState() {
     super.initState();
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'snapshot') _accept(call.arguments);
+      if (call.method == 'noticeView' && call.arguments is Map) {
+        final args = call.arguments as Map;
+        if (_wanted &&
+            _labels['liveFriends'] == true &&
+            args['opening'] == _opening &&
+            args['revision'] is int &&
+            (args['revision'] as int) > _noticeRevision) {
+          final next = MenuNotice.parse(args['payload']);
+          if (next != null) {
+            setState(() {
+              _notice = next.title.isEmpty ? null : next;
+              _noticeRevision = args['revision'] as int;
+            });
+          }
+        }
+      }
+      if (call.method == 'attentionView' && call.arguments is Map) {
+        final args = call.arguments as Map;
+        if (_wanted &&
+            _labels['liveFriends'] == true &&
+            args['opening'] == _opening &&
+            args['revision'] is int &&
+            (args['revision'] as int) > _attentionRevision) {
+          final next = MenuAttention.parse(args['payload']);
+          if (next != null) {
+            setState(() {
+              _attention = next;
+              _attentionRevision = args['revision'] as int;
+            });
+          }
+        }
+      }
       if ((call.method == 'preferencesState' || call.method == 'contextView') &&
           call.arguments is Map) {
         final args = call.arguments as Map;
@@ -73,10 +151,24 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
               setState(() => _preferencesFailed = true);
             }
             if (call.method == 'contextView' &&
+                args['revision'] is int &&
+                (args['revision'] as int) > _contextRevision &&
                 data is List &&
-                data.length == 5 &&
-                data.every((v) => v is String && v.length <= 512)) {
-              setState(() => _contextValues = List<String>.from(data));
+                (data.length == 5 || data.length == 6) &&
+                data.every((v) => v is String && v.length <= 512) &&
+                (data.length == 5 ||
+                    const {
+                      'presence.online',
+                      'presence.inGame',
+                      'presence.invisible',
+                      'presence.away',
+                      'presence.offline',
+                      'presence.unknown',
+                    }.contains(data[5]))) {
+              setState(() {
+                _contextRevision = args['revision'] as int;
+                _contextValues = List<String>.from(data);
+              });
             }
           } on Object {
             /* Invalid presentation is ignored. */
@@ -191,12 +283,76 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
     }
     final newOpening = opening != _opening;
     setState(() {
+      // A local-only native epoch changes on account/session detach, never on
+      // ordinary menu hiding. Keep tools across openings, not across accounts.
+      final epoch = value['localToolsEpoch'];
+      if (epoch is int && epoch >= 0) {
+        if (epoch != _localToolsEpoch) {
+          _localTools?.dispose();
+          _localTools = null;
+          _localToolsEpoch = epoch;
+        }
+        if (wanted && value['nativeTools'] == true) {
+          _localTools ??= MenuLocalToolsController(_localToolCall);
+          _localTools!.screenshotDirectoryAvailable =
+              value['screenshotDirectory'] == true;
+        }
+      } else {
+        // Older/malformed envelopes do not authorize retained local images.
+        _localTools?.dispose();
+        _localTools = null;
+        _localToolsEpoch = null;
+      }
       _opening = opening;
       _wanted = wanted;
       _workspacePreview = value['workspacePreview'] == true;
       _labels = wanted ? Map<Object?, Object?>.from(value) : const {};
       if (newOpening || !wanted) {
+        _recoveryPending =
+            wanted &&
+            value['liveFriends'] == true &&
+            value['recoveryPending'] == true;
+        _recoveryBusy = false;
+        _recoveryFailed = false;
+        _shortcutSettings = wanted && value['shortcutSettings'] == true
+            ? SurfaceMenuShortcutSettings(
+                _channel,
+                opening,
+                () =>
+                    mounted &&
+                    _wanted &&
+                    opening == _opening &&
+                    _labels['shortcutSettings'] == true,
+              )
+            : null;
         _contextValues = null;
+        _browserResume = wanted && value['browserResume'] == true
+            ? SurfaceMenuBrowserResume(
+                _channel,
+                opening,
+                () =>
+                    mounted &&
+                    _wanted &&
+                    opening == _opening &&
+                    _labels['browserResume'] == true,
+              )
+            : null;
+        _contextRevision = -1;
+        _screenshotDirectory = wanted && value['screenshotDirectory'] == true
+            ? SurfaceMenuScreenshotDirectory(
+                _channel,
+                opening,
+                () =>
+                    mounted &&
+                    _wanted &&
+                    opening == _opening &&
+                    _labels['screenshotDirectory'] == true,
+              )
+            : null;
+        _attention = const MenuAttention();
+        _attentionRevision = -1;
+        _notice = null;
+        _noticeRevision = -1;
         if (newOpening && wanted) {
           try {
             final prefs = value['preferences'];
@@ -208,6 +364,13 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
             }
           } on Object {
             /* Keep in-memory geometry on malformed preference data. */
+          }
+          if (_recoveryPending) {
+            // A damaged envelope must not mount tools behind confirmation.
+            _windowLayout = {
+              ...(_windowLayout ?? _preferences.layout),
+              'open': <String>[],
+            };
           }
           _preferencesFailed = value['preferencesFailed'] == true;
         }
@@ -358,11 +521,54 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
     }
     _friendsAck?.cancel();
     _channel.setMethodCallHandler(null);
+    _localTools?.dispose();
+    _nativePopups.dispose();
     super.dispose();
   }
 
+  Future<void> _chooseRecovery(String action) async {
+    if (!_wanted || !_recoveryPending || _recoveryBusy) return;
+    final opening = _opening;
+    setState(() {
+      _recoveryBusy = true;
+      _recoveryFailed = false;
+    });
+    try {
+      final reply = await _channel
+          .invokeMethod<String>('recoveryAction', {
+            'opening': opening,
+            'action': action,
+          })
+          .timeout(const Duration(seconds: 6));
+      if (!mounted || !_wanted || opening != _opening) return;
+      if (reply == null || reply.length > 32768) {
+        throw const FormatException('Invalid recovery reply');
+      }
+      final preferences = MenuWindowPreferences.parse(jsonDecode(reply));
+      if (preferences == null) {
+        throw const FormatException('Invalid recovery preferences');
+      }
+      setState(() {
+        _preferences = preferences;
+        _windowLayout = preferences.layout;
+        _recoveryPending = false;
+        _recoveryBusy = false;
+        ++_recoveryRevision;
+      });
+    } on Object {
+      if (mounted && _wanted && opening == _opening) {
+        setState(() {
+          _recoveryBusy = false;
+          _recoveryFailed = true;
+        });
+      }
+    }
+  }
+
   void _savePreferences() {
-    if (!_wanted || _labels['preferences'] is! String) return;
+    if (!_wanted || _recoveryPending || _labels['preferences'] is! String) {
+      return;
+    }
     // Transfer the latest geometry while this opening is still authorized.
     // The primary engine coalesces disk writes even if Alt-Tab hides us now.
     unawaited(
@@ -370,7 +576,8 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
         'opening': _opening,
         'payload': MenuWindowPreferences(_preferences.revision, {
           ...(_windowLayout ?? _preferences.layout),
-          if (_preferences.settings['restoreDesktop'] != true)
+          if (!MenuRestorePreferences.fromSettings(_preferences.settings)!
+              .remembersWindows)
             'open': <String>[],
         }, _preferences.settings).encode(),
       }),
@@ -379,6 +586,7 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    navigatorObservers: [_nativePopups],
     scrollBehavior: const StarBridgeScrollBehavior(),
     debugShowCheckedModeBanner: false,
     locale: const Locale('zh', 'CN'),
@@ -394,9 +602,28 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       enabled: _wanted,
       child: (widget.workspacePreview || _workspacePreview)
           ? MenuBridgePreview(
-              key: ValueKey(_opening),
+              key: ValueKey('$_opening:$_localToolsEpoch:$_recoveryRevision'),
+              recoveryOverlay: _recoveryPending
+                  ? MenuRecoveryPrompt(
+                      busy: _recoveryBusy,
+                      failed: _recoveryFailed,
+                      onChoose: _chooseRecovery,
+                    )
+                  : null,
               visible: _wanted,
+              startupMode:
+                  const {'safe', 'unverified'}.contains(_labels['startupMode'])
+                  ? _labels['startupMode'] as String
+                  : 'normal',
+              attention: _attention,
+              notice: _notice,
               initialSettings: _preferences.settings,
+              shortcutSettings: _shortcutSettings,
+              browserResume: _browserResume,
+              screenshotDirectory: _screenshotDirectory,
+              system24Hour: _labels['system24Hour'] is bool
+                  ? _labels['system24Hour'] as bool
+                  : null,
               preferencesFailed: _preferencesFailed,
               contextValues: _contextValues,
               onSettingsChanged: (settings) {
@@ -413,6 +640,7 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
                       {'opening': _opening, 'action': action, ...arguments},
                     )
                   : null,
+              localToolsController: _localTools,
               initialLayout: _windowLayout,
               onLayoutChanged: (layout) {
                 _windowLayout = layout;

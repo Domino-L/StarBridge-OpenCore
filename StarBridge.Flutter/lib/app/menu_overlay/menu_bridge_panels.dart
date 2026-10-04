@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'menu_bridge_style.dart';
+import '../../platform/window/menu_display_preferences.dart';
+import '../localization/app_strings.dart';
 
 /// Synthetic content only; no account IDs, remote avatars or social actions.
 class BridgeFriendsPreview extends StatelessWidget {
@@ -219,9 +221,15 @@ class _Conversation extends StatelessWidget {
 }
 
 class BridgeContextPreview extends StatelessWidget {
-  const BridgeContextPreview({super.key, this.live = false, this.values});
+  const BridgeContextPreview({
+    super.key,
+    this.live = false,
+    this.values,
+    this.preferences = const MenuDisplayPreferences(),
+  });
   final bool live;
   final List<String>? values;
+  final MenuDisplayPreferences preferences;
   @override
   Widget build(BuildContext context) => BridgePlate(
     framed: false,
@@ -230,11 +238,34 @@ class BridgeContextPreview extends StatelessWidget {
       spacing: 28,
       runSpacing: 18,
       children: [
-        _Context('当前协作', values?[0] ?? (live ? '暂无协作场景' : '远航者组织')),
-        _Context('成员', values?[1] ?? (live ? '—' : '12 人')),
-        _Context('当前飞船', values?[2] ?? (live ? '—' : '星座 仙女座')),
-        _Context('所在位置', values?[3] ?? (live ? '—' : '斯坦顿 · 奥里森')),
-        _Context('服务器', values?[4] ?? (live ? '—' : '美服 · LIVE')),
+        if (preferences.showScene)
+          _Context(
+            AppStrings.of(context).text('menu.display.sceneLabel'),
+            values?[0] ??
+                (live
+                    ? AppStrings.of(context).text('menu.display.noScene')
+                    : '远航者组织'),
+          ),
+        if (preferences.showMembers)
+          _Context(
+            AppStrings.of(context).text('menu.display.membersLabel'),
+            values?[1] ?? (live ? '—' : '12 人'),
+          ),
+        if (preferences.showShip)
+          _Context(
+            AppStrings.of(context).text('menu.display.shipLabel'),
+            values?[2] ?? (live ? '—' : '星座 仙女座'),
+          ),
+        if (preferences.effectiveShowLocation)
+          _Context(
+            AppStrings.of(context).text('menu.display.locationLabel'),
+            values?[3] ?? (live ? '—' : '斯坦顿 · 奥里森'),
+          ),
+        if (preferences.showServer)
+          _Context(
+            AppStrings.of(context).text('menu.display.serverLabel'),
+            values?[4] ?? (live ? '—' : '美服 · LIVE'),
+          ),
       ],
     ),
   );

@@ -72,6 +72,8 @@ const overlayWorkspaceZhTw = <String, String>{
   'overlay.workspace.description': '調整浮層顯示的內容和位置。設定只保存在這台電腦上。',
   'overlay.runtime.open': '資訊浮層正在顯示',
   'overlay.runtime.closed': '資訊浮層已關閉',
+  'overlay.runtime.suppressed': '資訊浮層暫時隱藏',
+  'overlay.runtime.suppressedDescription': '選單開啟時暫時隱藏，關閉選單後恢復顯示。在這裡關閉則不再恢復。',
   'overlay.runtime.failed': '資訊浮層未能開啟',
   'overlay.runtime.unavailable': '目前無法使用資訊浮層',
   'overlay.runtime.checking': '正在檢查資訊浮層…',

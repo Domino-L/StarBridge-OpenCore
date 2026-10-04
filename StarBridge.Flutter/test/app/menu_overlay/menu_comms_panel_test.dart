@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_bridge_preview.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_comms_panel.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_comms_view.dart';
@@ -50,6 +52,9 @@ void main() {
       final actions = <String>[];
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'CN'),
+          supportedLocales: AppStrings.supportedLocales,
+          localizationsDelegates: const [AppStringsDelegate(), ...GlobalMaterialLocalizations.delegates],
           theme: buildStarBridgeTheme(
             FutureRestraintStyle.resolve(AppearanceMode.dark),
             const Locale('zh', 'CN'),

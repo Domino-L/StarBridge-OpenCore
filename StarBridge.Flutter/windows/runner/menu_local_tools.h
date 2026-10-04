@@ -16,6 +16,9 @@ class MenuLocalTools {
       std::function<void(bool)> modal, std::function<void()> dismiss);
   ~MenuLocalTools();
   void Handle(const flutter::EncodableMap& args, Result result);
+  // Trusted primary Host reply only. This arms ONE explicit direct save;
+  // the auxiliary surface cannot provide a path or reuse old authorization.
+  bool AuthorizeScreenshotDirectory(const std::string& directory);
   void Hide();
   // Session detachment retires local pages/images without deleting the browser
   // profile. Ordinary menu hiding only suspends them.

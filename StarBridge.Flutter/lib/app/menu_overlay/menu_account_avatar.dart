@@ -10,7 +10,13 @@ final class MenuAccountAvatar {
   final _images = MenuOrganizationAvatars();
   String? _source, _value;
   int _epoch = 0;
+  set enabled(bool value) {
+    if (_images.enabled == value) return;
+    clear();
+    _images.enabled = value;
+  }
   String? read(String? source) {
+    if (!_images.enabled) return null;
     if (_source != source) {
       _source = source;
       _value = null;
