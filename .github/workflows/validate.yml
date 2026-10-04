@@ -17,7 +17,9 @@ jobs:
   build:
     name: Build and test
     runs-on: windows-latest
-    timeout-minutes: 45
+    # Clean hosted Windows runs include the full Flutter suite and native build.
+    # The complete suite alone can take over 40 minutes; keep every gate enabled.
+    timeout-minutes: 90
 
     steps:
       - name: Check out source
