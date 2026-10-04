@@ -48,7 +48,7 @@ internal sealed partial class CommunityClient
                 var code = Resolve(item.TargetRef, scope, allowWpfS2: legacyViewerId is not null).Code.ToUpperInvariant();
                 if (!distinctCodes.Add(code)) throw Invalid();
                 codes.Add(item.TargetRef, code);
-                options.Add(new { targetRef = item.TargetRef, name = item.Name,
+                options.Add(new { targetRef = item.TargetRef, name = item.Name, communityCode = code,
                     selected = consent.Codes.Contains(code, StringComparer.OrdinalIgnoreCase) });
             }
             after = page.Next;

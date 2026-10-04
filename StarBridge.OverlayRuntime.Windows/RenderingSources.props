@@ -27,9 +27,12 @@
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/Models/PlayerRow.cs" Link="Rendering/Models/PlayerRow.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeDesktopNotificationRuntime.cs" Link="Rendering/NativeDesktopNotificationRuntime.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Community.cs" Link="Rendering/NativeInformationOverlayRuntime.Community.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Modules.cs" Link="Rendering/NativeInformationOverlayRuntime.Modules.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.ContinuousPlay.cs" Link="Rendering/NativeInformationOverlayRuntime.ContinuousPlay.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.LocalGameEvents.cs" Link="Rendering/NativeInformationOverlayRuntime.LocalGameEvents.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.cs" Link="Rendering/NativeInformationOverlayRuntime.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Language.cs" Link="Rendering/NativeInformationOverlayRuntime.Language.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.LocalSelf.cs" Link="Rendering/NativeInformationOverlayRuntime.LocalSelf.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Reminders.cs" Link="Rendering/NativeInformationOverlayRuntime.Reminders.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Room.cs" Link="Rendering/NativeInformationOverlayRuntime.Room.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.SharedActivity.cs" Link="Rendering/NativeInformationOverlayRuntime.SharedActivity.cs" />
@@ -42,6 +45,7 @@
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.FrameChrome.cs" Link="Rendering/OverlayCompositionHudWindow.FrameChrome.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.LagrangeWeave.cs" Link="Rendering/OverlayCompositionHudWindow.LagrangeWeave.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.Panels.cs" Link="Rendering/OverlayCompositionHudWindow.Panels.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.SourceLabels.cs" Link="Rendering/OverlayCompositionHudWindow.SourceLabels.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.RenderSupport.cs" Link="Rendering/OverlayCompositionHudWindow.RenderSupport.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionStartupTransitionWindow.cs" Link="Rendering/OverlayCompositionStartupTransitionWindow.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEntitlementPolicy.cs" Link="Rendering/OverlayEntitlementPolicy.cs" />
@@ -76,4 +80,3 @@
     <Compile Include="../shared/client-policies/GameServerRegionPresentation.cs" Link="Rendering/GameServerRegionPresentation.cs" />
   </ItemGroup>
 </Project>
-

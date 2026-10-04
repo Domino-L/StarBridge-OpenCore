@@ -34,6 +34,8 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_preview_ide
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_models.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_rules.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_controls.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_preset_bar.dart';
+import 'package:starbridge_flutter/design_system/components/coming_soon.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_layout_geometry.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_runtime_projection.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_schema.dart';
@@ -46,11 +48,107 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_p
 import 'package:starbridge_flutter/design_system/styles/overlay_appearance_preview.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_layout_editor.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_port.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_preset_import_preview.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  testWidgets('import preview requires confirmation and preserves current draft', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final port = _MemoryWorkspacePort(_workspaceSnapshot());
+    final module = OverlaySettingsModule(InMemoryOverlaySettingsAdapter(), workspacePort: port);
+    addTearDown(module.dispose);
+    await module.initialize();
+    module.workspace!.updateSetting('showNotice', false);
+    final imported = _workspaceSnapshot();
+    final payload = jsonEncode({'schemaVersion': 1, 'name': '导入示例',
+      'settings': imported.settings!.toMap(), 'layout': imported.layout.map((item) => item.toMap()).toList()});
+    await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pumpAndSettle();
+    Future<void> preview() async {
+      await tester.tap(find.byKey(const Key('overlay-preset-manage')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('导入'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), payload);
+      await tester.tap(find.text('查看导入预览'));
+      await tester.pumpAndSettle();
+    }
+    await preview();
+    expect(find.byType(OverlayPresetImportPreview), findsOneWidget);
+    expect(port.lastMutation, isNull);
+    await tester.tap(find.descendant(of: find.byType(OverlayPresetImportPreview), matching: find.text('取消')));
+    await tester.pumpAndSettle();
+    expect(port.lastMutation, isNull);
+    expect(module.workspace!.projection.value.dirty, isTrue);
+    await preview();
+    await tester.tap(find.byKey(const Key('overlay-import-confirm')));
+    await tester.pumpAndSettle();
+    expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.importPreset);
+    expect(port.lastMutation?.name, '导入示例');
+    expect(module.workspace!.projection.value.dirty, isTrue);
+    expect(module.workspace!.projection.value.settings!['showNotice'], isFalse);
+    expect(module.workspace!.canUndo, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final width in [1280.0, 1440.0, 360.0]) {
+    testWidgets('import detailed preview layout at $width', (tester) async {
+      tester.view.physicalSize = Size(width, width == 360 ? 640 : 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final snapshot = _workspaceSnapshot();
+      var previewSettings = snapshot.settings!;
+      for (final field in ['showNotice', 'showSquads', 'showMembers', 'showChat', 'showEventNotifications', 'showCrosshair']) {
+        previewSettings = previewSettings.withValue(field, true);
+      }
+      previewSettings = previewSettings.withValue('crosshairOpacity', 0.6).withValue('crosshairSize', 16.0);
+      await tester.pumpWidget(_app(OverlayPresetImportPreview(name: '舰桥布局 · 导入预览',
+        settings: previewSettings, layout: snapshot.layout, currentSettings: snapshot.settings)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('overlay-import-confirm')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      if (width != 360) {
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/overlay-import-${width.toInt()}.png'));
+      }
+      await tester.ensureVisible(find.text('查看详细设置'));
+      await tester.tap(find.text('查看详细设置'));
+      await tester.pumpAndSettle();
+      expect(find.text('准星透明度'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('cold opening is cancellable and is not shown as unavailable', (tester) async {
+    tester.view.physicalSize = const Size(1240, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final pending = OverlayRuntimeSnapshot.fromMap({
+      'schemaVersion': 1, 'windowState': 'opening', 'isVisible': false,
+      'appliedRevision': 42, 'hotkeyState': 'registered', 'followGameState': 'followingGame',
+      'requestedSkin': 'Default', 'effectiveSkin': 'Default', 'usedFallbackSkin': false,
+      'retryable': false,
+    });
+    final workspace = _MemoryWorkspacePort(_workspaceSnapshot())..runtime = pending;
+    final module = OverlaySettingsModule(InMemoryOverlaySettingsAdapter(), workspacePort: workspace);
+    addTearDown(module.dispose);
+    await module.initialize();
+    await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('正在打开信息浮层…'), findsOneWidget);
+    expect(find.text('取消打开'), findsOneWidget);
+    expect(find.text('当前无法使用信息浮层'), findsNothing);
+    await tester.tap(find.byKey(const Key('overlay-runtime-action')));
+    await tester.pumpAndSettle();
+    expect(workspace.lastRuntimeAction, OverlayRuntimeAction.close);
+    expect(find.text('信息浮层已关闭'), findsOneWidget);
+  });
   test(
     'returning to Fleet Standard clears the previous locked appearance theme',
     () {
@@ -508,7 +606,7 @@ void main() {
     expect(find.text('有尚未保存的更改'), findsOneWidget);
     await tester.tap(find.byTooltip('撤销'));
     await tester.pump();
-    expect(find.text('所有更改已保存'), findsOneWidget);
+    expect(find.text('已保存'), findsOneWidget);
     await tester.tap(find.byTooltip('重做'));
     await tester.pump();
     expect(find.text('有尚未保存的更改'), findsOneWidget);
@@ -519,7 +617,7 @@ void main() {
       OverlayWorkspaceMutationKind.saveActive,
     );
     expect(workspace.lastExpectedRevision, 42);
-    expect(find.text('所有更改已保存'), findsOneWidget);
+    expect(find.text('已保存'), findsOneWidget);
 
     expect(find.byKey(const Key('overlay-group-nav-appearance')), findsNothing);
     await tester.tap(find.byKey(const Key('overlay-appearance-center-entry')));
@@ -695,39 +793,121 @@ void main() {
     await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
     await tester.pumpAndSettle();
 
-    expect(find.text('场景快捷预设'), findsOneWidget);
-    expect(find.text('组队房间'), findsOneWidget);
-    expect(find.byKey(const Key('overlay-active-preset')), findsNothing);
-    expect(find.byKey(const Key('overlay-active-preset-name')), findsOneWidget);
-    expect(
-      find.byKey(const Key('overlay-preset-name-save-hint')),
-      findsOneWidget,
-    );
-    final nameFieldRect = tester.getRect(
-      find.byKey(const Key('overlay-active-preset-name')),
-    );
-    final manageButtonRect = tester.getRect(
-      find.byKey(const Key('overlay-preset-manage')),
-    );
-    final appearanceEntryRect = tester.getRect(
-      find.byKey(const Key('overlay-appearance-center-entry')),
-    );
-    expect(nameFieldRect.top, closeTo(manageButtonRect.top, 1));
-    expect(nameFieldRect.bottom, closeTo(manageButtonRect.bottom, 1));
-    expect(nameFieldRect.top, closeTo(appearanceEntryRect.top, 1));
-    expect(nameFieldRect.bottom, closeTo(appearanceEntryRect.bottom, 1));
-    await tester.tap(find.byKey(const Key('overlay-quick-preset-preset2')));
+    expect(find.byKey(const Key('overlay-preset-toolbar')), findsOneWidget);
+    expect(find.byKey(const Key('overlay-active-preset-name')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('overlay-preset-selector-preset1')));
     await tester.pumpAndSettle();
-    expect(
-      port.lastMutation?.kind,
-      OverlayWorkspaceMutationKind.activatePreset,
-    );
+    await tester.tap(find.text('组队预设').last);
+    await tester.pumpAndSettle();
+    expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.activatePreset);
     expect(port.lastMutation?.presetId, 'preset2');
-
-    await tester.tap(find.byKey(const Key('overlay-add-preset')));
+    await tester.tap(find.descendant(of: find.byKey(const Key('overlay-preset-toolbar')), matching: find.byType(DropdownButton<String>)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新增预设').last);
     await tester.pumpAndSettle();
     expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.createPreset);
     expect(port.lastMutation?.name, '新预设');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('B1 cancelling preset switch keeps the actual selection and draft', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final port = _MemoryWorkspacePort(_workspaceSnapshot(includePartyPreset: true));
+    final module = OverlaySettingsModule(InMemoryOverlaySettingsAdapter(), workspacePort: port);
+    addTearDown(module.dispose);
+    await module.initialize();
+    module.workspace!.updateSetting('showNotice', false);
+    await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pumpAndSettle();
+    final selector = find.byKey(const ValueKey('overlay-preset-selector-preset1'));
+    for (final choice in ['组队预设', '新增预设']) {
+      await tester.tap(selector);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(choice).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<DropdownButton<String>>(selector).value, 'preset1');
+      expect(module.workspace!.projection.value.dirty, isTrue);
+      expect(port.lastMutation, isNull);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final width in [960.0, 1057.0, 1217.0, 1440.0]) {
+    testWidgets('B2 B3 B4 workspace remains usable at content width $width', (tester) async {
+      tester.view.physicalSize = Size(width, 820);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final module = OverlaySettingsModule(InMemoryOverlaySettingsAdapter(), workspacePort: _MemoryWorkspacePort(_workspaceSnapshot()));
+      addTearDown(module.dispose);
+      await module.initialize();
+      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(const Key('overlay-workspace-toolbar'))).height, lessThanOrEqualTo(130));
+      expect(find.byKey(const Key('overlay-workspace-save')), findsNothing);
+      final preview = find.byKey(const Key('overlay-preview-stage'));
+      if (width < 1280) {
+        expect(tester.getSize(preview).width, greaterThan(640));
+        final before = tester.getRect(preview);
+        await tester.tap(find.byKey(const Key('overlay-settings-expand')));
+        await tester.pumpAndSettle();
+        await tester.drag(find.byKey(const Key('overlay-settings-dock')), const Offset(0, -180));
+        await tester.pumpAndSettle();
+        expect(tester.getRect(preview), before);
+        await tester.tap(find.byKey(const Key('overlay-settings-expand')));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byKey(const Key('overlay-preview-background')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('太空示意').last);
+      await tester.pumpAndSettle();
+      expect(module.workspace!.projection.value.dirty, isFalse);
+      await tester.tap(find.byKey(const Key('overlay-preview-zoom')));
+      await tester.pumpAndSettle();
+      final viewer = tester.widget<InteractiveViewer>(find.byKey(const Key('overlay-preview-actual-size')));
+      expect(viewer.scaleEnabled, isFalse);
+      expect(viewer.transformationController!.value.getMaxScaleOnAxis(), 1);
+      await tester.drag(find.byKey(const Key('overlay-preview-actual-size')), const Offset(-60, -30));
+      await tester.pumpAndSettle();
+      expect(module.workspace!.projection.value.dirty, isFalse);
+      module.workspace!.updateSetting('showNotice', false);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('overlay-workspace-save')), findsOneWidget);
+      module.workspace!.undo();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('overlay-workspace-save')), findsNothing);
+      expect(find.byTooltip('重做'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('A7 account source hides legacy scene on preset cards', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final module = OverlaySettingsModule(
+      InMemoryOverlaySettingsAdapter(),
+      workspacePort: _MemoryWorkspacePort(_workspaceSnapshot(includePartyPreset: true)),
+    );
+    addTearDown(module.dispose);
+    await module.initialize();
+    await tester.pumpWidget(_app(OverlayWorkspacePresetBar(
+      projection: module.workspace!.projection.value,
+      module: module.workspace!,
+      showLegacyScene: false,
+      onImport: () {}, onExport: () {}, onOpenAppearance: () {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('组队房间'), findsNothing);
+    expect(find.text('自动'), findsNothing);
+    expect(find.text('预设'), findsOneWidget);
+    expect(find.text('点击切换预设。'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -747,12 +927,12 @@ void main() {
     await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.byKey(const Key('overlay-active-preset-name')),
-      '深空行动',
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('overlay-active-preset-rename')));
+    await tester.tap(find.byKey(const Key('overlay-preset-manage')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重命名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '深空行动');
+    await tester.tap(find.text('确定'));
     await tester.pumpAndSettle();
 
     expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.renamePreset);
@@ -782,7 +962,7 @@ void main() {
 
     expect(find.byKey(const Key('overlay-runtime-card')), findsOneWidget);
     expect(find.byKey(const Key('overlay-group-navigation')), findsNothing);
-    expect(find.byKey(const Key('overlay-preview-stage')), findsNothing);
+    expect(find.byKey(const Key('overlay-preview-stage')), findsOneWidget);
     expect(find.byKey(const Key('overlay-runtime-preview')), findsOneWidget);
     expect(find.text('屏幕布局'), findsNothing);
     expect(find.text('信息浮层已关闭'), findsOneWidget);
@@ -1936,12 +2116,9 @@ void editorRegressionTests() {
           )
           .toList();
       double intrinsicWidth(Text text) {
-        final painter = TextPainter(
-          text: TextSpan(text: text.data, style: text.style),
-          textDirection: TextDirection.ltr,
-          maxLines: 1,
-        )..layout();
-        return painter.width;
+        // Include the same inherited family, fallback and letter spacing as
+        // the actual rendered Text, rather than measuring an isolated style.
+        return tester.getSize(find.byWidget(text)).width;
       }
 
       final requiredLaneWidth =
@@ -2250,6 +2427,9 @@ void editorRegressionTests() {
       find.byKey(const Key('overlay-appearance-preview-unavailable-Verdict')),
       findsOneWidget,
     );
+    expect(find.byType(ComingSoonBadge), findsWidgets);
+    expect(find.text('此外观即将推出'), findsOneWidget);
+    expect(find.text('制作中'), findsNothing);
     expect(
       tester
           .widget<FilledButton>(
@@ -2847,7 +3027,39 @@ void editorRegressionTests() {
     expect(find.byKey(const Key('overlay-fullscreen-editor')), findsOneWidget);
     expect(window.entered, isTrue);
   });
-  testWidgets('live preview directly moves and resizes the selected module', (
+  testWidgets('B2 B5 current module and barrage open compact settings; resizing keeps zoom', (tester) async {
+    tester.view.physicalSize = const Size(1100, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final module = OverlaySettingsModule(InMemoryOverlaySettingsAdapter(), workspacePort: _MemoryWorkspacePort(_workspaceSnapshot()));
+    addTearDown(module.dispose);
+    await module.initialize();
+    module.workspace!.updateSetting('showNotice', true);
+    module.workspace!.updateSetting('showChat', true);
+    module.workspace!.updateSetting('chatDisplayMode', 'FullScreenBarrage');
+    await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('overlay-runtime-preview-Notice')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('overlay-settings-dock')), findsOneWidget);
+    expect(find.byKey(const Key('overlay-field-showNotice')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('overlay-settings-expand')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('overlay-runtime-preview-barrage-lane-0')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('overlay-field-chatDisplayMode')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('overlay-settings-expand')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('overlay-preview-zoom')));
+    await tester.pumpAndSettle();
+    tester.view.physicalSize = const Size(1440, 900);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('overlay-preview-actual-size')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('B5 inline preview selects without moving or resizing modules', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1000);
@@ -2872,23 +3084,13 @@ void editorRegressionTests() {
     expect(previewMember, findsOneWidget);
     await tester.drag(previewMember, const Offset(50, 30));
     await tester.pumpAndSettle();
-    final moved = module.workspace!.projection.value.layout[2];
-    expect(
-      moved.x,
-      greaterThan(before.x),
-      reason: 'Dragging the live preview must update the shared draft',
-    );
-    final resize = find.descendant(
-      of: find.byKey(const Key('overlay-preview-stage')),
-      matching: find.byKey(const Key('overlay-layout-resize-Members')),
-    );
-    expect(resize, findsOneWidget);
-    await tester.drag(resize, const Offset(22, 18));
-    await tester.pumpAndSettle();
-    expect(
-      module.workspace!.projection.value.layout[2].width,
-      greaterThan(moved.width),
-    );
+    final after = module.workspace!.projection.value.layout[2];
+    expect(after.x, before.x, reason: 'B5 inline preview selects without editing layout');
+    expect(after.y, before.y);
+    expect(after.width, before.width);
+    expect(find.byKey(const Key('overlay-layout-resize-Members')), findsNothing);
+    expect(find.byKey(const Key('overlay-field-memberNameMode')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -3180,6 +3382,7 @@ Future<void> _loadPreviewFonts() async {
   for (final font in {
     'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
     'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
+    'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
     'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
   }.entries) {
     await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();

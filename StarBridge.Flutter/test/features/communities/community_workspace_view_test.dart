@@ -127,7 +127,14 @@ void main() {
       await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
       await settleCommunityImages(tester);
       final banner = find.byType(CommunityMemberBanner);
-      final fields = ['示例成员 · 你', '探索', '美服', 'C2 Hercules', '奥里森', '游戏中'];
+      final fields = [
+        '示例成员 · 你',
+        '探索',
+        '美服',
+        'C2 Hercules',
+        'ARRIVAL · 地点待确认',
+        '游戏中',
+      ];
       double? previous;
       for (final field in fields) {
         final value = find.descendant(of: banner, matching: find.text(field));

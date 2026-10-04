@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,14 +8,19 @@ import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_settings_models.dart';
+import 'overlay_preset_import_preview.dart';
+import 'overlay_preset_transfer.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_scene_picker.dart';
+import 'overlay_source_binding_field.dart';
+import 'overlay_chat_sources_field.dart';
+import 'overlay_source_limit_notice.dart';
+import 'overlay_roster_editor.dart';
 import 'overlay_workspace_appearance_center.dart';
 import 'overlay_workspace_controls.dart';
 import 'overlay_workspace_editor_state.dart';
 import 'overlay_workspace_fullscreen.dart';
 import 'overlay_workspace_group_navigation.dart';
-import 'overlay_workspace_layout_editor.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_module.dart';
 import 'overlay_workspace_module_style_controls.dart';
@@ -27,10 +30,16 @@ import 'overlay_workspace_runtime_card.dart';
 import 'overlay_workspace_schema.dart';
 
 class OverlayWorkspacePage extends StatefulWidget {
-  const OverlayWorkspacePage({required this.module, this.scenes, super.key});
+  const OverlayWorkspacePage({
+    required this.module,
+    this.scenes,
+    this.roster,
+    super.key,
+  });
 
   final OverlayWorkspaceModule module;
   final OverlaySceneController? scenes;
+  final OverlayRosterPort? roster;
 
   @override
   State<OverlayWorkspacePage> createState() => _OverlayWorkspacePageState();
@@ -39,10 +48,19 @@ class OverlayWorkspacePage extends StatefulWidget {
 class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
   String _group = overlayWorkspaceGroupOrder.first;
   bool _appearanceCenterOpen = false;
+  bool _settingsOpen = false;
   final _editor = OverlayWorkspaceEditorState();
+  final _previewKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _editor.addListener(_selectionChanged);
+  }
 
   @override
   void dispose() {
+    _editor.removeListener(_selectionChanged);
     _editor.dispose();
     super.dispose();
   }
@@ -75,7 +93,11 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
       (preset) => preset.id == snapshot.activePresetId,
     );
     final fields = overlayWorkspaceFieldSpecs
-        .where((field) => field.group == _group && (widget.scenes == null || field.field != 'scenePreference'))
+        .where(
+          (field) =>
+              field.group == _group &&
+              (widget.scenes == null || field.field != 'scenePreference'),
+        )
         .toList(growable: false);
     return Stack(
       children: [
@@ -93,7 +115,28 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
           ),
         Align(
           alignment: AlignmentDirectional.bottomCenter,
-          child: _SaveBar(projection: projection, module: widget.module),
+          child: MediaQuery.disableAnimationsOf(context)
+              ? (projection.dirty
+                    ? _SaveBar(projection: projection, module: widget.module)
+                    : const SizedBox.shrink())
+              : AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  reverseDuration: const Duration(milliseconds: 100),
+                  switchInCurve: const Cubic(0.16, 1, 0.3, 1),
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween(
+                        begin: const Offset(0, .15),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  ),
+                  child: projection.dirty
+                      ? _SaveBar(projection: projection, module: widget.module)
+                      : const SizedBox.shrink(),
+                ),
         ),
       ],
     );
@@ -104,190 +147,287 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
     OverlayWorkspaceProjection projection,
     OverlayWorkspacePreset active,
     List<OverlayWorkspaceFieldSpec> fields,
-  ) {
-    final tokens = context.tokens;
-    return Padding(
-      padding: EdgeInsetsDirectional.fromSTEB(
-        tokens.space.xl,
-        tokens.space.lg,
-        tokens.space.xl,
-        88,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: _Header(activePresetName: active.name)),
-              SizedBox(width: tokens.space.lg),
-              Expanded(
-                child: OverlayWorkspaceRuntimeCard(
-                  projection: projection,
-                  onAction: () => _runRuntimeAction(projection),
-                ),
-              ),
-            ],
-          ),
-          if (projection.failure case final failure?) ...[
-            SizedBox(height: tokens.space.md),
-            _Failure(failure: failure, onRetry: widget.module.refresh),
-          ],
-          SizedBox(height: tokens.space.md),
-          OverlayWorkspacePresetBar(
-            projection: projection,
-            module: widget.module,
-            onImport: () => _importPreset(projection),
-            onExport: () => _exportPreset(active),
-            onOpenAppearance: () =>
-                setState(() => _appearanceCenterOpen = true),
-          ),
-          SizedBox(height: tokens.space.md),
-          Expanded(
-            child: KeyedSubtree(
-              key: const Key('overlay-workspace-content'),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 190,
-                    child: OverlayWorkspaceGroupNavigation(
-                      selected: _group,
-                      onSelected: (value) => setState(() => _group = value),
-                    ),
-                  ),
-                  SizedBox(width: tokens.space.md),
-                  SizedBox(
-                    width: 400,
-                    child: SingleChildScrollView(
-                      key: const Key('overlay-settings-dock'),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          OverlayWorkspaceSettingsGroup(
-                            group: _group,
-                            fields: fields,
-                            settings: projection.settings!,
-                            appearances: projection.snapshot!.appearances,
-                            onChanged: widget.module.updateSetting,
-                            onExperiencePreset:
-                                widget.module.applyExperiencePreset,
-                            footer: _moduleStyleControls(projection),
-                          ),
-                          if (_group == 'startup') ...[
-                            SizedBox(height: tokens.space.md),
-                            OverlayWorkspaceHotkeyCard(
-                              hotkey: projection.hotkey!,
-                              onBindingChanged: (value) =>
-                                  widget.module.updateHotkey(binding: value),
-                              onEnabledChanged: (value) =>
-                                  widget.module.updateHotkey(enabled: value),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: tokens.space.md),
-                  Expanded(
-                    child: OverlayWorkspacePreviewStage(
-                      editorCanvas: OverlayWorkspaceInteractivePreview(
-                        module: widget.module,
-                        editor: _editor,
-                      ),
-                      projection: projection,
-                      fullscreenButton: _fullscreenButton,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  ) => _workspace(context, projection, active, fields, wide: true);
 
   Widget _compactWorkspace(
     BuildContext context,
     OverlayWorkspaceProjection projection,
     OverlayWorkspacePreset active,
     List<OverlayWorkspaceFieldSpec> fields,
-  ) {
+  ) => _workspace(context, projection, active, fields, wide: false);
+
+  Widget _settings(
+    OverlayWorkspaceProjection projection,
+    List<OverlayWorkspaceFieldSpec> fields,
+  ) => SingleChildScrollView(
+    key: const Key('overlay-settings-dock'),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OverlayWorkspaceSettingsGroup(
+          group: _group,
+          fields: fields,
+          settings: projection.settings!,
+          appearances: projection.snapshot!.appearances,
+          onChanged: widget.module.updateSetting,
+          onExperiencePreset: widget.module.applyExperiencePreset,
+          footer: _moduleStyleControls(projection),
+          header: _sourceField(projection),
+        ),
+        if (_group == 'startup')
+          OverlayWorkspaceHotkeyCard(
+            hotkey: projection.hotkey!,
+            onBindingChanged: (value) =>
+                widget.module.updateHotkey(binding: value),
+            onEnabledChanged: (value) =>
+                widget.module.updateHotkey(enabled: value),
+          ),
+      ],
+    ),
+  );
+
+  Widget? _sourceField(OverlayWorkspaceProjection projection) {
+    final module = switch (_group) {
+      'notice' => OverlaySourceModule.notice,
+      'fleetOverview' => OverlaySourceModule.overview,
+      'members' => OverlaySourceModule.members,
+      'chat' => OverlaySourceModule.chat,
+      'events' => OverlaySourceModule.events,
+      _ => null,
+    };
+    if (module == null ||
+        projection.snapshot?.sourcePresetsEnabled != true ||
+        projection.sources == null) {
+      return null;
+    }
+    if (module == OverlaySourceModule.chat) {
+      return OverlayChatSourcesField(
+        value: projection.sources!,
+        scenes: widget.scenes,
+        onChanged: projection.busy ? null : widget.module.updateChatSources,
+        onSingleChanged: projection.busy
+            ? null
+            : (value) => widget.module.updateModuleSource(module, value),
+      );
+    }
+    return OverlaySourceBindingField(
+      key: Key('overlay-module-source-${module.name}'),
+      value: projection.sources!.forModule(module),
+      scenes: widget.scenes,
+      onChanged: projection.busy
+          ? null
+          : (value) => widget.module.updateModuleSource(module, value),
+    );
+  }
+
+  Widget _workspace(
+    BuildContext context,
+    OverlayWorkspaceProjection projection,
+    OverlayWorkspacePreset active,
+    List<OverlayWorkspaceFieldSpec> fields, {
+    required bool wide,
+  }) {
     final tokens = context.tokens;
-    final horizontalPadding = MediaQuery.sizeOf(context).width < 720
-        ? tokens.space.md
-        : tokens.space.xl;
-    return SingleChildScrollView(
-      key: const Key('overlay-workspace-content'),
-      padding: EdgeInsetsDirectional.fromSTEB(
-        horizontalPadding,
-        tokens.space.lg,
-        horizontalPadding,
-        104,
-      ),
+    final preview = OverlayWorkspacePreviewStage(
+      key: _previewKey,
+      projection: projection,
+      fullscreenButton: _fullscreenButton,
+      editor: _editor,
+      module: widget.module,
+    );
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, projection.dirty ? 76 : 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _Header(activePresetName: active.name),
-          SizedBox(height: tokens.space.md),
-          OverlayWorkspaceRuntimeCard(
-            projection: projection,
-            onAction: () => _runRuntimeAction(projection),
-            showPreview: true,
-            editorCanvas: OverlayWorkspaceInteractivePreview(
-              module: widget.module,
-              editor: _editor,
-            ),
-            fullscreenButton: _fullscreenButton,
+          Column(
+            key: const Key('overlay-workspace-toolbar'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final title = Text(
+                    _copy(context, 'overlay.title'),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  );
+                  final runtime = OverlayWorkspaceRuntimeCard(
+                    projection: projection,
+                    compact: true,
+                    onAction: () => _runRuntimeAction(projection),
+                  );
+                  return constraints.maxWidth >= 760
+                      ? Row(
+                          children: [
+                            Expanded(child: title),
+                            runtime,
+                          ],
+                        )
+                      : Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          children: [title, runtime],
+                        );
+                },
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _copy(context, 'overlay.workspace.description'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              OverlayWorkspacePresetBar(
+                scenes: widget.scenes,
+                compact: true,
+                showLegacyScene: widget.scenes == null,
+                projection: projection,
+                module: widget.module,
+                onImport: () => _importPreset(projection),
+                onExport: () => _exportPreset(active),
+                onOpenAppearance: () =>
+                    setState(() => _appearanceCenterOpen = true),
+                sourceSelector: widget.scenes == null
+                    ? null
+                    : OverlayScenePicker(
+                        controller: widget.scenes!,
+                        compact: true,
+                      ),
+              ),
+            ],
           ),
-          if (projection.failure case final failure?) ...[
-            SizedBox(height: tokens.space.md),
+          if (projection.failure case final failure?)
             _Failure(failure: failure, onRetry: widget.module.refresh),
-          ],
-          SizedBox(height: tokens.space.md),
-          OverlayWorkspacePresetBar(
-            projection: projection,
-            module: widget.module,
-            onImport: () => _importPreset(projection),
-            onExport: () => _exportPreset(active),
-            onOpenAppearance: () =>
-                setState(() => _appearanceCenterOpen = true),
-          ),
-          SizedBox(height: tokens.space.md),
-          _GroupSelector(
-            selected: _group,
-            onSelected: (value) => setState(() => _group = value),
-          ),
-          SizedBox(height: tokens.space.md),
-          OverlayWorkspaceSettingsGroup(
-            group: _group,
-            fields: fields,
-            settings: projection.settings!,
-            appearances: projection.snapshot!.appearances,
-            onChanged: widget.module.updateSetting,
-            onExperiencePreset: widget.module.applyExperiencePreset,
-            footer: _moduleStyleControls(projection),
-          ),
-          if (_group == 'startup') ...[
-            SizedBox(height: tokens.space.md),
-            OverlayWorkspaceHotkeyCard(
-              hotkey: projection.hotkey!,
-              onBindingChanged: (value) =>
-                  widget.module.updateHotkey(binding: value),
-              onEnabledChanged: (value) =>
-                  widget.module.updateHotkey(enabled: value),
+          if (projection.runtime.failureCode ==
+              'overlay.sources_limit_exceeded')
+            OverlaySourceLimitNotice(
+              module: widget.module,
+              scenes: widget.scenes,
             ),
-          ],
+          const SizedBox(height: 12),
+          Expanded(
+            key: const Key('overlay-workspace-content'),
+            child: wide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        width: 190,
+                        child: OverlayWorkspaceGroupNavigation(
+                          selected: _group,
+                          onSelected: _selectGroup,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: preview),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 380,
+                        child: _settings(projection, fields),
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              key: ValueKey('overlay-group-compact-$_group'),
+                              initialValue: _group,
+                              isExpanded: true,
+                              decoration: const InputDecoration(isDense: true),
+                              items: [
+                                for (final group
+                                    in overlayWorkspaceNavigationGroupOrder)
+                                  DropdownMenuItem(
+                                    value: group,
+                                    child: Text(
+                                      overlayWorkspaceGroupName(context, group),
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                if (value != null) _selectGroup(value);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            key: const Key('overlay-settings-expand'),
+                            onPressed: () =>
+                                setState(() => _settingsOpen = !_settingsOpen),
+                            child: Text(
+                              _copy(
+                                context,
+                                _settingsOpen
+                                    ? 'overlay.workspace.hideSettings'
+                                    : 'overlay.workspace.showSettings',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(child: preview),
+                            if (_settingsOpen)
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 380,
+                                  ),
+                                  child: Material(
+                                    elevation: 8,
+                                    color: tokens.surfaces.panel.fill,
+                                    child: _settings(projection, fields),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ],
       ),
     );
   }
 
-  Widget? _moduleStyleControls(OverlayWorkspaceProjection projection) {
-    if (_group == 'startup' && widget.scenes != null) {
-      return OverlayScenePicker(controller: widget.scenes!);
+  static const _keyByGroup = {
+    'notice': 'Notice',
+    'fleetOverview': 'Squads',
+    'members': 'Members',
+    'chat': 'Chat',
+    'events': 'Events',
+    'crosshair': 'Crosshair',
+  };
+
+  void _selectGroup(String group) {
+    setState(() {
+      _group = group;
+      _settingsOpen = true;
+    });
+    _editor.change(() => _editor.selectedKey = _keyByGroup[group]);
+  }
+
+  void _selectionChanged() {
+    final group = _keyByGroup.entries
+        .where((entry) => entry.value == _editor.selectedKey)
+        .firstOrNull
+        ?.key;
+    if (mounted && group != null && (group != _group || !_settingsOpen)) {
+      setState(() {
+        _group = group;
+        _settingsOpen = true;
+      });
     }
+  }
+
+  Widget? _moduleStyleControls(OverlayWorkspaceProjection projection) {
     if (!const {
       'notice',
       'fleetOverview',
@@ -297,7 +437,7 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
     }.contains(_group)) {
       return null;
     }
-    return OverlayWorkspaceModuleStyleControls(
+    final controls = OverlayWorkspaceModuleStyleControls(
       group: _group,
       layout: projection.layout,
       settings: projection.settings!,
@@ -305,12 +445,22 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
           widget.module.updateLayoutItem(item, coalesce: coalesce),
       onSettingChanged: widget.module.updateSetting,
     );
+    return _group == 'members' && widget.roster != null
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              controls,
+              OverlayRosterButton(port: widget.roster!),
+            ],
+          )
+        : controls;
   }
 
   Future<void> _runRuntimeAction(OverlayWorkspaceProjection projection) async {
     final language = Localizations.localeOf(context).toLanguageTag();
     switch (projection.runtime.windowState) {
       case 'open':
+      case 'opening':
         await widget.module.closeRuntime(language);
         return;
       case 'failed':
@@ -326,12 +476,12 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
   }
 
   Future<void> _exportPreset(OverlayWorkspacePreset preset) async {
-    final package = jsonEncode({
-      'schemaVersion': 1,
-      'name': preset.name,
-      'settings': preset.settings.toMap(),
-      'layout': preset.layout.map((item) => item.toMap()).toList(),
-    });
+    final package = OverlayPresetTransfer(
+      name: preset.name,
+      settings: preset.settings,
+      layout: preset.layout,
+      sources: preset.sources,
+    ).serialize();
     await Clipboard.setData(ClipboardData(text: package));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -340,15 +490,16 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
   }
 
   Future<void> _importPreset(OverlayWorkspaceProjection projection) async {
-    final controller = TextEditingController();
+    var importText = '';
     final payload = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(_copy(context, 'overlay.workspace.importTitle')),
+        scrollable: true,
         content: SizedBox(
           width: 560,
           child: TextField(
-            controller: controller,
+            onChanged: (value) => importText = value,
             minLines: 8,
             maxLines: 14,
             decoration: InputDecoration(
@@ -363,32 +514,38 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
             child: Text(_copy(context, 'overlay.workspace.cancel')),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: Text(_copy(context, 'overlay.workspace.import')),
+            onPressed: () => Navigator.pop(context, importText),
+            child: Text(_copy(context, 'overlay.importPreview.inspect')),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (payload == null || payload.trim().isEmpty) return;
     try {
-      final document = jsonDecode(payload);
-      if (document is! Map || document['schemaVersion'] != 1) {
+      final package = OverlayPresetTransfer.parse(payload);
+      // A legacy Host must not silently import a v2 package while losing its sources.
+      if (package.sources != null &&
+          projection.snapshot?.sourcePresetsEnabled != true) {
         throw const FormatException();
       }
-      final data = Map<String, Object?>.from(document.cast<String, Object?>());
-      final settings = OverlayWorkspaceSettings.fromMap(
-        stringMap(data['settings']),
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => OverlayPresetImportPreview(
+          name: package.name,
+          settings: package.settings,
+          layout: package.layout,
+          sources: package.sources,
+          removedOrganizationBindings: package.removedOrganizationBindings,
+          currentSettings: projection.settings,
+        ),
       );
-      final layout = objectList(data['layout'])
-          .map((item) => OverlayWorkspaceLayoutItem.fromMap(stringMap(item)))
-          .toList(growable: false);
-      final name = data['name'];
-      if (name is! String || name.trim().isEmpty) throw const FormatException();
+      if (!mounted || confirmed != true) return;
       await widget.module.importPreset(
-        name: name,
-        settings: settings,
-        layout: layout,
+        name: package.name,
+        settings: package.settings,
+        layout: package.layout,
+        sources: package.sources,
       );
     } on Object {
       if (!mounted) return;
@@ -398,95 +555,6 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
         ),
       );
     }
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.activePresetName});
-
-  final String activePresetName;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final copy = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _copy(context, 'overlay.title'),
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        SizedBox(height: tokens.space.xs),
-        Text(
-          _copy(context, 'overlay.workspace.description'),
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(color: tokens.colors.textSecondary),
-        ),
-      ],
-    );
-    final preset = Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: tokens.space.sm,
-        vertical: tokens.space.xs,
-      ),
-      decoration: BoxDecoration(
-        border: Border.all(color: tokens.colors.accent),
-        borderRadius: tokens.shape.small,
-      ),
-      child: Text(
-        _copy(
-          context,
-          'overlay.workspace.currentPreset',
-        ).replaceAll('{name}', activePresetName),
-      ),
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 600) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              copy,
-              SizedBox(height: tokens.space.sm),
-              preset,
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(child: copy),
-            SizedBox(width: tokens.space.md),
-            preset,
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _GroupSelector extends StatelessWidget {
-  const _GroupSelector({required this.selected, required this.onSelected});
-
-  final String selected;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Wrap(
-      spacing: tokens.space.xs,
-      runSpacing: tokens.space.xs,
-      children: overlayWorkspaceNavigationGroupOrder
-          .map(
-            (group) => ChoiceChip(
-              selected: selected == group,
-              label: Text(overlayWorkspaceGroupName(context, group)),
-              onSelected: (_) => onSelected(group),
-            ),
-          )
-          .toList(growable: false),
-    );
   }
 }
 
@@ -552,6 +620,7 @@ class _SaveBar extends StatelessWidget {
               ),
               SizedBox(width: tokens.space.xs),
               FilledButton(
+                key: const Key('overlay-workspace-save'),
                 onPressed: projection.dirty && !projection.busy
                     ? module.save
                     : null,

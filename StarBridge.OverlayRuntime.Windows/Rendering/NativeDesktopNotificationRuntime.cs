@@ -11,6 +11,7 @@ using System.Windows.Threading;
 /// <summary>One Native Host-owned STA; no App/MainWindow, tray, polling of business data or second client.</summary>
 public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
 {
+    public string DiagnosticTransport => "wpfCard";
     private readonly int _parentId;
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _started = new();
@@ -20,12 +21,12 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     private Dispatcher? _dispatcher;
     private DispatcherTimer? _timer;
     private volatile bool _disposed;
-    private long _tick = Stopwatch.GetTimestamp();
     private string? _lastSuppression;
     private sealed class Entry(DesktopNotification notice, Window window) {
         internal readonly DesktopNotification Notice = notice;
         internal readonly Window Window = window;
         internal TimeSpan Remaining = TimeSpan.FromSeconds(notice.Activity is null ? 8 : 4.5);
+        internal long LastTick = Stopwatch.GetTimestamp();
         internal System.Drawing.Rectangle Area;
         internal bool Exiting;
     }
@@ -58,26 +59,31 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
                 // Activity is ephemeral; never queue it behind business reminders.
                 if (_visible.Count >= 3) return new(false, "queueFull");
                 var shown = Show(notice);
-                return new(shown, shown ? "submitted" : "unavailable");
+                return new(shown, shown ? "submitted" : "unavailable") { DiagnosticOutcome = shown ? "windowShown" : "unavailable" };
             }
             if (_visible.Count < 3) {
                 var shown = Show(notice);
-                return new(shown, shown ? "submitted" : DesktopNotificationEnvironment.UserReason(_lastSuppression));
+                return new(shown, shown ? "submitted" : DesktopNotificationEnvironment.UserReason(_lastSuppression)) {
+                    DiagnosticOutcome = shown ? "windowShown" : null
+                };
             }
             if (_pending.Count >= 12) return new(false, "queueFull");
-            _pending.Enqueue(notice); return new(true, "submitted");
+            _pending.Enqueue(notice); notice.ReportDiagnostic("queued");
+            return new(true, "submitted") { DiagnosticOutcome = "queued" };
         }, DispatcherPriority.Send, token).Task.WaitAsync(token).ConfigureAwait(false);
     }
 
     private bool Allowed(DesktopNotification notice)
     {
-        var reason = DesktopNotificationEnvironment.SuppressionReason();
+        var reason = notice.Activity is not null
+            ? DesktopNotificationEnvironment.PlayerActivitySuppressionReason()
+            : DesktopNotificationEnvironment.SuppressionReason();
         if (reason.Length == 0) {
             var foreground = GetForegroundWindow();
             bool? appForeground = foreground == IntPtr.Zero || GetWindowThreadProcessId(foreground, out var id) == 0
                 ? null : id == _parentId;
             reason = DesktopNotificationVisibility.SuppressionReason(notice,
-                notice.Activity is null ? _game.Read().State : "unknown", appForeground);
+                notice.Activity is null ? _game.ReadCurrentState() : "unknown", appForeground);
         }
         if (reason != _lastSuppression) {
             _lastSuppression = reason;
@@ -88,13 +94,14 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
 
     private bool Show(DesktopNotification notice)
     {
-        if (!notice.IsCurrent()) return false;
+        if (!notice.IsCurrent()) { notice.ReportDiagnostic("expired"); return false; }
         var passive = notice.Activity != null;
         var window = new Window { Width = passive ? 368 : 380, Height = passive ? 88 : 170, WindowStyle = WindowStyle.None,
             ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, ShowActivated = false,
             AllowsTransparency = true, Background = System.Windows.Media.Brushes.Transparent,
             Topmost = true, Left = -32000, Top = -32000, Title = "StarBridge notification" };
         var entry = new Entry(notice, window);
+        window.ContentRendered += (_, _) => notice.ReportDiagnostic("contentRendered");
         window.Content = passive ? new PlayerActivityNotificationCard(notice) : new DesktopNotificationCard(notice, () => Open(entry), () => Dismiss(entry));
         var animate = DesktopNotificationMotion.Enabled(notice.ReduceMotion);
         window.Opacity = !passive && animate ? 0 : 1;
@@ -119,12 +126,15 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
             entry.Area = screen.WorkingArea;
             new WindowInteropHelper(window).EnsureHandle();
             Place(entry, screen.WorkingArea, _visible.Count - 1);
-            if (!notice.IsCurrent() || !Allowed(notice)) { Remove(entry); return false; }
+            if (!notice.IsCurrent()) { notice.ReportDiagnostic("expired"); Remove(entry); return false; }
+            if (!Allowed(notice)) { notice.ReportDiagnostic(DesktopNotificationEnvironment.UserReason(_lastSuppression)); Remove(entry); return false; }
             window.Show();
+            entry.LastTick = Stopwatch.GetTimestamp();
+            notice.ReportDiagnostic("windowShown");
             Place(entry, screen.WorkingArea, _visible.Count - 1);
             if (!passive) DesktopNotificationMotion.Fade(window, 1, 180, animate);
             return true;
-        } catch { Remove(entry); return false; }
+        } catch { notice.ReportDiagnostic("showFailed"); Remove(entry); return false; }
     }
 
     private void Place(Entry entry, System.Drawing.Rectangle area, int index)
@@ -137,7 +147,8 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
             .Sum(other => (int)Math.Ceiling(other.Window.Height * scale) + gap);
         var x = entry.Notice.Position.EndsWith("Left") ? area.Left + gap : area.Right - width - gap;
         var y = entry.Notice.Position.StartsWith("top") ? area.Top + gap + offset : area.Bottom - height - gap - offset;
-        SetWindowPos(handle, new IntPtr(-1), x, y, width, height, 0x10); // NOACTIVATE
+        if (!SetWindowPos(handle, new IntPtr(-1), x, y, width, height, 0x10))
+            entry.Notice.ReportDiagnostic("placementFailed"); // NOACTIVATE
     }
 
     private void Open(Entry entry)
@@ -176,6 +187,7 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
 
     private void Remove(Entry entry) {
         if (!_visible.Contains(entry)) return;
+        entry.Notice.ReportDiagnostic("removed");
         DesktopNotificationMotion.Cancel(entry.Window);
         if (entry.Window.Content is UIElement card) {
             DesktopNotificationMotion.Cancel(card);
@@ -191,29 +203,42 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
         if (dispatcher == null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
         dispatcher.BeginInvoke(ClearOnThread, DispatcherPriority.Send);
     }
-    private void ClearOnThread() { _pending.Clear(); foreach (var e in _visible.ToArray()) Remove(e); }
+    private void ClearOnThread() {
+        foreach (var notice in _pending) notice.ReportDiagnostic("cleared");
+        _pending.Clear();
+        foreach (var e in _visible.ToArray()) { e.Notice.ReportDiagnostic("cleared"); Remove(e); }
+    }
     public void ClearMessages()
     {
         var dispatcher = _dispatcher;
         if (dispatcher == null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
         dispatcher.BeginInvoke(() => {
             var activities = _pending.Where(n => n.Activity != null).ToArray();
+            foreach (var notice in _pending.Where(n => n.Activity == null)) notice.ReportDiagnostic("cleared");
             _pending.Clear();
             foreach (var activity in activities) _pending.Enqueue(activity);
-            foreach (var entry in _visible.Where(e => e.Notice.Activity == null).ToArray()) Remove(entry);
+            foreach (var entry in _visible.Where(e => e.Notice.Activity == null).ToArray()) { entry.Notice.ReportDiagnostic("cleared"); Remove(entry); }
         }, DispatcherPriority.Send);
     }
     private void Tick()
     {
-        var now = Stopwatch.GetTimestamp(); var elapsed = Stopwatch.GetElapsedTime(_tick, now); _tick = now;
+        var now = Stopwatch.GetTimestamp();
         foreach (var e in _visible.ToArray()) {
+            // Each card owns its display interval. Dispatcher time spent before
+            // a new card was shown must not consume its visible lifetime.
+            var elapsed = Stopwatch.GetElapsedTime(e.LastTick, now);
+            e.LastTick = now;
             if (e.Notice.Activity != null || !e.Window.IsMouseOver) e.Remaining -= elapsed;
             // Privacy revocation and system suppression bypass animation: never retain stale text for a fade.
-            if (!e.Notice.IsCurrent() || !Allowed(e.Notice)) Remove(e);
-            else if (e.Remaining <= TimeSpan.Zero) Dismiss(e);
+            if (!e.Notice.IsCurrent()) { e.Notice.ReportDiagnostic("expired"); Remove(e); }
+            else if (!Allowed(e.Notice)) { e.Notice.ReportDiagnostic(DesktopNotificationEnvironment.UserReason(_lastSuppression)); Remove(e); }
+            else if (e.Remaining <= TimeSpan.Zero) { e.Notice.ReportDiagnostic("elapsed"); Dismiss(e); }
         }
-        while (_visible.Count < 3 && _pending.TryDequeue(out var next))
-            if (next.IsCurrent() && Allowed(next)) Show(next);
+        while (_visible.Count < 3 && _pending.TryDequeue(out var next)) {
+            if (!next.IsCurrent()) next.ReportDiagnostic("expired");
+            else if (!Allowed(next)) next.ReportDiagnostic(DesktopNotificationEnvironment.UserReason(_lastSuppression));
+            else Show(next);
+        }
     }
     private void Run()
     {

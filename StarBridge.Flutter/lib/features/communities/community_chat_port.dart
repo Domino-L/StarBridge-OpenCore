@@ -1,7 +1,15 @@
 import 'dart:convert';
+
+import '../overlay_settings/overlay_preset_sources.dart';
+
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+
+/// Optional, cancellable, short-lived sidebar preview. Not a read receipt.
+abstract interface class CommunityChatPreviewPort {
+  Future<CommunityChatPage> readChatPreview(String targetRef);
+}
 
 abstract interface class CommunityChatPort {
   Stream<void> get invalidations;
@@ -159,7 +167,7 @@ final class CommunityChatDetail {
     if (row['attachment'] != null) {
       final value = _map(row['attachment']);
       if (value['kind'] != 'overlay_preset') throw const FormatException();
-      final package = _text(
+      var package = _text(
         value,
         'overlayPresetPackage',
         96 * 1024,
@@ -172,17 +180,44 @@ final class CommunityChatDetail {
       for (final entry in rawBody.entries) {
         final key = entry.key.toLowerCase();
         if (body.containsKey(key) ||
-            !{'version', 'name', 'settings', 'layout'}.contains(key)) {
+            !{
+              'version',
+              'name',
+              'settings',
+              'layout',
+              'sources',
+              'removedorganizationbindings',
+            }.contains(key)) {
           throw const FormatException();
         }
         body[key] = entry.value;
       }
-      if (body['version'] != 1 ||
+      if ((body['version'] != 1 && body['version'] != 2) ||
           !['name', 'settings', 'layout'].every(
             (key) =>
                 body[key] is String && (body[key] as String).trim().isNotEmpty,
           )) {
         throw const FormatException();
+      }
+      if (body['version'] == 1 && body.length != 4) {
+        throw const FormatException();
+      }
+      if (body['version'] == 2) {
+        if (body.length != 6 || body['removedorganizationbindings'] is! bool) {
+          throw const FormatException();
+        }
+        final sources = OverlayPresetSources.fromMap(_map(body['sources']));
+        package = jsonEncode({
+          'Version': 2,
+          'Name': body['name'],
+          'Settings': body['settings'],
+          'Layout': body['layout'],
+          'Sources': sources.forTransfer().toMap(),
+          'RemovedOrganizationBindings':
+              body['removedorganizationbindings'] == true ||
+              sources.hasOrganizationBindings,
+        });
+        if (package.length > 96 * 1024) throw const FormatException();
       }
       attachment = Map.unmodifiable({
         'kind': 'overlay_preset',

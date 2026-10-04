@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_preview_identity.dart';
+import 'overlay_preview_sources.dart';
 import 'overlay_workspace_models.dart';
 
 /// Preview-only fixtures. Nothing here enters the workspace mutation or feed.
@@ -74,18 +75,45 @@ class OverlayPreviewContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
+    final source = OverlayPreviewSourceScope.of(context, moduleKey);
+    final room = source == null
+        ? settings['scenePreference'] == 'PartyRoom'
+        : source.id == 'room';
     String copy(String key) => strings.text('overlay.sample.$key');
-    String moduleTitle() =>
-        moduleKey == 'Squads' && settings['scenePreference'] == 'PartyRoom'
+    String moduleTitle() => moduleKey == 'Squads' && room
         ? copy('room')
         : strings.text('overlay.workspace.module.$moduleKey');
 
+    if (source?.unavailable == true) {
+      return Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            OverlayPreviewSourceTitle(
+              moduleKey: moduleKey,
+              child: _previewText(context, moduleTitle(), size: 12),
+            ),
+            const SizedBox(height: 8),
+            _previewText(
+              context,
+              strings.text('overlay.source.unavailable'),
+              size: 10,
+              maxLines: 2,
+            ),
+          ],
+        ),
+      );
+    }
     if (!simulate) {
       return Center(
-        child: Text(
-          moduleTitle(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        child: OverlayPreviewSourceTitle(
+          moduleKey: moduleKey,
+          child: Text(
+            moduleTitle(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       );
     }
@@ -93,11 +121,11 @@ class OverlayPreviewContent extends StatelessWidget {
     return KeyedSubtree(
       key: Key('overlay-simulated-structure-$moduleKey'),
       child: switch (moduleKey) {
-        'Notice' => _NoticePreview(copy: copy, settings: settings),
+        'Notice' => _NoticePreview(copy: copy, settings: settings, room: room),
         'Squads' => _FleetOverviewPreview(
           copy: copy,
           title: moduleTitle(),
-          room: settings['scenePreference'] == 'PartyRoom',
+          room: room,
         ),
         'Members' => _MembersPreview(
           copy: copy,
@@ -165,15 +193,19 @@ Widget _previewFittedText(
 );
 
 class _NoticePreview extends StatelessWidget {
-  const _NoticePreview({required this.copy, required this.settings});
+  const _NoticePreview({
+    required this.copy,
+    required this.settings,
+    required this.room,
+  });
 
   final _PreviewCopy copy;
   final OverlayWorkspaceSettings settings;
+  final bool room;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final room = settings['scenePreference'] == 'PartyRoom';
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 7, 18, 7),
       child: Row(
@@ -183,12 +215,15 @@ class _NoticePreview extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _previewText(
-                  context,
-                  room ? copy('roomCommunication') : copy('communication'),
-                  size: 11.2,
-                  color: tokens.colors.accent,
-                  weight: FontWeight.w600,
+                OverlayPreviewSourceTitle(
+                  moduleKey: 'Notice',
+                  child: _previewText(
+                    context,
+                    room ? copy('roomCommunication') : copy('communication'),
+                    size: 11.2,
+                    color: tokens.colors.accent,
+                    weight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 _previewText(
@@ -251,12 +286,15 @@ class _FleetOverviewPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _previewText(
-            context,
-            title,
-            size: 12,
-            color: tokens.colors.accent,
-            weight: FontWeight.w600,
+          OverlayPreviewSourceTitle(
+            moduleKey: 'Squads',
+            child: _previewText(
+              context,
+              title,
+              size: 12,
+              color: tokens.colors.accent,
+              weight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 10),
           Row(
@@ -353,12 +391,15 @@ class _MembersPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _previewText(
-            context,
-            title,
-            size: 12,
-            color: tokens.colors.accent,
-            weight: FontWeight.w600,
+          OverlayPreviewSourceTitle(
+            moduleKey: 'Members',
+            child: _previewText(
+              context,
+              title,
+              size: 12,
+              color: tokens.colors.accent,
+              weight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 8),
           for (final row in rows)
@@ -467,12 +508,15 @@ class _ChatPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _previewText(
-            context,
-            title,
-            size: 12,
-            color: tokens.colors.accent,
-            weight: FontWeight.w600,
+          OverlayPreviewSourceTitle(
+            moduleKey: 'Chat',
+            child: _previewText(
+              context,
+              title,
+              size: 12,
+              color: tokens.colors.accent,
+              weight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 7),
           for (final sample in samples)
@@ -555,12 +599,15 @@ class _EventPreview extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: _previewText(
-                        context,
-                        copy('memberOnline'),
-                        size: 11,
-                        color: tokens.colors.accent,
-                        weight: FontWeight.w600,
+                      child: OverlayPreviewSourceTitle(
+                        moduleKey: 'Events',
+                        child: _previewText(
+                          context,
+                          copy('memberOnline'),
+                          size: 11,
+                          color: tokens.colors.accent,
+                          weight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     _previewText(

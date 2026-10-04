@@ -38,6 +38,10 @@ internal sealed partial class FriendsReader
         lock (_targetGate)
         {
             var owner = Owner(bearer, scope);
+            var retainedChats = _friendChatTargets
+                .Where(key => _conversations.TryGetValue(key, out var chat) && chat.Owner == owner && chat.Expires > DateTimeOffset.UtcNow)
+                .GroupBy(key => _conversations[key].Id, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => new KeyValuePair<string, ConversationTarget>(group.First(), _conversations[group.First()]), StringComparer.Ordinal);
             if (!append) {
                 _targets.Clear(); // An explicit directory refresh replaces its command targets.
                 foreach (var old in _friendChatTargets) _conversations.Remove(old);
@@ -62,8 +66,11 @@ internal sealed partial class FriendsReader
                 RememberAvatar(reference, _targets[reference]);
                 string? chatReference = null;
                 if (row.Relationship == "friend") {
-                    chatReference = Guid.NewGuid().ToString("N");
-                    _conversations[chatReference] = new(owner, row.AccountId, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: row.Callsign);
+                    var retained = retainedChats.GetValueOrDefault(row.AccountId);
+                    chatReference = retained.Key ?? Guid.NewGuid().ToString("N");
+                    _conversations[chatReference] = retained.Value is { } existing
+                        ? existing with { Expires = DateTimeOffset.UtcNow.AddMinutes(30), DisplayName = row.Callsign }
+                        : new(owner, row.AccountId, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: row.Callsign);
                     _friendChatTargets.Add(chatReference);
                 }
                 return row with { TargetRef = reference, ChatTargetRef = chatReference, Actions = actions,

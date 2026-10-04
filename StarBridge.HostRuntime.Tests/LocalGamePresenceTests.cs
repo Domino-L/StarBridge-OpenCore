@@ -6,6 +6,7 @@ internal static class LocalGamePresenceTests
 {
     internal static async Task Verify()
     {
+        NotificationAfterIdleExit();
         bool? running = false;
         var time = new Clock();
         var reader = new LocalGamePresenceReader(() => running, time);
@@ -57,6 +58,40 @@ internal static class LocalGamePresenceTests
         using var unsupported = new HostBridgeDispatcher("old-host");
         var rejected = await unsupported.DispatchAsync(BridgeEnvelope.Request("host.getGamePresence", "missing", 0));
         Require(rejected.Response.Error?.Code == BridgeErrorCodes.CapabilityUnavailable, "Optional capability fails closed.");
+    }
+
+    private static void NotificationAfterIdleExit()
+    {
+        bool? running = true;
+        var clock = new Clock();
+        using var reader = new LocalGamePresenceReader(() => running, clock);
+        Require(reader.Read().State == "running", "Session observer has a previous running sample.");
+        Require(reader.ReadCurrentState() == "running", "Current game observation is running.");
+        running = false;
+        clock.Now += TimeSpan.FromMinutes(1);
+        Require(reader.ReadCurrentState() == "notRunning",
+            "First notification after an idle game exit must not inherit a stale running state.");
+        foreach (var requests in new[] { 0, 1 })
+        {
+            var notice = new StarBridge.HostRuntime.Notifications.DesktopNotification(
+                Guid.NewGuid(), false, 0, 0, "source", "bottomRight", "zh-CN", "dark", () => true,
+                DirectMessage: requests == 0 ? new("Test", "Synthetic", 1) : null, FriendRequests: requests);
+            Require(StarBridge.HostRuntime.Notifications.DesktopNotificationVisibility.SuppressionReason(
+                notice, reader.ReadCurrentState(), false) == "", "Post-exit social card is eligible in the background.");
+            Require(StarBridge.HostRuntime.Notifications.DesktopNotificationVisibility.SuppressionReason(
+                notice, "running", false) == "", "A background game alone cannot block private/friend cards after OS checks.");
+            Require(StarBridge.HostRuntime.Notifications.DesktopNotificationVisibility.SuppressionReason(
+                notice, "unknown", false) == "game-active-or-unknown", "Unknown game observation remains suppressed.");
+        }
+        Require(reader.Read().State == "running", "One-shot notification reads do not bypass session exit confirmation.");
+        clock.Now += TimeSpan.FromSeconds(10);
+        Require(reader.Read().State == "notRunning", "Session exit still confirms after its own ten-second grace.");
+        running = null;
+        Require(reader.ReadCurrentState() == "unknown", "An uncertain probe cannot enable a desktop card.");
+        reader.Dispose();
+        Require(reader.ReadCurrentState() == "unknown", "Disposed notification observation fails closed.");
+        using var failing = new LocalGamePresenceReader((Func<bool?>)(() => throw new IOException("synthetic")));
+        Require(failing.ReadCurrentState() == "unknown", "Probe errors cannot enable a desktop card.");
     }
 
     private static void Require(bool condition, string message)

@@ -147,6 +147,8 @@ class GameLogPanel extends StatelessWidget {
               children: [
                 Text('${text('expected')} · ${value.expectedHandle ?? '—'}'),
                 Text('${text('detected')} · ${value.handle ?? '—'}'),
+                if (value.handle == null && value.recentHandle != null)
+                  Text('${text('recentDetected')} · ${value.recentHandle}'),
               ],
             ),
             SizedBox(height: t.space.md),

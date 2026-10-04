@@ -10,6 +10,49 @@ import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.d
 
 void main() {
   test(
+    'nonfriends never acquire friend sharing from an overbroad search response',
+    () {
+      for (final relation in [
+        'none',
+        'incoming',
+        'outgoing',
+        'blocked',
+        'unknown',
+      ]) {
+        final result = parseFriendsSnapshot({
+          'schemaVersion': 1,
+          'query': 'Search',
+          'friends': [],
+          'incoming': [],
+          'outgoing': [],
+          'blocked': [],
+          'results': [
+            {
+              'callsign': 'Search',
+              'gameId': '',
+              'relationship': relation,
+              'updatedAt': '2026-09-06T12:00:00Z',
+              'shared': {
+                'presence': 'InGame',
+                'sameServer': true,
+                'serverId': 'private-server',
+                'serverRegion': 'private-region',
+                'ship': 'private-ship',
+                'location': 'private-location',
+                'lastOnlineAt': '2026-09-06T12:00:00Z',
+              },
+              'sharedLabels': {
+                'ship': {'en': 'Private ship'},
+              },
+            },
+          ],
+        });
+        expect(result.results.single.shared, isEmpty);
+        expect(result.results.single.sharedLabels, isEmpty);
+      }
+    },
+  );
+  test(
     'unsupported Host fails closed without requesting account data',
     () async {
       final host = Harness(capabilities: []);

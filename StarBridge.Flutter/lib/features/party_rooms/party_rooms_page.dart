@@ -9,10 +9,14 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
 import 'room_management_actions.dart';
+import 'room_current_toolbar.dart';
 import 'room_invitation_dialog.dart';
 import 'room_chat_panel.dart';
 import 'room_directory_card.dart';
 import 'room_members_panel.dart';
+import 'room_workspace_layout.dart';
+import 'room_member_removal.dart';
+import 'room_member_transfer.dart';
 import 'room_feedback.dart';
 import 'room_tag_catalog.dart';
 import 'room_tag_picker.dart';
@@ -22,9 +26,11 @@ class PartyRoomsPage extends StatefulWidget {
   const PartyRoomsPage({
     required this.module,
     this.openCommunityInvite,
+    this.onRefresh,
     super.key,
   });
   final PartyRoomsModule module;
+  final VoidCallback? onRefresh;
   final Future<void> Function(BuildContext, String)? openCommunityInvite;
   @override
   State<PartyRoomsPage> createState() => _PartyRoomsPageState();
@@ -87,8 +93,11 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                     TextButton(
                       onPressed: module.busy
                           ? null
-                          : () => module.refresh(foreground: true),
-                      child: Text(t(module.manualRefreshing ? 'refreshing' : 'refresh')),
+                          : widget.onRefresh ??
+                                () => module.refresh(foreground: true),
+                      child: Text(
+                        t(module.manualRefreshing ? 'refreshing' : 'refresh'),
+                      ),
                     ),
                   ],
                 ),
@@ -103,71 +112,76 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                   const SizedBox(height: 12),
                 ],
                 if (module.supportsCommands) ...[
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (module.supportsInvitations)
-                        OutlinedButton(
-                          style: semanticActionStyle(
-                            context,
-                            ActionTone.info,
-                            emphasis: ActionEmphasis.outlined,
+                  if (current)
+                    RoomCurrentToolbar(module: module)
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (module.supportsInvitations)
+                          OutlinedButton(
+                            style: semanticActionStyle(
+                              context,
+                              ActionTone.info,
+                              emphasis: ActionEmphasis.outlined,
+                            ),
+                            onPressed: module.canCommand
+                                ? () => showRoomInvitations(context, module)
+                                : null,
+                            child: Text(
+                              '${roomActionText(context, 'invitations')} · ${module.directory?.receivedInvitations.length ?? 0}',
+                            ),
                           ),
-                          onPressed: module.canCommand
-                              ? () => showRoomInvitations(context, module)
-                              : null,
-                          child: Text(
-                            '${roomActionText(context, 'invitations')} · ${module.directory?.receivedInvitations.length ?? 0}',
+                        if (module.supportsInvitations &&
+                            current &&
+                            module.selectedRoom?.viewerIsHost == true)
+                          OutlinedButton(
+                            onPressed: module.canInvite
+                                ? () => showRoomInvitations(
+                                    context,
+                                    module,
+                                    host: true,
+                                  )
+                                : null,
+                            child: Text(
+                              roomActionText(context, 'inviteFriends'),
+                            ),
                           ),
-                        ),
-                      if (module.supportsInvitations &&
-                          current &&
-                          module.selectedRoom?.viewerIsHost == true)
-                        OutlinedButton(
-                          onPressed: module.canInvite
-                              ? () => showRoomInvitations(
-                                  context,
-                                  module,
-                                  host: true,
-                                )
-                              : null,
-                          child: Text(roomActionText(context, 'inviteFriends')),
-                        ),
-                      if (!current) ...[
-                        FilledButton(
-                          onPressed:
-                              module.canCommand &&
-                                  (module.directory?.tagOptions.isNotEmpty ??
-                                      false)
-                              ? () => createRoomDialog(context, module)
-                              : null,
-                          child: Text(roomActionText(context, 'create')),
-                        ),
-                        OutlinedButton(
-                          onPressed: module.canCommand
-                              ? () => joinRoomDialog(context, module)
-                              : null,
-                          child: Text(roomActionText(context, 'codeJoin')),
-                        ),
-                      ] else
-                        OutlinedButton(
-                          style: semanticActionStyle(
-                            context,
-                            roomLeaveTone(module.selectedRoom),
-                            emphasis: ActionEmphasis.outlined,
+                        if (!current) ...[
+                          FilledButton(
+                            onPressed:
+                                module.canCommand &&
+                                    (module.directory?.tagOptions.isNotEmpty ??
+                                        false)
+                                ? () => createRoomDialog(context, module)
+                                : null,
+                            child: Text(roomActionText(context, 'create')),
                           ),
-                          onPressed: module.canCommand
-                              ? () => leaveRoomDialog(context, module)
-                              : null,
-                          child: Text(roomActionText(context, 'leave')),
-                        ),
-                      if (current &&
-                          module.supportsManagement &&
-                          module.selectedRoom?.viewerIsHost == true)
-                        RoomManagementActions(module: module),
-                    ],
-                  ),
+                          OutlinedButton(
+                            onPressed: module.canCommand
+                                ? () => joinRoomDialog(context, module)
+                                : null,
+                            child: Text(roomActionText(context, 'codeJoin')),
+                          ),
+                        ] else
+                          OutlinedButton(
+                            style: semanticActionStyle(
+                              context,
+                              roomLeaveTone(module.selectedRoom),
+                              emphasis: ActionEmphasis.outlined,
+                            ),
+                            onPressed: module.canCommand
+                                ? () => leaveRoomDialog(context, module)
+                                : null,
+                            child: Text(roomActionText(context, 'leave')),
+                          ),
+                        if (current &&
+                            module.supportsManagement &&
+                            module.selectedRoom?.viewerIsHost == true)
+                          RoomManagementActions(module: module),
+                      ],
+                    ),
                   if (module.commandMessage != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -342,8 +356,15 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
           room: rooms[index],
           serverTime: module.directory!.serverTime,
           selected: rooms[index].id == module.selectedRoomId,
-          onSelect: module.writing ? null : () => module.select(rooms[index].id),
-          onJoin: !module.canCommand
+          onSelect: module.writing
+              ? null
+              : () => module.select(rooms[index].id),
+          onJoin:
+              !module.canCommand ||
+                  module.directory!.viewerPendingRoomIds?.contains(
+                        rooms[index].id,
+                      ) ==
+                      true
               ? null
               : () {
                   module.select(rooms[index].id);
@@ -357,6 +378,12 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
       key: ValueKey('members-${module.directory!.currentRoomId}'),
       room: module.selectedRoom!,
       serverTime: module.directory!.serverTime,
+      onRemove: module.canManage
+          ? (member) => removeRoomMember(context, module, member)
+          : null,
+      onTransfer: module.canTransferHost
+          ? (member) => transferRoomHost(context, module, member)
+          : null,
     );
     final chat = module.chat;
     if (chat == null || !chat.available) return members;
@@ -365,23 +392,6 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
       module: chat,
       openCommunityInvite: widget.openCommunityInvite,
     );
-    return LayoutBuilder(
-      builder: (context, constraints) => constraints.maxWidth >= 850
-          ? Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(flex: 3, child: members),
-                const SizedBox(width: 12),
-                Expanded(flex: 2, child: panel),
-              ],
-            )
-          : Column(
-              children: [
-                Expanded(child: members),
-                const SizedBox(height: 12),
-                Expanded(child: panel),
-              ],
-            ),
-    );
+    return RoomWorkspaceLayout(members: members, chat: panel);
   }
 }

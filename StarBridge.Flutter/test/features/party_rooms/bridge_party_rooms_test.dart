@@ -10,6 +10,30 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  for (final status in ['hostTransferred', 'removed', 'updated']) {
+    test('transfer accepts only its authoritative status: $status', () async {
+      final host = Harness(
+        capabilities: managementCapabilities,
+        commandPayload: {
+          'schemaVersion': 1,
+          'status': status,
+          'directory': emptyDirectory,
+        },
+      );
+      final result = await host.adapter.execute(
+        RoomCommand(RoomOperation.transferHost, {
+          'roomId': 'r1',
+          'memberToken': 'opaque-member',
+        }),
+      );
+      expect(result.status, status == 'hostTransferred' ? status : 'unknown');
+      expect(result.accepted, status == 'hostTransferred');
+      final sent = host.requests.where((r) => r.name == 'partyRooms.execute');
+      expect(sent, hasLength(1));
+      expect(sent.single.payload['operation'], 'transferHost');
+      await host.close();
+    });
+  }
   test(
     'management requires its optional Host capability before dispatch',
     () async {

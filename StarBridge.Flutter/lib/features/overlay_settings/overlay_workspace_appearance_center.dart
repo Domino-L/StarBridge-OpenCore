@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../design_system/components/coming_soon.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -417,6 +418,9 @@ class _AvailabilityBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!released && !previewAvailable && !current) {
+      return const ComingSoonBadge();
+    }
     final tokens = context.tokens;
     final color = current
         ? tokens.colors.accent

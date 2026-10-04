@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../app/shell/widgets/attention_badge.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'communities_module.dart';
 import 'community_logo.dart';
@@ -26,8 +27,14 @@ class CommunityShortcuts extends StatefulWidget {
 class _CommunityShortcutsState extends State<CommunityShortcuts>
     with CommunityVisibleRefresh<CommunityShortcuts> {
   @override
+  Duration get communityRefreshInterval => const Duration(seconds: 3);
+  // Presence transport health does not certify delivery of chat changes.
+  // Keep the existing shell reconciliation even after successful reads;
+  // activity events still refresh immediately via chatAttention.
+  @override
   Future<void> refreshVisibleCommunity() async {
     if (!widget.module.joinedLoaded) await widget.module.refreshJoined();
+    widget.module.chatAttention.refresh();
   }
 
   int revision = 0;
@@ -36,6 +43,7 @@ class _CommunityShortcutsState extends State<CommunityShortcuts>
     super.initState();
     revision = widget.module.accountRevision;
     widget.module.addListener(_changed);
+    widget.module.chatAttention.addListener(_changed);
     scheduleMicrotask(() {
       if (mounted) unawaited(widget.module.refreshJoined());
     });
@@ -56,8 +64,10 @@ class _CommunityShortcutsState extends State<CommunityShortcuts>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.module != widget.module) {
       oldWidget.module.removeListener(_changed);
+      oldWidget.module.chatAttention.removeListener(_changed);
       revision = widget.module.accountRevision;
       widget.module.addListener(_changed);
+      widget.module.chatAttention.addListener(_changed);
       scheduleMicrotask(() {
         if (mounted) unawaited(widget.module.refreshJoined());
       });
@@ -67,6 +77,7 @@ class _CommunityShortcutsState extends State<CommunityShortcuts>
   @override
   void dispose() {
     widget.module.removeListener(_changed);
+    widget.module.chatAttention.removeListener(_changed);
     super.dispose();
   }
 
@@ -132,11 +143,25 @@ class _CommunityShortcutsState extends State<CommunityShortcuts>
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                CommunityLogo(
-                                  data: row.logo,
-                                  size: 28,
-                                  framed: false,
-                                ),
+                                if (widget.iconOnly &&
+                                    model.chatAttention.count(row.targetRef) >
+                                        0)
+                                  AttentionIconBadge(
+                                    count: model.chatAttention.count(
+                                      row.targetRef,
+                                    ),
+                                    child: CommunityLogo(
+                                      data: row.logo,
+                                      size: 28,
+                                      framed: false,
+                                    ),
+                                  )
+                                else
+                                  CommunityLogo(
+                                    data: row.logo,
+                                    size: 28,
+                                    framed: false,
+                                  ),
                                 if (!widget.iconOnly) ...[
                                   const SizedBox(width: 8),
                                   Expanded(
@@ -149,6 +174,13 @@ class _CommunityShortcutsState extends State<CommunityShortcuts>
                                           .bodySmall,
                                     ),
                                   ),
+                                  if (model.chatAttention.count(row.targetRef) >
+                                      0)
+                                    AttentionCount(
+                                      count: model.chatAttention.count(
+                                        row.targetRef,
+                                      ),
+                                    ),
                                 ],
                               ],
                             ),

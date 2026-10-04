@@ -12,6 +12,20 @@ import '../party_rooms/room_chat_test.dart' as room;
 import 'direct_message_send_test.dart' as direct;
 
 void main() {
+  testWidgets('read failure does not claim the stranger message quota was used', (tester) async {
+    final port = direct.Sender();
+    final module = await direct.opened(port);
+    addTearDown(module.dispose);
+    module.canSend = false;
+    module.error = 'target_changed';
+    module.state = 'friend';
+    await tester.pumpWidget(app(DirectMessageComposer(module)));
+    expect(find.textContaining('3 条'), findsNothing);
+    module.error = null;
+    module.state = 'request_outgoing';
+    await tester.pumpWidget(app(DirectMessageComposer(module)));
+    expect(find.text('已发送 3 条消息，请等待对方回复。'), findsOneWidget);
+  });
   for (final privateChat in [true, false]) {
     testWidgets(
       '${privateChat ? 'private' : 'room'} IME, Shift+Enter and pending-send protection',

@@ -53,7 +53,23 @@ internal static class OverlayOverviewProjection
         ArgumentNullException.ThrowIfNull(sceneContext);
 
         var players = closedPlayers as PlayerRow[] ?? closedPlayers.ToArray();
-        var zh = language?.Equals("zh", StringComparison.OrdinalIgnoreCase) == true;
+        var zh = language?.StartsWith("zh", StringComparison.OrdinalIgnoreCase) == true;
+        if (hasFleet && players.Any(player => player.RealtimeStateUnknown))
+            return new(sceneContext.Kind == OverlaySceneKind.PartyRoom ? zh ? "房间概况" : "PARTY OVERVIEW"
+                    : zh ? "组织概况" : "ORGANIZATION OVERVIEW",
+                zh ? "实时状态未知" : "Realtime status unknown",
+                zh ? $"成员 {players.Length}" : $"Members {players.Length}", "—", "", "", "—", "",
+                StatusPalette.DisabledBrush, [], ShowsPlaceholder: false);
+        if (!hasFleet && sceneContext.Kind is OverlaySceneKind.Community or OverlaySceneKind.PartyRoom)
+        {
+            var organization = sceneContext.Kind == OverlaySceneKind.Community;
+            var traditional = language is "zh-Hant" or "zh-TW";
+            return new(organization ? zh ? "组织概况" : "ORGANIZATION OVERVIEW" : zh ? "房间概况" : "PARTY OVERVIEW",
+                traditional ? organization ? "組織資訊暫不可用" : "房間資訊暫不可用"
+                    : zh ? organization ? "组织信息暂不可用" : "房间信息暂不可用"
+                    : organization ? "Organization information unavailable" : "Room information unavailable",
+                "", "", "", "", "", "", StatusPalette.DisabledBrush, [], ShowsPlaceholder: true);
+        }
         if (sceneContext.Kind == OverlaySceneKind.Community)
         {
             var organization = ProjectFleet(players, hasFleet, localPresence, localShard, language, zh);
@@ -197,9 +213,15 @@ internal static class OverlayOverviewProjection
                     player.ServerShard,
                     localPresence,
                     localShard) == FleetServerRelationshipKind.SameServer);
-        var sameShardSummary = hasComparableLocalServer
-            ? zh ? $"与你同分线 {Number(sameServer)} 人" : $"Same shard as you {Number(sameServer)}"
-            : zh ? "你尚未进入服务器" : "You are not in a server";
+        var peers = players.Where(player => !player.IsSelf && player.SharedPresence == PlayerPresenceKind.InGame).ToArray();
+        var hasCompleteServerEvidence = StarBridge.Core.Overlay.InformationOverlayServerEvidence.CanReportPeerCount(
+            localPresence == PlayerPresenceKind.InGame, hasComparableLocalServer,
+            peers.Length, peers.Count(player => FleetServerRelationship.IsRecognizedShard(player.ServerShard)));
+        var sameShardSummary = !hasComparableLocalServer
+            ? zh ? "你尚未进入服务器" : "You are not in a server"
+            : !hasCompleteServerEvidence
+                ? zh ? "同服务器人数待确认" : "Same-server count unavailable"
+                : zh ? $"房间内与你同服务器 {Number(sameServer)} 人" : $"Room peers on your server {Number(sameServer)}";
         var busiestServerSummary = ProjectBusiestServerSummary(
             players,
             localPresence,
@@ -218,13 +240,17 @@ internal static class OverlayOverviewProjection
         return new OverlayOverviewProjectionResult(
             zh ? "房间概况" : "PARTY OVERVIEW",
             zh
-                ? $"在线 {Number(online)} / {Number(memberCount)}"
-                : $"Online {Number(online)} / {Number(memberCount)}",
+                ? $"成员 {Number(memberCount)} / {(sceneContext.RoomCapacity > 0 ? Number(sceneContext.RoomCapacity) : "—")}"
+                : $"Members {Number(memberCount)} / {(sceneContext.RoomCapacity > 0 ? Number(sceneContext.RoomCapacity) : "—")}",
             zh
-                ? $"游戏中 {Number(inGame)} / {Number(online)}"
-                : $"In game {Number(inGame)} / {Number(online)}",
+                ? $"游戏中 {Number(inGame)} / {Number(memberCount)}"
+                : $"In game {Number(inGame)} / {Number(memberCount)}",
             busiestServerSummary,
-            sameShardSummary,
+            string.Join("\n", new[] {
+                string.Join(" · ", new[] { sceneContext.RoomTitle,
+                    string.IsNullOrWhiteSpace(sceneContext.RoomHostDisplay) ? null : (zh ? "房主 " : "Host ") + sceneContext.RoomHostDisplay }
+                    .Where(value => !string.IsNullOrWhiteSpace(value))),
+                sceneContext.RoomGoal, sameShardSummary }.Where(value => !string.IsNullOrWhiteSpace(value))),
             FormatLocation(topLocations.ElementAtOrDefault(1)),
             topLocations.Count == 0
                 ? zh ? "暂无可显示地点" : "No visible locations"
@@ -324,7 +350,7 @@ internal static class OverlayOverviewProjection
     {
         if (player.IsSelf)
         {
-            return GameServerRegionPresentation.ResolveCode(localShard);
+            return GameServerRegionPresentation.ResolvePreferredCode(localShard, player.ServerRegion);
         }
 
         return GameServerRegionPresentation.ResolvePreferredCode(

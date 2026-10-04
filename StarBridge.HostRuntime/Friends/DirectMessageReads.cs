@@ -13,13 +13,18 @@ internal sealed record ConversationView(string TargetRef, string Callsign, strin
     public string? ConversationKey { get; init; }
     public long? LatestSequence { get; init; }
     public bool? LastMessageIncoming { get; init; }
+    public string? Presence { get; init; }
 }
 internal sealed record ConversationsView(ConversationView[] Conversations, int TotalUnread, DateTimeOffset ServerTime)
 { public int SchemaVersion => 1; }
 internal sealed record DirectMessageView(long Sequence, string MessageId, bool Incoming, string Text,
     DateTimeOffset CreatedAt, string? AttachmentKind)
-{ public DirectCommunityInvitationView? CommunityInvitation { get; init; } }
+{
+    public DirectCommunityInvitationView? CommunityInvitation { get; init; }
+    public DirectRoomInvitationView? RoomInvitation { get; init; }
+}
 internal sealed record DirectCommunityInvitationView(string Title, string Summary, string InviteCode, DateTimeOffset? ExpiresAt);
+internal sealed record DirectRoomInvitationView(string Title, string Summary, string InvitationId, DateTimeOffset ExpiresAt);
 internal sealed record DirectHistoryView(string TargetRef, DirectMessageView[] Messages, long LatestSequence,
     long OldestSequence, bool HasOlder, string State, bool CanSend)
 { public int SchemaVersion => 1; public bool LocalHistoryUnavailable { get; init; } }
@@ -63,7 +68,7 @@ internal sealed partial class FriendsReader
             token.ThrowIfCancellationRequested();
             return await ChatHistoryArchive.Read(archiveAccount, "private:" + target.Id, local.GetString()!);
         }
-        var path = target is null ? "/api/friends/chat/conversations?includePresence=false" :
+        var path = target is null ? "/api/friends/chat/conversations?includePresence=true" :
             "/api/friends/chat/messages?targetAccountId=" + Uri.EscapeDataString(target.Id) + $"&before={before}&after={after}&limit=50";
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
@@ -106,12 +111,14 @@ internal sealed partial class FriendsReader
             long? sequence = entry.TryGetProperty("latestSequence", out var latest) ? latest.GetInt64() : null;
             if (sequence < 0) throw ChatError("data_invalid");
             var sender = entry.TryGetProperty("lastSenderAccountId", out _) ? Text(entry, "lastSenderAccountId", 256) : null;
+            var presence = ChatState(entry) == "friend" ? ReadObservedPresence(user) : null;
             return new ConversationView(reference, Text(user, "callsign", 512), Text(user, "gameId", 512),
-                user.TryGetProperty("avatarImageData", out var avatar) && avatar.ValueKind == JsonValueKind.String ? RoomAvatarProjection.Normalize(avatar.GetString()) : null,
+                user.TryGetProperty("avatarImageData", out var avatar) && avatar.ValueKind == JsonValueKind.String ? RoomAvatarProjection.Normalize(avatar.GetString(), 512 * 1024) : null,
                 MessageText(entry, "lastMessagePreview", 4096), entry.GetProperty("lastMessageAt").GetDateTimeOffset(), unread, ChatState(entry)) {
                     ConversationKey = ConversationKey(Owner(bearer, scope), id, scope),
                     LatestSequence = sequence,
                     LastMessageIncoming = string.IsNullOrWhiteSpace(sender) ? null : sender == id,
+                    Presence = presence switch { "AppOnline" => "online", "InGame" => "inGame", "Away" => "away", "Offline" => "offline", _ => null },
                 };
         }).ToArray();
         var total = root.GetProperty("totalUnread").GetInt32();
@@ -158,6 +165,7 @@ internal sealed partial class FriendsReader
             previous = sequence;
             string? kind = null;
             DirectCommunityInvitationView? invitation = null;
+            DirectRoomInvitationView? roomInvitation = null;
             if (entry.TryGetProperty("attachment", out var attachment) && attachment.ValueKind != JsonValueKind.Null)
             {
                 kind = Text(attachment, "kind", 64) is var k && k is "overlay_preset" or "party_room_invitation" or "fleet_invitation" ? k : "unknown";
@@ -172,9 +180,19 @@ internal sealed partial class FriendsReader
                         ? value.GetDateTimeOffset() : null;
                     invitation = new(title, summary, code, expiry);
                 }
+                if (kind == "party_room_invitation")
+                {
+                    var title = Text(attachment, "title", 64);
+                    var summary = Text(attachment, "summary", 240);
+                    var invitationId = Text(attachment, "roomInvitationId", 80);
+                    if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(summary) ||
+                        invitationId.Length < 8 || invitationId.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
+                        throw ChatError("data_invalid");
+                    roomInvitation = new(title, summary, invitationId, attachment.GetProperty("expiresAt").GetDateTimeOffset());
+                }
             }
             return new DirectMessageView(sequence, id, sender == target.Id, MessageText(entry, "text", 4096), entry.GetProperty("createdAt").GetDateTimeOffset(), kind)
-            { CommunityInvitation = invitation };
+            { CommunityInvitation = invitation, RoomInvitation = roomInvitation };
         }).ToArray();
         var latest = root.GetProperty("latestSequence").GetInt64(); var oldest = root.GetProperty("oldestSequence").GetInt64();
         var hasOlder = root.GetProperty("hasOlder").GetBoolean();

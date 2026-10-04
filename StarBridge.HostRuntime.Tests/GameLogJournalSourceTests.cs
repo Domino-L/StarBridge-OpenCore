@@ -71,6 +71,8 @@ internal static class GameLogJournalSourceTests
     internal static Task LifeEvidenceUsesSameParser()
     {
         using var f = new Fixture(); f.Call();
+        var sink = new LocalGameOverlayEventTests.Sink();
+        using var localEvents = new StarBridge.HostRuntime.Overlay.LocalGameOverlayEventSource(f.Journal, sink, () => f.Owner.Generation, new Clock());
         f.Add("<SHUDEvent_OnNotification> Added notification \"local medical responders are on the way\"");
         f.Add("<UpdateNotificationItem> Notification \"local medical responders are on the way\", Action: Remove");
         f.Add("<AttachmentReceived> Player[Pilot_A] Attachment[synthetic] Port[weapon_attach_hand_right]");
@@ -81,6 +83,11 @@ internal static class GameLogJournalSourceTests
         f.Add("<UpdateNotificationItem> Notification \"incapacitated\", Action: RemoveIgnore");
         f.Call();
         Check(f.Journal.Entries.Any(e => e.EventType == "PlayerDied"), "Death confirmation evidence retained");
+        Check(sink.Notices.Any(e => e.Type == "PlayerDowned" && e.Context == LifeEventContext.SafeZoneMedicalResponse) &&
+              sink.Notices.Any(e => e.Type == "PlayerDied") && sink.Notices.Any(e => e.Type == "PlayerRevived"),
+            "Actual Game.log parser and accepted journal batch independently deliver local life events");
+        Check(sink.Notices.All(e => e.DisplayPlayer == "Pilot_A"),
+            "the accepted Game.log identity reaches local notices without title parsing or current-profile lookup");
         return Task.CompletedTask;
     }
 
@@ -130,17 +137,31 @@ internal static class GameLogJournalSourceTests
     internal static Task ServerNavigationAndPrivateProjection()
     {
         using var f = new Fixture(); f.Call();
+        var sink = new LocalGameOverlayEventTests.Sink();
+        using var localEvents = new StarBridge.HostRuntime.Overlay.LocalGameOverlayEventSource(f.Journal, sink, () => f.Owner.Generation, new Clock());
         f.Add("<Join PU> connected shard[pub_sc_alpha_apse1_123]");
         f.Add("<Join PU> connected shard[pub_sc_alpha_apse1_123]");
         f.Add("<RequestLocationInventory> Player[Pilot_A] requested inventory for Location[Stanton1_Lorville]");
         f.Add("<Player Selected Quantum Target - Local> | AUTH | ANVL_Arrow_101[1]| Player has selected point Area04 as their destination");
         f.Add("<Quantum Drive Arrived - Arrived at Final Destination> CSCItemNavigation::OnQuantumDriveArrived");
         f.Call();
+        Check(sink.Notices.Single(e => e.Type == "ServerJoined").DisplayValue == "ASIA",
+            "actual server parser hands the local overlay a region without the shard code");
         Check(f.Journal.Entries.Count(e => e.EventType == "ServerJoined") == 1, "Join transition not repeated state");
         var expectedLocation = GameLogLocationCatalogTests.HasPack ? "罗威尔" : "Stanton1_Lorville";
         Check(f.Journal.Entries.Any(e => e.Title == "Pilot_A 位置更新：" + expectedLocation),
             "Local journal uses the optional catalog, or preserves the local identifier when absent");
         Check(f.Journal.Entries.Any(e => e.Title.Contains("已抵达导航目标")), "Arrival uses preceding navigation evidence");
+        Check(f.Runtime.CurrentSession.Location.ArrivalPendingConfirmation &&
+            f.Runtime.CurrentSession.Location.ArrivalTargetCode == "Area04",
+            "Current local snapshot must retain arrival awaiting confirmation, even without an optional location catalog.");
+        var serialized = System.Text.Json.JsonSerializer.Serialize(f.Runtime.CurrentSession);
+        Check(!serialized.Contains("ArrivalTargetCode") && !serialized.Contains("Area04"),
+            "Local arrival target is not added to the serialized sharing contract.");
+        f.Add("<RequestLocationInventory> Player[Pilot_A] requested inventory for Location[Stanton1_Lorville]");
+        f.Call();
+        Check(!f.Runtime.CurrentSession.Location.ArrivalPendingConfirmation,
+            "Authoritative local location evidence clears the arrival phase.");
         var count = f.Journal.Entries.Length;
         f.Add("<RequestLocationInventory> Player[Other_Pilot] requested inventory for Location[Stanton1_Lorville]");
         f.Add("NETWORK_STATE player=Pilot_A state=Online");
@@ -151,6 +172,66 @@ internal static class GameLogJournalSourceTests
         f.Call();
         Check(f.Journal.Entries.Count(e => e.EventType == "ServerLeft") == 1, "Only real server transition recorded");
         return Task.CompletedTask;
+    }
+
+    internal static Task CurrentF8CMatchesJournal()
+    {
+        using var f = new Fixture(); f.Call();
+        f.Add("<SHUDEvent_OnNotification> Added notification \"You joined channel 'Anvil F8C Lightning : Pilot_A'\"");
+        f.Call();
+        Check(f.Journal.Entries.Any(e => e.EventType == "PlayerEnteredShip"), "F8C channel creates a live entered-ship event.");
+        var ship = f.Runtime.CurrentSession.Ship;
+        Check(ship.State == "confirmed" && ship.EnglishName!.Contains("F8C"),
+            "The same log read must supply the current F8C snapshot as well as the journal event.");
+        return Task.CompletedTask;
+    }
+
+    internal static Task ShipNamesAndRelease()
+    {
+        using var f = new Fixture(); f.Call();
+        f.Add("<SHUDEvent_OnNotification> Added notification \"You joined channel 'Anvil F8C Lightning : Pilot_A'\"");
+        f.Call();
+        Check(f.Runtime.CurrentSession.Ship.ChineseName == "F8C 闪电",
+            "The official channel name must translate just like the release runtime ID.");
+        Check(f.Journal.Entries.Last().Title.Contains("F8C 闪电"), "The journal uses the same translation as the snapshot.");
+        f.Add("ClearDriver: Local client node accepted 'ANVL_Lightning_F8C_123'"); f.Call();
+        Check(f.Runtime.CurrentSession.Ship.State == "unknown", "Official-name acquisition and runtime-ID release clear the same ship.");
+        f.Runtime.Sample();
+        Check(f.Runtime.CurrentSession.Ship.State == "unknown", "A refresh cannot restore a released ship.");
+        AllCatalogChannelNames();
+        return Task.CompletedTask;
+    }
+
+    private static void AllCatalogChannelNames()
+    {
+        using var pack = typeof(StarBridge.Core.Ships.ShipNameIndex).Assembly.GetManifestResourceStream("StarBridge.ShipNamePack.json")!;
+        using var document = System.Text.Json.JsonDocument.Parse(pack);
+        var count = 0;
+        foreach (var row in document.RootElement.GetProperty("entries").EnumerateArray())
+        {
+            var raw = row.GetProperty("englishName").GetString()!;
+            var runtime = row.GetProperty("runtimeId").GetString()!;
+            var tracker = new GameLogSessionTracker();
+            tracker.Observe("nickname=\"Fixture\" playerGEID=12345");
+            tracker.Observe($"<SHUDEvent_OnNotification> Added notification \"You joined channel '{raw} : Fixture'\"");
+            var ship = tracker.Snapshot(DateTimeOffset.UtcNow).Ship;
+            Check(ship.State == "confirmed", "Every catalog channel model is detected: " + raw);
+            var expected = GameShipNames.Find(raw);
+            Check(ship.ChineseName == expected?.ChineseName, "All log snapshot translations use the shared vocabulary: " + raw);
+            var release = StarBridge.Core.Ships.ShipNameIndex.Bundled.Find(raw)?.RuntimeId is not null ? runtime : raw;
+            tracker.Observe($"<SHUDEvent_OnNotification> Added notification \"You left channel '{release} : Fixture'\"");
+            Check(tracker.Snapshot(DateTimeOffset.UtcNow).Ship.State == "unknown", "Every channel exit clears its exact model: " + raw);
+            count++;
+        }
+        // Explicit punctuation evidence, independent of whether the public pack
+        // currently spells a model with a runtime-style ASCII alias.
+        var punctuated = new GameLogSessionTracker();
+        punctuated.Observe("nickname=\"Fixture\" playerGEID=12345");
+        punctuated.Observe("<SHUDEvent_OnNotification> Added notification \"You joined channel 'Fixture's Mk II : Fixture'\"");
+        Check(punctuated.Snapshot(DateTimeOffset.UtcNow).Ship.State == "confirmed", "Apostrophes inside model names must not break channel recognition.");
+        punctuated.Observe("<SHUDEvent_OnNotification> Added notification \"You left channel 'Fixture's Mk II : Fixture'\"");
+        Check(punctuated.Snapshot(DateTimeOffset.UtcNow).Ship.State == "unknown", "Apostrophes also preserve authoritative channel exit.");
+        Console.WriteLine($"PASS all {count} catalog models through actual channel parsing, snapshot translation and exit");
     }
 
     internal static async Task ClearAndAccountRace()

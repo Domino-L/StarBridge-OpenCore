@@ -9,6 +9,17 @@ using StarBridge.NativeHost;
 using StarBridge.OverlayRuntime.Windows;
 using System.Diagnostics;
 
+// Packaging probe: exit before parent validation, storage, account or UI startup.
+if (args is ["--overlay-source-build-info"])
+{
+    var flag = System.Reflection.CustomAttributeExtensions.GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>(
+        typeof(OverlayBridgeDispatcher).Assembly)
+        .SingleOrDefault(attribute => attribute.Key == "StarBridgeEnableOverlaySourcePresets")?.Value;
+    if (!bool.TryParse(flag, out var enabled)) return 2;
+    Console.WriteLine("overlay-source-presets=" + enabled.ToString().ToLowerInvariant());
+    return 0;
+}
+
 if (!NativeHostStartupOptions.TryParse(args, out var options) || options is null)
 {
     return 2;
@@ -93,14 +104,23 @@ using (var lifetime = new CancellationTokenSource())
         HostDataRoot.CurrentRoot,
         () => account.Generation,
         flutterExecutablePath);
+    var localGamePresence = new StarBridge.HostRuntime.Presence.LocalGamePresenceReader(
+        trustedVersion: () => account.ConfirmedGameVersion,
+        journal: eventJournal?.IsWritable == true ? eventJournal : null);
     var overlayRuntime = WindowsInformationOverlayRuntimeFactory.Create(
         () => account.CurrentGameSession,
         () => account.CurrentOverlayEntitlements,
         () => account.CurrentRoomOverlay,
         () => account.CurrentCommunityOverlay,
         () => account.CurrentOverlaySceneMode,
-        () => applicationPreferences.CurrentLocaleOverride);
+        () => applicationPreferences.CurrentLocaleOverride,
+        () => account.CurrentOverlayRosterPreferences,
+        localGamePresence.Read,
+        account.PrepareCommunityOverlayAsync,
+        account.ReadOverlayModules);
     var reminderSink = overlayRuntime as IContinuousPlayReminderSink;
+    if (!isolatedHangar && overlayRuntime is IInformationOverlayLiveUpdateSink liveOverlay)
+        account.ConfigureLiveOverlayUpdates(liveOverlay);
     if (!isolatedHangar && overlayRuntime is StarBridge.HostRuntime.Privacy.ISharedActivitySink sharedActivities)
         account.ConfigureSharedActivity(sharedActivities);
     var desktopNotifications = WindowsInformationOverlayRuntimeFactory.CreateDesktopNotifications(parent.Id);
@@ -147,19 +167,20 @@ using (var lifetime = new CancellationTokenSource())
             .. isolatedHangar ? Array.Empty<string>() : LocalEventExportDispatcher.AdvertisedCapabilities,
             .. reminderSink is null ? Array.Empty<string>() : ContinuousPlayBridgeDispatcher.AdvertisedCapabilities,
             .. isolatedHangar ? Array.Empty<string>() : GameplayDataExportDispatcher.AdvertisedCapabilities
-        ], gamePresence: new StarBridge.HostRuntime.Presence.LocalGamePresenceReader(
-            trustedVersion: () => account.ConfirmedGameVersion,
-            journal: eventJournal?.IsWritable == true ? eventJournal : null));
+        ], gamePresence: localGamePresence);
     var hangarSandbox = StarBridge.HostRuntime.Hangar.HangarSandboxDispatcher.FromEnvironment(() => account.Generation);
     var overlay = new OverlayBridgeDispatcher(
         HostDataRoot.CurrentRoot,
         () => account.Generation,
         () => account.CurrentGameSession,
-        overlayRuntime);
+        overlayRuntime,
+        () => account.CurrentOverlayPresetTrigger,
+        () => account.CurrentOverlaySourceScope);
     await overlay.InitializeRuntimeAsync(lifetime.Token);
     var audio = NotificationAudioBridgeDispatcher.CreateDefault(HostDataRoot.CurrentRoot,
         Path.Combine(AppContext.BaseDirectory, "Assets", "Audio"), () => account.Generation,
-        new WindowsNotificationActivity(parent.Id).CanNotify);
+        activityEnvironment.CanNotify,
+        activityEnvironment.CanPlaySocialSound);
     var playReminder = reminderSink is null ? null : new ContinuousPlayReminderRuntime(
         HostDataRoot.CurrentRoot, () =>
         {
@@ -167,8 +188,12 @@ using (var lifetime = new CancellationTokenSource())
             return new PlayProcessObservation(process.State, process.StartedAt);
         }, reminderSink);
     var notifications = new NotificationSettingsBridgeDispatcher(HostDataRoot.CurrentRoot, () => account.Generation,
-        new WindowsNotificationActivity(parent.Id).CanNotify, overlayRuntime as IInformationOverlayReminderSink,
-        desktopNotifications, account.NotificationActivation);
+        activityEnvironment.CanNotify, overlayRuntime as IInformationOverlayReminderSink,
+        desktopNotifications, account.NotificationActivation, account.SocialNotification,
+        gameIdentityPolicy: account.ReadGameIdentityNotificationPolicyAsync,
+        canNotifyGameIdentity: activityEnvironment.CanNotifyGameIdentity,
+        isGameIdentityCurrent: account.IsGameIdentityNotificationCurrent,
+        desktopSuppressionReason: activityEnvironment.DesktopSuppressionReason);
     if (!isolatedHangar) account.ConfigureCommunityNotifications(notifications);
     using var dispatcher = new CompositeBridgeDispatcher(
         lifecycle,
@@ -207,6 +232,8 @@ using (var lifetime = new CancellationTokenSource())
         playReminder: playReminder is null ? null : new ContinuousPlayBridgeDispatcher(playReminder, () => account.Generation),
         storageMigration: storageMigration);
     // Reverse using order stops ticks and invalidates callbacks before overlay disposal.
+    using var localOverlayEvents = eventJournal?.IsWritable == true && overlayRuntime is ILocalGameOverlayEventSink localEventSink
+        ? new LocalGameOverlayEventSource(eventJournal, localEventSink, () => account.Generation) : null;
     using var ownedPlayReminder = playReminder;
     using var playReminderDriver = playReminder is null ? null : new ContinuousPlayReminderDriver(playReminder);
     await using var server = new NativeHostPipeServer(options.PipeName, dispatcher);

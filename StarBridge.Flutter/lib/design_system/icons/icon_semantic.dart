@@ -10,6 +10,7 @@ enum StarBridgeIconSemantic {
   tools,
   settings,
   friends,
+  messages,
   notifications,
   account,
   profile,

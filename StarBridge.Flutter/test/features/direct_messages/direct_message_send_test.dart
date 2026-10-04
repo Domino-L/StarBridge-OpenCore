@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/features/direct_messages/direct_messages_module.dart';
 import 'package:starbridge_flutter/features/direct_messages/example_direct_messages.dart';
 
@@ -196,11 +197,13 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(fixtures.app(locale, ExampleDirectMessages.new));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('示例好友 (Example)'));
+      await tester.tap(find.text('示例好友  @Example'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField), '待发送\n第二行');
       await tester.pump();
-      await tester.tap(find.byType(TextButton).first);
+      await tester.tap(
+        find.byTooltip(AppStrings.resolve(locale).text('direct.backList')),
+      );
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       await tester.tap(

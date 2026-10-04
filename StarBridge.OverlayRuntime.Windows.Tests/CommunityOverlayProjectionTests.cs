@@ -9,6 +9,7 @@ internal static class CommunityOverlayProjectionTests
 {
     internal static void RunAll()
     {
+        LiveCommunicationAndWithdrawal();
         SelfRemainsVisibleWhenSharedPresenceIsOffline();
         var organization = new InformationOverlayCommunityContent("synthetic-org", "Organization name",
             [new("Case_Handle", "Display", "Officer", "AppOnline", "", "", "", false)]);
@@ -22,7 +23,7 @@ internal static class CommunityOverlayProjectionTests
             "Roster projection preserves authoritative identity, role and self flag.");
         Check(player.SharedEventTypes == 0 && !player.ShowMemberActions,
             "Displaying members does not grant event sharing or management actions.");
-        Check(projected.Chat.Length == 0 && projected.Scene.Context.ChatChannelId is null,
+        Check(projected.Chat.Length == 0 && projected.Scene.Context.ChatChannelId == "organization:synthetic-org",
             "Organization does not receive room chat or historical messages.");
         Check(NativeInformationOverlayRuntime.ProjectSource(room, organization, OverlayScenePreference.Auto, "en")
             .Scene.Context.Kind == OverlaySceneKind.PartyRoom, "Current room retains automatic priority.");
@@ -49,6 +50,34 @@ internal static class CommunityOverlayProjectionTests
     }
 
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+
+    private static void LiveCommunicationAndWithdrawal()
+    {
+        var content = new InformationOverlayCommunityContent("communication-fixture", "Organization", [])
+        { AnnouncementTitle = "Authorized notice", AnnouncementText = "Current text" };
+        var first = NativeInformationOverlayRuntime.ProjectSource(null, content, OverlayScenePreference.Auto, "en");
+        var settings = OverlayDisplaySettings.Default with { ChatDisplayMode = OverlayChatDisplayMode.MessageList };
+        var model = new OverlayViewModel(new(first.Scene.Players), settings, OverlayRosterSelectionSettings.Default,
+            "en", true, first.Command, PlayerPresenceKind.AppOnline, "", first.Scene.Context, first.Chat);
+        try
+        {
+            Check(model.FleetNotice == "Current text", "Authorized current announcement reaches the notice module.");
+            var next = NativeInformationOverlayRuntime.ProjectSource(null, content with
+            { AnnouncementTitle = "", AnnouncementText = "", Messages = [new(2, "Sender", "Sender", "New live text", DateTimeOffset.UtcNow, false)] }, OverlayScenePreference.Auto, "en");
+            model.Refresh(new(next.Scene.Players), settings, OverlayRosterSelectionSettings.Default,
+                "en", true, next.Command, PlayerPresenceKind.AppOnline, "", next.Scene.Context, next.Chat);
+            Check(model.FleetNotice == "", "Withdrawn announcement is immediately removed, not replaced by invented fleet text.");
+            Check(model.ChatMessages.Single().Detail == "New live text", "Live organization chat reaches its own channel.");
+            next = NativeInformationOverlayRuntime.ProjectSource(null, content with
+            { Messages = [new(3, "Sender", "Sender", "", DateTimeOffset.UtcNow, false) { AttachmentKind = "attachment" }] },
+                OverlayScenePreference.Auto, "zh");
+            model.Refresh(new(next.Scene.Players), settings, OverlayRosterSelectionSettings.Default,
+                "zh", true, next.Command, PlayerPresenceKind.AppOnline, "", next.Scene.Context, next.Chat);
+            Check(model.ChatMessages.Last().Detail == "[附件] 请在客户端查看",
+                "Organization list metadata produces a visible hint without guessing its type or fetching private payloads.");
+        }
+        finally { model.ClearAuthorizedContent(); }
+    }
 
     private static void SelfRemainsVisibleWhenSharedPresenceIsOffline()
     {

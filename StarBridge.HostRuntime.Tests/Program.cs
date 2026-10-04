@@ -4,8 +4,239 @@ using StarBridge.HostRuntime.Auth;
 using StarBridge.HostRuntime.LegacyRelay;
 using StarBridge.NativeBridge;
 using StarBridge.Core.Profiles;
+
 using System.Net;
 using System.Net.Http.Json;
+
+if (args is ["--overlay-source-build-gate", var expectedSourceGate])
+{
+    await OverlaySourceBuildGateTests.Run(bool.Parse(expectedSourceGate));
+    return 0;
+}
+
+if (args is ["--privacy-queue-timeout-only"])
+{
+    try { await LegacyPasswordLoginTests.PrivacyQueueTimeoutKeepsConsent(); Console.WriteLine("PASS actual Host queue timeout retains consent"); return 0; }
+    catch (Exception error) { Console.Error.WriteLine("FAIL privacy queue timeout: " + error.Message); return 1; }
+}
+
+if (args is ["--overlay-management-latency-only"])
+{
+    try { await LegacyPasswordLoginTests.OverlayRosterDoesNotWaitForManagementIdentity(); return 0; }
+    catch (Exception error) { Console.Error.WriteLine("FAIL overlay management latency: " + error.GetType().Name + ": " + error.Message); return 1; }
+}
+
+if (args is ["--overlay-workspace-reuse-only"])
+{
+    try
+    {
+    await LegacyPasswordLoginTests.OverlayReusesWorkspace();
+    await OverlayWorkspaceReuseTests.Run();
+    Console.WriteLine("PASS client workspace and first overlay frame share authorized members");
+    return 0;
+    }
+    catch (Exception error) { Console.Error.WriteLine("FAIL overlay roster reuse: " + error.Message); return 1; }
+}
+
+if (args is ["--overlay-sync-latency-only"])
+{
+    await OverlaySyncLatencyTests.Run();
+    return 0;
+}
+if (args is ["--location-compatibility-only", var expectedCompatibility])
+{
+    await LocationDisplayCompatibilityTests.Run();
+    LocationDisplayCompatibilityTests.CheckResource(bool.Parse(expectedCompatibility));
+    return 0;
+}
+
+if (args is ["--navigation-stations-only"])
+{
+    await NavigationStationDisplayTests.Run();
+    return 0;
+}
+
+if (args is ["--overlay-config-audit-only"])
+{
+    await OverlayConfigurationAuditTests.Run();
+    await OverlayPresetMigrationTests.Run();
+    Console.WriteLine("PASS legacy overlay configuration recovery");
+    return 0;
+}
+
+if (args is ["--chat-room-invitation-only"])
+{
+    try { await DirectMessageReadTests.RoomInvitationCards(); Console.WriteLine("PASS room invitation bridge cards"); return 0; }
+    catch (Exception error) { Console.WriteLine("FAIL room invitation bridge cards: " + error); return 1; }
+}
+
+if (args is ["--local-game-overlay-only"])
+{
+    await LocalGameOverlayEventTests.Verify();
+    await GameLogJournalSourceTests.LifeEvidenceUsesSameParser();
+    await GameLogJournalSourceTests.ServerNavigationAndPrivateProjection();
+    Console.WriteLine("PASS live local game events reach the overlay sink without remote sharing");
+    return 0;
+}
+
+if (args is ["--room-overlay-identity-only"])
+{
+    await LegacyPasswordLoginTests.RoomOverlayIdentityPipeline();
+    Console.WriteLine("PASS room read/chat identity and presence reach Native overlay");
+    return 0;
+}
+
+if (args is ["--room-overlay-transient-only"])
+{
+    await LegacyPasswordLoginTests.RoomOverlayTransientReadPipeline();
+    await RoomOverlaySessionTests.Revocation();
+    Console.WriteLine("PASS transient room reads preserve only the still-authorized bounded snapshot");
+    return 0;
+}
+
+if (args is ["--runtime-ship-labels-only"])
+{
+    try { await RuntimeShipLabelsTests.Verify(); return 0; }
+    catch (Exception error) { Console.WriteLine("FAIL runtime ship labels: " + error); return 1; }
+}
+
+if (args is ["--ship-identity-only"])
+{
+    await GameLogJournalSourceTests.ShipNamesAndRelease();
+    Console.WriteLine("PASS ship names and cross-format release use the same catalog identity");
+    return 0;
+}
+
+if (args is ["--overlay-arrival-only"])
+{
+    await GameLogJournalSourceTests.ServerNavigationAndPrivateProjection();
+    await GameLogJournalSourceTests.CurrentF8CMatchesJournal();
+    Console.WriteLine("PASS current local session preserves quantum arrival confirmation");
+    return 0;
+}
+
+if (args is ["--overlay-roster-route-only"])
+{
+    await CompositeBridgeDispatcherTests.RoutesPersonalProfileRequests();
+    await OverlayRosterPreferencesTests.Run();
+    Console.WriteLine("PASS composite roster read/write route and persistence");
+    return 0;
+}
+
+if (args is ["--overlay-source-latency-only"])
+{
+    await OverlaySceneChoiceTests.LocalChoiceBypassesSlowCatalog();
+    await OverlaySceneChoiceTests.BridgeAndPersistence();
+    Console.WriteLine("PASS local scene selection remains responsive during pending catalog IO");
+    return 0;
+}
+
+if (args is ["--local-self-source-only"])
+{
+    await LocalGamePresenceTests.Verify();
+    await RoomOverlaySessionTests.Membership();
+    await RoomOverlaySessionTests.Revocation();
+    await RoomOverlaySessionTests.Chat();
+    Console.WriteLine("PASS local process confirmation and authorized self source");
+    return 0;
+}
+
+if (args is ["--direct-overlay-only"])
+{
+    await DirectMessageOverlayTests.Run();
+    Console.WriteLine("PASS direct-message overlay delivery and privacy gates");
+    return 0;
+}
+
+if (args is ["--overlay-communication-only"])
+{
+    await AccountLifecycleIsEnabled();
+    await OverlayCommunitySourceTests.Communication();
+    await OverlayRosterPreferencesTests.Run();
+    await OverlayCommunitySourceTests.Selection();
+    await OverlayCommunitySourceTests.AccountAndLateResponses();
+    Console.WriteLine("PASS authorized overlay communication and source isolation");
+    return 0;
+}
+if (args is ["--overlay-community-schedule-only"])
+{
+    try
+    {
+        await OverlayCommunityRefreshScheduleTests.Run();
+        await OverlayCommunityProgressiveReadTests.Run();
+        await OverlayCommunitySourceTests.Recovery();
+        await OverlayCommunitySourceTests.AccountAndLateResponses();
+        await OverlayCommunitySourceTests.DemandAndDisposal();
+        Console.WriteLine("PASS organization driver retries within unchanged authority lease and still revokes immediately");
+        return 0;
+    }
+    catch (Exception error) { Console.WriteLine("FAIL organization refresh schedule: " + error.Message); return 1; }
+}
+if (args is ["--party-room-transfer-host-only"])
+{
+    await PartyRoomHostTransferTests.Authority();
+    await PartyRoomHostTransferTests.Confirmation();
+    await PartyRoomHostTransferTests.Unknown();
+    Console.WriteLine("PASS party room host transfer contract regression");
+    return 0;
+}
+if (args is ["--party-room-readback-only"])
+{
+    await PartyRoomReaderTests.PublicTwoMemberCreateReadback();
+    await PartyRoomReaderTests.Projection();
+    await PartyRoomReaderTests.InvalidData();
+    await PartyRoomReaderTests.Commands();
+    await PartyRoomReaderTests.CommandValidation();
+    await PartyRoomReaderTests.HttpBoundary();
+    Console.WriteLine("PASS party room create/readback contract regression");
+    return 0;
+}
+if (args is ["--party-room-invitations-only"])
+{
+    await PartyRoomInvitationTests.Invitations();
+    Console.WriteLine("PASS party room invitation target regression");
+    return 0;
+}
+
+if (args is ["--friend-presence-read-only"])
+{
+    await LegacyPasswordLoginTests.VerifyBackgroundPlayerActivity();
+    await GameLogLocationCatalogTests.SyntheticAndAbsentCatalog();
+    await LegacyPasswordLoginTests.VerifyPlayerActivity();
+    await FriendsReaderTests.HttpAndRequest();
+    await PlayerActivitySourcesTests.Verify();
+    Console.WriteLine("PASS friend presence and sharing read regression");
+    return 0;
+}
+if (args is ["--friend-search-privacy-only"])
+{
+    await FriendsReaderTests.Projection();
+    await FriendsReaderTests.HttpAndRequest();
+    Console.WriteLine("PASS friend search privacy projection and request boundary");
+    return 0;
+}
+
+if (args is ["--handle-mismatch-only"])
+{
+    await LegacyPasswordLoginTests.HandleMismatchProjection();
+    await LegacyPasswordLoginTests.HandleChangeCompatibility();
+    await LegacyPasswordLoginTests.OfflineHandleChange();
+    await GameIdentityNotificationTests.Run();
+    return 0;
+}
+
+if (args is ["--social-notifications-only"])
+{
+    await LocalGamePresenceTests.Verify();
+    await SocialNotificationAudioTests.Run();
+    await SocialActivityReadTests.Run();
+    await FriendRequestNotificationTests.Run();
+    await AccountDispatchConcurrencyTests.Verify();
+    await DirectMessageDesktopTests.Run();
+    await RoomAudioTests.Run();
+    Console.WriteLine("PASS social notification delivery regression");
+    return 0;
+}
 
 if (args is ["--local-chat-history-only"])
 {
@@ -311,8 +542,28 @@ if (args is ["--game-id-settings-only"])
     Console.WriteLine("PASS game ID settings transport guards legacy servers, lost receipts and account changes");
     return 0;
 }
+if (args is ["--location-confidence-hidden-only"])
+{
+    try
+    {
+        await PrivacyPublicationTests.Projection();
+        await PartyRoomReaderTests.Projection();
+        Console.WriteLine("PASS confidence-hidden location reason preserves privacy boundaries");
+        return 0;
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine("FAIL confidence-hidden location reason: " + exception.Message);
+        return 1;
+    }
+}
 if (args is ["--presence-recovery-only"])
 {
+    await SharingStatusDetailTests.Run();
+    await PrivacyPublicationRecoveryTests.AutomaticTimerRecovery();
+    await PrivacyPublicationRecoveryTests.RevokedConsentRestart();
+    await GameLogRuntimeTests.PublicationWake();
+    await PresenceChangeWakesFriendPublication();
     await PrivacyPublicationRecoveryTests.SilentHeartbeat();
     await FriendSharingPublicationTests.Verify();
     await FriendSharingRuntimeTests.Run();
@@ -329,6 +580,12 @@ if (args is ["--presence-recovery-only"])
     Console.WriteLine("PASS Presence recovers without manual apply");
     return 0;
 }
+if (args is ["--sharing-status-only"])
+{
+    await SharingStatusDetailTests.Run();
+    Console.WriteLine("PASS sharing status detail and recovery contract");
+    return 0;
+}
 
 if (args is ["--player-activity-sources-only"])
 {
@@ -336,6 +593,14 @@ if (args is ["--player-activity-sources-only"])
     await CommunityWpfS2Tests.Verify();
     await LegacyPasswordLoginTests.VerifyPlayerActivity();
     Console.WriteLine("PASS Player activity complete-source, privacy, ordering and account gates");
+    return 0;
+}
+
+if (args is ["--player-activity-transition-reliability-only"])
+{
+    await PlayerActivityTransitionReliabilityTests.Run();
+    await PlayerActivityPolicyTests.Run();
+    Console.WriteLine("PASS Player activity transitions and audience policy gates");
     return 0;
 }
 
@@ -437,6 +702,13 @@ if (args.Length == 2 && args[0] == "--hangar-catalog-bundle")
 
 var tests = new (string Name, Func<Task> Test)[]
 {
+    ("Handle correction from existing offline game log", LegacyPasswordLoginTests.OfflineHandleChange),
+    ("Handle mismatch remains actionable without inventing SCM binding", LegacyPasswordLoginTests.HandleMismatchProjection),
+    ("Compatibility Handle change uses explicit one-use confirmation and verified readback", LegacyPasswordLoginTests.HandleChangeCompatibility),
+    ("Identity mismatch desktop notifications are current and deduplicated", GameIdentityNotificationTests.Run),
+    ("Social audio reaches authenticated private and friend events", SocialNotificationAudioTests.Run),
+    ("Social activity cursor uses authenticated cancellable waits", SocialActivityReadTests.Run),
+    ("Friend requests notify once with privacy-safe delivery", FriendRequestNotificationTests.Run),
     ("Community media and directory reads avoid duplicate upstream work", CommunityReadEfficiencyTests.Verify),
     ("Independent account reads retain mutation barriers and session isolation", AccountDispatchConcurrencyTests.Verify),
     ("Help support history and public endpoints", HelpSupportTests.RunAll),
@@ -518,6 +790,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Local history rejects mixed revisions", LocalEventHistoryBridgeTests.RevisionChangesNeverMixPages),
     ("Local history preserves missing corrupt and backup states", LocalEventHistoryBridgeTests.MissingCorruptBackupAndRejectedQueries),
     ("Local history rejects cancelled stale and disposed reads", LocalEventHistoryBridgeTests.CancellationGenerationAndDispose),
+    ("Local game events have an independent overlay source", LocalGameOverlayEventTests.Verify),
     ("Play reminder preserves WPF defaults and repeat", ContinuousPlayReminderTests.DefaultsAndRepeat),
     ("Play reminder disabling and reenabling", ContinuousPlayReminderTests.DisabledAndReenabled),
     ("Play reminder interval changes", ContinuousPlayReminderTests.IntervalChangeUsesSessionAndLastAccepted),
@@ -543,6 +816,8 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Organization sharing binds membership, preserves account grants and verifies acknowledgments", CommunitySharingTests.Verify),
     ("Communities bounded reads and scoped membership commands", CommunityClientTests.Verify),
     ("Player activity sources require complete authorized identities", PlayerActivitySourcesTests.Verify),
+    ("Player activity preserves every real transition without replay", PlayerActivityTransitionReliabilityTests.Run),
+    ("Background social activity observes friends without a page", LegacyPasswordLoginTests.VerifyBackgroundPlayerActivity),
     ("Manual presence shares publication gate and preserves consent", ManualPresenceIntegrationTests.Verify),
     ("Community WPF S2 membership and roster read compatibility", CommunityWpfS2Tests.Verify),
     ("Community WPF S2 discovery preserves filters and public visibility", CommunityWpfS2DiscoveryTests.Verify),
@@ -560,6 +835,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Community WPF S2 governance preserves original permissions and one-shot mutations", CommunityWpfS2GovernanceTests.Verify),
     ("Community creation preserves WPF options and never replays an uncertain write", CommunityCreationClientTests.Verify),
     ("Community workspace protects identity, scope, pagination and media chunks", CommunityWorkspaceClientTests.Verify),
+    ("Room and workspace ship labels use the Native vocabulary without expanding sharing", RuntimeShipLabelsTests.Verify),
     ("Community logs preserve bounded history, scope and single-attempt deletion", CommunityLogsClientTests.Verify),
     ("Community disband preserves credential authority and single-attempt confirmation", CommunityDisbandClientTests.Verify),
     ("Community chat preserves scoped pages and bounded original details", CommunityChatClientTests.Verify),
@@ -584,7 +860,10 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Invitation send journal survives failures and restarts without automatic replay", InvitationSendWorkflowTests.Verify),
     ("Invitation account Bridge binds current identity and safely projects recovery", InvitationAccountBridgeTests.Verify),
     ("Privacy publication fails closed on invalid acknowledgements and unreadable policy", PrivacyPublicationTests.FailClosed),
+    ("Privacy publication production timer automatically recovers", PrivacyPublicationRecoveryTests.AutomaticTimerRecovery),
+    ("Sharing status distinguishes causes and bounds authorized recovery", SharingStatusDetailTests.Run),
     ("Privacy publication healthy heartbeat is silent", PrivacyPublicationRecoveryTests.SilentHeartbeat),
+    ("Host queue timeout preserves remembered sharing consent", LegacyPasswordLoginTests.PrivacyQueueTimeoutKeepsConsent),
     ("Privacy publication automatically recovers from transport loss", PrivacyPublicationRecoveryTests.TransientDisconnect),
     ("Privacy publication remembers explicit account consent across restart", PrivacyPublicationRecoveryTests.Restart),
     ("Privacy publication revoked consent stays stopped across restart", PrivacyPublicationRecoveryTests.RevokedConsentRestart),
@@ -594,16 +873,34 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Local privacy preserves corrupt records and rejects invalid audiences", LocalPrivacyTests.FailClosed),
     ("Local privacy bridge rejects stale consent without publication", LocalPrivacyTests.Contract),
     ("Local privacy account runtime routes and revokes local access", LocalPrivacyRuntimeScope),
+    ("Confirmed visibility change wakes friend publication without heartbeat", PresenceChangeWakesFriendPublication),
     ("Overlay community source selects stable authorized targets", OverlayCommunitySourceTests.Selection),
+    ("Overlay community communication baselines history and clears withdrawals", OverlayCommunitySourceTests.Communication),
+    ("Overlay roster preferences persist and reject revoked or stale writes", OverlayRosterPreferencesTests.Run),
     ("Overlay community source recovers silently and revokes stale content", OverlayCommunitySourceTests.Recovery),
     ("Overlay community source rejects account and selection races", OverlayCommunitySourceTests.AccountAndLateResponses),
     ("Overlay community source coalesces reads and preserves redaction", OverlayCommunitySourceTests.CoalescingAndProjection),
     ("Overlay community source reads on demand and cancels on disposal", OverlayCommunitySourceTests.DemandAndDisposal),
+    ("Overlay community driver recovers within bounded authorization", OverlayCommunityRefreshScheduleTests.Run),
+    ("Overlay community roster does not wait for communication", OverlayCommunityProgressiveReadTests.Run),
+    ("Overlay first frame reuses the client authorized workspace", LegacyPasswordLoginTests.OverlayReusesWorkspace),
+    ("Overlay roster does not depend on management identity", LegacyPasswordLoginTests.OverlayRosterDoesNotWaitForManagementIdentity),
+    ("Overlay shared workspace preserves lifetime, ordering and authority", OverlayWorkspaceReuseTests.Run),
+    ("Overlay live changes avoid periodic sampling, publication and roster delays", OverlaySyncLatencyTests.Run),
+    ("Optional WPF location display overrides preserve English and independent canonical locations", LocationDisplayCompatibilityTests.Run),
+    ("Navigation targets use actual station names across the Host and Flutter bridge", NavigationStationDisplayTests.Run),
     ("Overlay scene choice bridge persistence and account isolation", OverlaySceneChoiceTests.BridgeAndPersistence),
+    ("Overlay local choice bypasses slow catalog", OverlaySceneChoiceTests.LocalChoiceBypassesSlowCatalog),
+    ("Overlay F8C journal matches current session", GameLogJournalSourceTests.CurrentF8CMatchesJournal),
     ("Overlay scene choice store guards corruption and late writes", OverlaySceneChoiceTests.StoreGuards),
+    ("Party rooms actual Host identity pipeline", LegacyPasswordLoginTests.RoomOverlayIdentityPipeline),
+    ("Transient room reads preserve only the original valid overlay lease", LegacyPasswordLoginTests.RoomOverlayTransientReadPipeline),
+    ("Game log ship names and cross-format release share catalog identity", GameLogJournalSourceTests.ShipNamesAndRelease),
+    ("Party rooms actual Host peer avatar pipeline", LegacyPasswordLoginTests.RoomAvatarPipeline),
     ("Party rooms overlay only accepts current authorized membership", RoomOverlaySessionTests.Membership),
     ("Party rooms overlay clears revoked stale and expired content", RoomOverlaySessionTests.Revocation),
     ("Party rooms overlay chat baselines history and bounds live messages", RoomOverlaySessionTests.Chat),
+    ("Public two-member room create and dual-view readback", PartyRoomReaderTests.PublicTwoMemberCreateReadback),
     ("Party rooms read projection protects membership and private fields", PartyRoomReaderTests.Projection),
     ("Party rooms display projects bounded avatars and explicit leader versions", PartyRoomDisplayTests.Projection),
     ("Party rooms rejects incomplete and contradictory data", PartyRoomReaderTests.InvalidData),
@@ -623,6 +920,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Direct messages enforce read-only paging and opaque targets", DirectMessageReadTests.Paging),
     ("Composed inbox reads reach the notification observer", CompositeBridgeDispatcherTests.ObservesDirectMessages),
     ("Private desktop messages honor settings and activation boundaries", DirectMessageDesktopTests.Run),
+    ("Private messages reach enabled information overlay without replay or privacy leaks", DirectMessageOverlayTests.Run),
     ("Organization notification reads and source importance are bounded", CommunityNotificationTests.Run),
     ("Organization background delivery honors saved source policy", CommunityNotificationDeliveryTests.Run),
     ("Notification source policy bridge validates membership and account", NotificationPolicyBridgeTests.Run),
@@ -634,12 +932,26 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Direct messages preserve uncertain outcomes without replay", DirectMessageSendTests.Failures),
     ("Direct messages recheck permission and identity before sending", DirectMessageSendTests.Guards),
     ("Party rooms commands avoid replay and re-read authoritative membership", PartyRoomReaderTests.Commands),
+    ("Party rooms host transfer checks advertised capability and fresh authority", PartyRoomHostTransferTests.Authority),
+    ("Party rooms host transfer confirms once and safely handles readback failure", PartyRoomHostTransferTests.Confirmation),
+    ("Party rooms host transfer never replays unknown writes", PartyRoomHostTransferTests.Unknown),
     ("Party rooms command validation and uncertain responses fail safely", PartyRoomReaderTests.CommandValidation),
     ("Party rooms management protects host scope and password semantics", PartyRoomReaderTests.Management),
     ("Party rooms invitations scope targets and never replay writes", PartyRoomInvitationTests.Invitations),
     ("Party rooms chat protects membership cursors and uncertain sends", PartyRoomChatTests.Chat),
     ("Party rooms preset sharing preserves WPF format and additive import", OverlaySharedPresetTests.Sharing),
     ("Party rooms preset attachments validate before HTTP and retain unknown outcome", PartyRoomChatTests.Attachments),
+    ("Overlay legacy configuration recovers finite complete rendering modules", OverlayConfigurationAuditTests.Run),
+    ("Overlay v2 preset migration preserves policies and isolates transferred organizations", OverlayPresetMigrationTests.Run),
+    ("Overlay module frames share reads and preserve per-source authority", OverlayModuleFrameTests.Run),
+    ("Overlay preset source Bridge preserves policy and draft isolation", OverlayPresetSourceBridgeTests.Run),
+    ("Overlay temporary source session preserves draft and account isolation", OverlayTemporarySourceBridgeTests.Run),
+    ("Overlay event subscription follows module source", LegacyPasswordLoginTests.OverlayEventSources),
+    ("Overlay multi-community demand loads without a page", OverlaySyncLatencyTests.ModuleCommunityDemandWithoutFirstFrame),
+    ("Overlay multi-community healthy sources renew through slow peers", OverlayCommunityModuleRefreshTests.SlowPeerDoesNotBlockRenewal),
+    ("Overlay and client page share in-flight roster HTTP", LegacyPasswordLoginTests.OverlayAndPageShareInflightRoster),
+    ("Overlay multi-community resources update and revoke independently", OverlayCommunityModuleRefreshTests.Run),
+    ("Overlay shared workspace does not swallow new chat", OverlayCommunityModuleRefreshTests.WorkspaceObservationDoesNotSwallowChat),
     ("Overlay workspace reads every WPF setting and preset without mutation", OverlaySettingsTests.ReadsFullLegacyWorkspaceWithoutMutation),
     ("Overlay workspace defaults without creating legacy files", OverlaySettingsTests.DefaultsFullWorkspaceWithoutWriting),
     ("Overlay workspace saves legacy experimental render mode", OverlaySettingsTests.SavesWorkspaceLoadedFromLegacyExperimentalRenderMode),
@@ -647,7 +959,11 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Overlay workspace supports every preset action", OverlaySettingsTests.ManagesEveryPresetAction),
     ("Overlay settings persist and reuse the current game session", OverlaySettingsTests.PersistsAndProjectsCurrentSession),
     ("Overlay runtime exposes native lifecycle and saved workspace", OverlaySettingsTests.ExposesRuntimeLifecycle),
+    ("Overlay startup isolates incompatible migrated workspace", OverlayStartupIsolationTests.Run),
+    ("Overlay runtime carries saved module sources without trusting draft authority", OverlaySettingsTests.PassesSavedModuleSourcesToRuntime),
     ("Overlay settings reject stale writes and unavailable previews", OverlaySettingsTests.RejectsStaleAndUnsupportedRequests),
+    ("Game log publication wakes only on meaningful live changes", GameLogRuntimeTests.PublicationWake),
+    ("Game log offline recent identity without starting game", GameLogRuntimeTests.OfflineRecentIdentity),
     ("Game log current-session identity recognition", GameLogRuntimeTests.Recognition),
     ("Game log malformed UTF8 lines recover without false identity", GameLogRuntimeTests.MalformedUtf8Lines),
     ("Application support borrows scoped Game log selection", GameLogRuntimeTests.DiagnosticsSelection),
@@ -669,6 +985,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Legacy entitlement transport and owner boundary", LegacyEntitlementTests.Verify),
     ("Legacy entitlement account lifecycle", LegacyPasswordLoginTests.EntitlementLifecycle),
     ("Global account avatar update and owner isolation", LegacyPasswordLoginTests.AvatarUpdate),
+    ("Profile visibility and background publication preserve owner boundaries", LegacyPasswordLoginTests.ProfileVisibility),
     ("Gameplay reset legacy transport and owner boundary", LegacyPasswordLoginTests.GameplayResetTransport),
     ("Gameplay history storage failure, cancellation and account guards", GameplayHistoryRuntimeTests.FailureAndOwnership),
     ("Gameplay history old snapshot and explicit preference compatibility", GameplayHistoryRuntimeTests.OldSnapshotCompatibility),
@@ -676,6 +993,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Local game presence is independent, versioned and confirms process exit", LocalGamePresenceTests.Verify),
     ("Saved hangar catalog and exact-hash bundled images are safe optional display facts", HangarCatalogTests.Verify),
     ("Local personal profile preserves ownership and atomic saves", LocalPersonalProfileTests.Storage),
+    ("Profile hangar presentation preserves explicit inventory and display-only status", ProfileHangarPresentationTests.Verify),
     ("Local favorite modules enforce capacity, global uniqueness and reopen", LocalPersonalProfileTests.FavoriteModules),
     ("Local collaboration validates roles, schedules, exact days and reopen", LocalPersonalProfileTests.Collaboration),
     ("Local profile reads pre-collaboration files without changing integrity", LocalPersonalProfileTests.PreviousFormat),
@@ -1003,6 +1321,41 @@ static async Task SaturatedQueueReturnsBackpressure()
     await server;
 }
 
+static async Task PresenceChangeWakesFriendPublication()
+{
+    var root = CreateIsolatedDataRoot();
+    try {
+        var host = new LifecycleAccountHost();
+        await host.LoginAsync(default);
+        using var runtime = new AccountBridgeRuntime(host);
+        var store = new StarBridge.HostRuntime.Settings.PresenceVisibilityStore(root);
+        store.Save(StarBridge.Core.Presence.PlayerPresenceVisibilityMode.Invisible, store.Read().Revision, () => {});
+        var bridge = new StarBridge.HostRuntime.Settings.PresenceVisibilityBridge(store,
+            () => (host.CurrentContext, host.Generation),
+            async (_, _, change, token) => { await change(token); return true; },
+            (_, _, mode, _) => Task.FromResult(mode));
+        var remote = new FriendSharingRuntimeTests.Remote();
+        var publisher = new StarBridge.HostRuntime.Privacy.FriendSharingRuntime(remote,
+            () => new(host.CurrentContext!, host.Generation, "Fixture", true, null,
+                StarBridge.HostRuntime.Presence.GameLogSessionSnapshot.Empty),
+            () => true, () => bridge.PublicationMode, false);
+        // Inject timer-free, synthetic authority at the composition seam. The
+        // production DispatchAsync route must do the wake; no test wake is sent.
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(AccountBridgeRuntime).GetField("_presenceVisibility", flags)!.SetValue(runtime, bridge);
+        typeof(AccountBridgeRuntime).GetField("_friendSharing", flags)!.SetValue(runtime, publisher);
+        var request = BridgeEnvelope.Request("presence.set", "wake-fixture", host.Generation,
+            new { schemaVersion = 1, expectedRevision = store.Read().Revision, mode = "online" }, host.CurrentContext);
+        var reply = await runtime.DispatchAsync(request);
+        AssertEqual("ready", reply.Response.Payload.GetProperty("state").GetString(), "visibility confirmed");
+        AssertEqual(1, remote.Sources.Count, "confirmed online wakes friends without waiting for timer");
+        AssertEqual("AppOnline", remote.Sources.Single().Presence, "fresh friend source");
+        var before = remote.Calls.Count;
+        await runtime.DispatchAsync(request); // stale revision must not publish
+        AssertEqual(before, remote.Calls.Count, "rejected visibility write does not wake publication");
+    } finally { Directory.Delete(root, true); }
+}
+
 static async Task LocalPrivacyRuntimeScope()
 {
     var directory = CreateIsolatedDataRoot();
@@ -1045,6 +1398,17 @@ static async Task FriendsBridgeScope()
     await host.LoginAsync(default);
     using var runtime = new AccountBridgeRuntime(host);
     AssertEqual(true, AccountBridgeRuntime.AdvertisedCapabilities.Contains("friends.read"), "Friends advertised");
+    var activity = BridgeEnvelope.Request("presence.activity", "activity", host.Generation,
+        new { schemaVersion = 1, away = true }, host.CurrentContext);
+    AssertEqual(BridgeResponseStatuses.Ok, (await runtime.DispatchAsync(activity)).Response.Status,
+        "Account-scoped app inactivity is accepted without changing settings.");
+    foreach (var invalid in new[] {
+        activity with { SessionGeneration = host.Generation - 1 },
+        activity with { AccountContext = new BridgeAccountContext("test", "scm", "other") },
+        activity with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(new { schemaVersion = 1, away = "true" }) },
+        activity with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(new { schemaVersion = 1, away = true, handle = "injected" }) }
+    }) AssertEqual("presence.activity_invalid", (await runtime.DispatchAsync(invalid)).Response.Error?.Code,
+        "Stale, foreign or overbroad activity reports are rejected.");
     var response = await runtime.DispatchAsync(BridgeEnvelope.Request("friends.read", "friends", host.Generation,
         new { schemaVersion = 1 }, host.CurrentContext));
     AssertEqual(BridgeResponseStatuses.Ok, response.Response.Status, "Friends wired");
@@ -1506,7 +1870,12 @@ static async Task AccountLifecycleIsEnabled()
                 "overlayScenes.read",
                 "overlayScenes.select",
                 "overlayScenes.focusCommunity",
+                "overlayRoster.read",
+                "overlayRoster.update",
                 "account.read",
+                "gameIdentity.prepareHandleChange",
+                "gameIdentity.confirmHandleChange",
+                "gameIdentity.cancelHandleChange",
                 "account.avatar",
                 "account.compatibility.read",
                 "account.passwordRecovery",
@@ -1566,6 +1935,8 @@ static async Task AccountLifecycleIsEnabled()
                 "communities.manageAdmissions",
                 "friends.commands",
                 "directMessages.read",
+                "social.wait",
+                "communities.wait",
                 "directMessages.send",
                 "directMessages.markRead",
                 "directMessages.privacyRead",
@@ -1591,6 +1962,7 @@ static async Task AccountLifecycleIsEnabled()
                 "privacy.locationConfidence",
                 "privacy.communityMemberScopes",
                 "presence.visibility",
+                "presence.activity",
                 "gameplayTime.local",
                 "gameplayTime.history",
                 "gameplayTime.reset",

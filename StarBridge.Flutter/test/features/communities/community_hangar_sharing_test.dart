@@ -2,6 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/communities/community_hangar_sharing_port.dart';
 import 'package:starbridge_flutter/features/communities/communities_module.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
+import 'package:starbridge_flutter/features/settings/community_join_hangar_choice.dart';
+
+import '../settings/community_sharing_test.dart' show target;
 
 import 'bridge_communities_test.dart' show CommunityHarness;
 
@@ -22,6 +25,72 @@ const capabilities = [
 ];
 
 void main() {
+  test('join choice uses the real Bridge and sends only opaque current selection references', () async {
+    final source = snapshot();
+    source['options'] = [
+      {
+        'targetRef': 'b' * 32,
+        'name': 'Same name',
+        'selected': true,
+        'communityCode': 'A',
+      },
+      {
+        'targetRef': 'c' * 32,
+        'name': 'Same name',
+        'selected': false,
+        'communityCode': 'B',
+      },
+    ];
+    final h = CommunityHarness(
+      capabilities: capabilities,
+      responses: {
+        'communities.hangarSharing': source,
+        'communities.saveHangarSharing': {
+          'schemaVersion': 1,
+          'status': 'accepted',
+        },
+      },
+    );
+    addTearDown(h.close);
+    expect(
+      await saveJoinedCommunityHangarChoice(
+        port: h.adapter,
+        target: target('B'),
+        share: true,
+        membershipCurrent: () async => true,
+      ),
+      isTrue,
+    );
+    final write = h.requests.singleWhere(
+      (r) => r.name == 'communities.saveHangarSharing',
+    );
+    expect(write.payload, {
+      'schemaVersion': 1,
+      'editRef': 'a' * 32,
+      'selectedRefs': ['b' * 32, 'c' * 32],
+      'inventoryMode': 'auto',
+    });
+  });
+  test('join choices keep the authoritative community code', () {
+    final value = CommunityHangarSharing.parse({
+      ...snapshot(),
+      'options': [
+        {
+          'targetRef': 'b' * 32,
+          'name': 'Same name',
+          'selected': true,
+          'communityCode': 'A',
+        },
+        {
+          'targetRef': 'c' * 32,
+          'name': 'Same name',
+          'selected': false,
+          'communityCode': 'B',
+        },
+      ],
+    });
+    expect(value.options.map((row) => row.communityCode), ['A', 'B']);
+  });
   testWidgets('sharing editor accepts a bounded slow multi-request read', (
     tester,
   ) async {
@@ -71,6 +140,32 @@ void main() {
       {'usesExplicitTargets': null},
       {'maximumTargets': 100},
       {'options': null},
+      {
+        'options': [
+          {
+            'targetRef': 'b' * 32,
+            'name': 'A',
+            'selected': false,
+            'communityCode': 'Same',
+          },
+          {
+            'targetRef': 'c' * 32,
+            'name': 'B',
+            'selected': false,
+            'communityCode': 'same',
+          },
+        ],
+      },
+      {
+        'options': [
+          {
+            'targetRef': 'b' * 32,
+            'name': 'A',
+            'selected': false,
+            'communityCode': ' A ',
+          },
+        ],
+      },
       {
         'options': [
           {'targetRef': 'b' * 32, 'name': 'A', 'selected': 'true'},

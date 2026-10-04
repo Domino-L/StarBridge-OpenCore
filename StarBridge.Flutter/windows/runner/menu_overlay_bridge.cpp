@@ -108,6 +108,7 @@ class MenuOverlayBridge::Impl {
         configured_ = false;
         window_.UnregisterShortcut();
         window_.Hide();
+        if (local_tools_) local_tools_->Reset();
         snapshot_.clear();
         Update();
         result->Success();

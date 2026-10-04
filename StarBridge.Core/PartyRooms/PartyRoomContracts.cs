@@ -52,6 +52,8 @@ public sealed record PartyRoomInviteActionRequest(
     string Action);
 
 public sealed record PartyRoomLeaveRequest(string RoomId);
+public sealed record PartyRoomRemoveMemberRequest(string RoomId, string RemovalToken);
+public sealed record PartyRoomTransferHostRequest(string RoomId, string MemberToken);
 
 public sealed record PartyRoomApplicationDecisionRequest(
     string RoomId,
@@ -141,7 +143,13 @@ public sealed record PartyRoomMemberSnapshot(
 {
     public string ChatColor { get; init; } = "#69CCFF";
 
+    public string? LocationHiddenReason { get; init; }
+
+    public bool ArrivalPendingConfirmation { get; init; }
+    public string? ArrivalTargetCode { get; init; }
+
     public string? PublicProfileId { get; init; }
+    public string? RemovalToken { get; init; }
 }
 
 public sealed record PartyRoomSnapshot(
@@ -168,6 +176,8 @@ public sealed record PartyRoomSnapshot(
 {
     public bool ViewerIsHost { get; init; }
 
+    public bool CanPreviewMemberProfiles { get; init; }
+
     public PartyRoomJoinApplicationSnapshot[] PendingApplications { get; init; } = [];
 }
 
@@ -176,6 +186,7 @@ public sealed record PartyRoomDirectoryResponse(
     string? CurrentRoomId,
     DateTimeOffset ServerTime)
 {
+    public bool SupportsHostTransfer { get; init; }
     public PartyRoomInvitationSnapshot[] ReceivedInvitations { get; init; } = [];
 
     public PartyRoomInvitationSnapshot[] SentInvitations { get; init; } = [];

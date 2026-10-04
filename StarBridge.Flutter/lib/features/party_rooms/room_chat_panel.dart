@@ -1,9 +1,9 @@
 import 'dart:async';
+
 import '../common/user_interaction.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
-
 import '../../app/localization/app_strings.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -12,10 +12,11 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import 'room_action_dialogs.dart';
 import 'room_chat_module.dart';
+import 'room_system_message.dart';
 import 'room_preset_dialog.dart';
 import 'room_feedback.dart';
 import '../direct_messages/chat_message_bubble.dart';
-import '../direct_messages/chat_send_shortcuts.dart';
+import 'room_chat_composer.dart';
 import '../direct_messages/communication_time_formatter.dart';
 import '../communities/community_invitation_card.dart';
 
@@ -165,14 +166,10 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                           AppStrings.of(context).locale,
                         );
                         if (message.kind != 'player') {
-                          return Padding(
+                          return RoomSystemMessage(
                             key: ValueKey(message.id),
-                            padding: const EdgeInsets.all(8),
-                            child: Text(
-                              '${message.text} · $time',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
+                            text: message.text,
+                            time: message.time,
                           );
                         }
                         return ChatMessageBubble(
@@ -180,7 +177,13 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                           incoming: !message.isSelf,
                           sender: message.sender,
                           avatar: message.avatar,
-                          userTarget: message.userRef == null ? null : UserTarget('room', message.userRef!, query: message.gameId),
+                          userTarget: message.userRef == null
+                              ? null
+                              : UserTarget(
+                                  'room',
+                                  message.userRef!,
+                                  query: message.gameId,
+                                ),
                           time: time,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -254,69 +257,50 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
               onPressed: module.acknowledgeUncertain,
               child: Text(t('reviewSend')),
             ),
-          const SizedBox(height: 8),
-          if (module.attachmentDraft case final attachment?)
-            ListTile(
-              dense: true,
-              leading: const StarBridgeIcon(StarBridgeIconSemantic.overlay),
-              title: Text(attachment['title'] as String? ?? ''),
-              subtitle: Text(t('presetDraft')),
-              trailing: IconButton(
-                tooltip: t('removeAttachment'),
-                onPressed: module.sending || module.uncertain
-                    ? null
-                    : module.clearAttachment,
-                icon: const StarBridgeIcon(StarBridgeIconSemantic.windowClose),
-              ),
-            ),
-          ChatSendShortcuts(
+          RoomChatComposer(
             controller: _text,
-            onSend: () {
-              if (module.available &&
-                  !module.loading &&
-                  !module.sending &&
-                  !module.uncertain &&
-                  module.hasDraft) {
-                module.send();
-              }
-            },
-            child: TextField(
-              key: const Key('room-chat-draft'),
-              controller: _text,
-              maxLength: 300,
-              minLines: 1,
-              maxLines: 3,
-              enabled: module.available && !module.sending,
-              onChanged: (value) => setState(() => module.draft = value),
-              decoration: InputDecoration(
-                labelText: t('chatDraft'),
-                helperText: AppStrings.of(context).text('direct.send.shortcut'),
-              ),
-            ),
-          ),
-          Row(
-            children: [
-              if (module.presetsAvailable)
-                TextButton.icon(
-                  onPressed: module.sending || module.uncertain
-                      ? null
-                      : () => roomPresetDialog(context, module),
-                  icon: const StarBridgeIcon(StarBridgeIconSemantic.overlay),
-                  label: Text(t('sharePreset')),
-                ),
-              const Spacer(),
-              FilledButton(
-                onPressed:
-                    !module.available ||
-                        module.loading ||
-                        module.sending ||
-                        module.uncertain ||
-                        !module.hasDraft
-                    ? null
-                    : module.send,
-                child: Text(t(module.sending ? 'working' : 'send')),
-              ),
-            ],
+            inputKey: const Key('room-chat-draft'),
+            enabled: module.available && !module.sending,
+            sending: module.sending,
+            onChanged: (value) => setState(() => module.draft = value),
+            onSend:
+                module.available &&
+                    !module.loading &&
+                    !module.sending &&
+                    !module.uncertain &&
+                    module.hasDraft
+                ? module.send
+                : null,
+            attachment: module.attachmentDraft == null
+                ? null
+                : ListTile(
+                    dense: true,
+                    leading: const StarBridgeIcon(
+                      StarBridgeIconSemantic.overlay,
+                    ),
+                    title: Text(
+                      module.attachmentDraft!['title'] as String? ?? '',
+                    ),
+                    subtitle: Text(t('presetDraft')),
+                    trailing: IconButton(
+                      tooltip: t('removeAttachment'),
+                      onPressed: module.sending || module.uncertain
+                          ? null
+                          : module.clearAttachment,
+                      icon: const StarBridgeIcon(
+                        StarBridgeIconSemantic.windowClose,
+                      ),
+                    ),
+                  ),
+            leadingAction: module.presetsAvailable
+                ? TextButton.icon(
+                    onPressed: module.sending || module.uncertain
+                        ? null
+                        : () => roomPresetDialog(context, module),
+                    icon: const StarBridgeIcon(StarBridgeIconSemantic.overlay),
+                    label: Text(t('sharePreset')),
+                  )
+                : null,
           ),
         ],
       ),

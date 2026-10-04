@@ -97,6 +97,14 @@ class _LocalHangarSavePanelState extends State<LocalHangarSavePanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Semantics(liveRegion: true, child: Text(message)),
+            if (m.phase == 'ready' && !partial)
+              Text(
+                pick(
+                  '若已明确选择共享组织，保存后会同步到这些组织；不会自动开启共享或更改共享范围。',
+                  '若已明確選擇共享組織，儲存後會同步至這些組織；不會自動開啟共享或變更共享範圍。',
+                  'If you have explicitly selected sharing organizations, saving also syncs to them. It does not enable sharing or change its audience.',
+                ),
+              ),
             if (m.busy) ...[
               const SizedBox(height: 8),
               LinearProgressIndicator(

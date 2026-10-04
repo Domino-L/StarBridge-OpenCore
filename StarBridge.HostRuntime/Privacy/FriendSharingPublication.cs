@@ -11,7 +11,7 @@ internal sealed record FriendSharingPublicationSnapshot(PrivacyPublicationInput 
         Visibility is PlayerPresenceVisibilityMode.Online or PlayerPresenceVisibilityMode.InGame;
 }
 
-/// <summary>Uses the existing Game.log snapshot; never creates a second listener.</summary>
+/// <summary>Uses the existing Game.log snapshot and scoped app inactivity; never creates a second game listener.</summary>
 internal static class FriendSharingPublicationSource
 {
     internal static FriendSharingSource Build(FriendSharingPublicationSnapshot state)
@@ -27,7 +27,7 @@ internal static class FriendSharingPublicationSource
         var location = connected && Has(FriendSharedFields.Location) && game.Location.CanSynchronize && game.Location.State == "confirmed";
         // Neither timestamp is client-authored. Transport must omit both; Relay
         // stamps receipt time and maintains last-online evidence independently.
-        return new(default, playing ? "InGame" : "AppOnline",
+        return new(default, playing ? "InGame" : state.Input.AppAway ? "Away" : "AppOnline",
             connected && needsServer ? game.Server.Shard : null,
             connected && Has(FriendSharedFields.ServerDetails) ? game.Server.Region : null,
             ship ? game.Ship.EnglishName : null, location ? game.Location.EnglishName : null,
@@ -55,6 +55,7 @@ internal sealed class FriendSharingPublication(
     internal async Task TickAsync(CancellationToken cancellation = default)
     {
         if (!await _gate.WaitAsync(0, cancellation).ConfigureAwait(false)) return;
+        var publishing = false;
         try
         {
             var next = current();
@@ -79,18 +80,28 @@ internal sealed class FriendSharingPublication(
                 return;
             }
             var sequence = checked(++_sequence);
+            publishing = true;
             await publish(next!, _session!, sequence, FriendSharingPublicationSource.Build(next!), cancellation).ConfigureAwait(false);
+            publishing = false;
             if (!Same(next!, current())) await WithdrawAsync(cancellation).ConfigureAwait(false);
         }
-        catch
+        catch (Exception error)
         {
-            // A failed send may already have arrived. Retire the session before
-            // any positive retry; never replay its source or sequence.
-            _withdrawOnly = _session is not null;
+            // A transport failure may have arrived, but is not an offline intent.
+            // Keep only the existing bounded session; a later tick builds fresh
+            // content with a strictly newer sequence after permission is reread.
+            // Identity/policy changes and rejection still require retirement.
+            if (!(publishing && IsTransient(error, cancellation) &&
+                _active is not null && Same(_active, current())))
+                _withdrawOnly = _session is not null;
             throw;
         }
         finally { _gate.Release(); }
     }
+
+    internal static bool IsTransient(Exception error, CancellationToken cancellation) =>
+        !cancellation.IsCancellationRequested && (error is HttpRequestException { StatusCode: null } or
+            OperationCanceledException or Account.AccountBridgeHostException { Code: "events.temporarily_unavailable" });
 
     // The owner must revoke/disable the current snapshot before calling this;
     // this class owns sessions, not the account's durable consent choice.

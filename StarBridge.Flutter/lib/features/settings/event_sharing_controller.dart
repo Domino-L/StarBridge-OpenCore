@@ -31,11 +31,37 @@ final class EventSharingController extends ChangeNotifier {
   late final StreamSubscription _subscription;
   late final Timer _timer;
   int _epoch = 0;
+  Future<void>? _refreshing;
+  int? _refreshEpoch;
   bool _closed = false, busy = false;
   String? error;
   String? _ownerKey;
   String? get accountKey => _ownerKey;
   String state = 'inactive';
+  bool hasCommunityChoice(CommunitySharingTarget target) =>
+      (snapshot?['settings'] as Map?)?['communities'] is List &&
+      (((snapshot!['settings'] as Map)['communities']) as List).any((raw) {
+        final row = raw as Map;
+        return (row['code'] as String).toLowerCase() ==
+                target.code.toLowerCase() &&
+            row['joinedAt'] == target.joinedAt;
+      });
+
+  Future<bool> saveJoinedCommunityChoice(
+    CommunitySharingTarget target,
+    EventSharingChoice next,
+  ) async {
+    await refresh();
+    if (!canEdit ||
+        !targets!.communities.any(
+          (t) => t.code == target.code && t.joinedAt == target.joinedAt,
+        )) {
+      return false;
+    }
+    if (hasCommunityChoice(target) && choice(target.code) == next) return true;
+    return saveChoices({target.code: next});
+  }
+
   Map<String, Object?>? snapshot;
   CommunitySharingTargets? targets;
   bool get canEdit =>
@@ -152,7 +178,22 @@ final class EventSharingController extends ChangeNotifier {
     return value;
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh() {
+    if (_refreshing != null && _refreshEpoch == _epoch) return _refreshing!;
+    if (_closed || busy) return Future<void>.value();
+    final epoch = _epoch;
+    final task = _refreshCore();
+    _refreshEpoch = epoch;
+    _refreshing = task;
+    unawaited(
+      task.whenComplete(() {
+        if (_refreshEpoch == epoch) _refreshing = null;
+      }),
+    );
+    return task;
+  }
+
+  Future<void> _refreshCore() async {
     if (_closed || busy) return;
     final epoch = _epoch;
     busy = true;
@@ -188,8 +229,8 @@ final class EventSharingController extends ChangeNotifier {
     await saveChoices({code: next});
   }
 
-  Future<void> saveChoices(Map<String?, EventSharingChoice> choices) async {
-    if (!canEdit) return;
+  Future<bool> saveChoices(Map<String?, EventSharingChoice> choices) async {
+    if (!canEdit) return false;
     final epoch = _epoch;
     final room = choices[null] ?? choice(null);
     final rows = [
@@ -235,12 +276,14 @@ final class EventSharingController extends ChangeNotifier {
       snapshot = value;
       state = result['state'] as String;
       error = null;
+      return true;
     } catch (e) {
       if (!_closed && epoch == _epoch) {
         error = e is BridgeClientException
             ? e.code
             : 'events.write_unconfirmed';
       }
+      return false;
     } finally {
       if (!_closed && epoch == _epoch) {
         busy = false;

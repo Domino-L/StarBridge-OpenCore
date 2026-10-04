@@ -68,6 +68,22 @@ internal static class LocationArrivalPresentation
             : "Arrival pending";
     }
 
+    // Current arrival presentation is distinct from retained confirmed history.
+    // Legacy desktop surfaces can continue using ResolveCompactLocation.
+    internal static string ResolveCurrentLocation(PlayerPresenceKind presence, bool? hasServerSession,
+        string? confirmedLocation, bool arrivalPendingConfirmation, string? arrivalTarget, string language)
+    {
+        if (!ShouldShowPending(arrivalPendingConfirmation, presence, hasServerSession))
+            return ResolveCompactLocation(presence, hasServerSession, confirmedLocation, false, language);
+        var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        var traditional = language is "zh-Hant" or "zh-TW";
+        if (!PlayerSessionStatePresentation.HasRecognizedValue(arrivalTarget) ||
+            PlayerSessionStatePresentation.IsSessionStateText(arrivalTarget))
+            return traditional ? "地點待確認" : zh ? PendingLocation : "Location pending";
+        var target = LocationNameLocalizer.DisplayName(arrivalTarget, zh ? "zh" : "en");
+        return target + (traditional ? " · 待確認" : zh ? " · 待确认" : " · pending");
+    }
+
     internal static string ResolveDetail(
         bool arrivalPendingConfirmation,
         PlayerPresenceKind presence,

@@ -154,7 +154,7 @@ void main() {
       expect(find.textContaining('不会改变对方资料或舰队关系'), findsOneWidget);
       await tester.tap(find.text('保留好友'));
       await tester.pumpAndSettle();
-      expect(find.text('示例好友 (Example)'), findsOneWidget);
+      expect(find.text('示例好友  @Example'), findsOneWidget);
       await tester.tap(find.text('屏蔽用户'));
       await tester.pumpAndSettle();
       await tester.tap(
@@ -190,7 +190,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
-      expect(find.text('呼号 (Example)'), findsNothing);
+      expect(find.text('呼号  @Example'), findsNothing);
       expect(port.commands, isEmpty);
       expect(find.textContaining('登录 SCM'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());

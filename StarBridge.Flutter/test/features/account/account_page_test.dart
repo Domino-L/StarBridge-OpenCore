@@ -744,6 +744,14 @@ void main() {
       );
 
       expect(find.byKey(const Key('account-save-preferences')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('handle-mismatch-banner')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('handle-mismatch-action')).hitTestable(),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
   }

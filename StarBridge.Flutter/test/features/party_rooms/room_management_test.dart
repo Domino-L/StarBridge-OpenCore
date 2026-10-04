@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/party_rooms/party_rooms_module.dart';
 import 'package:starbridge_flutter/features/party_rooms/bridge_party_rooms_adapter.dart';
 import 'package:starbridge_flutter/features/party_rooms/room_commands.dart';
+import 'package:starbridge_flutter/features/party_rooms/room_invitations.dart';
 
 import 'party_rooms_test.dart' show room, wire, ready;
 import 'room_commands_test.dart' show CommandPort;
@@ -153,6 +154,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(module.selectedRoom!.members.length, count + 1);
       expect(find.text('已批准加入申请。'), findsWidgets);
+      await tester.pump(const Duration(seconds: 6));
+      expect(find.text('已批准加入申请。'), findsNothing);
+      expect(module.commandMessage, isNull);
       await tester.tap(
         find.byKey(const ValueKey('decline-example-application-2')),
       );
@@ -179,9 +183,29 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+  test('invite target read failure stays inside invitation dialog and preserves room', () async {
+    final port = InvitationPort()
+      ..result = ready(wire(current: 'a', rooms: [room('a')..['viewerIsHost'] = true]));
+    final module = PartyRoomsModule(port);
+    await module.refresh();
+    expect(module.canInvite, isTrue);
+    final pending = module.execute(RoomCommand(RoomOperation.inviteTargets, {'roomId': 'a'}));
+    port.pendingCommand.complete(const RoomCommandResult('rejected', error: 'invalidInput'));
+    final result = await pending;
+    expect(result.error, 'invalidInput');
+    expect(module.commandMessage, isNull);
+    expect(module.state, RoomReadState.ready);
+    expect(module.directory?.currentRoomId, 'a');
+    module.dispose();
+  });
 }
 
 class ManagementPort extends CommandPort implements RoomManagementPort {
   @override
   bool get supportsManagement => true;
+}
+
+class InvitationPort extends ManagementPort implements RoomInvitationsPort {
+  @override
+  bool get supportsInvitations => true;
 }

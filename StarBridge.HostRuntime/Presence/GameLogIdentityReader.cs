@@ -24,6 +24,8 @@ public sealed class GameLogIdentityReader
     private byte[] _anchor = [];
     private readonly List<byte> _line = [];
     private bool _longLine;
+    private DateTimeOffset? _recentIdentityAt;
+    private long? _recentWriteStamp;
     private readonly GameLogSessionTracker? _session;
     private readonly Support.GameLogJournalBatch? _journal;
 
@@ -45,6 +47,8 @@ public sealed class GameLogIdentityReader
         _source = null; _position = 0; _identities.Clear(); _quit = false;
         _invalidIdentityEvidence = false;
         _anchor = []; _line.Clear(); _longLine = false;
+        _recentIdentityAt = null;
+        _recentWriteStamp = null;
         _session?.Reset();
         _journal?.Reset();
     }
@@ -111,10 +115,24 @@ public sealed class GameLogIdentityReader
         if (process.State != "running") { Reset(); return new(process.State == "notRunning" ? "notRunning" : "unknown"); }
         if (process.StartedAt is null || process.LogPath is null || process.SessionId is null)
         { Reset(); return new("unknown"); }
+        return ReadFile(path, process, now);
+    }
+
+    /// <summary>Latest valid identity in the selected log, never live presence or gameplay events.</summary>
+    public GameLogIdentityObservation ReadRecent(string path, DateTimeOffset now)
+    {
+        if (_session is not null || _journal is not null)
+            throw new InvalidOperationException("Historical identity must use an identity-only reader.");
+        return ReadFile(path, null, now);
+    }
+
+    private GameLogIdentityObservation ReadFile(string path, GameProcessSession? process, DateTimeOffset now)
+    {
+        var recent = process is null;
         try
         {
             path = ValidatePath(path);
-            if (!path.Equals(Path.GetFullPath(process.LogPath), StringComparison.OrdinalIgnoreCase))
+            if (!recent && !path.Equals(Path.GetFullPath(process!.LogPath!), StringComparison.OrdinalIgnoreCase))
             {
                 Reset();
                 return new("differentInstallation");
@@ -129,8 +147,10 @@ public sealed class GameLogIdentityReader
                 (fileInfo.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
                 throw new IOException();
             var length = stream.Length;
-            var source = path + "|" + process.SessionId + "|" + fileInfo.Volume + ":" + fileInfo.IndexHigh + ":" + fileInfo.IndexLow;
-            if (_source != source || length < _position || !AnchorMatches())
+            var writeStamp = ((long)fileInfo.Write.dwHighDateTime << 32) | (uint)fileInfo.Write.dwLowDateTime;
+            var source = path + "|" + (process?.SessionId ?? "recent-identity-only") + "|" + fileInfo.Volume + ":" + fileInfo.IndexHigh + ":" + fileInfo.IndexLow;
+            if (_source != source || length < _position || !AnchorMatches() ||
+                (recent && length == _position && _recentWriteStamp is { } lastWrite && lastWrite != writeStamp))
             { Reset(); _source = source; }
             stream.Position = _position;
             var remaining = (int)Math.Min(length - _position, WindowBytes);
@@ -165,7 +185,10 @@ public sealed class GameLogIdentityReader
                     }
                     else if (!_longLine)
                     {
-                        if (_line.Count >= 65536) { _longLine = true; _line.Clear(); }
+                        if (_line.Count >= 65536) {
+                            _longLine = true; _line.Clear();
+                            if (recent) _invalidIdentityEvidence = true;
+                        }
                         else _line.Add(buffer[i]);
                     }
                 }
@@ -175,9 +198,19 @@ public sealed class GameLogIdentityReader
             stream.Position = _position - _anchor.Length;
             stream.ReadExactly(_anchor);
             if (stream.Length < length) { Reset(); return new("waiting"); }
+            if (recent) {
+                if (!GetFileInformationByHandle(stream.SafeFileHandle, out var after) ||
+                    after.Write.dwHighDateTime != fileInfo.Write.dwHighDateTime ||
+                    after.Write.dwLowDateTime != fileInfo.Write.dwLowDateTime) {
+                    Reset(); return new("reading");
+                }
+                _recentWriteStamp = writeStamp;
+            }
             // Do not skip the middle of a large file: it may contain a conflicting identity or quit.
             if (_position < stream.Length) return new("reading");
-            if (_quit || _invalidIdentityEvidence) return new("waiting");
+            if ((!recent && _quit) || _invalidIdentityEvidence) return new("waiting");
+            // An incomplete possible identity must not let a previous value authorize a rename.
+            if (recent && (_longLine || _line.Count != 0)) return new("reading");
             return _identities.Count switch
             {
                 0 => new("waiting"), 1 => new("identified", _identities.Single().Value), _ => new("ambiguous")
@@ -196,12 +229,18 @@ public sealed class GameLogIdentityReader
                 var containsQuit = line.Contains("SystemQuit", StringComparison.Ordinal);
                 if (_journal is null && !containsIdentity && !containsQuit &&
                     (_session is null || !GameLogSessionTracker.MightContainEvidence(line))) return;
-                if (line.Length < 22 || line[0] != '<') return;
+                if (line.Length < 22 || line[0] != '<') {
+                    if (recent && containsIdentity) _invalidIdentityEvidence = true;
+                    return;
+                }
                 var end = line.IndexOf('>');
                 if (end is < 20 or > 40 ||
                     !DateTimeOffset.TryParse(line.AsSpan(1, end - 1), CultureInfo.InvariantCulture,
                         DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var timestamp) ||
-                    timestamp < process.StartedAt.Value.AddSeconds(-2) || timestamp > now.AddSeconds(5)) return;
+                    (!recent && timestamp < process!.StartedAt!.Value.AddSeconds(-2)) || timestamp > now.AddSeconds(5)) {
+                    if (recent && containsIdentity) _invalidIdentityEvidence = true;
+                    return;
+                }
                 _session?.Observe(line);
                 if (line.Contains("SystemQuit", StringComparison.Ordinal) && line.Contains("CSystem::Quit", StringComparison.Ordinal))
                 {
@@ -214,7 +253,15 @@ public sealed class GameLogIdentityReader
                 }
                 var match = Identity.Match(line);
                 if (!match.Success || !IdentityBindingPolicy.IsValidGameName(match.Groups["handle"].Value) ||
-                    match.Groups["id"].Value.All(c => c == '0')) return;
+                    match.Groups["id"].Value.All(c => c == '0')) {
+                    if (recent) _invalidIdentityEvidence = true;
+                    return;
+                }
+                if (recent) {
+                    if (_recentIdentityAt is { } previous && timestamp < previous) return;
+                    if (_recentIdentityAt != timestamp) _identities.Clear();
+                    _recentIdentityAt = timestamp;
+                }
                 if (_identities.Count < 2)
                     _identities.TryAdd((match.Groups["handle"].Value.ToLowerInvariant(), match.Groups["id"].Value),
                         match.Groups["handle"].Value);

@@ -5,11 +5,20 @@ public sealed record DesktopNotification(Guid Id, bool Test, int Invitations, in
     string Preview, string Position, string Locale, string Appearance, Func<bool> IsCurrent, bool ReduceMotion = false,
     Action? Activated = null, PlayerActivityNotificationContent? Activity = null,
     bool BackgroundOnly = true, DirectMessageNotificationContent? DirectMessage = null,
-    CommunityNotificationContent? Community = null);
+    CommunityNotificationContent? Community = null, int FriendRequests = 0,
+    bool GameIdentityMismatch = false)
+{
+    public Action<string>? Diagnostic { get; init; }
+    public void ReportDiagnostic(string outcome)
+    {
+        try { Diagnostic?.Invoke(outcome); } catch { /* Diagnostics cannot affect delivery. */ }
+    }
+}
 
 public sealed record CommunityNotificationContent(string Name, string Callsign, string Text, bool Management);
 
-public sealed record DirectMessageNotificationContent(string Callsign, string Text, int Conversations);
+public sealed record DirectMessageNotificationContent(string Callsign, string Text, int Conversations,
+    string? AvatarImageData = null);
 
 public sealed record PlayerActivityNotificationContent(string Callsign, string GameId,
     string Kind, string Audience, string? AvatarImageData = null,
@@ -17,6 +26,7 @@ public sealed record PlayerActivityNotificationContent(string Callsign, string G
 
 public interface IDesktopNotificationSink : IDisposable
 {
+    string DiagnosticTransport => "unknown";
     ValueTask<bool> TryPresentAsync(DesktopNotification notification, CancellationToken cancellationToken);
     async ValueTask<DesktopNotificationResult> TryPresentDetailedAsync(DesktopNotification notification, CancellationToken cancellationToken) =>
         new(await TryPresentAsync(notification, cancellationToken), "unavailable");
@@ -25,4 +35,7 @@ public interface IDesktopNotificationSink : IDisposable
     void ClearMessages() => Clear();
 }
 
-public sealed record DesktopNotificationResult(bool Submitted, string Reason);
+public sealed record DesktopNotificationResult(bool Submitted, string Reason)
+{
+    public string? DiagnosticOutcome { get; init; }
+}

@@ -20,10 +20,10 @@ class MenuAvatarActions extends StatelessWidget {
   Widget build(BuildContext context) => onProfile == null && actions.isEmpty
       ? child
       : MenuAnchor(
-          style: const MenuStyle(
-            backgroundColor: WidgetStatePropertyAll(BridgeInk.ground),
+          style: MenuStyle(
+            backgroundColor: WidgetStatePropertyAll(MenuBridgeColors.of(context).ground),
             surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
-            side: WidgetStatePropertyAll(BorderSide(color: BridgeInk.line)),
+            side: WidgetStatePropertyAll(BorderSide(color: MenuBridgeColors.of(context).line)),
             elevation: WidgetStatePropertyAll(0),
             maximumSize: WidgetStatePropertyAll(Size(300, 400)),
           ),
@@ -32,7 +32,7 @@ class MenuAvatarActions extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
             ),
-            const Divider(height: 1, color: BridgeInk.divider),
+            Divider(height: 1, color: MenuBridgeColors.of(context).divider),
             if (onProfile != null)
               MenuItemButton(onPressed: onProfile, child: const Text('查看个人页面')),
             ...actions,

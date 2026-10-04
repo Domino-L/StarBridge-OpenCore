@@ -42,7 +42,7 @@ class TrayApplicationBinding {
         if (workspace != null) {
           final state = workspace.projection.value;
           final language = preferences.value.effective.locale.languageCode;
-          final completed = state.runtime.isVisible
+          final completed = state.runtime.isVisible || state.runtime.windowState == 'opening'
               ? await workspace.closeRuntime(language)
               : state.runtime.failed
               ? await workspace.retryRuntime(language)
@@ -116,6 +116,8 @@ class TrayApplicationBinding {
                   ? TrayOverlayState.unavailable
                   : workspace.runtime.isVisible
                   ? TrayOverlayState.enabled
+                  : workspace.runtime.windowState == 'opening'
+                  ? TrayOverlayState.opening
                   : TrayOverlayState.disabled
             : o.settings == null
             ? TrayOverlayState.unavailable

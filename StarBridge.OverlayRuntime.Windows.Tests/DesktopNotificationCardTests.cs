@@ -16,9 +16,57 @@ internal static class DesktopNotificationCardTests
         Exception? failure = null;
         var thread = new Thread(() => {
             try {
+                VerifyFreshCardLifetime();
+                var pixels = new byte[320 * 320 * 4];
+                new Random(731).NextBytes(pixels);
+                var source = BitmapSource.Create(320, 320, 96, 96, PixelFormats.Bgra32, null, pixels, 320 * 4);
+                var avatarEncoder = new PngBitmapEncoder();
+                avatarEncoder.Frames.Add(BitmapFrame.Create(source));
+                using var encoded = new MemoryStream();
+                avatarEncoder.Save(encoded);
+                var largeAvatar = "data:image/png;base64," + Convert.ToBase64String(encoded.ToArray());
+                if (largeAvatar.Length <= 350000 || encoded.Length > 512 * 1024)
+                    throw new Exception("Large avatar fixture must cross old card limit but stay within directory contract");
+                if (DesktopNotificationCard.PlayerAvatar(largeAvatar) is not { PixelWidth: 84 })
+                    throw new Exception("A directory-approved large avatar must decode to a bounded native thumbnail");
+                var activityWithAvatar = new PlayerActivityNotificationCard(new(Guid.NewGuid(), false, 0, 0,
+                    "fullContent", "bottomRight", "zh-CN", "dark", () => true,
+                    Activity: new("Pilot", "pilot", "Online", "", largeAvatar, Sources: ["friends"])));
+                activityWithAvatar.Measure(new(344, 88));
+                activityWithAvatar.Arrange(new(0, 0, 344, 88));
+                activityWithAvatar.UpdateLayout();
+                if (Descendants(activityWithAvatar).OfType<System.Windows.Controls.Image>().SingleOrDefault()?.Source
+                    is not BitmapSource { PixelWidth: 84 })
+                    throw new Exception("The actual activity card must show the large permitted avatar, not initials");
                 // Capture the actual native card without ever opening a feature-client window.
+                foreach (var preview in new[] { "sourceOnly", "fullContent", "hiddenDetails" }) {
+                    var direct = new DesktopNotificationCard(new(Guid.NewGuid(), false, 0, 0, preview, "bottomRight",
+                        "zh-CN", "dark", () => true, DirectMessage: new("Pilot", "Message", 1)), () => { }, () => { });
+                    direct.Measure(new(380,170)); direct.Arrange(new(0,0,380,170)); direct.UpdateLayout();
+                    var avatars = Descendants(direct).OfType<Border>().Count(b => b.Name == "SenderAvatar");
+                    if (avatars != (preview == "hiddenDetails" ? 0 : 1))
+                        throw new Exception("Direct reminder needs a sender avatar fallback unless identity is hidden.");
+                }
                 foreach (var locale in new[] { "zh-CN", "zh-TW", "en-US" })
                 foreach (var appearance in new[] { "dark", "light" }) {
+                    var identity = new DesktopNotificationCard(new(Guid.NewGuid(), false, 0, 0, "sourceOnly", "bottomRight",
+                        locale, appearance, () => true, ReduceMotion: true, Activated: () => { }, GameIdentityMismatch: true), () => { }, () => { });
+                    identity.Measure(new(380,170)); identity.Arrange(new(0,0,380,170)); identity.UpdateLayout();
+                    var identitySummary = System.Windows.Automation.AutomationProperties.GetName(identity);
+                    var expectedIdentityText = locale switch {
+                        "zh-CN" => "游戏身份与应用记录不一致，请打开应用核对。",
+                        "zh-TW" => "遊戲身分與應用程式記錄不一致，請開啟應用程式核對。",
+                        _ => "Your game identity differs from the app record. Open the app to review."
+                    };
+                    if (!identitySummary.Contains(expectedIdentityText) || identitySummary.Contains("SCM") ||
+                        identitySummary.Contains("绑定") || identitySummary.Contains("房间"))
+                        throw new Exception("Typed identity warning must use neutral Host-owned text without claiming SCM binding or room actions");
+                    var hiddenIdentity = new DesktopNotificationCard(new(Guid.NewGuid(), false, 0, 0, "hiddenDetails", "bottomRight",
+                        locale, appearance, () => true, GameIdentityMismatch: true), () => { }, () => { });
+                    var hiddenIdentitySummary = System.Windows.Automation.AutomationProperties.GetName(hiddenIdentity);
+                    if (hiddenIdentitySummary.Contains("身份") || hiddenIdentitySummary.Contains("身分") ||
+                        hiddenIdentitySummary.Contains("identity", StringComparison.OrdinalIgnoreCase))
+                        throw new Exception("Hidden identity preview must not expose the source through accessibility text");
                     var passive = new PlayerActivityNotificationCard(new(Guid.NewGuid(), false, 0, 0, "fullContent", "bottomRight", locale, appearance, () => true,
                         Activity: new("Pilot", "pilot", "StartedGame", "", Sources: ["friends", "organization:Example Fleet", "room"])));
                     passive.Measure(new(344,88)); passive.Arrange(new(0,0,344,88)); passive.UpdateLayout();
@@ -128,6 +176,40 @@ internal static class DesktopNotificationCardTests
         });
         thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         if (failure != null) throw failure;
+    }
+
+    private static void VerifyFreshCardLifetime()
+    {
+        // Exercise the production timer without starting its thread or showing a
+        // window. Simulate an old dispatcher tick followed by a newly added card.
+        var type = typeof(NativeDesktopNotificationRuntime);
+        var runtime = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var entryType = type.GetNestedType("Entry", System.Reflection.BindingFlags.NonPublic)!;
+        var notice = new DesktopNotification(Guid.NewGuid(), false, 0, 0, "fullContent", "bottomRight",
+            "zh-CN", "dark", () => false, Activity: new("Pilot", "pilot", "Online", ""));
+        // Expiration avoids native environment queries; elapsed accounting runs first.
+        var entry = Activator.CreateInstance(entryType, flags | System.Reflection.BindingFlags.Public,
+            null, new object[] { notice, new Window() }, null)!;
+        var older = Activator.CreateInstance(entryType, flags | System.Reflection.BindingFlags.Public,
+            null, new object[] { notice, new Window() }, null)!;
+        entryType.GetField("LastTick", flags)?.SetValue(older,
+            System.Diagnostics.Stopwatch.GetTimestamp() - 10 * System.Diagnostics.Stopwatch.Frequency);
+        var list = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(entryType))!;
+        list.Add(entry);
+        list.Add(older);
+        type.GetField("_visible", flags)!.SetValue(runtime, list);
+        type.GetField("_pending", flags)!.SetValue(runtime, new Queue<DesktopNotification>());
+        type.GetField("_tick", flags)?.SetValue(runtime,
+            System.Diagnostics.Stopwatch.GetTimestamp() - 10 * System.Diagnostics.Stopwatch.Frequency);
+        type.GetMethod("Tick", flags)!.Invoke(runtime, null);
+        var remaining = (TimeSpan)entryType.GetField("Remaining", flags)!.GetValue(entry)!;
+        if (remaining < TimeSpan.FromSeconds(4))
+            throw new Exception("A new activity card must not consume dispatcher time from before it existed");
+        if ((TimeSpan)entryType.GetField("Remaining", flags)!.GetValue(older)! > TimeSpan.Zero)
+            throw new Exception("An older card must still consume its own elapsed display time");
+        if (list.Count != 0)
+            throw new Exception("Invalidated cards must be removed immediately regardless of remaining display time");
     }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root) {

@@ -1,5 +1,26 @@
 import 'package:flutter/material.dart';
 
+const overlayPreviewSpaceColors = [
+  Color(0xff07111c),
+  Color(0xff172d3c),
+  Color(0xff090f18),
+];
+
+const overlayPickerHueColors = [
+  Color(0xffff0000),
+  Color(0xffffff00),
+  Color(0xff00ff00),
+  Color(0xff00ffff),
+  Color(0xff0000ff),
+  Color(0xffff00ff),
+  Color(0xffff0000),
+];
+
+Color? parseOverlayPickerColor(String value) =>
+    RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(value)
+    ? Color(0xff000000 | int.parse(value.substring(1), radix: 16))
+    : null;
+
 // Colors used by the existing Windows overlay editor, independent of app theme.
 Color overlayPreviewAccent(String theme) => Color(switch (theme) {
   'Anvil' => 0xff4effab,

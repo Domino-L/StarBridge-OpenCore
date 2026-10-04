@@ -1,10 +1,12 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'community_workspace_copy.dart';
+import 'community_compact_header.dart';
 import 'community_workspace_image.dart';
 import 'community_workspace_port.dart';
 import 'community_profile_copy.dart';
@@ -66,6 +68,8 @@ class CommunityWorkspaceHeader extends StatelessWidget {
         communityTimeZoneSummary(context, workspace),
     ].join(' · ');
 
+    String metricLabel(String key) =>
+        key == 'online' ? t(scoped ? 'onlinePage' : 'onlineTotal') : t(key);
     Widget heading(String value) => Text(
       value,
       style: text.labelMedium?.copyWith(color: colors.textSecondary),
@@ -138,7 +142,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsetsDirectional.only(end: 8),
                   child: Semantics(
-                    label: '${t(metric.$1)} ${metric.$2}',
+                    label: '${metricLabel(metric.$1)} ${metric.$2}',
                     excludeSemantics: true,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,9 +172,9 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Tooltip(
-                          message: t(metric.$1),
+                          message: metricLabel(metric.$1),
                           child: Text(
-                            t(metric.$1),
+                            metricLabel(metric.$1),
                             key: ValueKey(
                               'community-presence-label-${metric.$1}',
                             ),
@@ -281,7 +285,10 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                   key: const Key('community-copy-all-contacts'),
                   onPressed: onCopyContacts,
                   tooltip: t('copyAll'),
-                  icon: const StandardIcon(StandardIconSemantic.copyAll, size: 18),
+                  icon: const StandardIcon(
+                    StandardIconSemantic.copyAll,
+                    size: 18,
+                  ),
                 ),
             ],
           ),
@@ -372,110 +379,21 @@ class CommunityWorkspaceHeader extends StatelessWidget {
     int gaming,
     bool scoped,
     bool narrow,
-  ) {
-    String t(String key) => workspaceText(context, key);
-    final colors = context.tokens.colors;
-    final text = Theme.of(context).textTheme;
-    return Row(
-      key: const ValueKey('community-header-compact'),
-      children: [
-        SizedBox(
-          width: 32,
-          height: 32,
-          child: CommunityWorkspaceImage(
-            bytes: logo,
-            loading: logoLoading,
-            loadFailed: logoFailed,
-            icon: StandardIconSemantic.groups,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Tooltip(
-            message: '${workspace.name}\n${workspace.code}',
-            child: Text(
-              workspace.name,
-              key: const ValueKey('community-compact-name'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: text.titleMedium,
-            ),
-          ),
-        ),
-        for (final metric in [
-          ('online', online, colors.accent, StandardIconSemantic.radioButtonChecked),
-          ('gaming', gaming, colors.success, StandardIconSemantic.sportsEsports),
-          (
-            'member',
-            workspace.totalCount,
-            colors.textPrimary,
-            StandardIconSemantic.people,
-          ),
-        ])
-          Padding(
-            padding: EdgeInsetsDirectional.only(start: narrow ? 8 : 16),
-            child: Tooltip(
-              message:
-                  '${t(metric.$1)} ${metric.$2}'
-                  '${scoped && metric.$1 != 'member' ? '\n${t('presencePageScope')}' : ''}',
-              child: Semantics(
-                label:
-                    '${t(metric.$1)} ${metric.$2}'
-                    '${scoped && metric.$1 != 'member' ? ' · ${t('presencePageScope')}' : ''}',
-                excludeSemantics: true,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (narrow)
-                      StandardIcon(metric.$4, size: 16, color: metric.$3)
-                    else
-                      Text(
-                        '${t(metric.$1)}${scoped && metric.$1 != 'member' ? ' · ${t('currentPage')}' : ''}',
-                        key: ValueKey('community-presence-label-${metric.$1}'),
-                        style: text.labelMedium?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    const SizedBox(width: 5),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: narrow ? 40 : 64),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          '${metric.$2}',
-                          key: ValueKey(
-                            'community-presence-value-${metric.$1}',
-                          ),
-                          style: text.titleMedium?.copyWith(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                            color: metric.$3,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        const SizedBox(width: 8),
-        TextButton(
-          key: const Key('community-open-details'),
-          onPressed: onDetails,
-          child: Text(t('viewDetails')),
-        ),
-        if (onToggleExpansion != null)
-          IconButton(
-            key: const Key('community-header-expand'),
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            padding: EdgeInsets.zero,
-            onPressed: onToggleExpansion,
-            tooltip: profileText(context, 'expandHeader'),
-            icon: const StandardIcon(StandardIconSemantic.unfoldMore, size: 18),
-          ),
-      ],
-    );
-  }
+  ) => CommunityCompactHeader(
+    name: workspace.name,
+    code: workspace.code,
+    online: online,
+    gaming: gaming,
+    total: workspace.totalCount,
+    scoped: scoped,
+    narrow: narrow,
+    logo: CommunityWorkspaceImage(
+      bytes: logo,
+      loading: logoLoading,
+      loadFailed: logoFailed,
+      icon: StandardIconSemantic.groups,
+    ),
+    onDetails: onDetails,
+    onToggleExpansion: onToggleExpansion,
+  );
 }

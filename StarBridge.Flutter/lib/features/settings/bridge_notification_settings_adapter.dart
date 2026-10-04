@@ -13,11 +13,18 @@ final class LocalRoomReminder {
     this.desktopEligible = false,
     this.overlayHandled = false,
     this.desktopTicket,
+    this.kind = 'room',
+    this.conversationKeys = const [],
+    this.senderName,
+    this.messagePreview,
   });
   final int revision, invitations, applications;
   final bool desktopEligible;
   final bool overlayHandled;
   final String? desktopTicket;
+  final String kind;
+  final List<String> conversationKeys;
+  final String? senderName, messagePreview;
 }
 
 final class BridgeNotificationSettingsAdapter
@@ -25,6 +32,52 @@ final class BridgeNotificationSettingsAdapter
   BridgeNotificationSettingsAdapter(this.session) {
     notificationSourceDeliveryEpoch(session).addListener(_clearSourceReminder);
     _subscription = session.events.listen((event) {
+      if (event.name == 'notificationSettings.social') {
+        final data = event.payload;
+        final count = data['count'],
+            revision = data['revision'],
+            kind = data['kind'];
+        if (data['schemaVersion'] == 1 &&
+            count is int &&
+            count > 0 &&
+            count <= 5000 &&
+            revision is int &&
+            revision >= 0 &&
+            (kind == 'direct' || kind == 'friend')) {
+          final rawKeys = data['conversationKeys'];
+          final keys =
+              rawKeys is List &&
+                  rawKeys.length <= 2000 &&
+                  rawKeys.every(
+                    (k) =>
+                        k is String && RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(k),
+                  )
+              ? rawKeys.cast<String>()
+              : <String>[];
+          final rawSender = data['senderName'],
+              rawPreview = data['messagePreview'];
+          final sender =
+              rawSender is String &&
+                  rawSender.length <= 512 &&
+                  !rawSender.runes.any((code) => code < 32 || code == 127)
+              ? rawSender
+              : null;
+          final preview = rawPreview is String && rawPreview.length <= 4096
+              ? rawPreview.replaceAll(RegExp(r'\s+'), ' ').trim()
+              : null;
+          _reminders.add(
+            LocalRoomReminder(
+              revision,
+              count,
+              0,
+              kind: kind as String,
+              conversationKeys: List.unmodifiable(keys),
+              senderName: kind == 'direct' && count == 1 ? sender : null,
+              messagePreview: kind == 'direct' && count == 1 ? preview : null,
+            ),
+          );
+        }
+      }
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
         _reminders.add(null);

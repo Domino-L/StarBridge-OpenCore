@@ -6,7 +6,8 @@ using StarBridge.Core.Chat;
 using StarBridge.Core.Overlay;
 
 // WPF v1 settings/layout package. It contains no account, hotkey or entitlement data.
-internal sealed record OverlaySharedPreset(int Version, string Name, string Settings, string Layout)
+internal sealed record OverlaySharedPreset(int Version, string Name, string Settings, string Layout,
+    JsonElement? Sources = null, bool RemovedOrganizationBindings = false)
 {
     internal static OverlaySharedPreset Parse(string? payload)
     {
@@ -16,13 +17,15 @@ internal sealed record OverlaySharedPreset(int Version, string Name, string Sett
                 throw Invalid();
             using var json = JsonDocument.Parse(payload);
             var fields = json.RootElement.EnumerateObject().ToArray();
-            if (fields.Length != 4 || fields.Select(p => p.Name.ToLowerInvariant()).Distinct().Count() != 4 ||
-                fields.Any(p => p.Name.ToLowerInvariant() is not ("version" or "name" or "settings" or "layout")))
-                throw Invalid();
             var package = JsonSerializer.Deserialize<OverlaySharedPreset>(payload,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw Invalid();
+            var expected = package.Version == 2
+                ? new[] { "version", "name", "settings", "layout", "sources", "removedorganizationbindings" }
+                : new[] { "version", "name", "settings", "layout" };
+            if (fields.Length != expected.Length || fields.Select(p => p.Name.ToLowerInvariant()).Distinct().Count() != expected.Length ||
+                fields.Any(p => !expected.Contains(p.Name.ToLowerInvariant()))) throw Invalid();
             var name = InformationOverlayPresetCodec.CleanName(package.Name);
-            if (package.Version != 1 || name is null || string.IsNullOrWhiteSpace(package.Settings) ||
+            if (package.Version is not (1 or 2) || name is null || string.IsNullOrWhiteSpace(package.Settings) ||
                 string.IsNullOrWhiteSpace(package.Layout)) throw Invalid();
             var settings = package.Settings.Split(',', StringSplitOptions.TrimEntries);
             if (settings.Length < 5 || settings.Length > 128 ||
@@ -47,15 +50,21 @@ internal sealed record OverlaySharedPreset(int Version, string Name, string Sett
             var parsed = InformationOverlayLayoutItem.ParseMany(package.Layout).ToDictionary(i => i.Key);
             var layout = InformationOverlayDefaults.CreateLayout(InformationOverlayPresetCodec.DefaultPresetId)
                 .Select(item => parsed.GetValueOrDefault(item.Key, item));
-            return new(1, name, OverlayDisplaySettings.Parse(package.Settings).Serialize(),
-                InformationOverlayLayoutItem.SerializeMany(layout));
+            OverlaySourceExport? transfer = package.Version == 2
+                ? OverlayPresetSourcesCodec.ForTransfer(OverlayPresetSourcesCodec.Parse(package.Sources?.GetRawText() ?? "")) : null;
+            return new(package.Version, name, OverlayDisplaySettings.Parse(package.Settings).Serialize(),
+                InformationOverlayLayoutItem.SerializeMany(layout),
+                transfer is null ? null : JsonSerializer.Deserialize<JsonElement>(OverlayPresetSourcesCodec.Serialize(transfer.Sources)),
+                package.RemovedOrganizationBindings || transfer?.RemovedOrganizationBindings == true);
         }
-        catch (Exception error) when (error is JsonException or InvalidOperationException or ArgumentException)
+        catch (Exception error) when (error is JsonException or InvalidOperationException or ArgumentException or FormatException)
         {
             throw Invalid();
         }
     }
 
-    internal string Serialize() => JsonSerializer.Serialize(this);
+    // Preserve the exact four-field v1 format for WPF and old relay deployments.
+    internal string Serialize() => Version == 1
+        ? JsonSerializer.Serialize(new { Version, Name, Settings, Layout }) : JsonSerializer.Serialize(this);
     private static OverlaySettingsException Invalid() => new("overlay.shared_preset_invalid");
 }

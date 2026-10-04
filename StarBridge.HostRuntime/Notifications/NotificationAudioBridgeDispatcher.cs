@@ -16,20 +16,26 @@ public sealed class NotificationAudioBridgeDispatcher : IBridgeRequestDispatcher
     private readonly object _gate = new();
     private bool _disposed;
     private readonly RoomAudioObserver _rooms;
+    private readonly DirectMessageNotificationObserver _direct;
+    private readonly FriendRequestNotificationObserver _friends = new();
     private readonly TimeProvider _time;
     private readonly Func<bool> _canNotify;
+    private readonly Func<bool> _canPlaySocial;
     private long? _lastPlayback;
+    private readonly NotificationDeliveryJournal _delivery;
+    private void Record(NotificationDeliveryStage stage) => _delivery.Record(NotificationDeliveryChannel.Audio, stage);
     internal NotificationAudioBridgeDispatcher(string dataRoot, NotificationAudioCatalog? catalog,
-        INotificationAudioOutput output, Func<long> generation, Func<bool>? canNotify = null, TimeProvider? time = null)
-    { _store = new(dataRoot); _policies = new(dataRoot); _catalog = catalog; _output = output; _generation = generation; _canNotify = canNotify ?? (() => false);
-        _time = time ?? TimeProvider.System; _rooms = new(_time); }
+        INotificationAudioOutput output, Func<long> generation, Func<bool>? canNotify = null, TimeProvider? time = null, Func<bool>? canPlaySocial = null)
+    { _delivery = new(dataRoot); _store = new(dataRoot); _policies = new(dataRoot); _catalog = catalog; _output = output; _generation = generation; _canNotify = canNotify ?? (() => false);
+        _canPlaySocial = canPlaySocial ?? _canNotify;
+        _time = time ?? TimeProvider.System; _rooms = new(_time); _direct = new(_time); }
 
-    public static NotificationAudioBridgeDispatcher CreateDefault(string dataRoot, string assetRoot, Func<long> generation, Func<bool>? canNotify = null)
+    public static NotificationAudioBridgeDispatcher CreateDefault(string dataRoot, string assetRoot, Func<long> generation, Func<bool>? canNotify = null, Func<bool>? canPlaySocial = null)
     {
         NotificationAudioCatalog? catalog = null;
         try { catalog = NotificationAudioCatalog.Load(assetRoot); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException) { }
-        return new(dataRoot, catalog, new WindowsWaveAudioOutput(), generation, canNotify);
+        return new(dataRoot, catalog, new WindowsWaveAudioOutput(), generation, canNotify, canPlaySocial: canPlaySocial);
     }
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
     public ValueTask<BridgeDispatchBatch> DispatchAsync(BridgeEnvelope request, CancellationToken cancellationToken = default)
@@ -96,29 +102,48 @@ public sealed class NotificationAudioBridgeDispatcher : IBridgeRequestDispatcher
     }
     internal void ResetAutomaticSession()
     {
-        lock (_gate) { _rooms.Reset(); if (!_disposed) _output.Stop(); }
+        lock (_gate) { _rooms.Reset(); _direct.Reset(); _friends.Reset(); if (!_disposed) _output.Stop(); }
     }
 
-    // Only CompositeBridgeDispatcher can supply a completed authenticated room read.
+    // Only CompositeBridgeDispatcher can supply completed authenticated reads.
     // No externally callable 'play this event' command and no new network polling.
     internal void ObserveRoomRead(BridgeEnvelope request, BridgeEnvelope response, CancellationToken token)
     {
+        string? trace = null;
+        void Record(NotificationDeliveryStage stage, string? result = null) =>
+            _delivery.Record(NotificationDeliveryChannel.Audio, stage, trace, _output.DiagnosticTransport, result,
+                stage is NotificationDeliveryStage.NativeAccepted or NotificationDeliveryStage.NativeRejected ? _output.DefaultEndpointSnapshot : null);
         lock (_gate) {
-            if (_disposed || token.IsCancellationRequested) { _rooms.Reset(); return; }
-            if (!_rooms.Observe(request, response, _generation())) return;
+            if (_disposed || token.IsCancellationRequested) { _rooms.Reset(); _direct.Reset(); _friends.Reset(); return; }
+            var direct = request.Name == "directMessages.read";
+            var friend = request.Name == "notificationInbox.read";
+            if (!(friend ? _friends.Observe(request, response, _generation()) > 0 : direct ? _direct.Observe(request, response, _generation()) : _rooms.Observe(request, response, _generation()))) {
+                if (direct && !request.Payload.TryGetProperty("targetRef", out _)) Record(_direct.LastStage);
+                return;
+            }
+            trace = NotificationDeliveryJournal.TraceFor(request);
+            Record(NotificationDeliveryStage.FreshEvent);
             try {
-                if (request.AccountContext is null || _policies.Read(request.AccountContext).For("room") == NotificationSourceMode.DoNotDisturb) return;
+                if (request.AccountContext is null) return;
+                var mode = _policies.Read(request.AccountContext).For(friend ? "friends" : direct ? "directMessages" : "room");
+                if (direct ? !NotificationSourcePolicy.Allows(mode, NotificationEventKind.DirectMessage) : mode == NotificationSourceMode.DoNotDisturb) { Record(NotificationDeliveryStage.SourceMuted); return; }
                 var settings = _store.Read();
                 // DoNotDisturb is retained only for v1 compatibility; Enabled is the sole sound switch.
-                if (!settings.Enabled || settings.Volume == 0 || !_canNotify() ||
-                    (_lastPlayback is { } last && _time.GetElapsedTime(last) < TimeSpan.FromSeconds(10))) return;
+                var social = direct || friend;
+                if (!settings.Enabled || settings.Volume == 0) { Record(NotificationDeliveryStage.ChannelDisabled); return; }
+                if (!(social ? _canPlaySocial() : _canNotify())) { Record(NotificationDeliveryStage.EnvironmentSuppressed); return; }
+                if (_lastPlayback is { } last && _time.GetElapsedTime(last) < TimeSpan.FromSeconds(social ? 1 : 10)) { Record(NotificationDeliveryStage.Throttled); return; }
                 var asset = _catalog?.Resolve(NotificationAudioCueIds.Soft);
-                if (asset is null) return;
+                if (asset is null) { Record(NotificationDeliveryStage.CueUnavailable); return; }
                 var wave = ReadVerifiedWave(asset, settings.Volume);
-                if (token.IsCancellationRequested || request.SessionGeneration != _generation()) return;
-                if (_output.TryPlay(wave)) _lastPlayback = _time.GetTimestamp();
+                if (token.IsCancellationRequested || request.SessionGeneration != _generation()) { Record(NotificationDeliveryStage.Stale); return; }
+                var played = _output.TryPlay(wave);
+                Record(played ? NotificationDeliveryStage.NativeAccepted : NotificationDeliveryStage.NativeRejected,
+                    played ? "acceptedUnverified" : "rejected");
+                if (played) _lastPlayback = _time.GetTimestamp();
             } catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
                 _output.Stop(); // A local audio failure never changes the successful room result.
+                Record(NotificationDeliveryStage.Failed);
             }
         }
     }

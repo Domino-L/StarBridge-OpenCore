@@ -36,22 +36,24 @@ internal sealed partial class OverlayCompositionHudWindow
         var contentRight = (float)rect.Right - 136;
         var titleWidth = (float)rect.Width - 150;
         var noticeTitleFormat = _titleFormat;
-        DrawText(
+        DrawSourceHeader(
             target,
-            state.FleetNoticeTitle,
+            state.EmptyStates.Notice is null ? state.FleetNoticeTitle : state.EmptyNoticeTitle,
+            state.SourceLabels.Notice,
             noticeTitleFormat,
             titleX,
             y,
             titleWidth,
-            22,
-            state.Palette.Title,
+            state,
             textOpacity);
         var bodyY = y + 27;
         var bodyWidth = (float)rect.Width - 156;
         var timerX = (float)rect.Right - 126;
         var timerY = (float)rect.Y;
         var timerHeight = (float)rect.Height;
-        DrawText(target, state.NoticeTimerLabel, _textRightFormat, timerX, timerY, 108, timerHeight, state.Palette.Alert, textOpacity);
+        DrawText(target, state.EmptyStates.Notice ?? state.FleetNotice, _textFormat, x, bodyY, bodyWidth, 24, state.Palette.Text, textOpacity);
+        if (state.EmptyStates.Notice is null)
+            DrawText(target, state.NoticeTimerLabel, _textRightFormat, timerX, timerY, 108, timerHeight, state.Palette.Alert, textOpacity);
     }
 
 
@@ -71,16 +73,19 @@ internal sealed partial class OverlayCompositionHudWindow
         var squadsTitleFormat = _titleFormat;
         var primaryFormat = _textFormat;
         var standardMetricFormat = _textRightFormat;
-        DrawText(
+        DrawSourceHeader(
             target,
             state.SquadsTitle,
+            state.SourceLabels.Overview,
             squadsTitleFormat,
             titleLeft,
             top,
             Math.Max(1, (float)rect.Right - titleLeft - 28),
-            22,
-            state.Palette.Title,
+            state,
             textOpacity);
+
+        if (DrawModuleEmptyMessage(target, state.EmptyStates.Overview, left, rowY, contentWidth,
+                (float)rect.Bottom - rowY - 8, state, textOpacity)) return;
 
         var compactMetrics =
             contentWidth < OverlaySquadStatusRowLayout.CompactThreshold;
@@ -125,10 +130,10 @@ internal sealed partial class OverlayCompositionHudWindow
             left,
             rowY + 22,
             contentWidth,
-            15,
+            IsPartySceneLabel(state.SquadsTitle) ? 54 : 15,
             state.Palette.Muted,
             textOpacity);
-        DrawOverviewLocations(
+        if (!IsPartySceneLabel(state.SquadsTitle)) DrawOverviewLocations(
             target,
             state,
             left,
@@ -260,16 +265,18 @@ internal sealed partial class OverlayCompositionHudWindow
         var clipRect = RectF((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height);
         var rowsBottom = (float)rect.Bottom - 8;
         var membersTitleFormat = _titleFormat;
-        DrawText(
+        DrawSourceHeader(
             target,
             state.MembersTitle,
+            state.SourceLabels.Members,
             membersTitleFormat,
             titleLeft,
             top,
             Math.Max(1, (float)rect.Right - titleLeft - 28),
-            22,
-            state.Palette.Title,
+            state,
             textOpacity);
+        if (DrawModuleEmptyMessage(target, state.EmptyStates.Members, left, rowY, contentWidth,
+                rowsBottom - rowY, state, textOpacity)) return;
         var statusWidth = state.HideMemberStatus ? 0 : 40f;
         var remaining = Math.Max(40, contentWidth - statusWidth);
         var nameWidth = (float)(remaining * state.MemberNameRatio);
@@ -307,7 +314,7 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private void DrawChatPanel(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
-        if (state.ChatDisplayMode == OverlayChatDisplayMode.FullScreenBarrage)
+        if (state.ChatDisplayMode == OverlayChatDisplayMode.FullScreenBarrage && state.EmptyStates.Chat is null)
         {
             DrawChatBarrage(target, state);
             return;
@@ -327,21 +334,23 @@ internal sealed partial class OverlayCompositionHudWindow
         var contentBottom = (float)rect.Bottom - 8;
         var clipRect = RectF((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height);
         var chatTitleFormat = _titleFormat;
-        DrawText(
+        DrawSourceHeader(
             target,
             state.ChatTitle,
+            state.SourceLabels.Chat,
             chatTitleFormat,
             titleLeft,
             top,
             Math.Max(1, (float)rect.Right - titleLeft - 28),
-            22,
-            state.Palette.Title,
+            state,
             textOpacity);
         var chatMeta = state.ChatTitle.Contains("房间", StringComparison.OrdinalIgnoreCase) ||
                        state.ChatTitle.Equals("PARTY COMMS", StringComparison.OrdinalIgnoreCase)
             ? "PARTY COMMS"
             : "FLEET COMMS";
 
+        if (DrawModuleEmptyMessage(target, state.EmptyStates.Chat, left, contentTop, contentWidth,
+                contentBottom - contentTop, state, textOpacity)) return;
         var cursorTop = contentTop;
         target.PushAxisAlignedClip(clipRect, AntialiasMode.PerPrimitive);
         try

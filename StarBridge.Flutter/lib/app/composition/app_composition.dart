@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'app_feature_registry.dart';
+import '../menu_overlay/menu_friends_session.dart';
 import '../../features/common/bridge_user_interaction.dart';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,8 @@ import '../../features/account/account_models.dart';
 import '../../features/gameplay_time/gameplay_time_controller.dart';
 import '../../features/game_log/game_log_controller.dart';
 import '../../features/account/account_module.dart';
+import 'handle_mismatch_module.dart';
+import '../../features/account/handle_mismatch_port.dart';
 import '../../features/account/account_port.dart';
 import '../../features/account/bridge_account_adapter.dart';
 import '../../features/account/host_unavailable_account_adapter.dart';
@@ -82,6 +85,7 @@ import '../shell/chrome/in_memory_shell_chrome.dart';
 import '../shell/chrome/shell_chrome_port.dart';
 import 'account_shell_chrome.dart';
 import 'direct_message_refresh.dart';
+import 'social_activity.dart';
 import 'bridge_game_presence.dart';
 import 'social_privacy_composition.dart';
 import 'app_activity_presence.dart';
@@ -96,6 +100,7 @@ final class AppComposition {
     required this.shellChrome,
     required this.preferences,
     required this.account,
+    required this.handleMismatch,
     required this.personalProfile,
     required this.officialFleet,
     required this.partyRooms,
@@ -111,6 +116,7 @@ final class AppComposition {
     this.continuousPlay,
     this.desktopNotifications,
     this.directMessageRefresh,
+    this.socialActivity,
     this.directMessageRequests,
     this.notificationReminders = const Stream.empty(),
     required this.overlaySettings,
@@ -128,6 +134,7 @@ final class AppComposition {
   final ShellChromePort shellChrome;
   final AppPreferencesPort preferences;
   final AccountModule account;
+  final HandleMismatchModule handleMismatch;
   final PersonalProfileModule personalProfile;
   final OfficialFleetModule officialFleet;
   final PartyRoomsModule partyRooms;
@@ -145,17 +152,51 @@ final class AppComposition {
         );
   final NotificationSettingsModule notificationSettings;
   final NotificationInboxController notificationInbox;
+  DirectMessagesPort createWindowMessagesPort() => _nativeHost == null
+      ? UnavailableDirectMessages()
+      : BridgeDirectMessages(
+          _nativeHost.session,
+          ownAvatar: () =>
+              account.projection.value.profile?.avatarImageData ??
+              account.projection.value.profile?.avatarUrl,
+        );
   final ApplicationSupportModule applicationSupport;
   final NotificationAudioController? notificationAudio;
   final ContinuousPlayController? continuousPlay;
   final DesktopNotificationPort? desktopNotifications;
   final DirectMessageRefresh? directMessageRefresh;
+  final SocialActivity? socialActivity;
   final ValueNotifier<int>? directMessageRequests;
   final Stream<LocalRoomReminder?> notificationReminders;
   final OverlaySettingsModule overlaySettings;
   final AccountShellChrome _accountShellChrome;
   final bool ownsPreferences;
   final NativeHostLease? _nativeHost;
+  MenuFriendsSession createFriendsWindowSession(
+    void Function(Map<String, Object?>) publish,
+  ) => MenuFriendsSession(
+    _nativeHost == null
+        ? UnavailableFriendsPort()
+        : BridgeFriendsAdapter(_nativeHost.session),
+    publish,
+    presence: manualPresence?.source.controller,
+    identity: () {
+      final current = account.projection.value;
+      if (current.generation != _nativeHost?.session.activeGeneration ||
+          !(current.isSignedIn ||
+              current.sessionState == AccountSessionState.legacySignedIn)) {
+        return null;
+      }
+      return (
+        name:
+            current.profile?.displayName ??
+            current.identity.authoritativeHandle ??
+            '',
+        handle: current.identity.authoritativeHandle ?? '',
+        avatar: current.profile?.avatarImageData,
+      );
+    },
+  );
   late final userInteractions = _nativeHost == null
       ? null
       : BridgeUserInteraction(_nativeHost.session);
@@ -414,6 +455,7 @@ final class AppComposition {
         : null;
     ConnectedManualPresence? manualPresence;
     GameLogController? gameLog;
+    late final CommunitiesModule communities;
     final overlaySettings = composeOverlaySettings(
       overlaySettingsPort,
       workspacePort: overlayWorkspacePort,
@@ -421,6 +463,7 @@ final class AppComposition {
       account: account,
       profile: personalProfile,
       rooms: partyRooms,
+      menuCommunities: () => communities,
       menuPresence: () => manualPresence?.source.controller,
       menuGame: () => gameLog?.value ?? const GameLogView(),
     );
@@ -438,6 +481,27 @@ final class AppComposition {
             account.projection,
             onIdentityChanged: () => unawaited(account.refresh()),
           );
+    final handleMismatch = HandleMismatchModule(
+      account: account.projection,
+      gameLog: gameLog,
+      port: nativeHost == null
+          ? null
+          : BridgeHandleMismatchPort(nativeHost.session),
+      activeGeneration: nativeHost == null
+          ? null
+          : () => nativeHost.session.activeGeneration,
+      invalidations: nativeHost?.session.events
+          .where(
+            (event) =>
+                event.name == 'account.changed' ||
+                event.name == 'bootstrap.invalidated',
+          )
+          .map((_) {}),
+      refresh: () async {
+        await account.refresh();
+        await gameLog?.run();
+      },
+    );
     final accountShellChrome = AccountShellChrome(
       base: shellChrome,
       account: account,
@@ -451,8 +515,9 @@ final class AppComposition {
         : ConnectedManualPresence(
             nativeHost.session,
             accountShellChrome.projection,
+            appAway: appActivity,
           );
-    final communities = CommunitiesModule(
+    communities = CommunitiesModule(
       (communitiesPortFactory ??
           () => nativeHost != null
               ? BridgeCommunities(
@@ -493,6 +558,12 @@ final class AppComposition {
     unawaited(notificationSettings.initialize());
     unawaited(overlaySettings.initialize());
     final directMessageRequests = ValueNotifier<int>(0);
+    final directMessageRefresh = nativeHost == null
+        ? null
+        : DirectMessageRefresh(
+            BridgeDirectMessages(nativeHost.session),
+            account.projection,
+          );
     return AppComposition._(
       accountShellChrome,
       features: createAppFeatureRegistry(
@@ -520,11 +591,13 @@ final class AppComposition {
                 ? BridgeDirectMessages(
                     nativeHost.session,
                     ownAvatar: () =>
+                        account.projection.value.profile?.avatarImageData ??
                         account.projection.value.profile?.avatarUrl,
                   )
                 : UnavailableDirectMessages(),
         applicationSupport,
         directMessageRequests,
+        directMessageRefresh?.unread,
       ),
       windowChrome: windowChrome,
       shellChrome: accountShellChrome,
@@ -541,12 +614,10 @@ final class AppComposition {
       notificationSettings: notificationSettings,
       applicationSupport: applicationSupport,
       directMessageRequests: directMessageRequests,
-      directMessageRefresh: nativeHost == null
+      socialActivity: nativeHost == null
           ? null
-          : DirectMessageRefresh(
-              BridgeDirectMessages(nativeHost.session),
-              account.projection,
-            ),
+          : SocialActivity(nativeHost.session),
+      directMessageRefresh: directMessageRefresh,
       notificationAudio: notificationAudio,
       notificationInbox: notificationInbox,
       continuousPlay: continuousPlay,
@@ -567,14 +638,17 @@ final class AppComposition {
       appActivity: appActivity,
       gameplayTime: gameplayTime,
       gameLog: gameLog,
+      handleMismatch: handleMismatch,
     );
   }
 
   void dispose() {
+    handleMismatch.dispose();
     _sharingStatus?.dispose();
     unawaited(userInteractions?.close());
     directMessageRequests?.dispose();
     directMessageRefresh?.dispose();
+    socialActivity?.dispose();
     manualPresence?.dispose();
     _accountShellChrome.dispose();
     appActivity.dispose();

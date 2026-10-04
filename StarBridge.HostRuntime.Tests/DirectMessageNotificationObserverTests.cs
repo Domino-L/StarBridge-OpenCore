@@ -30,6 +30,7 @@ internal static class DirectMessageNotificationObserverTests
             return observer.Observe(request, response, active);
         }
         Check(!Read(1, 10), "First read must establish a baseline, not replay history.");
+        Check(observer.LastStage == NotificationDeliveryStage.BaselineEstablished, "Initial baseline must be distinguishable from suppression.");
         Check(Read(2, 11), "Fresh incoming message must be recognized.");
         Check(!Read(3, 11) && !Read(2, 10) && !Read(4, 11), "Duplicates and older responses must not replay.");
         Check(!Read(5, 12, incoming: false) && !Read(6, 12), "Own sends advance baseline without notification.");
@@ -44,6 +45,12 @@ internal static class DirectMessageNotificationObserverTests
         Check(!Read(60, 26, generation: 2, active: 2) && Read(61, 27, generation: 2, active: 2), "New owner generation needs its own baseline.");
         observer.Reset();
         Check(!Read(62, 28, generation: 2, active: 2), "Explicit invalidation clears the baseline.");
+        Check(!Read(63, 29, generation: 2, active: 2, malformed: true) &&
+            observer.LastStage == NotificationDeliveryStage.ContractUnavailable, "Missing direction has a contract reason, not a disabled-channel reason.");
+        Check(!Read(64, 30, generation: 2, active: 2, fail: true) &&
+            observer.LastStage == NotificationDeliveryStage.InvalidResponse, "Failed response has a distinct reason.");
+        Check(!Read(65, 30, generation: 2, active: 2) && !Read(100, 31, generation: 2, active: 2) &&
+            observer.LastStage == NotificationDeliveryStage.ContinuityReset, "A long gap records quiet rebaseline.");
         return Task.CompletedTask;
     }
 }

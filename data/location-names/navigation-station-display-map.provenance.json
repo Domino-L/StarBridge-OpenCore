@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "packRevision": "2026-10-01.1",
+  "sourceType": "starbridge-authored-display-pairings",
+  "sourceName": "StarBridge navigation and station identifiers from the existing 4.9.186.42610 catalog",
+  "sourceReference": "docs/information-overlay-issues/NAVIGATION-STATION-MISMATCHES-2026-10-01.md; all row identifiers already exist in data/location-names/location-name-pack.json. Pairings follow the reviewed station-code correspondences and user-confirmed display requirement. Four gateway captions include their host system as requested. The Magnus-coded Nyx Gateway uses the existing catalog station name and is explicitly pending in-game verification; full original-XML and in-game validation remains pending.",
+  "snapshotDate": "2026-10-01",
+  "verifiedDate": "2026-10-01",
+  "licenseOrPermission": "Apache-2.0 applies only to the StarBridge-authored pairing structure, selection, and contextual caption composition. No license claim is made over underlying game identifiers or existing station/system names. No original XML, SCM business mappings, or personal game logs are included. Upstream rights remain with their respective owners.",
+  "maintainer": "StarBridge contributors"
+}

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../app/composition/social_activity.dart';
+
 import 'package:flutter/foundation.dart';
 
 import '../../platform/bridge/bridge_account_access.dart';
@@ -47,14 +49,24 @@ class InboxItem {
   }
 }
 
-/// Account-scoped receipt state. Loading the page never marks anything read.
+/// Account-scoped receipts. Fetching never marks read; visible UI reports reads.
 class NotificationInboxController extends ChangeNotifier {
   NotificationInboxController(this.session, {DateTime Function()? now})
     : _now = now ?? DateTime.now {
+    if (session != null) {
+      _activity = socialActivityChanges(session!).listen((_) {
+        if (busy) {
+          _wakePending = true;
+        } else {
+          unawaited(refresh(quiet: true));
+        }
+      });
+    }
     _events = session?.events.listen((event) {
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
         _epoch++;
+        _wakePending = false;
         _owner = null;
         items = const [];
         ready = false;
@@ -71,10 +83,12 @@ class NotificationInboxController extends ChangeNotifier {
   int? _readGeneration;
   final unread = ValueNotifier<int>(0);
   StreamSubscription<BridgeEnvelope>? _events;
+  StreamSubscription<void>? _activity;
   Timer? _timer;
   BridgeAccountContext? _owner;
   int _epoch = 0;
   bool _disposed = false;
+  bool _wakePending = false;
   bool busy = false, ready = false;
   String? error;
   List<InboxItem> items = const [];
@@ -167,6 +181,10 @@ class NotificationInboxController extends ChangeNotifier {
       if (_current(epoch, generation)) {
         busy = false;
         notifyListeners();
+        if (_wakePending) {
+          _wakePending = false;
+          unawaited(refresh(quiet: true));
+        }
       }
     }
   }
@@ -207,6 +225,10 @@ class NotificationInboxController extends ChangeNotifier {
       }
     }
     if (confirmed && _current(epoch, generation)) return refresh();
+    if (_wakePending && _current(epoch, generation)) {
+      _wakePending = false;
+      unawaited(refresh(quiet: true));
+    }
     return false;
   }
 
@@ -216,6 +238,7 @@ class NotificationInboxController extends ChangeNotifier {
     _epoch++;
     _timer?.cancel();
     unawaited(_events?.cancel());
+    unawaited(_activity?.cancel());
     unread.dispose();
     super.dispose();
   }

@@ -7,6 +7,14 @@
     <DefineConstants>$(DefineConstants);STARBRIDGE_HOST_RUNTIME</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <StarBridgeEnableOverlaySourcePresets Condition="'$(StarBridgeEnableOverlaySourcePresets)' == ''">false</StarBridgeEnableOverlaySourcePresets>
+    <DefineConstants Condition="'$(StarBridgeEnableOverlaySourcePresets)' == 'true'">$(DefineConstants);STARBRIDGE_OVERLAY_SOURCE_PRESETS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="StarBridgeEnableOverlaySourcePresets" Value="$(StarBridgeEnableOverlaySourcePresets)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
     <ProjectReference Include="..\StarBridge.NativeBridge\StarBridge.NativeBridge.csproj" />
@@ -45,6 +53,9 @@
     <EmbeddedResource Include="..\data\location-names\location-name-pack.json"
                       LogicalName="StarBridge.LocationCatalog.json"
                       Condition="Exists('..\data\location-names\location-name-pack.json')" />
+    <EmbeddedResource Include="../StarBridge.Desktop/Data/location-names-zh.txt"
+                      LogicalName="StarBridge.LocationCompatibilityNames.txt"
+                      Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/location-names-zh.txt')" />
     <!-- Private local test assets, never an official redistribution grant. -->
     <EmbeddedResource Include="../StarBridge.Flutter/assets/ships/catalog-manifest.json"
                       LogicalName="StarBridge.ShipMedia.json"

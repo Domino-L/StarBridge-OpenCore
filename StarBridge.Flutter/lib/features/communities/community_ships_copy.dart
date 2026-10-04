@@ -98,6 +98,22 @@ const communityShipsCopy = <String, (String, String, String)>{
     'Replace saved ship details with this device’s complete hangar.',
   ),
   'sharingRevoke': ('停止组织共享', '停止組織共享', 'Stop organization sharing'),
+  'sharingCurrentNone': (
+    '当前未向任何组织共享机库。',
+    '目前未向任何組織共享機庫。',
+    'Your hangar is not currently shared with any organization.',
+  ),
+  'sharingCurrentSelected': (
+    '当前共享组织数：',
+    '目前共享組織數：',
+    'Currently shared with organizations:',
+  ),
+  'sharingCurrentLegacy': (
+    '当前沿用旧版共享规则，尚未设置明确的组织范围。',
+    '目前沿用舊版共享規則，尚未設定明確的組織範圍。',
+    'Legacy sharing rules still apply; an explicit organization audience has not been set.',
+  ),
+  'sharingSetNone': ('设为不向组织共享', '設為不向組織共享', 'Set to no organization sharing'),
   'sharingChanged': (
     '账号或组织已变化，请关闭后重新打开。',
     '帳號或組織已變更，請關閉後重新開啟。',

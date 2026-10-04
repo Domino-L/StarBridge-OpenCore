@@ -12,6 +12,7 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_tag_catalog.dart';
 import 'room_tag_colors.dart';
+import '../common/runtime_name_labels.dart';
 
 String roomText(BuildContext context, String key) =>
     AppStrings.of(context).text('rooms.$key');
@@ -27,6 +28,55 @@ String roomServerRegion(BuildContext context, String code) => roomText(
   context,
   'region.${const {'US', 'EU', 'AU', 'ASIA'}.contains(code) ? code : 'unknown'}',
 );
+String roomLocation(BuildContext context, RoomMember member) {
+  if (member.location.trim().isNotEmpty &&
+      member.presenceKey == 'presence.inGame' &&
+      member.arrivalPendingConfirmation) {
+    final locale = AppStrings.of(context).locale;
+    final pending = roomText(context, 'locationPending');
+    final target = member.arrivalTargetCode?.trim() ?? '';
+    return target.isNotEmpty && target.toLowerCase() != 'unknown'
+        ? '${runtimeNameLabel(target, member.arrivalTargetLabels, locale)} · $pending'
+        : pending;
+  }
+  final original = member.location;
+  if (member.locationHiddenReason == 'lowConfidence' &&
+      member.presenceKey == 'presence.inGame' &&
+      original.trim().toLowerCase() == 'unknown') {
+    return roomText(context, 'lowConfidenceLocation');
+  }
+  if (original.isEmpty) return roomText(context, 'notShared');
+  if (original.trim().toLowerCase() == 'unknown') {
+    return roomText(context, 'factUnknown');
+  }
+  final locale = AppStrings.of(context).locale;
+  final names = member.locationLabels;
+  if (locale.languageCode == 'zh') {
+    final traditional =
+        locale.countryCode == 'TW' ||
+        locale.countryCode == 'HK' ||
+        locale.scriptCode == 'Hant';
+    return names[traditional ? 'zhHant' : 'zhHans'] ??
+        names['zhHans'] ??
+        names['en'] ??
+        original;
+  }
+  return names['en'] ?? original;
+}
+
+String roomShip(BuildContext context, RoomMember member) {
+  final ship = member.ship.trim();
+  if (ship.isEmpty) return roomText(context, 'notShared');
+  if (ship.toLowerCase() == 'unknown') {
+    return roomText(context, 'factUnknown');
+  }
+  return runtimeNameLabel(
+    member.ship,
+    member.shipLabels,
+    AppStrings.of(context).locale,
+  );
+}
+
 String roomDate(BuildContext context, DateTime value) {
   final local = value.toLocal(), locale = MaterialLocalizations.of(context);
   return '${locale.formatCompactDate(local)} ${locale.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: true)}';
@@ -36,10 +86,36 @@ class RoomAvatar extends StatelessWidget {
   const RoomAvatar({super.key, required this.member, this.size = 44});
   final RoomMember member;
   final double size;
+  @override
+  Widget build(BuildContext context) => RoomIdentityAvatar(
+    name: member.displayName,
+    gameId: member.gameId,
+    avatarData: member.avatarData,
+    userRef: member.userRef,
+    isSelf: member.isSelf,
+    size: size,
+  );
+}
+
+class RoomIdentityAvatar extends StatelessWidget {
+  const RoomIdentityAvatar({
+    super.key,
+    required this.name,
+    this.gameId = '',
+    this.avatarData,
+    this.userRef,
+    this.isSelf = false,
+    this.size = 44,
+    this.includeSocialActions = true,
+  });
+  final String name, gameId;
+  final String? avatarData, userRef;
+  final bool isSelf, includeSocialActions;
+  final double size;
   Uint8List? _bytes() {
-    final data = member.avatarData;
+    final data = avatarData;
     if (data == null ||
-        data.length > 128 * 1024 ||
+        data.length > ((512 * 1024 + 2) ~/ 3 * 4) + 24 ||
         !(data.startsWith('data:image/png;base64,') ||
             data.startsWith('data:image/jpeg;base64,'))) {
       return null;
@@ -62,12 +138,15 @@ class RoomAvatar extends StatelessWidget {
       ),
     );
     return UserAvatarMenu(
-      name: member.displayName,
-      avatarImageData: member.avatarData,
-      isSelf: member.isSelf,
-      target: member.userRef == null ? null : UserTarget('room', member.userRef!, query: member.gameId),
+      name: name,
+      avatarImageData: avatarData,
+      isSelf: isSelf,
+      includeSocialActions: includeSocialActions,
+      target: userRef == null
+          ? null
+          : UserTarget('room', userRef!, query: gameId),
       child: Semantics(
-        label: member.displayName,
+        label: name,
         image: true,
         child: Container(
           width: size,

@@ -22,7 +22,7 @@ final class StarBridgeIconGlyph {
 }
 
 abstract final class StarBridgeIconSet {
-  static const id = 'starbridge-outline-v1';
+  static const id = 'starbridge-avionics-v2';
 
   static StarBridgeIconGlyph resolve(StarBridgeIconSemantic semantic) =>
       switch (semantic) {
@@ -65,6 +65,10 @@ abstract final class StarBridgeIconSet {
         ),
         StarBridgeIconSemantic.settings => const StarBridgeIconGlyph(
           semantic: StarBridgeIconSemantic.settings,
+          family: StarBridgeIconFamily.identity,
+        ),
+        StarBridgeIconSemantic.messages => const StarBridgeIconGlyph(
+          semantic: StarBridgeIconSemantic.messages,
           family: StarBridgeIconFamily.identity,
         ),
         StarBridgeIconSemantic.friends => const StarBridgeIconGlyph(

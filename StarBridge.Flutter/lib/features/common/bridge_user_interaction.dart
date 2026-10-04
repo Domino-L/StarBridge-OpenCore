@@ -82,12 +82,25 @@ final class BridgeUserInteraction implements UserInteractionPort {
       return parsePersonalProfileSnapshot(data);
     } on BridgeClientException catch (error) {
       return PersonalProfileSnapshot.unavailable(
-        failureKey: error.code == 'profile.visitor_not_visible'
-            ? 'profile.visitor.notVisible'
+        failureKey: switch (error.code) {
+          'profile.visitor_not_visible' => 'profile.visitor.notVisible',
+          'users.targetChanged' ||
+          'communities.refreshRequired' => 'profile.visitor.refreshSource',
+          'account.reauthorization_required' =>
+            'profile.visitor.accountRequired',
+          'bridge.timeout' => 'profile.visitor.readTimeout',
+          _ => 'profile.error.unavailable',
+        },
+      );
+    } on Object catch (error) {
+      return PersonalProfileSnapshot.unavailable(
+        failureKey:
+            error is FormatException ||
+                error is BridgeFormatException ||
+                error is TypeError
+            ? 'profile.error.invalidResponse'
             : 'profile.error.unavailable',
       );
-    } on Object {
-      return const PersonalProfileSnapshot.unavailable();
     }
   }
 

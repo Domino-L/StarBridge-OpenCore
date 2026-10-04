@@ -48,7 +48,8 @@ public sealed record OverlayChatMessage(
     bool IsSystem,
     bool IsSelf,
     string SenderColor,
-    string? SourceLabel = null);
+    string? SourceLabel = null,
+    string? SourceKey = null);
 
 public sealed record MemberAvatarRow(
     string Name,

@@ -8,6 +8,7 @@ import 'menu_organization_avatars.dart';
 import 'menu_comms_invitations.dart';
 import 'menu_chat_archive.dart';
 import 'menu_account_avatar.dart';
+import 'menu_conversation_snapshot.dart';
 
 /// Visible-only communication lease in the primary engine.
 /// Opaque UI keys resolve against the latest account-scoped directory here;
@@ -57,6 +58,8 @@ final class MenuCommsSession
   bool _silentRead = false;
   int _epoch = 0, _serial = 0, _before = 0, _oldest = 0;
   int _identityEpoch = 0;
+  bool _directoryNeeded = true;
+  bool _supplementing = false;
   bool _hasOlder = false;
   Map<String, Conversation> _targets = {};
   Conversation? _selected;
@@ -77,22 +80,34 @@ final class MenuCommsSession
   @override
   void openChat(MenuChatTarget? target) {
     if (_disposed || !_visible || _sending) return;
-    _clear();
     if (target == null || target.reference.isEmpty) {
+      _clear();
       _emit({'state': 'restricted'});
       return;
     }
+    _clear(keepDirectory: true);
+    final existing = _targets.entries
+        .where(
+          (e) =>
+              e.value.ref == target.reference ||
+              (target.stableKey != null &&
+                  e.value.conversationKey == target.stableKey),
+        )
+        .firstOrNull;
     _selected = Conversation(
       target.reference,
       target.name,
-      '',
-      DateTime.now(),
-      0,
-      'none',
-      avatar: target.avatar,
+      existing?.value.preview ?? '',
+      existing?.value.time ?? DateTime.now(),
+      existing?.value.unread ?? 0,
+      existing?.value.state ?? 'none',
+      avatar: target.avatar ?? existing?.value.avatar,
       conversationKey: target.stableKey,
+      gameId: target.gameId ?? '',
+      presence: target.presence,
     );
-    _selectedKey = 'c${++_serial}';
+    _selectedKey = existing?.key ?? 'c${++_serial}';
+    _targets[_selectedKey!] = _selected!;
     unawaited(_read());
   }
 
@@ -258,13 +273,14 @@ final class MenuCommsSession
   }
 
   void _cancel() {
+    _supplementing = false;
     _receipting = false;
     _epoch++;
     _reading = false;
     _port.cancel();
   }
 
-  void _clear() {
+  void _clear({bool keepDirectory = false}) {
     _invitations?.closeFlow();
     _invitationView = null;
     _attachmentCodes.clear();
@@ -276,9 +292,12 @@ final class MenuCommsSession
     _readStatus = '';
     _canSend = false;
     _permissionAt = null;
-    _targets = {};
-    _portraits.clear();
-    _avatars.clear();
+    if (!keepDirectory) {
+      _targets = {};
+      _portraits.clear();
+      _avatars.clear();
+      _directoryNeeded = true;
+    }
     _selected = null;
     _selectedKey = null;
     _before = _oldest = 0;
@@ -334,6 +353,9 @@ final class MenuCommsSession
     }
     if (action == 'read') {
       final through = _receipts[key];
+      // A visible receipt has priority over optional directory supplementation.
+      // Cancel first: the bridge adapter must never run concurrent operations.
+      if (through != null && _supplementing) _cancel();
       if (through != null &&
           !_reading &&
           !_receipting &&
@@ -407,38 +429,8 @@ final class MenuCommsSession
     try {
       final Map<String, Object?> view;
       if (selected == null) {
-        final rows = await _bounded(_port.directory(), epoch);
+        await _readDirectory(epoch);
         if (!_current(epoch)) return;
-        if (rows.length > 5000) throw const DirectReadFailure('data_invalid');
-        final previousKeys = {
-          for (final entry in _targets.entries) entry.value.ref: entry.key,
-        };
-        final seen = <String>{};
-        if (rows.any((row) => row.ref.isEmpty || !seen.add(row.ref))) {
-          throw const DirectReadFailure('data_invalid');
-        }
-        // Same-account refresh retains focus for unchanged directory targets.
-        // Removed targets lose their key; account/visibility changes clear all.
-        _targets = {
-          for (final row in rows) previousKeys[row.ref] ?? 'c${++_serial}': row,
-        };
-        // Bound decode work and wire size independently of directory length.
-        // Remaining rows keep their readable initial avatar, not a missing row.
-        final portraitRows = _targets.entries.take(16).toList();
-        final portraits = await Future.wait(
-          portraitRows.map((row) => _avatars.logo(row.value.avatar)),
-        );
-        if (!_current(epoch)) return;
-        _portraits.clear();
-        var portraitBytes = 0;
-        for (final (i, row) in portraitRows.indexed) {
-          final portrait = portraits[i];
-          if (portrait == null || portraitBytes + portrait.length > 180000) {
-            continue;
-          }
-          portraitBytes += portrait.length;
-          _portraits[row.key] = portrait;
-        }
         view = {
           'state': 'ready',
           'rows': [
@@ -607,6 +599,18 @@ final class MenuCommsSession
           _history[key] = display;
         }
         _emit(view);
+        // The bridge port has a single request epoch. Read the directory only
+        // AFTER history, keeping usable chat visible while it is supplemented.
+        if (selected != null && _directoryNeeded) {
+          _reading = true;
+          _supplementing = true;
+          _silentRead = true;
+          await _readDirectory(epoch);
+          if (_current(epoch)) {
+            _reading = false;
+            _emit(_view);
+          }
+        }
       }
     } on Object catch (error) {
       if (!_current(epoch)) return;
@@ -657,11 +661,33 @@ final class MenuCommsSession
             : 'unavailable',
       });
     } finally {
-      if (_current(epoch)) _reading = false;
+      if (_current(epoch)) {
+        _reading = false;
+        _supplementing = false;
+      }
     }
   }
 
   bool _current(int epoch) => !_disposed && _visible && epoch == _epoch;
+  Future<void> _readDirectory(int epoch) async {
+    final rows = await _bounded(_port.directory(), epoch);
+    if (!_current(epoch)) return;
+    final snapshot = await readMenuConversationSnapshot(
+      rows,
+      _targets,
+      _avatars,
+      () => 'c${++_serial}',
+      selected: _selected,
+      selectedKey: _selectedKey,
+    );
+    if (!_current(epoch)) return;
+    _targets = snapshot.targets;
+    _portraits
+      ..clear()
+      ..addAll(snapshot.portraits);
+    _directoryNeeded = false;
+  }
+
   Future<void> _clearLocal(Conversation target, int epoch) async {
     try {
       await archive!.clear('private', target.ref);

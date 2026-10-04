@@ -9,6 +9,8 @@ import '../features/communities/community_visitor_profile_test.dart'
 import '../features/friends/social_layout_test.dart' show capture, loadFonts;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
@@ -27,6 +29,63 @@ import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart'
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'Windows social buttons open independent singleton windows without leaving the workspace',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      const channel = MethodChannel('starbridge/friends-primary');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final calls = <MethodCall>[];
+      final socialCalls = <String>[];
+      for (final kind in ['messages', 'notifications']) {
+        messenger.setMockMethodCallHandler(
+          MethodChannel('starbridge/$kind-primary'),
+          (call) async {
+            if (call.method == 'show') socialCalls.add(kind);
+            return call.method == 'show' ? true : null;
+          },
+        );
+      }
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return call.method == 'show' ? true : null;
+      });
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        messenger.setMockMethodCallHandler(channel, null);
+        for (final kind in ['messages', 'notifications']) {
+          messenger.setMockMethodCallHandler(
+            MethodChannel('starbridge/$kind-primary'),
+            null,
+          );
+        }
+      });
+      await _pumpShell(tester);
+      await tester.tap(find.byTooltip('好友'));
+      await tester.pumpAndSettle();
+      expect(find.byType(FriendsPage), findsNothing);
+      expect(calls.where((c) => c.method == 'show').length, 1);
+      await tester.tap(find.byTooltip('好友'));
+      await tester.pumpAndSettle();
+      final shows = calls.where((c) => c.method == 'show').toList();
+      expect(shows.length, 2);
+      expect(
+        (shows[0].arguments as Map)['opening'],
+        (shows[1].arguments as Map)['opening'],
+      );
+      await tester.tap(find.byTooltip('消息'));
+      await tester.pumpAndSettle();
+      expect(find.byType(FriendsPage), findsNothing);
+      expect(socialCalls, ['messages']);
+      await tester.tap(find.byTooltip('通知'));
+      await tester.pumpAndSettle();
+      expect(socialCalls, ['messages', 'notifications']);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
   testWidgets(
     'visitor wallpaper fills the shell workspace behind navigation at QHD',
     (tester) async {
@@ -209,7 +268,7 @@ void main() {
     expect(find.byTooltip('最大化'), findsOneWidget);
   });
 
-  testWidgets('registry navigation changes the empty workspace destination', (
+  testWidgets('registry navigation opens the upcoming operations destination', (
     tester,
   ) async {
     await _pumpShell(tester);
@@ -219,11 +278,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('行动'), findsWidgets);
-    expect(find.text('组织与舰队的目标性协作'), findsOneWidget);
+    expect(find.text('组织与舰队的目标性协作（即将推出）'), findsOneWidget);
     final semantics = tester.getSemantics(
-      find.bySemanticsLabel('operations placeholder'),
+      find.byKey(const Key('operations-coming-soon-semantics')),
     );
-    expect(semantics.label, 'operations placeholder');
+    expect(semantics.label, contains('即将推出'));
   });
 
   testWidgets('disconnected review state never presents a false online path', (
@@ -405,23 +464,24 @@ void main() {
     });
   }
 
-  testWidgets(
-    'overlay preference remains distinct from the actual host scene',
-    (tester) async {
-      final chrome = InMemoryShellChrome(
-        initial: InMemoryShellChrome.connectedProjection,
-      );
-      await _pumpShell(tester, shellChrome: chrome);
+  testWidgets('overlay preference remains distinct from the actual host scene', (
+    tester,
+  ) async {
+    final chrome = InMemoryShellChrome(
+      initial: InMemoryShellChrome.connectedProjection,
+    );
+    await _pumpShell(tester, shellChrome: chrome);
 
-      await tester.tap(find.byTooltip('浮层场景：默认场景'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('行动场景'));
-      await tester.pumpAndSettle();
+    // Shell and settings share the same source menu. The trigger tooltip now
+    // explains source scope, so locate the stable interactive control instead.
+    await tester.tap(find.byKey(const Key('overlay-scene-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('行动信息'));
+    await tester.pumpAndSettle();
 
-      expect(chrome.projection.value.overlay.preferredSceneId, 'operation');
-      expect(chrome.projection.value.overlay.actualSceneId, 'default');
-    },
-  );
+    expect(chrome.projection.value.overlay.preferredSceneId, 'operation');
+    expect(chrome.projection.value.overlay.actualSceneId, 'default');
+  });
 
   testWidgets('top actions remain real route destinations', (tester) async {
     await _pumpShell(tester);
@@ -434,7 +494,11 @@ void main() {
       expect(find.byKey(ValueKey('friends-nav-$section')), findsOneWidget);
     }
     expect(find.byType(TextField), findsOneWidget);
-    expect(find.text('好友、私信与最近玩过'), findsOneWidget);
+    expect(find.text('好友状态与好友申请'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('friends-recent')));
+    await tester.pumpAndSettle();
+    expect(find.text('私信、消息请求与未读消息'), findsOneWidget);
+    expect(find.byKey(const Key('friends-nav-friends')), findsNothing);
   });
 
   testWidgets('deferred navigation entries are truthful destinations', (
@@ -444,7 +508,13 @@ void main() {
 
     await tester.tap(find.text('交易大厅'));
     await tester.pumpAndSettle();
-    expect(find.text('该入口尚未开放'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('marketplace-deferred-destination')),
+        matching: find.text('即将推出'),
+      ),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const Key('marketplace-deferred-destination')),
       findsOneWidget,
@@ -452,7 +522,13 @@ void main() {
 
     await tester.tap(find.text('工具'));
     await tester.pumpAndSettle();
-    expect(find.text('该入口尚未开放'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tools-deferred-destination')),
+        matching: find.text('即将推出'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('tools-deferred-destination')), findsOneWidget);
     expect(find.byType(FilledButton), findsNothing);
   });

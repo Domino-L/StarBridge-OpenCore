@@ -11,6 +11,57 @@ import '../features/settings/local_privacy_page_test.dart'
     show app, PublishingPrivacy, viewport;
 
 void main() {
+  testWidgets('global retry reapplies saved scope without saving settings', (
+    tester,
+  ) async {
+    viewport(tester, const Size(430, 900));
+    final port = NoticePrivacy()..state = 'reconnecting';
+    final c = LocalPrivacyController(port);
+    final monitor = SharingStatusMonitor(controller: c);
+    final saved = port.snapshot;
+    await tester.pumpWidget(
+      app(
+        SharingStatusNotice(
+          status: monitor,
+          onOpenSettings: () {},
+          onRetry: () => monitor.canRetry
+              ? () {
+                  monitor.retry();
+                }
+              : null,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('sharing-status-retry')));
+    await tester.pumpAndSettle();
+    expect(port.actions.where((action) => action == 'apply'), hasLength(1));
+    expect(port.writes, 0);
+    expect(port.snapshot, same(saved));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    monitor.dispose();
+    c.dispose();
+  });
+  testWidgets('automatic reconnect is not described as inactive sharing', (
+    tester,
+  ) async {
+    final c = LocalPrivacyController(NoticePrivacy()..state = 'reconnecting');
+    addTearDown(c.dispose);
+    final monitor = SharingStatusMonitor(controller: c);
+    await tester.pumpWidget(
+      app(SharingStatusNotice(status: monitor, onOpenSettings: () {})),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pumpAndSettle();
+    expect(find.text('正在恢复实时共享'), findsOneWidget);
+    expect(find.text('实时共享未生效'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    monitor.dispose();
+  });
   testWidgets(
     'global notice appears outside editor, polls without writes, clears on recovery',
     (tester) async {
@@ -178,7 +229,11 @@ void main() {
     port.failStatus = true;
     await c.refreshPublication();
     await tester.pumpAndSettle();
-    expect(find.text('实时共享异常'), findsOneWidget);
+    expect(find.text('实时共享异常'), findsNothing);
+    expect(c.publicationView.state, 'applied');
+    await c.refreshPublication();
+    await tester.pumpAndSettle();
+    expect(find.text('暂时无法读取共享状态'), findsOneWidget);
     port
       ..failStatus = false
       ..reportedRevision = 4;
@@ -203,6 +258,7 @@ class NoticePrivacy extends PublishingPrivacy {
   }
   String state = 'inactive';
   int? reportedRevision;
+  String? errorCode;
   bool failStatus = false;
   @override
   Future<PrivacyPublicationView> publication(
@@ -214,6 +270,7 @@ class NoticePrivacy extends PublishingPrivacy {
     return PrivacyPublicationView(
       state,
       revision: reportedRevision ?? revision,
+      errorCode: errorCode,
     );
   }
 }

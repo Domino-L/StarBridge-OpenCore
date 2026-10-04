@@ -11,6 +11,25 @@ import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
 
 void main() {
+  test('A8 default component text inherits locale font fallback', () {
+    for (final locale in [
+      const Locale('zh', 'CN'),
+      const Locale('zh', 'TW'),
+      const Locale('en'),
+    ]) {
+      final tokens = FutureRestraintStyle.resolve(AppearanceMode.dark);
+      final theme = buildStarBridgeTheme(tokens, locale);
+      // titleSmall / labelMedium are supplied by ThemeData, not our textTheme.
+      expect(
+        theme.textTheme.titleSmall!.fontFamilyFallback,
+        tokens.typography.fallbacksFor(locale),
+      );
+      expect(
+        theme.textTheme.labelMedium!.fontFamilyFallback,
+        tokens.typography.fallbacksFor(locale),
+      );
+    }
+  });
   test('Direction A is the only selectable style and resolves both modes', () {
     final registry = StyleRegistry();
     expect(registry.userSelectable.map((item) => item.id), [

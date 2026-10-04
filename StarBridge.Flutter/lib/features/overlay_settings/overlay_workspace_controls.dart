@@ -7,6 +7,8 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_rules.dart';
 import 'overlay_workspace_schema.dart';
+import 'overlay_workspace_value_format.dart';
+import 'overlay_color_picker.dart';
 
 export 'overlay_workspace_hotkey_card.dart';
 
@@ -19,6 +21,7 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
     this.appearances = const [],
     this.onExperiencePreset,
     this.footer,
+    this.header,
     super.key,
   });
 
@@ -29,6 +32,7 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
   final List<OverlayWorkspaceAppearance> appearances;
   final ValueChanged<String>? onExperiencePreset;
   final Widget? footer;
+  final Widget? header;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +50,7 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
               overlayWorkspaceGroupName(context, group),
               style: Theme.of(context).textTheme.titleLarge,
             ),
+            if (header != null) ...[SizedBox(height: tokens.space.md), header!],
             if (group == 'appearance' &&
                 overlayWorkspaceAppearanceRule(settings).locksTheme) ...[
               SizedBox(height: tokens.space.sm),
@@ -96,6 +101,10 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
                                 : settings[field.field],
                             appearances: appearances,
                             enabled: overlayWorkspaceFieldEnabled(
+                              field.field,
+                              settings,
+                            ),
+                            disabledReason: overlayWorkspaceFieldDisabledReason(
                               field.field,
                               settings,
                             ),
@@ -186,6 +195,7 @@ class _Field extends StatelessWidget {
     required this.enabled,
     required this.onChanged,
     this.appearances = const [],
+    this.disabledReason,
   });
 
   final OverlayWorkspaceFieldSpec spec;
@@ -193,10 +203,14 @@ class _Field extends StatelessWidget {
   final bool enabled;
   final ValueChanged<Object?> onChanged;
   final List<OverlayWorkspaceAppearance> appearances;
+  final String? disabledReason;
 
   @override
   Widget build(BuildContext context) {
     final label = _fieldName(context, spec);
+    final helper = disabledReason == null
+        ? null
+        : _copy(context, disabledReason!);
     final numberValue = value is num ? (value! as num).toDouble() : null;
     return switch (spec.kind) {
       OverlayWorkspaceFieldKind.choice
@@ -211,13 +225,18 @@ class _Field extends StatelessWidget {
         key: Key('overlay-field-${spec.field}'),
         contentPadding: EdgeInsets.zero,
         title: Text(label),
+        subtitle: helper == null ? null : Text(helper),
         value: value == true,
         onChanged: enabled ? (next) => onChanged(next) : null,
       ),
       OverlayWorkspaceFieldKind.choice => DropdownButtonFormField<String>(
         key: Key('overlay-field-${spec.field}'),
         initialValue: spec.options.contains(value) ? value as String : null,
-        decoration: InputDecoration(labelText: label),
+        decoration: InputDecoration(
+          labelText: label,
+          helperText: helper,
+          helperMaxLines: 3,
+        ),
         items:
             (spec.selectableOptions.isEmpty
                     ? spec.options
@@ -251,7 +270,11 @@ class _Field extends StatelessWidget {
                 orElse: () => null,
               )
             : null,
-        decoration: InputDecoration(labelText: label),
+        decoration: InputDecoration(
+          labelText: label,
+          helperText: helper,
+          helperMaxLines: 3,
+        ),
         items: spec.numberOptions
             .map(
               (option) => DropdownMenuItem<num>(
@@ -269,31 +292,37 @@ class _Field extends StatelessWidget {
       OverlayWorkspaceFieldKind.number => _NumberField(
         spec: spec,
         value: value,
+        helperText: helper,
         onChanged: enabled ? onChanged : null,
       ),
-      OverlayWorkspaceFieldKind.color => TextFormField(
-        key: ValueKey('overlay-field-${spec.field}-$value'),
-        initialValue: value?.toString() ?? '',
-        enabled: enabled,
+      OverlayWorkspaceFieldKind.color => OverlayColorField(
+        key: ValueKey('overlay-field-${spec.field}'),
+        value: value?.toString() ?? '#FFFFFF',
+        label: label,
+        helperText: helper,
+        onChanged: enabled ? onChanged : null,
+      ),
+      OverlayWorkspaceFieldKind.eventTypes => InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          helperText: _copy(context, 'overlay.workspace.colorHelp'),
+          helperText: helper,
+          helperMaxLines: 3,
         ),
-        onChanged: enabled
-            ? (next) {
-                if (RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(next)) {
-                  onChanged(next.toUpperCase());
-                }
-              }
-            : null,
+        child: _EventTypeField(
+          value: value,
+          onChanged: enabled ? onChanged : null,
+        ),
       ),
-      OverlayWorkspaceFieldKind.eventTypes => _EventTypeField(
-        value: value,
-        onChanged: enabled ? onChanged : null,
-      ),
-      OverlayWorkspaceFieldKind.eventDurations => _EventDurationField(
-        value: value,
-        onChanged: enabled ? onChanged : null,
+      OverlayWorkspaceFieldKind.eventDurations => InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          helperText: helper,
+          helperMaxLines: 3,
+        ),
+        child: _EventDurationField(
+          value: value,
+          onChanged: enabled ? onChanged : null,
+        ),
       ),
     };
   }
@@ -371,34 +400,60 @@ class _NumberField extends StatelessWidget {
     required this.spec,
     required this.value,
     required this.onChanged,
+    this.helperText,
   });
 
   final OverlayWorkspaceFieldSpec spec;
   final Object? value;
   final ValueChanged<Object?>? onChanged;
+  final String? helperText;
 
   @override
   Widget build(BuildContext context) {
     final number = value is num ? (value as num).toDouble() : spec.minimum;
     final clamped = number.clamp(spec.minimum, spec.maximum).toDouble();
-    final integral = value is int;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '${_fieldName(context, spec)}  ${integral ? clamped.round() : clamped.toStringAsFixed(2)}',
-        ),
-        Slider(
-          key: Key('overlay-field-${spec.field}'),
-          value: clamped,
-          min: spec.minimum,
-          max: spec.maximum,
-          divisions: spec.divisions,
-          onChanged: onChanged == null
-              ? null
-              : (next) => onChanged!(integral ? next.round() : next),
-        ),
-      ],
+    // JSON writes whole-valued doubles as 0/1, so runtime numeric type cannot
+    // determine whether a setting accepts fractions. Counts alone are integral.
+    final integral = spec.unit == OverlayWorkspaceUnit.count;
+    return InputDecorator(
+      decoration: InputDecoration(
+        helperText: helperText,
+        helperMaxLines: 3,
+        filled: false,
+        contentPadding: EdgeInsets.zero,
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${_fieldName(context, spec)}  ${overlayWorkspaceFormatValue(spec, clamped, AppStrings.of(context))}',
+          ),
+          // Flutter's Windows AX bridge cannot safely reuse the Slider's
+          // OverlayPortal children when enabling replaces their traversal
+          // parent. Recreate that local subtree only across enabled changes;
+          // keep the value in the draft and preserve normal drag state.
+          KeyedSubtree(
+            key: ValueKey('slider-${spec.field}-${onChanged != null}'),
+            child: Slider(
+              key: Key('overlay-field-${spec.field}'),
+              value: clamped,
+              min: spec.minimum,
+              max: spec.maximum,
+              divisions: spec.divisions,
+              label: overlayWorkspaceFormatValue(
+                spec,
+                clamped,
+                AppStrings.of(context),
+              ),
+              onChanged: onChanged == null
+                  ? null
+                  : (next) => onChanged!(integral ? next.round() : next),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -578,7 +633,9 @@ String _numberOptionName(
       : value.toString();
   final key = 'overlay.workspace.option.${spec.field}.$normalized';
   final translated = _copy(context, key);
-  return translated == key ? normalized : translated;
+  return translated == key
+      ? overlayWorkspaceFormatValue(spec, value, AppStrings.of(context))
+      : translated;
 }
 
 String _fieldName(BuildContext context, OverlayWorkspaceFieldSpec spec) {

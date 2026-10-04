@@ -7,6 +7,9 @@ using System.Text.RegularExpressions;
 // avatars fall back independently; they must not break the room directory.
 internal static class RoomAvatarProjection
 {
+    internal static string? PreferCurrentAccountAvatar(string? currentAccountAvatar, string? projectedAvatar, bool isSelf) =>
+        isSelf ? Normalize(currentAccountAvatar, 512 * 1024) ?? projectedAvatar : projectedAvatar;
+
     internal static string? Normalize(string? value, int maximumBytes = 96 * 1024)
     {
         if (maximumBytes is < 24 or > 512 * 1024 || string.IsNullOrWhiteSpace(value) ||

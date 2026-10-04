@@ -2,7 +2,10 @@ namespace StarBridge.HostRuntime.Overlay;
 
 // Only trusted Host events cross this seam; Flutter cannot supply text or ownership.
 public sealed record InformationOverlayReminder(Guid Id, int Invitations, int Applications,
-    string Preview, Func<bool> IsCurrent);
+    string Preview, Func<bool> IsCurrent)
+{
+    public Notifications.DirectMessageNotificationContent? DirectMessage { get; init; }
+}
 
 public interface IInformationOverlayReminderSink
 {

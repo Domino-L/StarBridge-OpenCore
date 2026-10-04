@@ -45,6 +45,53 @@ Future<Object?> native(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('hidden startup can become ready before the main snapshot', (
+    tester,
+  ) async {
+    const channel = MethodChannel('starbridge/tray-surface');
+    final calls = <MethodCall>[];
+    await tester.binding.setSurfaceSize(const Size(336, 552));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      return null; // Native engine is warm; the main binding is not ready yet.
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+    await tester.pumpWidget(const TraySurfaceApp());
+    await tester.pumpAndSettle();
+    expect(calls.map((c) => c.method), ['ready']);
+    expect(find.byType(TrayQuickPanel), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await native(tester.binding, channel.name, 'snapshot', {
+      ...sample.toMap(),
+      'opening': 0,
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('隐身'), findsOneWidget);
+    expect(calls.where((c) => c.method == 'action'), isEmpty);
+    expect(calls.where((c) => c.method == 'painted').single.arguments, 0);
+
+    await native(tester.binding, channel.name, 'snapshot', {
+      ...sample.toMap(),
+      'opening': 1,
+    });
+    await tester.pumpAndSettle();
+    expect(
+      calls.where((c) => c.method == 'painted').map((c) => c.arguments),
+      [0, 1],
+      reason: 'Hidden preparation must not consume the first visible frame',
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'opening tray refreshes facts without executing an overlay action',
     (tester) async {

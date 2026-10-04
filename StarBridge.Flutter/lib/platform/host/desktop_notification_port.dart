@@ -141,7 +141,10 @@ final class BridgeDesktopNotificationPort
       return isCurrent(activation) &&
               response.payload['schemaVersion'] == 1 &&
               (destination == 'roomReminders' ||
-                  destination == 'directMessages' || destination == 'communities')
+                  destination == 'notificationInbox' ||
+                  destination == 'directMessages' ||
+                  destination == 'communities' ||
+                  destination == 'gameIdentity')
           ? destination as String
           : null;
     } catch (_) {

@@ -117,6 +117,7 @@ ThemeData buildStarBridgeTheme(StarBridgeTokens tokens, Locale locale) {
     useMaterial3: true,
     colorScheme: colorScheme,
     fontFamily: typography.uiFamily,
+    fontFamilyFallback: fallback,
     scaffoldBackgroundColor: surfaces.ground.fill,
     canvasColor: surfaces.panel.fill,
     dividerColor: surfaces.ground.border,

@@ -77,10 +77,10 @@ final class BridgeOverlayScenes implements OverlayScenePort {
         response.accountContext?.subject != account.accountContext!.subject) {
       throw StateError('Account changed');
     }
-    return parse(response.payload);
+    return parse(response.payload, generation: response.sessionGeneration);
   }
 
-  static OverlaySceneState parse(Map<String, Object?> p) {
+  static OverlaySceneState parse(Map<String, Object?> p, {int? generation}) {
     if (p['schemaVersion'] != 1 ||
         p['revision'] is! int ||
         (p['revision']! as int) < 0 ||
@@ -91,6 +91,7 @@ final class BridgeOverlayScenes implements OverlayScenePort {
           'unavailable',
           'loading',
           'standby',
+          'bindingUnavailable',
         ].contains(p['status']) ||
         p['organizations'] is! List) {
       throw const FormatException('Invalid scene snapshot');
@@ -106,6 +107,11 @@ final class BridgeOverlayScenes implements OverlayScenePort {
     }
 
     final code = optional(p['code']);
+    final sourceOwnerKey = optional(p['sourceOwnerKey']);
+    if (sourceOwnerKey != null &&
+        !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(sourceOwnerKey)) {
+      throw const FormatException('Invalid source owner key');
+    }
     if (p['mode'] == 'community'
         ? code == null || code.isEmpty
         : code != null) {
@@ -127,8 +133,56 @@ final class BridgeOverlayScenes implements OverlayScenePort {
       targets.add(OverlaySceneTarget(id, name));
     }
     final actual = optional(p['actualId']);
+    String? selection(Object? raw) {
+      final id = optional(raw);
+      if (id != null &&
+          !['auto', 'room', 'missing'].contains(id) &&
+          !targets.any((target) => id == 'org:${target.code}')) {
+        throw const FormatException('Invalid selection identity');
+      }
+      return id;
+    }
+
+    final bindingId = selection(p['presetBindingId']);
+    Map<String, String?>? resolutions;
+    if (p['resolvedSourceIds'] case final Map raw) {
+      if (sourceOwnerKey == null || raw.length > targets.length + 2) {
+        throw const FormatException('Invalid source preview scope');
+      }
+      resolutions = {};
+      for (final entry in raw.entries) {
+        final id = selection(entry.key);
+        final result = optional(entry.value);
+        if (id == null ||
+            id == 'missing' ||
+            result != null &&
+                result != 'room' &&
+                result != 'local' &&
+                !targets.any((target) => result == 'org:${target.code}')) {
+          throw const FormatException('Invalid source preview identity');
+        }
+        resolutions[id] = result;
+      }
+      resolutions = Map.unmodifiable(resolutions);
+    } else if (p['resolvedSourceIds'] != null) {
+      throw const FormatException('Invalid source preview');
+    }
+    final temporaryId = selection(p['temporarySourceId']);
+    if (temporaryId != null && (bindingId == null || sourceOwnerKey == null)) {
+      throw const FormatException('Temporary source requires a bound session');
+    }
+    final automaticSource = optional(p['automaticPresetSourceId']);
+    if (automaticSource != null &&
+        (sourceOwnerKey == null ||
+            !(automaticSource == 'local' ||
+                automaticSource.startsWith('room:') &&
+                    automaticSource.length > 5 ||
+                targets.any((x) => automaticSource == 'org:${x.code}')))) {
+      throw const FormatException('Invalid automatic preset source');
+    }
     if (actual != null &&
         actual != 'room' &&
+        actual != 'local' &&
         !targets.any((x) => actual == 'org:${x.code}')) {
       throw const FormatException();
     }
@@ -137,6 +191,12 @@ final class BridgeOverlayScenes implements OverlayScenePort {
       mode: p['mode']! as String,
       code: code,
       actualId: actual,
+      sourceOwnerKey: sourceOwnerKey,
+      automaticPresetSourceId: automaticSource,
+      contextGeneration: generation,
+      presetBindingId: bindingId,
+      resolvedSourceIds: resolutions,
+      temporarySourceId: temporaryId,
       status: p['status']! as String,
       targets: List.unmodifiable(targets),
       available: true,

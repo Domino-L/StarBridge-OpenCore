@@ -6,11 +6,17 @@ import 'room_invitations.dart';
 import 'room_preset_port.dart';
 import 'bridge_room_presets.dart';
 import '../direct_messages/bridge_direct_messages.dart' show inlineAvatar;
+import '../overlay_settings/overlay_preset_inspection_port.dart';
+import '../overlay_settings/overlay_preset_transfer.dart';
 
-final class BridgeRoomChat implements RoomChatPort, RoomPresetPort {
+final class BridgeRoomChat
+    implements RoomChatPort, RoomPresetPort, OverlayPresetInspectionPort {
   BridgeRoomChat(this.session);
   final BridgeClientSession session;
   late final _presets = BridgeRoomPresets(session);
+  @override
+  Future<OverlayPresetTransfer> inspectPreset(String package, int revision) =>
+      inspectSharedOverlayPreset(session, package, revision);
   @override
   bool get presetsAvailable => available && _presets.available;
   @override

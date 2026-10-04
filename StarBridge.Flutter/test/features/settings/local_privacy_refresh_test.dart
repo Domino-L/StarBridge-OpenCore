@@ -56,7 +56,7 @@ void main() {
     expect(port.reads, 2);
     expect(controller.draft, same(original));
     expect(controller.status, LocalPrivacyStatus.ready);
-    expect(controller.canEdit, false);
+    expect(controller.canEdit, true);
     expect(await controller.save(), false);
     port.pending!.complete(
       LocalPrivacySnapshot(

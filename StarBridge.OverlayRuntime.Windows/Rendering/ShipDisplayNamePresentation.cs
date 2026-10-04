@@ -18,17 +18,17 @@ internal static class ShipDisplayNamePresentation
             return text;
         }
 
-        var code = ShipNameLocalizer.ResolveCode(text);
-        if (ShipNameLocalizer.KnownChineseNames.TryGetValue(code, out var chineseName) &&
-            !string.IsNullOrWhiteSpace(chineseName))
-        {
-            return chineseName.Trim();
-        }
+        if (text.Length > 256 || text.Any(char.IsControl) ||
+            text.Equals("Unknown", StringComparison.OrdinalIgnoreCase) || text.Equals("None", StringComparison.OrdinalIgnoreCase))
+            return emptyFallback;
+        // Already-translated labels (including Latin model suffixes) must be
+        // stable when the scene and member-row presenters both format them.
+        if (text.Any(character => character is >= '\u3400' and <= '\u9fff')) return text;
+        if (StarBridge.HostRuntime.Presence.GameShipNames.Find(text) is { } name)
+            return string.IsNullOrWhiteSpace(name.ChineseName) ? name.EnglishName : name.ChineseName;
 
-        return IsAlreadyChinese(text) ? text : UnknownShip;
+        // Detection and translation are separate. Keep a bounded detected name
+        // even when an optional/new catalog entry has no Chinese translation.
+        return text;
     }
-
-    private static bool IsAlreadyChinese(string value) =>
-        value.Any(character => character is >= '\u3400' and <= '\u9fff') &&
-        !value.Any(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
 }

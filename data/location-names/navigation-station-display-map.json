@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "revision": "2026-10-01.1",
+  "entries": [
+    { "navigationCode": "rs_ext_arc-l001", "stationCode": "RR_ARC_L1" },
+    { "navigationCode": "rs_ext_pyro2_l4", "stationCode": "RR_P2_L4" },
+    { "navigationCode": "rs_int_p2l4", "stationCode": "RR_P2_L4" },
+    { "navigationCode": "rs_ext_pyro3_l1", "stationCode": "RR_P3_L1" },
+    { "navigationCode": "rs_int_p3l1", "stationCode": "RR_P3_L1" },
+    { "navigationCode": "rs_ext_pyro3_l3", "stationCode": "RR_P3_L3" },
+    { "navigationCode": "rs_int_p3l3", "stationCode": "RR_P3_L3" },
+    { "navigationCode": "rs_ext_pyro3_leo", "stationCode": "RR_P3_LEO" },
+    { "navigationCode": "rs_int_p3leo", "stationCode": "RR_P3_LEO" },
+    { "navigationCode": "rs_ext_pyro5_l2", "stationCode": "RR_P5_L2" },
+    { "navigationCode": "rs_int_p5l2", "stationCode": "RR_P5_L2" },
+    { "navigationCode": "rs_ext_pyro5_l4", "stationCode": "RR_P5_L4" },
+    { "navigationCode": "rs_int_p5l4", "stationCode": "RR_P5_L4" },
+    { "navigationCode": "rs_ext_pyro5_l5", "stationCode": "RR_P5_L5" },
+    { "navigationCode": "rs_int_p5l5", "stationCode": "RR_P5_L5" },
+    { "navigationCode": "rs_ext_pyro6_l3", "stationCode": "RR_P6_L3" },
+    { "navigationCode": "rs_int_p6l3", "stationCode": "RR_P6_L3" },
+    { "navigationCode": "rs_ext_pyro6_l4", "stationCode": "RR_P6_L4" },
+    { "navigationCode": "rs_int_p6l4", "stationCode": "RR_P6_L4" },
+    { "navigationCode": "rs_ext_pyro6_l5", "stationCode": "RR_P6_L5" },
+    { "navigationCode": "rs_int_p6l5", "stationCode": "RR_P6_L5" },
+    { "navigationCode": "rs_ext_pyro6_leo", "stationCode": "RR_P6_LEO" },
+    { "navigationCode": "rs_int_p6leo_ruinstation", "stationCode": "RR_P6_LEO" },
+    { "navigationCode": "rs_ext_pyro-stan_jp1", "stationCode": "RR_JP_PyroStanton", "nameZh": "斯坦顿星门（派罗）", "nameEn": "Stanton Gateway (Pyro)" },
+    { "navigationCode": "rs_ext_stan-pyro_jp1", "stationCode": "RR_JP_StantonPyro", "nameZh": "派罗星门（斯坦顿）", "nameEn": "Pyro Gateway (Stanton)" },
+    { "navigationCode": "rs_ext_stan-terra_jp1", "stationCode": "RR_JP_StantonTerra", "nameZh": "泰拉星门（斯坦顿）", "nameEn": "Terra Gateway (Stanton)" },
+    { "navigationCode": "rs_ext_stan-magnus_jp1", "stationCode": "RR_JP_StantonMagnus", "nameZh": "尼克斯星门（斯坦顿）", "nameEn": "Nyx Gateway (Stanton)", "verification": "pending-in-game" }
+  ]
+}

@@ -50,7 +50,7 @@ internal static class FleetLocationProjection
 
         var displayName = LocationNameLocalizer.DisplayName(
             normalized,
-            language?.Equals("zh", StringComparison.OrdinalIgnoreCase) == true ? "zh" : "en");
+            language?.StartsWith("zh", StringComparison.OrdinalIgnoreCase) == true ? "zh" : "en");
         return PlayerSessionStatePresentation.HasRecognizedValue(displayName)
             ? new FleetLocationValue(normalized, displayName.Trim())
             : null;

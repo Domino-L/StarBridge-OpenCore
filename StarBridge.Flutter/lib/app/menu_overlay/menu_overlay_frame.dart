@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/styles/attention_badge_palette.dart';
+
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -210,6 +212,8 @@ class _ToolButton extends StatelessWidget {
               children: [
                 Badge(
                   key: ValueKey('menu-unread-${tool.id}'),
+                  backgroundColor: AttentionBadgePalette.background,
+                  textColor: AttentionBadgePalette.foreground,
                   isLabelVisible: tool.hasUnread,
                   child: StarBridgeIcon(tool.icon),
                 ),

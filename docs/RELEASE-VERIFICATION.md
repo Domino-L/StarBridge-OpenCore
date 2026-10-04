@@ -1,17 +1,52 @@
 # 核验 StarBridge Release
 
-当前公开测试版为 0.7.0.3。版本记录按产品版本统一展示，不区分实现技术。
+本文说明 0.7.0.4 的文件身份与核验步骤；发布状态以官网公告和正式 GitHub Release 为准。
+版本记录按产品版本统一展示，不区分实现技术。
 
 请只运行来自 [StarBridge-OpenCore Releases](https://github.com/Domino-L/StarBridge-OpenCore/releases)
 或 [星海舰桥官网](https://scstarbridge.com/) 的安装器。相同文件名不能证明文件可信。
 
-## 0.7.0.3 的签名状态
+## 0.7.0.4 的文件身份与核验
+
+本版使用完整安装器，不使用历史版本的 `win-x64-update.zip`。
+以下身份仅对应本版安装器；源码更新本身不能证明更新渠道已经切换：
+
+- 官网地址：https://api.scstarbridge.com/downloads/StarBridge-0.7.0.4-20261003-03-win-x64-setup.exe
+- 官网文件：`StarBridge-0.7.0.4-20261003-03-win-x64-setup.exe`
+- GitHub 附件：`StarBridge-0.7.0.4-win-x64-setup.exe`
+- 文件大小：`371425824` 字节
+- SHA-256：`3DE67A43DACACDEA8E285C7B089C88252A8EC7507BAA5FE9DE93768B6989A6CF`
+
+主程序、更新助手和完整安装器均须具有可信 Windows Authenticode 签名和时间戳。
+发布后下载文件时，应重新执行以下检查，不能用本地签名记录替代下载文件核验：
+
+```powershell
+$installer = '.\StarBridge-0.7.0.4-win-x64-setup.exe'
+(Get-Item -LiteralPath $installer).Length
+Get-FileHash -Algorithm SHA256 -LiteralPath $installer
+Get-AuthenticodeSignature -LiteralPath $installer |
+    Format-List Status, SignerCertificate, TimeStamperCertificate
+```
+
+大小和摘要须完全一致；签名须为 `Valid`，签名证书与时间戳均应可信。
+Windows 显示“未知发布者”或任一检查不通过时，不要运行文件。
+GitHub Release 正式发布后再运行：
+
+```powershell
+gh release verify v0.7.0.4 --repo Domino-L/StarBridge-OpenCore
+gh release verify-asset v0.7.0.4 .\StarBridge-0.7.0.4-win-x64-setup.exe --repo Domino-L/StarBridge-OpenCore
+```
+
+这些命令须验证精确 Release 与文件，草稿或未通过不可变验证不等于完成发布。
+应用内更新还需验证签名安装清单中的版本、地址、摘要及公告；升级和回滚须有本次候选的独立证据。
+
+## 历史 0.7.0.3 的签名状态
 
 0.7.0.3 的主程序、更新助手和完整安装器均必须具有可信 Windows Authenticode
 签名和时间戳。如果 Windows 显示“未知发布者”，或 `Get-AuthenticodeSignature`
 不是 `Valid`，请不要安装或运行该文件。
 
-## 0.7.0.3 完整安装器
+## 历史 0.7.0.3 完整安装器
 
 本版使用完整安装器，不使用历史版本的 `win-x64-update.zip`。正式下载文件为：
 

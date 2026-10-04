@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:starbridge_flutter/app/routing/open_destination_intent.dart';
+import 'package:starbridge_flutter/features/direct_messages/direct_messages_page.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
@@ -9,10 +12,129 @@ import 'package:starbridge_flutter/features/friends/friends_module.dart';
 import 'package:starbridge_flutter/features/friends/friends_page.dart';
 
 import 'friends_test.dart' show ready;
+import '../direct_messages/direct_message_live_delivery_test.dart'
+    show IncomingPort;
+
+import 'package:starbridge_flutter/app/shell/widgets/attention_badge.dart';
 
 import 'social_layout_test.dart' show app;
 
 void main() {
+  testWidgets(
+    'disposing outgoing chat cannot clear incoming viewport ownership',
+    (tester) async {
+      final owner = FriendsModule(CountingFriends());
+      addTearDown(owner.dispose);
+      final port = IncomingPort();
+      final messages = owner.chat(() => port);
+      Widget chat(String key) => DirectMessagesPage(
+        key: ValueKey(key),
+        createPort: () => port,
+        sharedModule: messages,
+        onBack: () {},
+      );
+      await tester.pumpWidget(app(Stack(children: [chat('old')])));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(app(Stack(children: [chat('old'), chat('new')])));
+      await tester.pumpAndSettle();
+      final incoming = messages.isViewportCurrent;
+      expect(incoming, isNotNull);
+      await tester.pumpWidget(app(Stack(children: [chat('new')])));
+      await tester.pumpAndSettle();
+      expect(messages.isViewportCurrent, same(incoming));
+      await tester.pumpWidget(const SizedBox());
+      expect(messages.isViewportCurrent, isNull);
+    },
+  );
+  testWidgets(
+    'friends recent entry routes to independent messages and retains draft',
+    (tester) async {
+      final model = FriendsModule(CountingFriends());
+      addTearDown(model.dispose);
+      final chat = IncomingPort();
+      final messages = model.chat(() => chat);
+      await messages.openFriend(chat.peer);
+      messages.editDraft('retained draft');
+      String? route;
+      await tester.pumpWidget(
+        app(
+          Actions(
+            actions: {
+              OpenDestinationIntent: CallbackAction<OpenDestinationIntent>(
+                onInvoke: (intent) {
+                  route = intent.route;
+                  return null;
+                },
+              ),
+            },
+            child: FriendsPage(
+              createPort: () => throw StateError('shared'),
+              module: model,
+              createChatPort: () => chat,
+              separateMessages: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('friends-recent')));
+      await tester.pumpAndSettle();
+      expect(route, '/messages');
+      expect(find.byType(DirectMessagesPage), findsNothing);
+      expect(messages.draft, 'retained draft');
+      await tester.pumpWidget(
+        app(
+          FriendsPage(
+            createPort: () => throw StateError('shared'),
+            module: model,
+            createChatPort: () => chat,
+            separateMessages: true,
+            messagesOnly: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(DirectMessagesPage), findsOneWidget);
+      expect(messages.draft, 'retained draft');
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'returning to friends locates new unread without losing retained chat draft',
+    (tester) async {
+      final model = FriendsModule(CountingFriends());
+      addTearDown(model.dispose);
+      final chat = IncomingPort();
+      final messages = model.chat(() => chat);
+      await messages.openFriend(chat.peer);
+      messages.editDraft('keep unsent draft');
+      chat.arrived = true;
+      await tester.pumpWidget(
+        app(
+          FriendsPage(
+            createPort: () => throw StateError('shared'),
+            module: model,
+            createChatPort: () => chat,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final badge = find.descendant(
+        of: find.byKey(const Key('friends-recent')),
+        matching: find.byType(AttentionCount),
+      );
+      expect(tester.widget<AttentionCount>(badge).count, 1);
+      expect(messages.selected?.ref, 'peer');
+      expect(messages.draft, 'keep unsent draft');
+      chat.arrived = false;
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+      expect(tester.widget<AttentionCount>(badge).count, 0);
+      expect(messages.selected?.ref, 'peer');
+      expect(messages.draft, 'keep unsent draft');
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   test(
     'prefetch warms the shared snapshot without submitting uncommitted search',
     () async {

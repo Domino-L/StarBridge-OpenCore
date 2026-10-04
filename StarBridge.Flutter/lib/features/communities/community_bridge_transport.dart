@@ -6,14 +6,18 @@ import '../../platform/bridge/bridge_account_access.dart';
 import 'communities_module.dart';
 import 'community_own_avatar.dart';
 import 'community_ships_port.dart';
+import 'community_activity.dart';
+import 'community_activity_port.dart';
 
 /// Shared account-scoped request lifecycle for all organization operations.
 abstract class CommunityBridgeTransport
     implements
         CommunitiesPort,
         CommunityOwnAvatarSource,
+        CommunityActivityPort,
         CommunityShipsRefreshPort {
   CommunityBridgeTransport(this.session, {this.ownAvatar}) {
+    _activity = CommunityActivity(session);
     _subscription = session.events.listen((event) {
       if (event.name == 'account.changed' ||
           event.name == 'account.avatarChanged' ||
@@ -26,6 +30,11 @@ abstract class CommunityBridgeTransport
     }, onDone: _invalidate);
   }
   final BridgeClientSession session;
+  late final CommunityActivity _activity;
+  @override
+  Stream<void> get workspaceChanges => _activity.changes.stream;
+  @override
+  bool get activityHealthy => _activity.healthy;
   final String? Function()? ownAvatar;
   @override
   String? get ownAvatarImageData => _closed ? null : ownAvatar?.call();
@@ -54,9 +63,16 @@ abstract class CommunityBridgeTransport
 
   Future<Map<String, Object?>> sendRequest(
     String name,
-    Map<String, Object?> payload,
-  ) async {
+    Map<String, Object?> payload, {
+    Duration? timeout,
+  }) async {
     final epoch = _epoch;
+    final clock = Stopwatch()..start();
+    Duration? remaining() => timeout == null
+        ? null
+        : timeout - clock.elapsed > Duration.zero
+        ? timeout - clock.elapsed
+        : const Duration(microseconds: 1);
     final capability = switch (name) {
       'communities.read' => 'communities.read',
       'communities.workspace' => 'communities.workspace',
@@ -112,6 +128,7 @@ abstract class CommunityBridgeTransport
     }
     final accountRequest = session.beginRequest(
       'account.getCurrent',
+      timeout: remaining(),
       payload: const {'schemaVersion': 1},
     );
     _pending.add(accountRequest);
@@ -127,16 +144,19 @@ abstract class CommunityBridgeTransport
     }
     final commandRequest = session.beginRequest(
       name,
-      timeout: name == 'communities.pickLogo'
-          ? const Duration(minutes: 5)
-          : name == 'communities.sendInvite' ||
-                name == 'communities.resumeInvite'
-          ? const Duration(seconds: 75)
-          : name == 'communities.ships'
-          ? const Duration(seconds: 45)
-          : name == 'communities.execute' || name == 'communities.hangarSharing'
-          ? const Duration(seconds: 45)
-          : null,
+      timeout:
+          remaining() ??
+          (name == 'communities.pickLogo'
+              ? const Duration(minutes: 5)
+              : name == 'communities.sendInvite' ||
+                    name == 'communities.resumeInvite'
+              ? const Duration(seconds: 75)
+              : name == 'communities.ships'
+              ? const Duration(seconds: 45)
+              : name == 'communities.execute' ||
+                    name == 'communities.hangarSharing'
+              ? const Duration(seconds: 45)
+              : null),
       // Overlay is device-local and rejects accountContext. Still gate its
       // initiation and late response with the surrounding account/epoch checks.
       accountContext:
@@ -190,6 +210,7 @@ abstract class CommunityBridgeTransport
     _closed = true;
     _invalidate();
     await _subscription.cancel();
+    await _activity.close();
     await _changes.close();
     await _shipRefreshes.close();
   }

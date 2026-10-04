@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tokens/starbridge_tokens.dart';
 
 abstract final class BridgeInk {
   // Constant-only menu chrome mirrors the client dark tokens. Regression
@@ -18,4 +19,24 @@ abstract final class BridgeInk {
   static const divider = Color(0xff26333c);
   static const selected = Color(0xff173348);
   static const scrim = Color(0x85000000);
+}
+
+/// Reused menu controls inherit a light desktop theme, while the actual game
+/// menu keeps its explicitly dark theme and original translucent palette.
+class MenuBridgeColors {
+  MenuBridgeColors.of(BuildContext context)
+    : tokens = Theme.of(context).extension<StarBridgeTokens>();
+  final StarBridgeTokens? tokens;
+  bool get light => tokens?.isDark == false;
+  Color get text => light ? tokens!.colors.textPrimary : BridgeInk.text;
+  Color get muted => light ? tokens!.colors.textSecondary : BridgeInk.muted;
+  Color get blue => light ? tokens!.colors.accent : BridgeInk.blue;
+  Color get green => light ? tokens!.colors.success : BridgeInk.green;
+  Color get amber => light ? tokens!.colors.warning : BridgeInk.amber;
+  Color get danger => light ? tokens!.colors.danger : BridgeInk.danger;
+  Color get line => light ? tokens!.surfaces.windowFrame : BridgeInk.line;
+  Color get ground => light ? tokens!.surfaces.ground.fill : BridgeInk.ground;
+  Color get panel => light ? tokens!.surfaces.panel.fill : BridgeInk.panel;
+  Color get selected => light ? tokens!.surfaces.selected.fill : BridgeInk.selected;
+  Color get divider => light ? tokens!.surfaces.panel.border : BridgeInk.divider;
 }

@@ -3,6 +3,9 @@ import 'dart:async';
 import '../routing/user_page_navigation.dart';
 
 import '../tray/tray_application_binding.dart';
+import '../friends_window/friends_window_binding.dart';
+import '../social_windows/social_window_binding.dart';
+import '../composition/social_window_actions.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -13,6 +16,8 @@ import '../feature_registry.dart';
 import '../runtime/example_scene_control.dart';
 import '../routing/open_destination_intent.dart';
 import '../../platform/host/desktop_notification_port.dart';
+import '../composition/room_invitation_navigation.dart';
+import '../routing/room_invitation_destination.dart';
 import '../localization/app_strings.dart';
 import 'shell_layout_mode.dart';
 import 'shell_focus_traversal.dart';
@@ -20,6 +25,7 @@ import 'shell_navigation_controller.dart';
 import 'widgets/navigation_pane.dart';
 import 'widgets/connection_status_notice.dart';
 import 'widgets/sharing_status_notice.dart';
+import '../composition/handle_mismatch_banner.dart';
 import 'widgets/example_scene_notice.dart';
 import 'widgets/shell_top_bar.dart';
 import 'widgets/shell_workspace.dart';
@@ -29,6 +35,7 @@ class StarBridgeShell extends StatefulWidget {
     required this.composition,
     required this.exampleSceneControl,
     this.onRetryConnection,
+    this.onHandleMismatch,
     this.navigationRequests,
     this.userNavigation,
     super.key,
@@ -37,6 +44,7 @@ class StarBridgeShell extends StatefulWidget {
   final AppComposition composition;
   final ExampleSceneControl exampleSceneControl;
   final Future<void> Function()? onRetryConnection;
+  final Future<void> Function()? onHandleMismatch;
   final ValueListenable<OpenDestinationIntent?>? navigationRequests;
   final UserPageNavigation? userNavigation;
 
@@ -47,6 +55,40 @@ class StarBridgeShell extends StatefulWidget {
 class _StarBridgeShellState extends State<StarBridgeShell> {
   late final ShellNavigationController _navigation;
   TrayApplicationBinding? _tray;
+  FriendsWindowBinding? _friendsWindow;
+  SocialWindowBinding? _messagesWindow, _notificationsWindow;
+
+  void _bindSocialWindows() {
+    _messagesWindow?.dispose();
+    _notificationsWindow?.dispose();
+    final composition = widget.composition;
+    Future<void> navigate(String route) async {
+      if (!mounted) return;
+      await _openDestination(route);
+    }
+
+    _messagesWindow = composeSocialWindow(
+      kind: 'messages',
+      composition: composition,
+      context: context,
+      navigate: navigate,
+      openProfile: (builder) async {
+        if (mounted) {
+          await _openUserPage(context, builder, 'navigation.profile');
+        }
+      },
+    );
+    _notificationsWindow = composeSocialWindow(
+      kind: 'notifications',
+      composition: composition,
+      context: context,
+      navigate: navigate,
+      openProfile: (_) async {},
+    );
+    composition.friends.detachedVisibleConversation = () =>
+        _messagesWindow?.visibleConversationKey;
+  }
+
   StreamSubscription<DesktopReminderActivation>? _notificationClicks;
   final _userNavigator = GlobalKey<NavigatorState>();
   String? _userTitle;
@@ -156,18 +198,50 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
     );
     _listenToNotifications();
     _bindTray();
+    _bindSocialWindows();
+    _bindFriendsWindow();
     widget.navigationRequests?.addListener(_openRequestedDestination);
   }
 
   void _openRequestedDestination() {
     final request = widget.navigationRequests?.value;
     if (!mounted || request == null) return;
-    unawaited(
-      _select(
-        widget.composition.features.byRoute(request.route),
+    unawaited(_openDestination(request.route));
+  }
+
+  bool _openingRoomInvitation = false;
+  Future<void> _openDestination(String route) async {
+    final invitations = isRoomInvitationDestination(route);
+    if (invitations && _openingRoomInvitation) return;
+    if (invitations) _openingRoomInvitation = true;
+    try {
+      final destination = widget.composition.features.byRoute(
+        invitations ? '/rooms' : route,
+      );
+      var selected = false;
+      await _select(
+        destination,
         NavigationInteraction.pointer,
-      ),
-    );
+        onSelected: () => selected = true,
+      );
+      if (!mounted ||
+          !selected ||
+          !invitations ||
+          !identical(_navigation.selected, destination)) {
+        return;
+      }
+      if (!await openRoomInvitationDestination(
+        context,
+        widget.composition,
+        route,
+        isCurrent: () =>
+            mounted && identical(_navigation.selected, destination),
+      )) {
+        if (mounted) _reminderUnavailable();
+      }
+    } finally {
+      if (invitations) _openingRoomInvitation = false;
+    }
   }
 
   void _bindTray() {
@@ -184,6 +258,74 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
         if (!mounted || !identical(_navigation.selected, destination)) {
           throw StateError('Navigation cancelled');
         }
+      },
+    );
+  }
+
+  void _bindFriendsWindow() {
+    _friendsWindow?.dispose();
+    final composition = widget.composition;
+    _friendsWindow = FriendsWindowBinding(
+      preferences: composition.preferences,
+      create: composition.createFriendsWindowSession,
+      openMessages: (current) async {
+        if (current() && mounted) {
+          await _select(
+            composition.features.byRoute('/messages'),
+            NavigationInteraction.pointer,
+          );
+        }
+      },
+      openChat: (target, current) async {
+        if (!current() || !mounted) return;
+        final conversation = friendWindowConversation(
+          reference: target.reference,
+          name: target.name,
+          avatar: target.avatar,
+          stableKey: target.stableKey,
+          presence: target.presence,
+          gameId: target.gameId,
+        );
+        if (!kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.windows &&
+            await _messagesWindow!.open(target: conversation)) {
+          return;
+        }
+        await _select(
+          composition.features.byRoute('/messages'),
+          NavigationInteraction.pointer,
+        );
+        if (!current() ||
+            !mounted ||
+            _navigation.selected.route != '/messages') {
+          return;
+        }
+        composition.friends.requestConversation(conversation);
+      },
+      openProfile: (target) async {
+        if (!mounted ||
+            !target.isCurrent() ||
+            composition.userInteractions == null) {
+          return;
+        }
+        if (!await _confirmUserLeaves() || !mounted || !target.isCurrent()) {
+          return;
+        }
+        final guard = _navigation.selected.confirmLeave;
+        if (guard != null && !await guard(context)) return;
+        if (!mounted || !target.isCurrent()) return;
+        unawaited(
+          _pushUserPage(
+            (_) => socialUserProfile(
+              composition,
+              source: target.source,
+              reference: target.reference,
+              query: target.query,
+              avatar: target.avatar,
+            ),
+            'navigation.profile',
+          ),
+        );
       },
     );
   }
@@ -206,6 +348,8 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
     }
     if (oldWidget.composition != widget.composition) {
       _bindTray();
+      _bindSocialWindows();
+      _bindFriendsWindow();
     }
     if (oldWidget.composition.desktopNotifications !=
         widget.composition.desktopNotifications) {
@@ -241,11 +385,38 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
         return;
       }
       if (!current()) return;
+      if (destination == 'gameIdentity') {
+        if (widget.composition.handleMismatch.notice == null ||
+            widget.onHandleMismatch == null) {
+          _reminderUnavailable();
+        } else {
+          unawaited(widget.onHandleMismatch!());
+        }
+        return;
+      }
+      if (destination == 'notificationInbox') {
+        if (!kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.windows &&
+            await _notificationsWindow!.open()) {
+          return;
+        }
+        _userNavigator.currentState?.popUntil((route) => route.isFirst);
+        _navigation.select(
+          widget.composition.features.byRoute('/notifications'),
+          interaction: NavigationInteraction.pointer,
+        );
+        return;
+      }
       if (destination == 'directMessages') {
+        if (!kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.windows &&
+            await _messagesWindow!.open()) {
+          return;
+        }
         _userNavigator.currentState?.popUntil((route) => route.isFirst);
         widget.composition.directMessageRequests?.value++;
         _navigation.select(
-          widget.composition.features.byRoute('/friends'),
+          widget.composition.features.byRoute('/messages'),
           interaction: NavigationInteraction.pointer,
         );
         return;
@@ -289,6 +460,9 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
 
   @override
   void dispose() {
+    _messagesWindow?.dispose();
+    _notificationsWindow?.dispose();
+    _friendsWindow?.dispose();
     widget.userNavigation?.open = null;
     widget.userNavigation?.openSelf = null;
     widget.navigationRequests?.removeListener(_openRequestedDestination);
@@ -305,12 +479,7 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
       actions: {
         OpenDestinationIntent: CallbackAction<OpenDestinationIntent>(
           onInvoke: (intent) {
-            unawaited(
-              _select(
-                widget.composition.features.byRoute(intent.route),
-                NavigationInteraction.pointer,
-              ),
-            );
+            unawaited(_openDestination(intent.route));
             return null;
           },
         ),
@@ -429,9 +598,20 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
                                         : widget.onRetryConnection,
                                   ),
                                 if (!widget.exampleSceneControl.active &&
+                                    projection.connectionIssue == null &&
                                     widget.composition.localPrivacy != null)
                                   SharingStatusNotice(
                                     status: widget.composition.sharingStatus!,
+                                    onRetry: () =>
+                                        widget
+                                            .composition
+                                            .sharingStatus!
+                                            .canRetry
+                                        ? () => unawaited(
+                                            widget.composition.sharingStatus!
+                                                .retry(),
+                                          )
+                                        : null,
                                     onOpenSettings: () => unawaited(
                                       _select(
                                         widget.composition.features.byRoute(
@@ -440,6 +620,15 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
                                         NavigationInteraction.pointer,
                                       ),
                                     ),
+                                  ),
+                                if (!widget.exampleSceneControl.active)
+                                  HandleMismatchBanner(
+                                    module: widget.composition.handleMismatch,
+                                    onOpen: widget.onHandleMismatch == null
+                                        ? null
+                                        : () => unawaited(
+                                            widget.onHandleMismatch!(),
+                                          ),
                                   ),
                                 Expanded(
                                   child: Navigator(
@@ -477,14 +666,31 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
 
   Future<void> _select(
     FeatureDescriptor descriptor,
-    NavigationInteraction interaction,
-  ) async {
+    NavigationInteraction interaction, {
+    VoidCallback? onSelected,
+  }) async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      final window = descriptor.route == '/messages'
+          ? _messagesWindow
+          : descriptor.route == '/notifications'
+          ? _notificationsWindow
+          : null;
+      if (window != null && (await window.open() || !mounted)) return;
+    }
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.windows &&
+        descriptor.id == 'friends' &&
+        _friendsWindow != null) {
+      if (await _friendsWindow!.open() || !mounted) return;
+      // Keep the existing page available if a native secondary view cannot open.
+    }
     if (_selecting) return;
     _selecting = true;
     try {
       if (!await _confirmUserLeaves() || !mounted) return;
       if (identical(_navigation.selected, descriptor)) {
         _userNavigator.currentState?.popUntil((route) => route.isFirst);
+        onSelected?.call();
         return;
       }
       final guard = _navigation.selected.confirmLeave;
@@ -492,6 +698,7 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
       if (!mounted) return;
       _userNavigator.currentState?.popUntil((route) => route.isFirst);
       _navigation.select(descriptor, interaction: interaction);
+      onSelected?.call();
     } finally {
       _selecting = false;
     }

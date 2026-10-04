@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../common/social_identity_text.dart';
+
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -9,6 +11,7 @@ import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
 import 'room_commands.dart';
 import 'room_feedback.dart';
+import 'room_display.dart';
 
 class RoomManagementActions extends StatelessWidget {
   const RoomManagementActions({super.key, required this.module});
@@ -19,6 +22,7 @@ class RoomManagementActions extends StatelessWidget {
     runSpacing: 8,
     children: [
       OutlinedButton(
+        key: const ValueKey('menu-room-settings'),
         onPressed: module.canManage
             ? () => editRoomDialog(context, module)
             : null,
@@ -56,6 +60,7 @@ Future<void> _closeRoom(BuildContext context, PartyRoomsModule module) async {
   if (room == null || !module.canManage) return;
   final confirmed = await showDialog<bool>(
     context: context,
+    useRootNavigator: false,
     builder: (context) => AlertDialog(
       icon: StarBridgeIcon(
         StarBridgeIconSemantic.warning,
@@ -97,6 +102,7 @@ Future<void> _applications(
   if (roomId == null || !module.canManage) return;
   await showDialog<void>(
     context: context,
+    useRootNavigator: false,
     barrierDismissible: false,
     builder: (context) => ListenableBuilder(
       listenable: module,
@@ -109,7 +115,7 @@ Future<void> _applications(
             ? module.selectedRoom!.pendingApplications
             : <RoomApplication>[];
         return PopScope(
-          canPop: !module.busy,
+          canPop: !module.writing,
           child: AlertDialog(
             title: Text(roomActionText(context, 'applications')),
             content: SizedBox(
@@ -135,7 +141,27 @@ Future<void> _applications(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Row(
                           children: [
-                            Expanded(child: Text(item.displayName)),
+                            RoomIdentityAvatar(
+                              key: ValueKey('applicant-avatar-${item.id}'),
+                              name: item.displayName,
+                              gameId: item.gameId,
+                              avatarData: item.avatarData,
+                              userRef: item.userRef,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: SocialIdentityText(
+                                callsign: item.callsign,
+                                gameId: item.gameId,
+                                callsignStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium,
+                                gameIdColor: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                                maxLines: 2,
+                              ),
+                            ),
                             TextButton(
                               key: ValueKey('decline-${item.id}'),
                               style: semanticActionStyle(
@@ -184,7 +210,7 @@ Future<void> _applications(
             ),
             actions: [
               TextButton(
-                onPressed: module.busy ? null : () => Navigator.pop(context),
+                onPressed: module.writing ? null : () => Navigator.pop(context),
                 child: Text(roomActionText(context, 'done')),
               ),
             ],

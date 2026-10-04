@@ -230,7 +230,13 @@ public sealed record PersonalProfileHangarShipContract(
     string? CustomImageMediaId = null,
     double CustomImageCropFocusX = 0.5,
     double CustomImageCropFocusY = 0.5,
-    double CustomImageCropZoom = 1.0);
+    double CustomImageCropZoom = 1.0)
+{
+    // Favorite display placeholders may share a catalog model with an owned
+    // ship, but are not inventory instances. Old contracts contained inventory
+    // entries without this additive flag; preserve that interpretation.
+    public bool IsInventoryEntry { get; init; } = true;
+}
 
 public sealed record PersonalProfileHangarContract(
     PersonalProfileHangarShipContract[] Ships);

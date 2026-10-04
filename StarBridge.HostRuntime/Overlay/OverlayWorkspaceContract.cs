@@ -13,7 +13,8 @@ internal sealed record OverlayWorkspacePresetSnapshot(
     bool IsActive,
     OverlayDisplaySettings Settings,
     IReadOnlyList<InformationOverlayLayoutItem> Layout,
-    string StorageState);
+    string StorageState,
+    OverlayPresetSources? Sources = null);
 
 internal sealed record OverlayWorkspaceHotkeySnapshot(
     string Binding,
@@ -29,7 +30,9 @@ internal sealed record OverlayWorkspaceReadResult(
     OverlayWorkspaceHotkeySnapshot Hotkey,
     OverlayDisplaySettings Settings,
     IReadOnlyList<InformationOverlayLayoutItem> Layout,
-    IReadOnlyList<OverlayWorkspacePresetSnapshot> Presets);
+    IReadOnlyList<OverlayWorkspacePresetSnapshot> Presets,
+    bool RemovedOrganizationBindings = false,
+    bool SourcePresetsEnabled = false);
 
 internal enum OverlayWorkspaceMutationKind
 {
@@ -40,7 +43,8 @@ internal enum OverlayWorkspaceMutationKind
     RenamePreset,
     DeletePreset,
     ResetPreset,
-    ImportPreset
+    ImportPreset,
+    ConfigurePresetSources
 }
 
 internal sealed record OverlayWorkspaceMutation(
@@ -51,11 +55,13 @@ internal sealed record OverlayWorkspaceMutation(
     OverlayDisplaySettings? Settings = null,
     IReadOnlyList<InformationOverlayLayoutItem>? Layout = null,
     string? RenderMode = null,
-    OverlayWorkspaceHotkeySnapshot? Hotkey = null);
+    OverlayWorkspaceHotkeySnapshot? Hotkey = null,
+    OverlayPresetSources? Sources = null,
+    string? ReplaceAutoSwitchPresetId = null);
 
 internal interface IOverlayWorkspaceStore
 {
     OverlayWorkspaceReadResult Load();
 
-    OverlayWorkspaceReadResult Apply(OverlayWorkspaceMutation mutation);
+    OverlayWorkspaceReadResult Apply(OverlayWorkspaceMutation mutation, Func<bool>? isCurrent = null);
 }

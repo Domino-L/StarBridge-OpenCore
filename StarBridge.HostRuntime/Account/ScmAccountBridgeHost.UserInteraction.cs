@@ -53,7 +53,7 @@ internal sealed partial class ScmAccountBridgeHost
                 schemaVersion = 1, targetRef = target.Context, memberRef = target.Reference
             }), scope, session.Legacy.AccountId);
         }
-        if (target.Source == "room") return ResolveRoomAvatar(target.Reference, scope);
+        if (target.Source == "room") return await ResolveRoomAvatarAsync(target.Reference, scope, session, context, generation, token);
         return (_friends ?? throw new AccountBridgeHostException("friends.read_unavailable"))
             .ResolveAvatarTarget(target.Source, target.Reference, session.AccessToken, scope);
     }

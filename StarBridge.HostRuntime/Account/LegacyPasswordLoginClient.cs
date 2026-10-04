@@ -209,13 +209,11 @@ internal sealed partial class LegacyPasswordLoginClient : IDisposable
     private static ScmGameIdentitySnapshot Identity(JsonElement value)
     {
         var handle = Text(value, "gameName")?.Trim();
-        var supported = value.TryGetProperty("identityBindingRequired", out var required) &&
-            required.ValueKind is JsonValueKind.True or JsonValueKind.False;
-        var confirmed = value.TryGetProperty("identityBindingConfirmedAt", out var date) &&
-            date.ValueKind == JsonValueKind.String && date.TryGetDateTimeOffset(out _);
-        if (!supported || !confirmed || string.IsNullOrWhiteSpace(handle) || handle.Length > 128 || handle.Any(char.IsControl))
+        // The authenticated legacy account Handle is the compatibility authority.
+        // Retired one-time binding flags are not an additional login requirement.
+        if (!IdentityBindingPolicy.IsValidGameName(handle))
             return new(ScmGameIdentityStatus.Unknown, null, null);
-        return new(ScmGameIdentityStatus.Verified, handle, handle.ToLowerInvariant());
+        return new(ScmGameIdentityStatus.Verified, handle, handle!.ToLowerInvariant());
     }
 
     private static string? DisplayName(JsonElement value)

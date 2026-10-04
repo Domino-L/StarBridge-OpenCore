@@ -1,0 +1,70 @@
+const handleMismatchZhCn = <String, String>{
+  'identity.notice.noObservation': '暂未识别',
+  'identity.notice.title': '游戏 Handle 与应用记录不一致',
+  'identity.notice.pair': '应用已验证 Handle：{expected} · 最近识别的游戏 Handle：{detected}',
+  'identity.notice.action': '核验账号',
+  'identity.notice.body':
+      '请核对应用账号与日志中最近识别的 Handle。与游戏身份相关的同步暂不可用；关闭此提示不会更改账号，也不会移除上方提醒。',
+  'identity.notice.unknown': '请先核验账号。兼容期旧账号可确认更新 Handle；其他登录方式请到账号设置处理。',
+  'identity.notice.ready': '若这是同一 RSI 账号改名，请确认更新应用记录。若是换了游戏账号，请暂不修改并切换回对应账号。',
+  'identity.notice.consequence':
+      '确认后将更新应用账号及相关共享身份，不会修改 RSI 账号，也不会导入或删除旧客户端机库。',
+  'identity.notice.confirm': '确认更新 Handle',
+  'identity.notice.outcomeUnknown': '尚未确认更新结果。请重新核验；核验只读取当前结果，不会再次提交修改。',
+  'identity.notice.bound': '此账号存在关联身份，请到账号设置核对。这里不会直接更改游戏 ID。',
+  'identity.notice.observationRequired':
+      '暂未读到有效 Handle。请在账号与识别中检查 Game.log 路径；已有身份记录时，无需重新启动游戏。',
+  'identity.notice.consistent': '正在重新读取账号与游戏身份，确认一致后会移除提醒。',
+  'identity.notice.readOnly': '本次核验不会修改应用账号、远端共享身份或迁移本机机库。',
+  'identity.notice.failed': '暂时无法确认账号状态。请重新核验，确认前将保留差异提示。',
+  'identity.notice.busy': '正在核验账号…',
+  'identity.notice.retry': '重新核验',
+  'identity.notice.open': '打开账号与识别',
+  'identity.notice.later': '稍后处理',
+};
+const handleMismatchZhTw = <String, String>{
+  'identity.notice.noObservation': '暫未識別',
+  'identity.notice.title': '遊戲 Handle 與應用記錄不一致',
+  'identity.notice.pair': '應用已驗證 Handle：{expected} · 最近識別的遊戲 Handle：{detected}',
+  'identity.notice.action': '核驗帳號',
+  'identity.notice.body':
+      '請核對應用帳號與日誌中最近識別的 Handle。與遊戲身分相關的同步暫不可用；關閉此提示不會更改帳號，也不會移除上方提醒。',
+  'identity.notice.unknown': '請先核驗帳號。相容期舊帳號可確認更新 Handle；其他登入方式請到帳號設定處理。',
+  'identity.notice.ready': '若這是同一 RSI 帳號改名，請確認更新應用記錄。若是換了遊戲帳號，請暫不修改並切換回對應帳號。',
+  'identity.notice.consequence':
+      '確認後將更新應用帳號及相關共享身分，不會修改 RSI 帳號，也不會匯入或刪除舊客戶端機庫。',
+  'identity.notice.confirm': '確認更新 Handle',
+  'identity.notice.outcomeUnknown': '尚未確認更新結果。請重新核驗；核驗只讀取目前結果，不會再次提交修改。',
+  'identity.notice.bound': '此帳號存在關聯身分，請到帳號設定核對。這裡不會直接更改遊戲 ID。',
+  'identity.notice.observationRequired':
+      '暫未讀到有效 Handle。請在帳號與識別中檢查 Game.log 路徑；已有身分記錄時，無需重新啟動遊戲。',
+  'identity.notice.consistent': '正在重新讀取帳號與遊戲身分，確認一致後會移除提醒。',
+  'identity.notice.readOnly': '本次核驗不會修改應用帳號、遠端共享身分或遷移本機機庫。',
+  'identity.notice.failed': '暫時無法確認帳號狀態。請重新核驗，確認前將保留差異提示。',
+  'identity.notice.busy': '正在核驗帳號…',
+  'identity.notice.retry': '重新核驗',
+  'identity.notice.open': '開啟帳號與識別',
+  'identity.notice.later': '稍後處理',
+};
+const handleMismatchEn = <String, String>{
+  'identity.notice.noObservation': 'Not currently detected',
+  'identity.notice.title': 'Game Handle differs from the app record',
+  'identity.notice.pair':
+      'Verified Handle: {expected} · Last detected game Handle: {detected}',
+  'identity.notice.action': 'Check account',
+  'identity.notice.body': 'Compare your app account with the last Handle detected in the log. Identity-dependent syncing is unavailable. Dismissing this prompt will not change your account or remove the banner.',
+  'identity.notice.unknown': 'Check your account first. Compatibility accounts can confirm a Handle update here; use account settings for other sign-in methods.',
+  'identity.notice.ready': 'If you renamed the same RSI account, confirm the app record update. If you switched game accounts, do not update; return to the corresponding account.',
+  'identity.notice.consequence': 'Confirmation updates your app account and related shared identity. It does not change your RSI account, import or delete your old client hangar.',
+  'identity.notice.confirm': 'Confirm Handle update',
+  'identity.notice.outcomeUnknown': 'The update result is not confirmed. Check again to read its status without resubmitting the change.',
+  'identity.notice.bound': 'This account has a linked identity. Check account settings; this dialog will not change your game ID.',
+  'identity.notice.observationRequired': 'No valid Handle has been read. Check the Game.log path in account settings. You do not need to restart the game if the log already contains an identity record.',
+  'identity.notice.consistent': 'Refreshing both identities. The banner will disappear once they are confirmed to match.',
+  'identity.notice.readOnly': 'This check does not change your app account or shared identity, or migrate your local hangar.',
+  'identity.notice.failed': 'Could not confirm account status. Check again; the mismatch notice stays until verified.',
+  'identity.notice.busy': 'Checking account…',
+  'identity.notice.retry': 'Check again',
+  'identity.notice.open': 'Open account settings',
+  'identity.notice.later': 'Not now',
+};

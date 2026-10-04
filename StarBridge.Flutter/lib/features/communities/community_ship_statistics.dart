@@ -1,9 +1,10 @@
 import 'communities_module.dart';
+import 'community_fleet_summary.dart';
 import 'community_ships_port.dart';
 import '../../shared/ships/ship_catalog_display.dart';
 
 /// Read-only presentation of one complete, authorized WPF-style inventory.
-class CommunityShipStatistics {
+class CommunityShipStatistics implements CommunityFleetSummary {
   CommunityShipStatistics(Iterable<CommunitySharedShip> source)
     : ships = List.unmodifiable(source) {
     for (final ship in ships) {
@@ -59,6 +60,8 @@ class CommunityShipStatistics {
     });
   }
   final List<CommunitySharedShip> ships;
+  @override
+  int get shipCount => ships.length;
   static const sizeOrder = [
     'capital',
     'large',
@@ -87,17 +90,22 @@ class CommunityShipStatistics {
     'unknown',
   ];
   final sizeRoles = <String, Map<String, int>>{};
+  @override
   int countAt(String size, String role) => sizeRoles[size]?[role] ?? 0;
   // Catalog codes identify models; owned instances and loaners are not models.
+  @override
   int get modelCount => ships
       .map((ship) => ship.code.trim().toLowerCase())
       .where((code) => code.isNotEmpty)
       .toSet()
       .length;
+  @override
   int get sharingMemberCount => owners.length;
-  final sizes = <String, int>{},
-      roles = <String, int>{},
-      availableRoles = <String, int>{};
+  @override
+  final sizes = <String, int>{};
+  @override
+  final roles = <String, int>{};
+  final availableRoles = <String, int>{};
   final owners = <String, List<CommunitySharedShip>>{};
   final available = <CommunitySharedShip>[];
   final candidates = <CommunitySharedShip>[];
@@ -114,10 +122,11 @@ class CommunityShipStatistics {
 
   bool get hasDispatchLoaners => available.any(concept);
   int notFlyable = 0;
-  int pricedCount = 0,
-      totalCents = 0,
-      ownerOffline = 0,
-      availabilityUnknown = 0;
+  @override
+  int pricedCount = 0;
+  @override
+  int totalCents = 0;
+  int ownerOffline = 0, availabilityUnknown = 0;
   CommunitySharedShip? mostValuable;
   CommunitySharedShip? get preferred => candidates.firstOrNull;
   List<CommunitySharedShip>? get topOwner {
@@ -177,6 +186,9 @@ Future<CommunityShipStatistics> readCommunityShipStatistics(
       : await port.readShips(targetRef, query: query);
   final revision = page.revision;
   final total = page.totalCount;
+  if (total > CommunityFleetSummary.maximumShips) {
+    throw const CommunityFailure('statisticsUnavailable');
+  }
   final ships = <CommunitySharedShip>[];
   final seen = <String>{};
   var offset = 0;
@@ -195,7 +207,8 @@ Future<CommunityShipStatistics> readCommunityShipStatistics(
       ships.add(ship);
     }
     if (page.next == null) break;
-    if (DateTime.now().isAfter(deadline) || ships.length >= 10000) {
+    if (DateTime.now().isAfter(deadline) ||
+        ships.length >= CommunityFleetSummary.maximumShips) {
       throw const CommunityFailure('statisticsUnavailable');
     }
     offset = page.next!;

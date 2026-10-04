@@ -22,6 +22,7 @@ void main() {
           'ship': 'Unknown',
           'location': 'Unknown',
           'arrivalPendingConfirmation': false,
+          'arrivalTargetCode': null,
           ...overrides,
         });
         return communityMemberRuntime(
@@ -43,6 +44,31 @@ void main() {
       expect(render({'serverRegion': null}).ship, text('waitingServerSync'));
       expect(render({'ship': '  C2 Hercules  '}).ship, 'C2 Hercules');
       expect(render({'ship': null}).ship, text('hidden'));
+      expect(
+        render({'locationHiddenReason': 'lowConfidence'}).location,
+        text('lowConfidenceLocation'),
+      );
+      expect(
+        render({'locationHiddenReason': 'lowConfidence', 'location': null})
+            .location,
+        text('hidden'),
+      );
+      expect(
+        render({'locationHiddenReason': 'lowConfidence', 'location': 'Orison'})
+            .location,
+        'Orison',
+      );
+      expect(
+        render({
+          'locationHiddenReason': 'lowConfidence',
+          'arrivalPendingConfirmation': true,
+        }).location,
+        text('locationPending'),
+      );
+      expect(
+        render({'locationHiddenReason': 'other'}).location,
+        text('waitingRecognition'),
+      );
       expect(
         render({'liveStatus': 'Paused', 'ship': 'C2 Hercules'}).ship,
         text('hidden'),

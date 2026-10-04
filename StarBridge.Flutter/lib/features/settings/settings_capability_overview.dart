@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -10,6 +11,8 @@ import 'settings_capability_catalog.dart';
 import 'settings_models.dart';
 import 'settings_entry_catalog.dart';
 import 'settings_entry_dialog.dart';
+import '../../app/feature_registry.dart' show FeatureAvailability;
+import '../../design_system/components/coming_soon.dart';
 
 class PlannedSettingsCapabilities extends StatelessWidget {
   const PlannedSettingsCapabilities({
@@ -79,24 +82,7 @@ class PlannedSettingsCapabilities extends StatelessWidget {
                 (item) =>
                     SettingsEntryOverrides.of(context).containsKey(item.id),
               ))
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: tokens.space.sm,
-                    vertical: tokens.space.xxs,
-                  ),
-                  decoration: BoxDecoration(
-                    color: tokens.surfaces.ground.fill,
-                    border: Border.all(
-                      color: tokens.surfaces.raised.border,
-                      width: tokens.stroke.regular,
-                    ),
-                    borderRadius: tokens.shape.small,
-                  ),
-                  child: Text(
-                    settingsEntryText(strings, 'unavailable'),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
+                const ComingSoonBadge(),
             ],
           ),
           SizedBox(height: tokens.space.md),
@@ -137,9 +123,22 @@ class _CapabilityRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      strings.text(capability.titleKey),
-                      style: Theme.of(context).textTheme.labelLarge,
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          strings.text(capability.titleKey),
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        if (SettingsEntryOverrides.availabilityFor(
+                              context,
+                              capability.id,
+                            ) ==
+                            FeatureAvailability.comingSoon)
+                          const ComingSoonBadge(),
+                      ],
                     ),
                     SizedBox(height: tokens.space.xxs),
                     Text(

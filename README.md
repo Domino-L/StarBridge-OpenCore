@@ -22,10 +22,12 @@
 | 下载方式 | 适合场景 |
 | --- | --- |
 | [官网下载](https://scstarbridge.com/) | 查看当前版本、更新公告和文件校验信息。 |
-| [0.7.0.3 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe) | 当前公开测试版，下载后可离线安装。 |
+| [0.7.0.4 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.4-20261003-03-win-x64-setup.exe) | 下载后校验文件身份，可离线安装。 |
+| [0.7.0.3 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe) | 上一已发布版本，下载后可离线安装。 |
 | [查看全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases) | 查看更新说明、历史版本和 SHA-256 校验文件。 |
 
-当前公开测试版为 0.7.0.3。主程序、更新助手和完整安装器要求可信 Windows 数字签名与时间戳。
+版本发布状态以官网公告和正式 GitHub Release 为准；源码更新不等于更新渠道已切换。
+0.7.0.4 更新内容见 [版本说明](docs/RELEASE-0.7.0.4.md)。主程序、更新助手和完整安装器要求可信 Windows 数字签名与时间戳。
 请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对
 `SHA256SUMS.txt` 和签名更新清单；证据格式见下方 Release 核验指南。如果 Windows 仍显示“未知发布者”，请停止安装并提交反馈。
 
@@ -258,7 +260,7 @@ NuGet 缓存的该版本，也可通过 CMake `STARBRIDGE_WEBVIEW2_SDK_ROOT` 指
 
 当前树不包含旧客户端 UI、云端业务实现、服务端数据库、生产部署或签名私钥。
 远端功能仍需要合法账号及相应服务权限；公开客户端不会绕过授权。
-0.7.0.3 默认关闭菜单浮层，保留信息浮层。
+0.7.0.4 默认关闭菜单浮层，保留信息浮层。
 
 ## 许可与名称
 

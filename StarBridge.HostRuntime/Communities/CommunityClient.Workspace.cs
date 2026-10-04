@@ -13,8 +13,9 @@ internal sealed partial class CommunityClient
     private readonly object _workspaceMemberGate = new();
 
     internal Task<object> ReadWorkspaceAsync(string bearer, JsonElement body, string scope, CancellationToken token,
-        Action<Notifications.PlayerActivitySourceSnapshot>? observed = null) =>
-        GuardWorkspace(() => ReadWorkspaceCore(bearer, body, scope, token, observed));
+        Action<Notifications.PlayerActivitySourceSnapshot>? observed = null, bool backgroundActivity = false,
+        Action<Overlay.InformationOverlayCommunityContent>? rosterReady = null, bool includeManagement = true) =>
+        GuardWorkspace(() => ReadWorkspaceCore(bearer, body, scope, token, observed, backgroundActivity, rosterReady, includeManagement));
     internal Task<object> ReadMediaAsync(string bearer, JsonElement body, string scope, CancellationToken token) =>
         GuardWorkspace(() => ReadMediaCore(bearer, body, scope, token));
     private static async Task<object> GuardWorkspace(Func<Task<object>> read)
@@ -25,15 +26,20 @@ internal sealed partial class CommunityClient
     }
 
     private async Task<object> ReadWorkspaceCore(string bearer, JsonElement body, string scope, CancellationToken token,
-        Action<Notifications.PlayerActivitySourceSnapshot>? observed)
+        Action<Notifications.PlayerActivitySourceSnapshot>? observed, bool backgroundActivity,
+        Action<Overlay.InformationOverlayCommunityContent>? rosterReady, bool includeManagement)
     {
         Validate(body, "targetRef", "query", "offset");
         var reference = Text(body, "targetRef", 32);
         var target = ResolveForRead(reference, scope, allowWpfS2: true);
         var query = Text(body, "query", 128).Trim();
         var offset = Number(body, "offset", 0, 1000000);
+        JsonElement[]? activityFleets = null;
+        JsonElement? completeRoster = null;
         var root = target.WpfS2ViewerId is not null
-            ? await WpfS2Workspace(bearer, target, query, offset, token, observed)
+            ? await WpfS2Workspace(bearer, target, query, offset, token, observed,
+                backgroundActivity ? fleets => activityFleets = fleets : null,
+                rosterReady is null ? null : rows => completeRoster = rows, includeManagement)
             : await WorkspaceJson(bearer, $"/api/fleets/workspace?code={Uri.EscapeDataString(target.Code)}&q={Uri.EscapeDataString(query)}&offset={offset}", token);
         var membershipVersion = target.WpfS2ViewerId is null ? 2 : 1;
         if (Number(root, "schemaVersion", 1, 1) != 1 || Number(root, "membershipModelVersion", membershipVersion, membershipVersion) != membershipVersion ||
@@ -55,6 +61,25 @@ internal sealed partial class CommunityClient
             foreach (var key in new[] { "isSelf", "isOwner", "online", "hasAvatar", "arrivalPendingConfirmation" }) fields[key] = member.GetProperty(key).GetBoolean();
             foreach (var key in new[] { "ship", "location", "locationConfidence", "serverRegion", "serverShard", "arrivalTargetCode" }) fields[key] = Optional(member, key, 512);
             fields["hasServerSession"] = OptionalServerSession(member);
+            var visibleGame = (bool)fields["online"]! &&
+                string.Equals(fields["liveStatus"] as string, "InGame", StringComparison.OrdinalIgnoreCase) &&
+                fields["hasServerSession"] is not false;
+            fields["arrivalPendingConfirmation"] = visibleGame && !string.IsNullOrWhiteSpace(fields["location"] as string) &&
+                (bool)fields["arrivalPendingConfirmation"]!;
+            if (!(bool)fields["arrivalPendingConfirmation"]!) fields["arrivalTargetCode"] = null;
+            fields["locationLabels"] = visibleGame
+                ? PartyRooms.RoomLocationLabels.From(fields["location"] as string) : null;
+            fields["arrivalTargetLabels"] = visibleGame && fields["location"] is string &&
+                (bool)fields["arrivalPendingConfirmation"]!
+                ? PartyRooms.RoomLocationLabels.From(fields["arrivalTargetCode"] as string) : null;
+            fields["shipLabels"] = (bool)fields["online"]! &&
+                string.Equals(fields["liveStatus"] as string, "InGame", StringComparison.OrdinalIgnoreCase) &&
+                fields["hasServerSession"] is not false
+                ? StarBridge.HostRuntime.Presence.GameShipLabels.From(fields["ship"] as string) : null;
+            fields["locationHiddenReason"] = StarBridge.Core.Presence.SharedLocationVisibility.NormalizeReason(
+                Optional(member, "locationHiddenReason", 32), fields["location"] as string,
+                (bool)fields["online"]! && string.Equals(fields["liveStatus"] as string, "InGame", StringComparison.OrdinalIgnoreCase),
+                (bool)fields["arrivalPendingConfirmation"]!);
             foreach (var key in new[] { "lastUpdated", "joinedAt" }) fields[key] = Timestamp(member, key);
             return fields;
         }).ToArray();
@@ -125,6 +150,20 @@ internal sealed partial class CommunityClient
                 _memberTargets[memberRef] = new(id, target.Code, scope, now.AddMinutes(5));
                 members[i]["memberRef"] = memberRef;
             }
+        }
+        // Only a fully validated workspace may queue an auxiliary observation.
+        if (activityFleets is not null)
+            QueueWpfS2PlayerObservation(bearer, activityFleets, observed, target.WpfS2ViewerId!);
+        // The UI and native overlay consume the same privacy-projected roster.
+        // S2 has already read/validated all members before UI filtering/paging.
+        // A paginated modern response is not a complete roster and cannot seed it.
+        if (rosterReady is not null && (completeRoster is not null || query.Length == 0 && offset == 0 && next is null))
+        {
+            var rows = completeRoster ?? root.GetProperty("members");
+            var roster = rows.EnumerateArray().Select(row =>
+                ScmAccountBridgeHost.ProjectOverlayMember(row) with
+                { PreferenceKey = Overlay.OverlayMemberIdentity.FromAccountId(Text(row, "memberId", 512)) }).ToArray();
+            rosterReady(new(target.Code, (string)response["name"]!, Array.AsReadOnly(roster)));
         }
         return response;
     }

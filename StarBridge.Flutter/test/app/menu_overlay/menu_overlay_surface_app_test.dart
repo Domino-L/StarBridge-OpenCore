@@ -452,7 +452,7 @@ void main() {
     expect(calls.last.arguments, {'opening': 1, 'visible': true});
     await friends(1, 2, 'Current');
     expect(find.text('Current'), findsOneWidget);
-    expect(find.text('状态未共享'), findsOneWidget);
+    expect(find.text('离线'), findsOneWidget);
     await friends(1, 1, 'Stale');
     await friends(0, 3, 'Old window');
     expect(find.text('Current'), findsOneWidget);

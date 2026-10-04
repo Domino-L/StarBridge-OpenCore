@@ -15,6 +15,7 @@ class CommunityShipBanner extends StatelessWidget {
     required this.owner,
     required this.importedAt,
     required this.action,
+    this.showImportedAt = true,
     super.key,
   });
   final Widget identity,
@@ -26,6 +27,7 @@ class CommunityShipBanner extends StatelessWidget {
       owner,
       importedAt,
       action;
+  final bool showImportedAt;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -47,12 +49,15 @@ class CommunityShipBanner extends StatelessWidget {
         status,
         price,
         owner,
-        importedAt,
+        if (showImportedAt) importedAt,
       ];
       if (constraints.maxWidth >= 900) {
         return ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 56),
-          child: CommunityShipColumns(cells: [...cells, action]),
+          child: CommunityShipColumns(
+            cells: [...cells, action],
+            showImportedAt: showImportedAt,
+          ),
         );
       }
       const labels = ['specRole', 'status', 'price', 'owner', 'importedAt'];
@@ -99,19 +104,28 @@ class CommunityShipBanner extends StatelessWidget {
 /// Shared column geometry keeps headers and instances aligned on wide screens.
 /// Classification, status and value stay together instead of stretching apart.
 class CommunityShipColumns extends StatelessWidget {
-  const CommunityShipColumns({required this.cells, super.key});
+  const CommunityShipColumns({
+    required this.cells,
+    this.showImportedAt = true,
+    super.key,
+  });
   final List<Widget> cells;
+  final bool showImportedAt;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final generous = constraints.maxWidth >= 1150;
       final widths = <int, double>{
-        1: generous ? 220 : 176,
+        1: !showImportedAt
+            ? 230
+            : generous
+            ? 220
+            : 176,
         2: generous ? 96 : 74,
         3: generous ? 112 : 82,
-        5: generous ? 112 : 94,
-        6: 72,
+        if (showImportedAt) 5: generous ? 112 : 94,
+        if (showImportedAt) 6: 72 else 5: 0,
       };
       return Row(
         children: [
@@ -139,7 +153,8 @@ class CommunityShipColumns extends StatelessWidget {
 }
 
 class CommunityShipColumnHeader extends StatelessWidget {
-  const CommunityShipColumnHeader({super.key});
+  const CommunityShipColumnHeader({this.showImportedAt = true, super.key});
+  final bool showImportedAt;
   @override
   Widget build(BuildContext context) => Padding(
     // Same border/padding and scrollbar gutter as the inventory rows.
@@ -148,6 +163,7 @@ class CommunityShipColumnHeader extends StatelessWidget {
       builder: (context, constraints) {
         if (constraints.maxWidth < 900) return const SizedBox.shrink();
         return CommunityShipColumns(
+          showImportedAt: showImportedAt,
           cells: [
             for (final key in [
               'shipColumn',
@@ -155,7 +171,7 @@ class CommunityShipColumnHeader extends StatelessWidget {
               'status',
               'priceColumn',
               'owner',
-              'importedAt',
+              if (showImportedAt) 'importedAt',
             ])
               Text(
                 communityShipsText(context, key),

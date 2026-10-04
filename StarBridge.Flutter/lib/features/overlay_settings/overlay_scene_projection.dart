@@ -3,6 +3,11 @@ import 'overlay_scene_controller.dart';
 
 OverlaySceneProjection projectOverlayScene(OverlaySceneState state) {
   final options = <OverlaySceneOption>[
+    if (state.presetBindingId != null)
+      const OverlaySceneOption(
+        id: 'resumeBinding',
+        labelKey: 'overlay.source.resumeBinding',
+      ),
     const OverlaySceneOption(id: 'auto', labelKey: 'overlay.source.auto'),
     const OverlaySceneOption(id: 'room', labelKey: 'overlay.source.room'),
     const OverlaySceneOption(
@@ -16,11 +21,18 @@ OverlaySceneProjection projectOverlayScene(OverlaySceneState state) {
         labelKey: '',
         label: target.name,
       ),
-    if (state.mode == 'community' &&
-        !state.targets.any((x) => x.code == state.code))
+    if (state.preferredId == 'missing' ||
+        state.preferredId.startsWith('org:') &&
+            !state.targets.any((x) => state.preferredId == 'org:${x.code}'))
       OverlaySceneOption(
         id: state.preferredId,
         labelKey: 'overlay.source.missing',
+        enabled: false,
+      ),
+    if (state.actualId == 'local')
+      const OverlaySceneOption(
+        id: 'local',
+        labelKey: 'overlay.source.localName',
         enabled: false,
       ),
   ];
@@ -29,6 +41,11 @@ OverlaySceneProjection projectOverlayScene(OverlaySceneState state) {
     preferredSceneId: state.preferredId,
     actualSceneId: state.actualId,
     canChange: state.available && !state.busy,
+    selectionOrigin: state.temporarySourceId != null
+        ? 'temporary'
+        : state.presetBindingId != null
+        ? 'preset'
+        : 'account',
     fallbackReasonKey: state.busy
         ? 'overlay.source.saving'
         : state.status == 'ready'

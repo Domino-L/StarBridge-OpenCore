@@ -2,7 +2,7 @@ param(
     [string]$LegacyPath = "",
     [string]$OutputPath = "",
     [string]$ProvenancePath = "",
-    [string]$Revision = "2026-07-26.3"
+    [string]$Revision = "2026-09-30.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -206,6 +206,18 @@ foreach ($runtimeId in @($groups.Keys | Sort-Object)) {
     })
 }
 
+# Independently observed exact runtime ID supplied by the maintainer on
+# 2026-09-30. The approved display model/name predates this observation; no
+# runtime ID is derived from the display catalog or merged with the base Raven.
+if (@($entries | Where-Object { $_.runtimeId -eq "AEGS_Sabre_Raven_EX" }).Count -eq 0) {
+    $entries.Add([ordered]@{
+        runtimeId = "AEGS_Sabre_Raven_EX"
+        englishName = "Sabre Raven EX"
+        chineseName = [Text.RegularExpressions.Regex]::Unescape("\u6e21\u9e26EX")
+        aliases = @([Text.RegularExpressions.Regex]::Unescape("\u5723\u76fe \u6e21\u9e26EX"))
+    })
+}
+
 if ($entries.Count -lt 300) {
     throw "Generated ship-name pack is unexpectedly small: $($entries.Count) entries."
 }
@@ -229,6 +241,16 @@ $provenance = [ordered]@{
         }
     )
     entryOverrides = @(
+        [ordered]@{
+            runtimeId = "AEGS_Sabre_Raven_EX"
+            sourceType = "field-observation"
+            sourceName = "StarBridge maintainer field observation"
+            sourceReference = "Exact runtime identifier observed independently; approved display model Sabre Raven EX"
+            verifiedDate = "2026-09-30"
+            translator = "StarBridge maintainer approved display wording"
+            licenseOrPermission = "Exact runtime identifier independently observed; display name previously approved by the maintainer. No license claim is made for game identifiers or names."
+            maintainer = "StarBridge contributors"
+        }
         [ordered]@{
             runtimeId = "GLSN_Basher"
             sourceType = "field-observation"

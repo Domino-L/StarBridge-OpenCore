@@ -38,6 +38,54 @@ void main() {
     }
   });
   testWidgets(
+    'applied receipt does not imply unconfirmed organization sharing',
+    (tester) async {
+      final port = CurrentReceiptFixture();
+      final c = LocalPrivacyController(port);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('privacy-publication-status')))
+            .data,
+        '已按保存的范围共享，组织范围待确认',
+      );
+      // A local draft is not an applied grant. Only saving may change the receipt.
+      c.enableCommunityChoices();
+      await tester.pumpAndSettle();
+      expect(find.text('已按保存的范围共享，组织范围待确认'), findsOneWidget);
+      expect(port.writes, 0);
+      expect(port.applies, 0);
+    },
+  );
+
+  testWidgets('explicit no-sharing choices are confirmed, not pending', (
+    tester,
+  ) async {
+    final port = CurrentReceiptFixture()
+      ..settings = LocalPrivacySettings.editorDefaults.copyWith(
+        communities: [
+          for (final code in ['A', 'B'])
+            CommunitySharingScope(
+              code: code,
+              joinedAt: membershipTime,
+              fields: 0,
+              administratorsCanView: false,
+              allMembersCanView: false,
+              visibilityGroupIds: const [],
+            ),
+        ],
+      );
+    final c = LocalPrivacyController(port);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
+    await tester.pumpAndSettle();
+    expect(find.text('已按保存的范围共享，组织范围待确认'), findsNothing);
+    expect(find.text('共享已生效'), findsOneWidget);
+    expect(port.writes, 0);
+  });
+  testWidgets(
     'cards edit only their organization and preserve separate bits/groups',
     (tester) async {
       viewport(tester, const Size(1280, 900));
@@ -161,7 +209,7 @@ void main() {
       await tester.pump(const Duration(seconds: 16));
       await tester.pumpAndSettle();
       expect(c.communityTargetsFailure, CommunityTargetsFailure.none);
-      expect(find.text('共享已生效'), findsOneWidget);
+      expect(find.text('已按保存的范围共享，组织范围待确认'), findsOneWidget);
       expect(identical(c.draft, draft), true);
       expect(port.writes, 0);
       expect(tester.takeException(), isNull);

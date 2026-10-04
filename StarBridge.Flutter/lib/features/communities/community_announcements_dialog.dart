@@ -1,7 +1,9 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'community_announcement_details.dart';
+import 'community_announcement_card.dart';
 
 import 'dart:math';
 
@@ -364,70 +366,52 @@ class CommunityAnnouncementsDialogState
   }
 
   Widget _summary(CommunityAnnouncement item, {bool current = false}) =>
-      Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: context.tokens.surfaces.raised.fill,
-          border: Border.all(color: context.tokens.surfaces.panel.border),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      CommunityAnnouncementCard(
+        title: item.title,
+        content: item.content.isEmpty ? t('emptyBody') : item.content,
+        maxLines: current ? 4 : 2,
+        metadata: Wrap(
+          spacing: 12,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Wrap(
-              spacing: 12,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _state(item),
-                Text(
-                  communicationTime(
-                    current ? item.publishedAt : item.updatedAt,
-                    AppStrings.of(context).locale,
-                  ),
-                  style: TextStyle(color: context.tokens.colors.textSecondary),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(item.title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 6),
+            _state(item),
             Text(
-              item.content.isEmpty ? t('emptyBody') : item.content,
-              maxLines: current ? 4 : 2,
-              overflow: TextOverflow.ellipsis,
+              communicationTime(
+                current ? item.publishedAt : item.updatedAt,
+                AppStrings.of(context).locale,
+              ),
+              style: TextStyle(color: context.tokens.colors.textSecondary),
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton(
-                  onPressed: () => setState(() => selected = item),
-                  child: Text(t('details')),
+          ],
+        ),
+        actions: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton(
+              onPressed: () => setState(() => selected = item),
+              child: Text(t('details')),
+            ),
+            if (current && model.canManage && !model.editing) ...[
+              OutlinedButton(
+                onPressed: model.writable && !confirming
+                    ? () => _edit(false)
+                    : null,
+                child: Text(t('edit')),
+              ),
+              OutlinedButton(
+                style: semanticActionStyle(
+                  context,
+                  ActionTone.danger,
+                  emphasis: ActionEmphasis.outlined,
                 ),
-                if (current && model.canManage && !model.editing) ...[
-                  OutlinedButton(
-                    onPressed: model.writable && !confirming
-                        ? () => _edit(false)
-                        : null,
-                    child: Text(t('edit')),
-                  ),
-                  OutlinedButton(
-                    style: semanticActionStyle(
-                      context,
-                      ActionTone.danger,
-                      emphasis: ActionEmphasis.outlined,
-                    ),
-                    onPressed: model.writable && !confirming
-                        ? () => _withdraw(item)
-                        : null,
-                    child: Text(t('withdraw')),
-                  ),
-                ],
-              ],
-            ),
+                onPressed: model.writable && !confirming
+                    ? () => _withdraw(item)
+                    : null,
+                child: Text(t('withdraw')),
+              ),
+            ],
           ],
         ),
       );
@@ -538,7 +522,10 @@ class CommunityAnnouncementsDialogState
                     onPressed: model.loading || model.saving || confirming
                         ? null
                         : model.refresh,
-                    icon: const StandardIcon(StandardIconSemantic.refresh, size: 18),
+                    icon: const StandardIcon(
+                      StandardIconSemantic.refresh,
+                      size: 18,
+                    ),
                     label: Text(t('refresh')),
                   ),
                   if (model.canManage && !model.editing)
@@ -546,7 +533,10 @@ class CommunityAnnouncementsDialogState
                       onPressed: model.writable && !confirming
                           ? () => _edit(true)
                           : null,
-                      icon: const StandardIcon(StandardIconSemantic.add, size: 18),
+                      icon: const StandardIcon(
+                        StandardIconSemantic.add,
+                        size: 18,
+                      ),
                       label: Text(t('create')),
                     ),
                 ],
@@ -579,7 +569,10 @@ class CommunityAnnouncementsDialogState
                         alignment: Alignment.centerLeft,
                         child: TextButton.icon(
                           onPressed: () => setState(() => selected = null),
-                          icon: const StandardIcon(StandardIconSemantic.arrowBack, size: 18),
+                          icon: const StandardIcon(
+                            StandardIconSemantic.arrowBack,
+                            size: 18,
+                          ),
                           label: Text(t('back')),
                         ),
                       ),

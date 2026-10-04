@@ -1,18 +1,29 @@
 import 'community_workspace_controller.dart';
 import 'community_workspace_port.dart';
+import 'community_workspace_reads.dart';
+import 'community_chat_attention.dart';
 
 /// Recent account-scoped workspaces, independent of the lifetime of their pages.
 /// Not a permissions cache: commands still use the Host's current authorization.
 /// Least-recently-used eviction bounds retained lists and media across organizations.
 final class CommunityWorkspaceSession {
-  CommunityWorkspaceSession({DateTime Function()? now, this.capacity = 4})
-    : assert(capacity > 0),
-      _now = now ?? DateTime.now;
+  CommunityWorkspaceSession({
+    DateTime Function()? now,
+    this.capacity = 4,
+    this.attention,
+  }) : assert(capacity > 0),
+       _now = now ?? DateTime.now;
 
   final DateTime Function() _now;
+  late final reads = CommunityWorkspaceReads(_now);
   final int capacity;
+  final CommunityChatAttention? attention;
   // Dart maps preserve insertion order; successful obtain moves an entry last.
   final _recent = <String, CommunityWorkspaceController>{};
+  // LRU eviction must not discard a submitted message or its unknown outcome.
+  // These remain account-owned until revisited/settled or explicitly cleared by
+  // the account/membership boundary. No background resend or persistence.
+  final _deliveryOwners = <String, CommunityWorkspaceController>{};
   CommunityWorkspacePort? _port;
   CommunityWorkspaceController? _current;
   String? _organizationKey;
@@ -26,7 +37,8 @@ final class CommunityWorkspaceSession {
     // Speculation never replaces an active account or evicts a user's page.
     if (_port != null && !identical(_port, port)) return null;
     _port = port;
-    final existing = _recent[organizationKey];
+    final existing =
+        _recent[organizationKey] ?? _deliveryOwners[organizationKey];
     if (existing != null) {
       return existing.targetRef == targetRef ? existing : null;
     }
@@ -34,7 +46,10 @@ final class CommunityWorkspaceSession {
     return _recent[organizationKey] = CommunityWorkspaceController(
       port,
       targetRef,
+      attention: attention,
       now: _now,
+      readWorkspace: (target, query, offset, reuse) =>
+          reads.read(port, target, query, offset, reuseFresh: reuse),
     );
   }
 
@@ -95,15 +110,29 @@ final class CommunityWorkspaceSession {
     _organizationKey = organizationKey;
     final current = organizationKey == null
         ? null
-        : _recent.remove(organizationKey);
+        : (_recent.remove(organizationKey) ??
+              _deliveryOwners.remove(organizationKey));
     final result =
-        current ?? CommunityWorkspaceController(port, targetRef, now: _now);
+        current ??
+        CommunityWorkspaceController(
+          port,
+          targetRef,
+          attention: attention,
+          now: _now,
+          readWorkspace: (target, query, offset, reuse) =>
+              reads.read(port, target, query, offset, reuseFresh: reuse),
+        );
     _current = result;
     if (organizationKey != null) {
       _recent[organizationKey] = result;
       while (_recent.length > capacity) {
         final evicted = _recent.keys.first;
-        _recent.remove(evicted)!.dispose();
+        final old = _recent.remove(evicted)!;
+        if (old.hasLocalDelivery) {
+          _deliveryOwners[evicted] = old;
+        } else {
+          old.dispose();
+        }
         _attemptedRoots.removeWhere((entry) => entry.$1 == evicted);
       }
     }
@@ -111,10 +140,15 @@ final class CommunityWorkspaceSession {
   }
 
   void clear() {
+    reads.clear();
     if (_organizationKey == null) _current?.dispose();
     for (final controller in _recent.values) {
       controller.dispose();
     }
+    for (final controller in _deliveryOwners.values) {
+      controller.dispose();
+    }
+    _deliveryOwners.clear();
     _recent.clear();
     _attemptedRoots.clear();
     _port = null;

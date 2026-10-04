@@ -12,6 +12,10 @@ internal static class ShipIdentityCanonicalizer
             return "";
         }
 
+        // Ship channels use catalog/official names; seat events use runtime IDs.
+        // Resolve only exact, unambiguous aliases and retain variant/instance checks.
+        value = StarBridge.Core.Ships.ShipNameIndex.Bundled.Find(value)?.RuntimeId ?? value;
+
         var normalized = new string(value
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)

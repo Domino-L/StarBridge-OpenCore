@@ -267,7 +267,7 @@ void main() {
       expect(find.text('多米诺'), findsOneWidget);
       expect(find.text('亚洲 · 同服务器'), findsOneWidget);
       expect(find.text('克拉克'), findsOneWidget);
-      expect(find.text('尚未接入 StarBridge'), findsNWidgets(3));
+      expect(find.text('未关联星海舰桥'), findsNWidgets(3));
       expect(tester.takeException(), isNull);
     },
   );
@@ -383,7 +383,7 @@ void main() {
       find.byKey(const Key('official-fleet-profile-details-unavailable')),
       findsOneWidget,
     );
-    expect(find.text('详细舰队资料尚未接入'), findsOneWidget);
+    expect(find.text('详细舰队资料 · 即将推出'), findsOneWidget);
     expect(find.text('officialFleet:9'), findsNothing);
     expect(find.text('舰队资源版本'), findsNothing);
   });

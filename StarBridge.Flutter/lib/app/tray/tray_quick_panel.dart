@@ -16,7 +16,7 @@ import '../presence/manual_presence_widgets.dart';
 
 enum TrayRuntimeState { running, background, unavailable }
 
-enum TrayOverlayState { enabled, disabled, unavailable }
+enum TrayOverlayState { enabled, disabled, opening, unavailable }
 
 /// Host-projected facts only. No guessed identity, scene or version defaults.
 class TrayQuickPanelState {
@@ -204,6 +204,8 @@ class _TrayQuickPanelState extends State<TrayQuickPanel> {
                         button(
                           state.overlay == TrayOverlayState.enabled
                               ? 'disable'
+                              : state.overlay == TrayOverlayState.opening
+                              ? 'cancelOpening'
                               : 'enable',
                           StarBridgeIconSemantic.overlay,
                           state.overlay == TrayOverlayState.unavailable

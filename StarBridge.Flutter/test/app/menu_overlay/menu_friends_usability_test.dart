@@ -7,6 +7,7 @@ import 'package:starbridge_flutter/app/menu_overlay/menu_bridge_preview.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_bridge_style.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_friends_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_friends_view.dart';
+import 'package:starbridge_flutter/app/menu_overlay/menu_friend_details.dart';
 import 'package:starbridge_flutter/features/friends/friends_module.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
@@ -45,6 +46,57 @@ const roster = MenuFriendsView(
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets(
+    'game details share the presence line and wrap in narrow windows',
+    (tester) async {
+      for (final width in [500.0, 220.0]) {
+        await tester.pumpWidget(
+          app(
+            Center(
+              child: SizedBox(
+                width: width,
+                child: MenuFriendsPanel(
+                  onClose: () {},
+                  embedded: true,
+                  view: const MenuFriendsView(
+                    'ready',
+                    rows: [
+                      (
+                        name: 'Fixture',
+                        presence: 'inGame',
+                        key: 'game',
+                        avatar: null,
+                      ),
+                    ],
+                    details: {
+                      'game': MenuFriendDetails({
+                        'serverId': 'Server',
+                        'location': 'Place',
+                      }, {}),
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        if (width == 500) {
+          expect(
+            tester.getTopLeft(find.text('Server')).dy,
+            tester.getTopLeft(find.text('游戏中')).dy,
+          );
+          expect(
+            tester.getTopLeft(find.text('Server')).dx,
+            greaterThan(tester.getTopLeft(find.text('游戏中')).dx),
+          );
+        }
+        expect(find.text('Place'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   test(
     'menu presence reuses client status tokens rather than decorative cyan',
     () {
@@ -134,8 +186,12 @@ void main() {
         tester.getTopLeft(find.text('新朋友')).dy,
         lessThan(tester.getTopLeft(find.text('北辰')).dy),
       );
-      expect(find.text('状态未共享 · 1'), findsOneWidget);
-      expect(find.text('▾ 离线 · 1'), findsOneWidget);
+      expect(find.text('状态未共享 · 1'), findsNothing);
+      expect(find.text('离线'), findsNWidgets(2));
+      expect(roster.rows.last.presence, 'unknown');
+      expect(find.text('在线 · 3'), findsOneWidget);
+      expect(find.text('暂离'), findsOneWidget);
+      expect(find.text('▾ 离线 · 2'), findsOneWidget);
       await capture(tester, shot, 'menu-friends-wpf-structure');
       await tester.tap(find.byKey(const ValueKey('friend-inline-accept-f6')));
       expect(actions, [

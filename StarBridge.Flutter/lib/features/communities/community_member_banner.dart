@@ -15,6 +15,64 @@ const _memberColumns = [
 const _memberFlex = [28, 14, 14, 18, 16, 14];
 const _wideMemberWidth = 800.0;
 
+/// Shared member chrome for the client and presentation-only menu surface.
+class CommunityMemberCard extends StatelessWidget {
+  const CommunityMemberCard({super.key, required this.child, this.status});
+  final Widget child;
+  final Color? status;
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: context.tokens.surfaces.raised.fill,
+      border: Border.all(color: context.tokens.surfaces.panel.border),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Stack(
+      children: [
+        if (status != null)
+          PositionedDirectional(
+            start: 0,
+            top: 8,
+            bottom: 8,
+            width: 3,
+            child: ColoredBox(color: status!),
+          ),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Material(color: Colors.transparent, child: child),
+        ),
+      ],
+    ),
+  );
+}
+
+class CommunityRoleBadge extends StatelessWidget {
+  const CommunityRoleBadge({
+    super.key,
+    required this.label,
+    required this.color,
+  });
+  final String label;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: AlignmentDirectional.centerStart,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .08),
+        border: Border.all(color: color.withValues(alpha: .6)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
+      ),
+    ),
+  );
+}
+
 Widget _columns(List<Widget> cells, Widget? actions) => Row(
   children: [
     for (var i = 0; i < cells.length; i++)

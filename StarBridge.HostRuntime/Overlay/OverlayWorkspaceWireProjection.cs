@@ -149,7 +149,10 @@ internal static class OverlayWorkspaceWireProjection
             throw new OverlaySettingsException("overlay.workspace_invalid_value");
         }
 
-        var actual = value.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+        var actual = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in value.EnumerateObject())
+            if (!actual.Add(property.Name))
+                throw new OverlaySettingsException("overlay.workspace_invalid_value");
         if (!actual.SetEquals(expected))
         {
             throw new OverlaySettingsException("overlay.workspace_invalid_value");

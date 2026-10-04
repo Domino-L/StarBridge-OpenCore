@@ -45,21 +45,31 @@ Map<String, Object?> history() => {
 };
 
 void main() {
+  test('directory keeps callsign and game ID separate for presentation', () {
+    final row = parseConversations(directory()).single;
+    expect(row.name, '呼号');
+    expect(row.gameId, 'Example');
+  });
   test(
     'receipt is capability gated, scoped and acknowledgement validated',
     () async {
       for (final fault in [null, 'target', 'cursor']) {
         final h = Harness(receiptCapability: true, receiptFault: fault);
         addTearDown(h.close);
+        var wakes = 0;
+        final wakeSubscription = h.adapter.changes.listen((_) => wakes++);
+        addTearDown(wakeSubscription.cancel);
         if (fault == null) {
           final receipt = await h.adapter.markRead(reference, 1);
           expect(receipt.through, 1);
           expect(receipt.unread, 0);
+          expect(wakes, 1);
         } else {
           await expectLater(
             h.adapter.markRead(reference, 1),
             throwsA(isA<DirectReadFailure>()),
           );
+          expect(wakes, 0);
         }
         final write = h.requests.singleWhere(
           (r) => r.name == 'directMessages.markRead',
@@ -131,7 +141,7 @@ void main() {
   test('directory and history only send scoped read requests, never receipt or send', () async {
     final h = Harness();
     addTearDown(h.close);
-    expect((await h.adapter.directory()).single.name, '呼号 (Example)');
+    expect((await h.adapter.directory()).single.name, '呼号');
     final page = await h.adapter.history(reference, before: 2);
     expect(page.messages.single.attachment, 'overlay_preset');
     final requests = h.requests

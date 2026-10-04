@@ -50,6 +50,8 @@ void main() {
       messages.directories.single.complete([]);
       messages.histories.single.reply.complete(dm.page('private-chat'));
       await tester.pump();
+      messages.directories.last.complete([]);
+      await tester.pump();
       expect(messages.histories.single.ref, 'private-chat');
       expect(messages.sends, 0);
       source.show(false);
@@ -123,6 +125,8 @@ void main() {
       expect(port.receipts, 1);
       session.act('read', token);
       expect(port.receipts, 1);
+      port.directories.last.complete([]);
+      await tester.pump();
       session.show(false);
       session.act('read', token);
       expect(port.receipts, 1);

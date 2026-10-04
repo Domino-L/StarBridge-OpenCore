@@ -37,7 +37,7 @@ internal sealed partial class PartyRoomReader
     }
 
     // Fixed same-origin GETs only. Tokens and upstream bodies stay inside Host.
-    private async Task<JsonDocument> ReadRoomJsonAsync(string bearer, string path, CancellationToken token)
+    private async Task<JsonDocument> ReadRoomJsonAsync(string bearer, string path, CancellationToken token, bool transientOverlayRead = false)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_endpoint, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
@@ -45,11 +45,13 @@ internal sealed partial class PartyRoomReader
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw new AccountBridgeHostException("party_rooms.identity_unavailable");
             if (response.StatusCode == HttpStatusCode.Forbidden) throw new AccountBridgeHostException("party_rooms.forbidden");
-            if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("party_rooms.command_unavailable");
+            if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException(
+                transientOverlayRead && ((int)response.StatusCode >= 500 || response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests)
+                    ? "party_rooms.read_unavailable" : "party_rooms.command_unavailable", transientOverlayRead);
             return await ReadBoundedRoomJsonAsync(response, token);
         }
         catch (Exception error) when (error is HttpRequestException or IOException or OperationCanceledException)
-        { throw new AccountBridgeHostException("party_rooms.command_unavailable"); }
+        { throw new AccountBridgeHostException(transientOverlayRead ? "party_rooms.read_unavailable" : "party_rooms.command_unavailable", transientOverlayRead); }
     }
 
     private static async Task<JsonDocument> ReadBoundedRoomJsonAsync(HttpResponseMessage response, CancellationToken token)
@@ -95,7 +97,16 @@ internal sealed partial class PartyRoomReader
             var list = friends.RootElement.GetProperty("friends");
             if (list.GetArrayLength() > 2000) throw Invalid();
             var rawRoom = rawDirectory.RootElement.GetProperty("rooms").EnumerateArray().Single(item => Text(item, "roomId") == roomId);
-            var memberIds = rawRoom.GetProperty("members").EnumerateArray().Select(item => Text(item, "accountId", true)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Joined-room responses intentionally redact accountId. The scoped
+            // publicProfileId is available only to a room member and is never
+            // forwarded to Flutter with the invite target list.
+            var memberIds = rawRoom.GetProperty("members").EnumerateArray()
+                .Select(item => item.TryGetProperty("publicProfileId", out var publicId) &&
+                    publicId.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(publicId.GetString())
+                    ? publicId.GetString()!
+                    : Text(item, "accountId"))
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var activeIds = directory.SentInvitations.Select(item => item.InvitationId).ToHashSet(StringComparer.Ordinal);
             var invitedIds = rawDirectory.RootElement.TryGetProperty("sentInvitations", out var sentInvitations)
                 ? sentInvitations.EnumerateArray().Where(item => activeIds.Contains(Text(item, "invitationId", true)))

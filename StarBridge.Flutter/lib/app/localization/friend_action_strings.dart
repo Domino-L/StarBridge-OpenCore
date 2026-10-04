@@ -1,5 +1,5 @@
 const friendActionsZhCn = <String, String>{
-  'friends.manageHint': '查看好友、处理申请或搜索用户；私信将在后续开放。',
+  'friends.manageHint': '查看好友状态、处理申请，或选择好友发送消息。',
   'friends.exampleActions': '示例场景：操作仅改变本页示例，不影响真实好友。',
   'friends.action.send': '添加好友',
   'friends.action.accept': '接受',
@@ -29,7 +29,7 @@ const friendActionsZhCn = <String, String>{
   'friends.busy': '另一项好友操作仍在处理中，请稍后刷新。',
 };
 const friendActionsZhTw = <String, String>{
-  'friends.manageHint': '查看好友、處理申請或搜尋使用者；私訊將於後續開放。',
+  'friends.manageHint': '查看好友狀態、處理申請，或選擇好友傳送訊息。',
   'friends.exampleActions': '範例場景：操作僅改變本頁範例，不影響真實好友。',
   'friends.action.send': '新增好友',
   'friends.action.accept': '接受',
@@ -59,7 +59,7 @@ const friendActionsZhTw = <String, String>{
   'friends.busy': '另一項好友操作仍在處理中，請稍後重新整理。',
 };
 const friendActionsEn = <String, String>{
-  'friends.manageHint': 'View friends, manage requests or search for people. Messaging is coming later.',
+  'friends.manageHint': 'View friend status, manage requests, or choose a friend to message.',
   'friends.exampleActions':
       'Example mode: actions change this preview only, never real friendships.',
   'friends.action.send': 'Add friend',

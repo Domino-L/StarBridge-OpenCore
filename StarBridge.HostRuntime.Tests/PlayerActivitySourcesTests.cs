@@ -16,6 +16,16 @@ internal static class PlayerActivitySourcesTests
         Check(PlayerActivitySources.Friends(unknownFriend).Members.Length == 0, "unknown friendship never grants event eligibility");
         foreach (var text in new[] { "", "paused", "hidden", "future-value" })
             Check(PlayerActivitySources.Presence(text) == "unknown", "unknown is not offline");
+        object SharedUser(string? presence) => new {
+            accountId = "friend", callsign = "Friend", gameId = "", relationshipState = "friend",
+            presence = "Offline", lastUpdated = default(DateTimeOffset), shared = new { presence }
+        };
+        var redacted = PlayerActivitySources.Friends(FriendsReader.Parse(FriendsReaderTests.Directory(SharedUser(null)), observePresence: true));
+        Check(redacted.Members.Single().Presence == "unknown" && !redacted.Members.Single().AllowsPresenceEvents,
+            "redacted configured presence must not manufacture an offline event");
+        var withdrawn = PlayerActivitySources.Friends(FriendsReader.Parse(FriendsReaderTests.Directory(SharedUser("Offline")), observePresence: true));
+        Check(withdrawn.Members.Single().Presence == "offline" && withdrawn.Members.Single().AllowsPresenceEvents,
+            "explicit authorized offline after invisible withdrawal is observed");
         var fleets = new[] { E(new { members = new[] {
             new { accountId = "one", callsign = "Same", gameName = "" },
             new { accountId = "two", callsign = "Same", gameName = "" },

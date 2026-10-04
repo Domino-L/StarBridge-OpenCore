@@ -150,7 +150,7 @@ void main() {
     expect(message.hitTestable(), findsOneWidget);
     expect(
       tester.getTopLeft(message).dx,
-      greaterThan(tester.getTopRight(find.text('示例好友 (Example)')).dx),
+      greaterThan(tester.getTopRight(find.text('示例好友  @Example')).dx),
     );
     final unread = find.descendant(
       of: message,
@@ -187,7 +187,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DirectMessagesPage), findsOneWidget);
     expect(find.byType(ChatMessageBubble), findsWidgets);
-    expect(find.text('这是会话历史示例 60'), findsOneWidget);
+    expect(find.descendant(of: find.byType(ChatMessageBubble),
+      matching: find.text('这是会话历史示例 60')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

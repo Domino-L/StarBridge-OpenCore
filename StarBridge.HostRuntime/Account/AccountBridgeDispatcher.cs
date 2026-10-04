@@ -23,6 +23,8 @@ internal sealed class AccountBridgeDispatcher : IDisposable
     private long _eventSequence;
     private int _activeDispatches;
     private bool _disposed;
+    private readonly object _activityGate = new();
+    private readonly Dictionary<string, (string Id, long Generation, CancellationTokenSource Source)> _activityCancellations = new();
 
     internal AccountBridgeDispatcher(
         IAccountBridgeHost host, IReadOnlyCollection<string>? enabledRequests = null)
@@ -67,6 +69,9 @@ internal sealed class AccountBridgeDispatcher : IDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Name == "bridge.cancel") return CancelActivityWait(request);
+        if (request.Name is AccountBridgeRequestNames.WaitSocialActivity or AccountBridgeRequestNames.WaitCommunityActivity)
+            return await DispatchActivityWaitAsync(request, cancellationToken);
         if (request.Name == AccountBridgeRequestNames.CancelLogin)
         {
             return await DispatchLoginCancellationAsync(request);
@@ -121,6 +126,51 @@ internal sealed class AccountBridgeDispatcher : IDisposable
                 BridgeEnvelope.ErrorResponse(
                     request,
                     new BridgeError(BridgeErrorCodes.Disconnected, "Account host is unavailable.", true)));
+        }
+    }
+
+    // This one bounded, non-mutating wait must never hold up account writes.
+    private async Task<AccountBridgeDispatchResult> DispatchActivityWaitAsync(BridgeEnvelope request, CancellationToken token)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
+        lock (_activityGate)
+        {
+            if (_activityCancellations.ContainsKey(request.Name))
+                return new(BridgeEnvelope.ErrorResponse(request, new("bridge.backpressure", "Activity wait already pending.", true)), []);
+            _activityCancellations.Add(request.Name, (request.CorrelationId!, request.SessionGeneration, lifetime));
+        }
+        try {
+            var response = await DispatchCoreAsync(request, lifetime.Token);
+            if (request.SessionGeneration != _host.Generation)
+                throw new BridgeStaleGenerationException(request.SessionGeneration, _host.Generation);
+            return new(response, []);
+        } catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
+        catch (AccountBridgeHostException e) { return new(BridgeEnvelope.ErrorResponse(request, new(e.Code, "Activity unavailable.", e.Retryable)), []); }
+        catch (BridgeProtocolException e) { return new(BridgeEnvelope.ErrorResponse(request, new(e.Code, "Activity rejected.")), []); }
+        catch (Exception) { return new(BridgeEnvelope.ErrorResponse(request, new("friends.read_unavailable", "Activity unavailable.", true)), []); }
+        finally {
+            lock (_activityGate) _activityCancellations.Remove(request.Name);
+        }
+    }
+
+    private AccountBridgeDispatchResult CancelActivityWait(BridgeEnvelope request)
+    {
+        try {
+            BridgeEnvelopeValidator.ValidateWireShape(request);
+            BridgeEnvelopeValidator.RequireCurrentVersion(request);
+            if (request.MessageType != BridgeMessageTypes.Request || request.AccountContext != null ||
+                request.Payload.EnumerateObject().Count() != 1) throw new ArgumentException();
+            var id = request.Payload.GetProperty("targetCorrelationId").GetString();
+            var cancelled = false;
+            lock (_activityGate) {
+                foreach (var active in _activityCancellations.Values.Where(active => active.Id == id && active.Generation == request.SessionGeneration)) {
+                    active.Source.Cancel();
+                    cancelled = true;
+                }
+            }
+            return new(BridgeEnvelope.Response(request, new { cancelled }), []);
+        } catch (Exception e) when (e is BridgeProtocolException or InvalidOperationException or ArgumentException or KeyNotFoundException) {
+            return new(BridgeEnvelope.ErrorResponse(request, new("bridge.invalid_request", "Invalid cancellation.")), []);
         }
     }
 
@@ -234,6 +284,10 @@ internal sealed class AccountBridgeDispatcher : IDisposable
                 BridgeEnvelope.Response(request, await _host.ProfileVisibilityAsync(
                     RequireCurrentContext(request), request.Payload,
                     request.Name == "personalProfile.saveVisibility", cancellationToken)),
+            "personalProfile.readBackground" or "personalProfile.saveBackground" =>
+                BridgeEnvelope.Response(request, await _host.ProfileBackgroundAsync(
+                    RequireCurrentContext(request), request.Payload,
+                    request.Name == "personalProfile.saveBackground", cancellationToken)),
             "communities.memberPersonalProfile" =>
                 ToPersonalProfileResponse(request, await _host.ReadMemberPersonalProfileAsync(
                     RequireCurrentContext(request), request.Payload, cancellationToken), editable: false),
@@ -264,6 +318,12 @@ internal sealed class AccountBridgeDispatcher : IDisposable
                     RequireCurrentContext(request), request.Payload, cancellationToken)),
             AccountBridgeRequestNames.ReadDirectMessages =>
                 BridgeEnvelope.Response(request, await _host.ReadDirectMessagesAsync(
+                    RequireCurrentContext(request), request.Payload, cancellationToken)),
+            AccountBridgeRequestNames.WaitSocialActivity =>
+                BridgeEnvelope.Response(request, await _host.WaitSocialActivityAsync(
+                    RequireCurrentContext(request), request.Payload, cancellationToken)),
+            AccountBridgeRequestNames.WaitCommunityActivity =>
+                BridgeEnvelope.Response(request, await _host.WaitCommunityActivityAsync(
                     RequireCurrentContext(request), request.Payload, cancellationToken)),
             AccountBridgeRequestNames.ReadDirectMessagePrivacy =>
                 BridgeEnvelope.Response(request, await _host.ReadDirectMessagePrivacyAsync(
@@ -468,10 +528,25 @@ internal sealed class AccountBridgeDispatcher : IDisposable
                     await _host.GetGameIdentityPolicyAsync(
                         RequireCurrentContext(request),
                         cancellationToken)),
+            AccountBridgeRequestNames.PrepareHandleChange =>
+                await PrepareHandleChangeAsync(request, cancellationToken),
+            AccountBridgeRequestNames.ConfirmHandleChange => BridgeEnvelope.Response(request,
+                await _host.ConfirmHandleChangeAsync(RequireCurrentContext(request), request.Payload, cancellationToken)),
+            AccountBridgeRequestNames.CancelHandleChange => BridgeEnvelope.Response(request,
+                await _host.CancelHandleChangeAsync(RequireCurrentContext(request), request.Payload, cancellationToken)),
             _ => throw new BridgeProtocolException(
                 BridgeErrorCodes.InvalidEnvelope,
                 "Unsupported account request.")
         };
+    }
+
+    private async Task<BridgeEnvelope> PrepareHandleChangeAsync(BridgeEnvelope request, CancellationToken token)
+    {
+        if (request.Payload.EnumerateObject().Count() != 1 ||
+            request.Payload.EnumerateObject().Single().Name != "schemaVersion")
+            throw new BridgeProtocolException(BridgeErrorCodes.InvalidEnvelope, "Unsupported identity handling fields.");
+        return BridgeEnvelope.Response(request,
+            await _host.PrepareHandleChangeAsync(RequireCurrentContext(request), token));
     }
 
     private async Task<BridgeEnvelope> CancelLoginAsync(BridgeEnvelope request)
@@ -655,7 +730,9 @@ internal sealed class AccountBridgeDispatcher : IDisposable
                 schemaVersion = AccountBridgeSchema.Version,
                 state = projection.State,
                 authoritativeHandle = projection.AuthoritativeHandle,
-                sensitiveWritesAllowed = projection.SensitiveWritesAllowed
+                sensitiveWritesAllowed = projection.SensitiveWritesAllowed,
+                detectedHandle = projection.DetectedHandle,
+                scmBindingState = projection.ScmBindingState
             });
 
     private static BridgeEnvelope ToCompatibilityResponse(
@@ -944,6 +1021,9 @@ internal sealed class AccountBridgeDispatcher : IDisposable
 
     private void OnAccountChanged(long generation)
     {
+        lock (_activityGate)
+            foreach (var active in _activityCancellations.Values)
+                if (active.Generation != generation) active.Source.Cancel();
         BridgeEnvelope envelope;
         Action<BridgeEnvelope>? publish = null;
         lock (_eventGate)
@@ -996,6 +1076,8 @@ internal sealed class AccountBridgeDispatcher : IDisposable
         }
 
         _disposed = true;
+        lock (_activityGate)
+            foreach (var active in _activityCancellations.Values) active.Source.Cancel();
         _host.AccountChanged -= OnAccountChanged;
         _dispatchGate.Dispose();
     }

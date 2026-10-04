@@ -1,4 +1,5 @@
 using System.Text.Json;
+using StarBridge.Core.Overlay;
 
 namespace StarBridge.Core.Chat;
 
@@ -56,7 +57,7 @@ public static class ChatAttachmentPolicy
             case ChatAttachmentKinds.OverlayPreset:
             {
                 var package = value.OverlayPresetPackage?.Trim() ?? "";
-                if (!IsValidOverlayPresetPackage(package))
+                if (!TryNormalizeOverlayPresetPackage(package, out package))
                 {
                     error = "浮层预设内容无效或超过大小限制。";
                     return false;
@@ -127,8 +128,9 @@ public static class ChatAttachmentPolicy
         _ => $"[消息卡片] {attachment.Title}"
     };
 
-    private static bool IsValidOverlayPresetPackage(string package)
+    private static bool TryNormalizeOverlayPresetPackage(string package, out string normalized)
     {
+        normalized = package;
         if (package.Length is < 16 or > MaximumPresetPackageLength)
         {
             return false;
@@ -138,13 +140,32 @@ public static class ChatAttachmentPolicy
         {
             using var document = JsonDocument.Parse(package);
             var root = document.RootElement;
-            return root.ValueKind == JsonValueKind.Object &&
-                   TryGetProperty(root, "version", out var version) && version.TryGetInt32(out var versionValue) && versionValue == 1 &&
+            var valid = root.ValueKind == JsonValueKind.Object &&
+                   TryGetProperty(root, "version", out var version) && version.TryGetInt32(out var versionValue) && versionValue is 1 or 2 &&
                    TryGetProperty(root, "name", out var name) && !string.IsNullOrWhiteSpace(name.GetString()) &&
                    TryGetProperty(root, "settings", out var settings) && !string.IsNullOrWhiteSpace(settings.GetString()) &&
                    TryGetProperty(root, "layout", out var layout) && !string.IsNullOrWhiteSpace(layout.GetString());
+            if (!valid) return false;
+            TryGetProperty(root, "version", out var versionNode);
+            if (versionNode.GetInt32() == 1) return true;
+            var fields = root.EnumerateObject().Select(p => p.Name.ToLowerInvariant()).ToArray();
+            if (fields.Length != 6 || !fields.ToHashSet().SetEquals(
+                ["version", "name", "settings", "layout", "sources", "removedorganizationbindings"])) return false;
+            if (!TryGetProperty(root, "sources", out var sources) ||
+                !TryGetProperty(root, "removedOrganizationBindings", out var removed) ||
+                removed.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+            var transfer = OverlayPresetSourcesCodec.ForTransfer(OverlayPresetSourcesCodec.Parse(sources.GetRawText()));
+            TryGetProperty(root, "name", out var nameNode);
+            TryGetProperty(root, "settings", out var settingsNode);
+            TryGetProperty(root, "layout", out var layoutNode);
+            normalized = JsonSerializer.Serialize(new {
+                Version = 2, Name = nameNode.GetString(), Settings = settingsNode.GetString(), Layout = layoutNode.GetString(),
+                Sources = JsonSerializer.Deserialize<JsonElement>(OverlayPresetSourcesCodec.Serialize(transfer.Sources)),
+                RemovedOrganizationBindings = removed.GetBoolean() || transfer.RemovedOrganizationBindings
+            });
+            return normalized.Length <= MaximumPresetPackageLength;
         }
-        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException or ArgumentException)
         {
             return false;
         }

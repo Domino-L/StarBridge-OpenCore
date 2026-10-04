@@ -7,8 +7,90 @@ using StarBridge.NativeBridge;
 
 internal static class PartyRoomReaderTests
 {
+    // Synthetic wire contract, not an account probe or a production create.
+    internal static async Task PublicTwoMemberCreateReadback()
+    {
+        var now = DateTimeOffset.Parse("2026-09-26T12:00:00Z");
+        var gameplay = new[] { "support_cargo_escort", "pve_ship_combat_mission" };
+        var context = new[] { "pace_casual", "experience_beginner_friendly", "experience_teaching" };
+        var snapshot = new StarBridge.Core.PartyRooms.PartyRoomSnapshot(
+            "synthetic-room", "synthetic-code", "synthetic-owner", "Contract room", "",
+            gameplay, context, 2, true, "everyone", "direct", false, "recommended", "zh",
+            null, now.AddHours(6),
+            [new("synthetic-owner", "Test pilot", "Test_Pilot", null, true, "", "", "", "", now)],
+            now, now, 3) { ViewerIsHost = true };
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        byte[] Directory(bool owner) => JsonSerializer.SerializeToUtf8Bytes(
+            new StarBridge.Core.PartyRooms.PartyRoomDirectoryResponse(
+                [snapshot with { ViewerIsHost = owner, Members = snapshot.Members.Select(member => member with {
+                    AccountId = "", PublicProfileId = owner ? member.AccountId : null
+                }).ToArray() }], owner ? snapshot.RoomId : null, now), options);
+        var methods = new List<string>();
+        var pendingWire = System.Text.Json.Nodes.JsonNode.Parse(Directory(false))!;
+        Check(PartyRoomReader.Parse(Directory(false)).ViewerPendingRoomIds is null,
+            "Old service does not falsely claim an empty application list.");
+        pendingWire["viewerPendingRoomIds"] = new System.Text.Json.Nodes.JsonArray("synthetic-room");
+        Check(PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(pendingWire))
+            .ViewerPendingRoomIds!.SequenceEqual(new[] { "synthetic-room" }),
+            "The applicant's scoped pending room IDs survive the Host bridge.");
+        pendingWire["viewerPendingRoomIds"] = new System.Text.Json.Nodes.JsonArray();
+        Check(PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(pendingWire))
+            .ViewerPendingRoomIds!.Length == 0, "Confirmed no pending applications differs from unknown.");
+        pendingWire["viewerPendingRoomIds"] = new System.Text.Json.Nodes.JsonArray("same", "same");
+        try { PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(pendingWire)); throw new Exception("Duplicate pending room IDs accepted."); }
+        catch (AccountBridgeHostException error) when (error.Code == "party_rooms.data_invalid") { }
+        using var reader = new PartyRoomReader(new Uri("https://relay.example.test/"), new Handler(request => {
+            methods.Add(request.Method.Method);
+            return new(HttpStatusCode.OK) { Content = new ByteArrayContent(request.Method == HttpMethod.Post
+                ? JsonSerializer.SerializeToUtf8Bytes(new StarBridge.Core.PartyRooms.PartyRoomMutationResponse(snapshot, Status: "joined"), options)
+                : Directory(true)) };
+        }));
+        var result = await reader.ExecuteAsync("synthetic-token", JsonSerializer.SerializeToElement(new {
+            schemaVersion = 1, operation = "create", data = new {
+                title = "Contract room", goal = "", capacity = 2, isPublic = true, eligibility = "everyone",
+                admissionMode = "direct", passwordEnabled = false, password = "", voiceRequirement = "recommended",
+                language = "zh", recruitmentDurationMinutes = (int?)null, autoDisbandHours = 6,
+                gameplayTagNodeIds = gameplay, contextTagIds = context
+            }
+        }), default);
+        Check(result.Error is null && result.Directory?.CurrentRoomId == snapshot.RoomId,
+            "Public two-member create must retain authoritative membership after readback.");
+        Check(methods.SequenceEqual(new[] { "POST", "GET" }), "Create is submitted once, not retried.");
+        foreach (var owner in new[] { true, false })
+        {
+            var projected = PartyRoomReader.Parse(Directory(owner));
+            Check(projected.Rooms.Single().Tags.Length == 5, "Both clients can read two gameplay and three context tags.");
+            Check(projected.Rooms.Single().RoomCode == (owner ? snapshot.RoomCode : null), "Discovery does not expose the room code.");
+            Check(BridgePayload.From(projected).GetProperty("rooms").GetArrayLength() == 1,
+                "Actual Relay DTO survives Host bridge serialization.");
+        }
+        // The actual response privacy projection clears accountId for EVERY
+        // viewer, including the owner; only room members get publicProfileId.
+        foreach (var owner in new[] { true, false })
+        {
+            var wire = System.Text.Json.Nodes.JsonNode.Parse(Directory(owner))!;
+            var member = wire["rooms"]![0]!["members"]![0]!;
+            member["accountId"] = "";
+            member["publicProfileId"] = owner ? "synthetic-owner" : null;
+            var projected = PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(wire));
+            Check(projected.Rooms.Single().Members.Single().AccountId == (owner ? "synthetic-owner" : ""),
+                "Redacted discovery stays readable; authorized room identity uses publicProfileId.");
+            var bridge = BridgePayload.From(projected).GetProperty("rooms")[0].GetProperty("members")[0];
+            Check(!bridge.TryGetProperty("accountId", out _) && !bridge.TryGetProperty("publicProfileId", out _),
+                "Stable identities stay inside Host and never leak through the directory bridge.");
+        }
+        foreach (var invalidId in new[] { "short", "private@example.invalid", new string('a', 129), "invalid\nidentity" })
+        {
+            var wire = System.Text.Json.Nodes.JsonNode.Parse(Directory(true))!;
+            wire["rooms"]![0]!["members"]![0]!["publicProfileId"] = invalidId;
+            try { PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(wire)); throw new Exception("Invalid public identity accepted."); }
+            catch (AccountBridgeHostException error) when (error.Code == "party_rooms.data_invalid") { }
+        }
+    }
+
     internal static async Task Commands()
     {
+        await MemberRemoval();
         var methods = new List<string>();
         using var reader = new PartyRoomReader(new Uri("https://relay.example.test/"), new Handler(request => {
             methods.Add(request.Method.Method);
@@ -37,6 +119,98 @@ internal static class PartyRoomReaderTests
             : new(HttpStatusCode.ServiceUnavailable)));
         var accepted = await refreshFailed.ExecuteAsync("test-bearer", payload, default);
         Check(accepted.Status == "joined" && accepted.Error == "refreshRequired" && accepted.Directory is null, "Accepted write and failed read are distinct.");
+        foreach (var transportFailure in new[] { false, true })
+        {
+            var writes = 0;
+            var reads = 0;
+            using var recovering = new PartyRoomReader(new Uri("https://relay.example.test/"), new Handler(request => {
+                if (request.Method == HttpMethod.Post)
+                {
+                    writes++;
+                    return new(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"joined\"}") };
+                }
+                if (++reads == 1)
+                {
+                    if (transportFailure) throw new IOException("Synthetic broken read stream");
+                    return new(HttpStatusCode.ServiceUnavailable);
+                }
+                return new(HttpStatusCode.OK) { Content = new ByteArrayContent(Wire("one", Room("one"))) };
+            }));
+            var recovered = await recovering.ExecuteAsync("test-bearer", payload, default);
+            Check(recovered.Error is null && recovered.Directory?.CurrentRoomId == "one",
+                "An accepted room operation must recover a single transient read failure without requiring manual refresh.");
+            Check(writes == 1 && reads == 2, "Recovery retries only the authoritative read, never the write.");
+        }
+        foreach (var failure in new[] { HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.OK })
+        {
+            var reads = 0;
+            using var guarded = new PartyRoomReader(new Uri("https://relay.example.test/"), new Handler(request => {
+                if (request.Method == HttpMethod.Post)
+                    return new(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"joined\"}") };
+                reads++;
+                return new(failure) { Content = new StringContent("{}") };
+            }));
+            var unresolved = await guarded.ExecuteAsync("test-bearer", payload, default);
+            Check(unresolved.Error == "refreshRequired" && unresolved.Directory is null && reads == 1,
+                "Authority rejection and malformed readback must not be retried or treated as membership.");
+        }
+    }
+
+    internal static async Task MemberRemoval()
+    {
+        const string membershipToken = "0123456789abcdef0123456789abcdef";
+        byte[] Directory(bool host, bool peer, bool joined = true)
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(Wire(joined ? "one" : null, Room("one")))!;
+            var room = node["rooms"]![0]!;
+            room["viewerIsHost"] = host;
+            if (peer)
+            {
+                var member = room["members"]![0]!.DeepClone();
+                member["isHost"] = false;
+                member["accountId"] = "synthetic-peer";
+                member["removalToken"] = membershipToken;
+                room["members"]!.AsArray().Add(member);
+            }
+            return JsonSerializer.SerializeToUtf8Bytes(node);
+        }
+        foreach (var host in new[] { false, true })
+        foreach (var joined in new[] { false, true })
+            Check(PartyRoomReader.Parse(Directory(host, true, joined)).Rooms[0].Members[1].RemovalToken ==
+                (host && joined ? membershipToken : null), "Only the current host receives removal capability.");
+        var payload = JsonSerializer.SerializeToElement(new { schemaVersion = 1, operation = "remove",
+            data = new { roomId = "one", removalToken = membershipToken } });
+        foreach (var scenario in new[] { "success", "notHost", "gone", "uncertain", "readback" })
+        {
+            var reads = 0;
+            var posts = 0;
+            using var reader = new PartyRoomReader(new Uri("https://relay.example.test/"), new Handler(request => {
+                if (request.Method == HttpMethod.Get)
+                {
+                    reads++;
+                    if (scenario == "readback" && reads == 2) return new(HttpStatusCode.ServiceUnavailable);
+                    return new(HttpStatusCode.OK) { Content = new ByteArrayContent(Directory(scenario != "notHost", scenario != "gone" && posts == 0)) };
+                }
+                posts++;
+                Check(request.RequestUri!.AbsolutePath == "/api/party-rooms/members/remove", "Removal endpoint is fixed.");
+                var text = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                Check(text.Contains(membershipToken) && !text.Contains("accountId") && !text.Contains("gameId"), "Removal does not expose a private identity.");
+                if (scenario == "uncertain") throw new HttpRequestException("Synthetic lost reply");
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"removed\"}") };
+            }));
+            try
+            {
+                var result = await reader.ExecuteAsync("synthetic-bearer", payload, default);
+                if (scenario is "notHost" or "gone")
+                    Check(result.Error == (scenario == "notHost" ? "notHost" : "memberGone") && posts == 0, "Stale authority or member never dispatches.");
+                else
+                    Check(result.Status == "removed" && result.Error is null && result.Directory!.Rooms[0].Members.Length == 1 && posts == 1,
+                        "Removal needs authoritative readback and exactly one write.");
+                Check(scenario != "uncertain", "Uncertain removal must not claim success.");
+            }
+            catch (AccountBridgeHostException error) when (scenario == "uncertain")
+            { Check(error.Code == "party_rooms.outcome_unknown" && posts == 1, "Unknown write outcome is not retried."); }
+        }
     }
 
     internal static async Task CommandValidation()
@@ -96,18 +270,54 @@ internal static class PartyRoomReaderTests
 
     internal static Task Projection()
     {
+        var shipWire = System.Text.Json.Nodes.JsonNode.Parse(Wire("one", Room("one")))!;
+        shipWire["rooms"]![0]!["members"]![0]!["shipText"] = "ANVL_Lightning_F8C";
+        var shipProjection = BridgePayload.From(PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(shipWire)))
+            .GetProperty("rooms")[0].GetProperty("members")[0];
+        Check(shipProjection.TryGetProperty("shipLabels", out var shipLabels) && shipLabels.ValueKind == JsonValueKind.Object &&
+            shipLabels.GetProperty("zhHans").GetString() == StarBridge.HostRuntime.Presence.GameShipNames.Find("ANVL_Lightning_F8C")!.ChineseName,
+            "Real room bridge supplies shared-catalog ship labels, not only a raw runtime ID.");
+        var hiddenWire = System.Text.Json.Nodes.JsonNode.Parse(Wire("one", Room("one")))!;
+        var hiddenMember = hiddenWire["rooms"]![0]!["members"]![0]!;
+        hiddenMember["locationText"] = "Unknown";
+        hiddenMember["locationHiddenReason"] = "lowConfidence";
+        var hidden = PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(hiddenWire)).Rooms.Single().Members.Single();
+        Check(hidden.LocationHiddenReason == "lowConfidence" && hidden.LocationLabels is null,
+            "Receiver reason survives the joined-room bridge without becoming a place name.");
+        hiddenWire["currentRoomId"] = null;
+        Check(PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(hiddenWire)).Rooms.Single().Members.Single().LocationHiddenReason is null,
+            "Discovery never reveals a member's hidden-location reason.");
+        const string currentAvatar = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/QccAAAAASUVORK5CYII=";
+        using var namesStream = new MemoryStream(Encoding.UTF8.GetBytes("""
+            {"schemaVersion":1,"entries":[{"canonicalCode":"LOC_NewBabbage","nameEn":"New Babbage","nameZh":"新巴贝奇"}]}
+            """));
+        var names = StarBridge.HostRuntime.Presence.GameLogLocationNameIndex.Load(namesStream);
+        Check(RoomLocationLabels.From("New Babbage", names) is { En: "New Babbage", ZhHans: "新巴贝奇" } &&
+            RoomLocationLabels.From("Unknown", names) is null,
+            "Room location labels reuse only known display mappings; unknown or unshared locations stay raw.");
+        var defaultWire = JsonSerializer.SerializeToElement(RoomLocationLabels.From("New Babbage", names));
+        Check(defaultWire.GetProperty("en").GetString() == "New Babbage" &&
+            defaultWire.GetProperty("zhHans").GetString() == "新巴贝奇",
+            "Organization dictionary serialization uses the same camel-case labels as the room bridge.");
+        Check(RoomAvatarProjection.PreferCurrentAccountAvatar(currentAvatar, null, true) == currentAvatar,
+            "A joined viewer can read their own current account avatar even when shared live fields are private.");
+        Check(RoomAvatarProjection.PreferCurrentAccountAvatar(currentAvatar, null, false) is null,
+            "The viewer's avatar must never replace another room member's private avatar.");
+        Check(RoomAvatarProjection.PreferCurrentAccountAvatar("invalid", currentAvatar, true) == currentAvatar,
+            "Invalid local media cannot erase an already authorized room avatar.");
         var directory = PartyRoomReader.Parse(Wire(null, Room("one"), Room("two")));
         Check(directory.Rooms.Length == 2 && directory.CurrentRoomId is null, "Directory membership must be explicit.");
         var wire = BridgePayload.From(directory);
         Check(wire.GetProperty("currentRoomId").ValueKind == JsonValueKind.Null, "Bridge must preserve explicit null membership.");
         var text = wire.GetRawText();
         Check(!text.Contains("private-") && !text.Contains("roomCode") && !text.Contains("accountId"), "No private identifiers cross the bridge.");
-        Check(directory.Rooms[0].Members[0].GameId == "Citizen_CN", "Handle casing must survive.");
+        Check(directory.Rooms[0].Members[0].GameId == "", "Game ID cannot appear before room admission.");
         Check(directory.Rooms[0].LeaderServerRegion == "US", "Only the host's broad region is projected for discovery.");
         Check(directory.Rooms[0].Tags.Select(tag => tag.Text).SequenceEqual(new[] {
             "救援与支援 · 护航安保 · 货运护航", "新手友好" }), "Reuse WPF paths, legacy aliases and context labels; deduplicate and omit unknown IDs.");
         var current = PartyRoomReader.Parse(Wire("two", Room("one"), Room("two")));
         Check(current.Rooms.Length == 1 && current.Rooms[0].RoomId == "two", "Joined users cannot browse other rooms.");
+        Check(current.Rooms[0].Members[0].GameId == "Citizen_CN", "Joined Handle casing must survive.");
         Check(current.Rooms.Single().RoomCode == "private-code", "Room code is available only for the authoritative current room.");
         Check(directory.Rooms.All(room => room.RoomCode is null), "Discovery never leaks room codes.");
         Check(PartyRoomReader.Parse(Wire(null)).Rooms.Length == 0, "Explicit empty is valid.");

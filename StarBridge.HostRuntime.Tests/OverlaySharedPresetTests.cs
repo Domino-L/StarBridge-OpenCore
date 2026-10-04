@@ -63,8 +63,53 @@ internal static class OverlaySharedPresetTests
             var legacy = OverlaySharedPreset.Parse(new OverlaySharedPreset(1, "旧预设", "0,CallsignAndGameName,0,0,0", "Chat,0,0,0.2,0.2;Mission,0,0,1,1").Serialize());
             Check(InformationOverlayLayoutItem.ParseMany(legacy.Layout).Count() == 4 && !legacy.Layout.Contains("Mission"), "Legacy missing modules default; retired Mission removed.");
             Check(!ChatAttachmentPolicy.TryNormalize(new("overlay_preset", "title", "summary", "{\"version\":{},\"name\":7,\"settings\":[],\"layout\":false}"), out _, out _), "Malformed field kinds cannot throw from chat normalization.");
+            await SourcesV2(Path.Combine(root, "v2"));
         }
         finally { Directory.Delete(root, true); }
+    }
+    private static async Task SourcesV2(string root)
+    {
+        var store = new OverlayWorkspaceStore(root, enableSourcePresets: true);
+        var privateSources = new OverlayPresetSources(new(OverlaySourceMode.Community, "fixture-org", "fixture-owner"), true,
+            new Dictionary<OverlaySourceModule, OverlaySourceBinding> { [OverlaySourceModule.Chat] = new(OverlaySourceMode.Community, "fixture-chat", "fixture-owner"),
+                [OverlaySourceModule.Members] = new(OverlaySourceMode.Room) });
+        var initial = store.Load();
+        store.Apply(new(initial.Revision, OverlayWorkspaceMutationKind.ConfigurePresetSources,
+            PresetId: initial.ActivePresetId, Sources: privateSources));
+        var runtime = new UntouchedRuntime();
+        using var host = new OverlayBridgeDispatcher(new OverlaySettingsStore(root), store, () => 1,
+            () => GameLogSessionSnapshot.Empty, runtime);
+        async Task<BridgeEnvelope> Request(object data) => (await host.DispatchAsync(
+            BridgeEnvelope.Request("overlay.updateWorkspace", Guid.NewGuid().ToString("N"), 1, data))).Response;
+        var before = store.Load();
+        var export = await Request(new { schemaVersion = 1, action = "exportSharedPreset", expectedRevision = before.Revision, presetId = before.ActivePresetId });
+        Check(export.Status == "ok", "Enabled v2 sharing exports source metadata.");
+        var attachment = export.Payload.GetProperty("attachment").Deserialize<ChatAttachmentContract>(BridgeProtocol.JsonOptions)!;
+        Check(ChatAttachmentPolicy.TryNormalize(attachment, out _, out _), "Chat accepts the sanitized v2 envelope.");
+        Check(!attachment.OverlayPresetPackage!.Contains("fixture-org") && !attachment.OverlayPresetPackage.Contains("fixture-owner") &&
+            !attachment.OverlayPresetPackage.Contains("fixture-chat"), "No organization identity leaves the exporter.");
+        var exported = OverlaySharedPreset.Parse(attachment.OverlayPresetPackage);
+        Check(exported.Version == 2 && exported.RemovedOrganizationBindings, "Removal marker survives transport.");
+        // Import must sanitize again, even when a peer sends a raw policy and lies about removal.
+        var hostile = exported with { Sources = JsonSerializer.Deserialize<JsonElement>(OverlayPresetSourcesCodec.Serialize(privateSources)), RemovedOrganizationBindings = false };
+        var files = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(p => p, File.ReadAllBytes);
+        var inspected = await Request(new { schemaVersion = 1, action = "inspectSharedPreset", expectedRevision = before.Revision, package = hostile.Serialize() });
+        Check(inspected.Status == "ok" && inspected.Payload.GetProperty("preset").GetProperty("removedOrganizationBindings").GetBoolean() &&
+            !inspected.Payload.GetRawText().Contains("fixture-org") && !inspected.Payload.GetRawText().Contains("fixture-owner"),
+            "Inspection returns sanitized Flutter layout/settings and removal results.");
+        Check(store.Load().Revision == before.Revision && runtime.Calls == 0 &&
+            Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == files.Count &&
+            files.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value)), "Inspection is strictly read-only.");
+        var import = await Request(new { schemaVersion = 1, action = "importSharedPreset", expectedRevision = before.Revision, package = hostile.Serialize() });
+        Check(import.Status == "ok" && import.Payload.GetProperty("removedOrganizationBindings").GetBoolean(), "Receiver sanitizes untrusted bindings and reports removal.");
+        var after = store.Load();
+        var added = after.Presets.Single(p => p.Id != before.ActivePresetId);
+        Check(added.Sources!.Binding.Mode == OverlaySourceMode.Auto && !added.Sources.AutoSwitch &&
+            added.Sources.Modules[OverlaySourceModule.Chat].Mode == OverlaySourceMode.Auto &&
+            added.Sources.Modules[OverlaySourceModule.Members].Mode == OverlaySourceMode.Room, "Import keeps room and drops organization/automatic activation.");
+        Check(after.ActivePresetId == before.ActivePresetId && runtime.Calls == 0 &&
+            after.Presets.Single(p => p.Id == before.ActivePresetId).Sources!.Binding == privateSources.Binding,
+            "Additive import leaves the current preset, its private binding and live draft untouched.");
     }
     private static void Check(bool value, string reason) { if (!value) throw new Exception(reason); }
     private sealed class UntouchedRuntime : IInformationOverlayRuntime

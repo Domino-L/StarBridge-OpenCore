@@ -68,35 +68,26 @@ PersonalProfileSnapshot projectLocalProfile(
       ship.identity.runtimeId: ship,
   };
   final favorites = ids == null
-      ? [
-          for (final ship in remote.favoriteShips)
-            if (available && !hangar.partial && !hangar.fromLegacyProfile)
-              ship.withFormerOwnership(
-                !hangar.ships.any(
-                  (owned) =>
-                      ship.identity.catalogId != null && owned.catalogId != null
-                      ? owned.modelKey == LocalHangarShip(
-                          id: ship.identity.runtimeId,
-                          title: ship.identity.englishName,
-                          catalogId: ship.identity.catalogId,
-                        ).modelKey
-                      : owned.catalogId?.toLowerCase() ==
-                          ship.identity.runtimeId.toLowerCase() ||
-                      owned.title.trim().toLowerCase() ==
-                          ship.identity.englishName.trim().toLowerCase(),
-                ),
-              )
-            else
-              ship,
-        ]
+      ? _projectRemoteFavorites(remote.favoriteShips, hangar)
       : [for (final id in ids) ?byId[id]];
   final unresolved = ids == null
       ? remote.hangarSummary.unresolvedFavoriteCount
       : ids.where((id) => !byId.containsKey(id)).length;
   final counts = <String, int>{};
   var knownCents = 0, unpriced = 0;
+  LocalHangarShip? recent;
   if (available) {
     for (final ship in hangar.ships) {
+      // Use the current inventory's known admission time, not the profile's
+      // remote history or this snapshot's save time. Equal-time batch entries
+      // retain their inventory order; removed and undated ships cannot win.
+      if (ship.addedAt case final addedAt?) {
+        // Older contracts use MinValue for an unknown admission time.
+        if (addedAt.year > 1 &&
+            (recent == null || addedAt.isAfter(recent.addedAt!))) {
+          recent = ship;
+        }
+      }
       final role = ShipCatalogDisplay.category(
         ship.display?.role ?? ship.category,
       );
@@ -136,9 +127,14 @@ PersonalProfileSnapshot projectLocalProfile(
                   category: profileShipCategory(role),
                 ),
           ],
-          recentlyAddedShip: null,
-          recentlyAddedShipImageAsset: '',
-          recentlyAddedAtLabel: '',
+          recentlyAddedShip: recent == null
+              ? null
+              : projectProfileShip(recent).identity,
+          recentlyAddedShipImageAsset: recent == null
+              ? ''
+              : projectProfileShip(recent).imageAsset,
+          recentlyAddedAtLabel:
+              recent?.addedAt?.toLocal().toString().split(' ').first ?? '',
           sourceLabelKey: hangar.partial
               ? 'profile.local.hangarPartial'
               : 'profile.local.hangarSource',
@@ -225,6 +221,40 @@ PersonalProfileSnapshot projectLocalProfile(
       timeZones: timeZones,
     ),
   );
+}
+
+// Keep the null guard outside the loop and behind a call boundary. Dart 3.13.2
+// Windows AOT hoisted hangar.ships.length ahead of the former loop-body guard,
+// causing a native access violation when the local hangar was unavailable.
+@pragma('vm:never-inline')
+List<PersonalProfileShipSummary> _projectRemoteFavorites(
+  List<PersonalProfileShipSummary> favorites,
+  LocalHangarSnapshot? hangar,
+) {
+  if (hangar == null ||
+      hangar.revision <= 0 ||
+      hangar.partial ||
+      hangar.fromLegacyProfile) {
+    return [...favorites];
+  }
+  return [
+    for (final ship in favorites)
+      ship.withFormerOwnership(
+        !hangar.ships.any(
+          (owned) => ship.identity.catalogId != null && owned.catalogId != null
+              ? owned.modelKey ==
+                    LocalHangarShip(
+                      id: ship.identity.runtimeId,
+                      title: ship.identity.englishName,
+                      catalogId: ship.identity.catalogId,
+                    ).modelKey
+              : owned.catalogId?.toLowerCase() ==
+                        ship.identity.runtimeId.toLowerCase() ||
+                    owned.title.trim().toLowerCase() ==
+                        ship.identity.englishName.trim().toLowerCase(),
+        ),
+      ),
+  ];
 }
 
 PersonalProfileShipSummary projectProfileShip(

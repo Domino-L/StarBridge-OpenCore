@@ -28,8 +28,20 @@ internal static class AvatarInteractionTests
         Check(reader.ResolveAvatarTarget("conversation", chat, "token", "scope") == "peer-id", "conversation has authoritative profile target");
         await reader.ReadAsync("token", null, default, "scope");
         Check(reader.ResolveAvatarTarget("conversation", chat, "token", "scope") == "peer-id", "conversation profile survives social refresh");
+        var activeReference = (await reader.ReadAsync("token", null, default, "scope")).Friends.Single().TargetRef;
+        for (var refresh = 0; refresh < 4100; refresh++) {
+            var current = await reader.ReadAsync("token", null, default, "scope");
+            var refreshed = current.Friends.Single();
+            Check(refreshed.TargetRef != activeReference,
+                "directory refresh must replace mutation references");
+            Check(refreshed.ChatTargetRef == chat,
+                "same authoritative friend retains independent profile read reference");
+            activeReference = refreshed.TargetRef;
+        }
+        Check(reader.ResolveAvatarTarget("conversation", chat, "token", "scope") == "peer-id",
+            "an unchanged friend entry must still open the same profile after repeated directory refreshes");
         foreach (var source in new[] { "friend", "conversation" }) {
-            try { reader.ResolveAvatarTarget(source, source == "friend" ? row.TargetRef! : chat, "token", "other-scope"); throw new Exception("scope accepted"); }
+            try { reader.ResolveAvatarTarget(source, source == "friend" ? activeReference! : chat, "token", "other-scope"); throw new Exception("scope accepted"); }
             catch (AccountBridgeHostException) { }
         }
         handler.DirectoryId = "different-account";

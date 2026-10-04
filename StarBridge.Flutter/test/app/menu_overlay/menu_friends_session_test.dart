@@ -30,6 +30,17 @@ class Port implements FriendsPort {
   }
 }
 
+class LivePort extends Port implements FriendsActivityPort {
+  final activity = StreamController<void>.broadcast(sync: true);
+  @override
+  Stream<void> get changes => activity.stream;
+  @override
+  Future<void> close() async {
+    await activity.close();
+    await super.close();
+  }
+}
+
 FriendsReadResult ready(String name, {String? presence}) => FriendsReadResult(
   FriendsReadState.ready,
   snapshot: FriendsSnapshot(
@@ -58,6 +69,75 @@ FriendsReadResult ready(String name, {String? presence}) => FriendsReadResult(
 );
 
 void main() {
+  testWidgets(
+    'auxiliary projection rejects nonfriend detailed presence even from an overbroad adapter',
+    (tester) async {
+      final port = Port(), views = <Map<String, Object?>>[];
+      final session = MenuFriendsSession(port, views.add);
+      session.show(true);
+      port.reads.last.complete(
+        FriendsReadResult(
+          FriendsReadState.ready,
+          snapshot: FriendsSnapshot(
+            groups: {
+              FriendsSection.friends: [
+                FriendRow(
+                  'Search',
+                  '',
+                  'none',
+                  DateTime(2026),
+                  shared: {
+                    'presence': 'InGame',
+                    'ship': 'private-ship',
+                    'location': 'private-location',
+                  },
+                ),
+              ],
+            },
+            results: [],
+          ),
+        ),
+      );
+      await tester.pump();
+      final encoded = jsonEncode(views.last);
+      expect(MenuFriendsView.parse(encoded).rows.single.presence, 'unknown');
+      expect(encoded, isNot(contains('private-ship')));
+      expect(encoded, isNot(contains('private-location')));
+      session.dispose();
+      await tester.pump();
+    },
+  );
+  testWidgets(
+    'social activity wakes open friends immediately and coalesces an in-flight read',
+    (tester) async {
+      final port = LivePort();
+      final views = <Map<String, Object?>>[];
+      final session = MenuFriendsSession(port, views.add);
+      session.show(true);
+      port.reads.last.complete(ready('Pilot', presence: 'AppOnline'));
+      await tester.pump();
+      port.activity.add(null);
+      expect(port.reads.length, 2);
+      port.activity.add(null);
+      port.activity.add(null);
+      expect(port.reads.length, 2);
+      port.reads.last.complete(ready('Pilot', presence: 'Offline'));
+      await tester.pump();
+      expect(port.reads.length, 3);
+      port.reads.last.complete(ready('Pilot', presence: 'InGame'));
+      await tester.pump();
+      expect(
+        MenuFriendsView.parse(jsonEncode(views.last)).rows.single.presence,
+        'inGame',
+      );
+      session.show(false);
+      port.activity.add(null);
+      await tester.pump();
+      expect(port.reads.length, 3);
+      session.dispose();
+      await tester.pump();
+    },
+  );
   testWidgets(
     'friend avatars are bounded and opaque keys survive only unchanged targets',
     (tester) async {
@@ -117,7 +197,8 @@ void main() {
     expect(wire, isNot(contains('not-for-display')));
     expect(wire, isNot(contains('private-avatar')));
     expect(MenuFriendsView.parse(wire).rows.single.avatar, isNull);
-    expect(wire, isNot(contains('ship')));
+    expect(wire, isNot(contains('never-forward')));
+    expect(MenuFriendsView.parse(wire).details.values.single.values['ship'], 'not-presence-proof');
     final view = MenuFriendsView.parse(wire);
     expect(view.incoming, 1);
     expect(view.rows.single.presence, 'inGame');

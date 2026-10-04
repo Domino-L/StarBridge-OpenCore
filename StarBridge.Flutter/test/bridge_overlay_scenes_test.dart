@@ -7,6 +7,38 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  test('preview resolution metadata is scoped, validated and immutable', () {
+    final payload = <String, Object?>{
+      'schemaVersion': 1,
+      'revision': 1,
+      'mode': 'auto',
+      'status': 'ready',
+      'sourceOwnerKey': 'A' * 64,
+      'organizations': [
+        {'code': 'A', 'name': 'Organization A'},
+      ],
+      'resolvedSourceIds': {'auto': 'room', 'room': null, 'org:A': 'org:A'},
+    };
+    final parsed = BridgeOverlayScenes.parse(payload);
+    expect(parsed.resolvedSourceIds!['auto'], 'room');
+    expect(parsed.resolvedSourceIds!.containsKey('room'), isTrue);
+    expect(
+      () => parsed.resolvedSourceIds!['auto'] = 'local',
+      throwsUnsupportedError,
+    );
+    expect(parsed.pending(failed: true).resolvedSourceIds, isNull);
+    expect(
+      () => BridgeOverlayScenes.parse({...payload, 'sourceOwnerKey': null}),
+      throwsFormatException,
+    );
+    expect(
+      () => BridgeOverlayScenes.parse({
+        ...payload,
+        'resolvedSourceIds': {'auto': 'org:foreign'},
+      }),
+      throwsFormatException,
+    );
+  });
   test('wire round trip accepts value-equal identities, persists choice and rejects wrong owner', () async {
     final pair = InMemoryBridgeConnection.createPair();
     final session = BridgeClientSession(
@@ -51,6 +83,8 @@ void main() {
                         : null,
                     'actualId': null,
                     'status': 'standby',
+                    'sourceOwnerKey': 'A' * 64,
+                    'automaticPresetSourceId': 'room:synthetic-room',
                     'organizations': [
                       {'code': 'A', 'name': '组织'},
                     ],
@@ -65,7 +99,11 @@ void main() {
       await session.close();
       await pair.host.close();
     });
-    expect((await adapter.read()).available, true);
+    final read = await adapter.read();
+    expect(read.available, true);
+    expect(read.sourceOwnerKey, 'A' * 64);
+    expect(read.automaticPresetSourceId, 'room:synthetic-room');
+    expect(read.contextGeneration, 4);
     expect((await adapter.focusCommunity('A')).mode, 'auto');
     expect(
       requests

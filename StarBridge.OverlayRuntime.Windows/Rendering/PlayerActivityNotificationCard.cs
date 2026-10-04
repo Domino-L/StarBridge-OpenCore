@@ -43,6 +43,8 @@ internal sealed class PlayerActivityNotificationCard : Border
         layout.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         var avatar = new Border { Width = 42, Height = 42, Background = Paint(light ? "#E0EAF0" : "#233743"), ClipToBounds = true };
         var image = DesktopNotificationCard.PlayerAvatar(player.AvatarImageData);
+        notice.ReportDiagnostic(player.AvatarImageData is null ? "avatarMissing" :
+            image is null ? "avatarDecodeFailed" : "avatarDecoded");
         avatar.Child = image is null ? new TextBlock { Text = title.Length == 0 ? "?" : System.Globalization.StringInfo.GetNextTextElement(title),
             Foreground = foreground, FontSize = 20, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
             : new System.Windows.Controls.Image { Source = image, Stretch = Stretch.UniformToFill };

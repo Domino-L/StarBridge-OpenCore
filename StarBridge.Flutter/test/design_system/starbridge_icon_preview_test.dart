@@ -171,7 +171,7 @@ class _Header extends StatelessWidget {
             ),
             SizedBox(height: 4),
             Text(
-              'OUTLINE V1  ·  24 × 24 MASTER  ·  16 / 20 / 24 OPTICAL GRADES',
+              'AVIONICS V2  ·  24 × 24 MASTER  ·  16 / 20 / 24 OPTICAL GRADES',
               style: TextStyle(
                 color: Color(0xFF93A4AE),
                 fontSize: 13,
@@ -189,7 +189,7 @@ class _Header extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
           ),
           child: const Text(
-            '45 SEMANTICS',
+            'AVIONICS GRAMMAR',
             style: TextStyle(
               color: Color(0xFF7CC7D6),
               fontSize: 12,

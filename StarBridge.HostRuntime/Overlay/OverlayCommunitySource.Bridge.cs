@@ -26,7 +26,7 @@ internal sealed partial class OverlayCommunitySource
             CheckScope();
             if (_disposed || _scope != (owner, generation)) return;
             _catalogRevision++;
-            _revision++; // An older roster response must not restore the old name.
+            InvalidateRead(); // An older roster response must not restore the old name.
             _catalog = _catalog.Select(row => row.Code == code ? row with { Name = name } : row).ToArray();
             if (_content?.Code == code) _content = _content with { Name = name };
         }
@@ -53,8 +53,18 @@ internal sealed partial class OverlayCommunitySource
                 CheckScope();
                 if (_disposed || scope != _scope) throw new OperationCanceledException();
                 if (catalogRevision != _catalogRevision) return _catalog;
+                // A complete newer directory supersedes pending content reads
+                // for removed memberships, including driver-only sources.
+                if (_catalog.Any(previous => !targets.Any(next => next.Code == previous.Code))) InvalidateRead();
                 _catalog = targets.ToArray(); _catalogAt = _now();
+                foreach (var code in _workspaceRosters.Keys.Where(code => !_catalog.Any(x => x.Code == code)).ToArray())
+                    RevokeWorkspace(code);
+                foreach (var code in _moduleAuthorities.Keys.Where(code => !_catalog.Any(x => x.Code == code)).ToArray())
+                    RevokeWorkspace(code);
+                foreach (var code in _moduleSessions.Keys.Where(code => !_catalog.Any(x => x.Code == code)).ToArray())
+                    RemoveModuleSession(code);
                 if (_content is not null && !_catalog.Any(x => x.Code == _content.Code)) _content = null;
+                DirectoryMembershipConfirmed?.Invoke(scope.Owner!, scope.Generation, _catalog.Select(t => t.Code).ToHashSet(StringComparer.Ordinal));
                 return _catalog;
             }
         }
@@ -82,7 +92,6 @@ internal sealed partial class OverlayCommunitySource
                 return Error(request, "invalidRequest");
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
             deadline.CancelAfter(TimeSpan.FromSeconds(20));
-            await _choiceGate.WaitAsync(deadline.Token); entered = true;
             // Local automatic/room choices remain writable even if directory reads fail.
             // A specific organization always needs a fresh authorization check.
             var selectingCommunity = write && body.GetProperty("mode").GetString() == "community";
@@ -94,6 +103,9 @@ internal sealed partial class OverlayCommunitySource
                     e is Account.AccountBridgeHostException or OperationCanceledException)
                 { catalogFailed = true; }
             }
+            // Network authorization must not hold the local choice/roster gate.
+            // Revision and scope are checked again after acquiring it.
+            await _choiceGate.WaitAsync(deadline.Token); entered = true;
             lock (_sync)
             {
                 CheckScope();
@@ -104,6 +116,7 @@ internal sealed partial class OverlayCommunitySource
                     var code = body.GetProperty("code").GetString();
                     if (!OverlaySceneChoiceStore.Valid("community", code)) return Error(request, "invalidRequest");
                     if (catalogFailed || !_catalog.Any(x => x.Code == code)) return Error(request, "targetUnavailable");
+                    _focusedModuleCommunity = code;
                     if (_pageCode != code)
                     {
                         _pageCode = code;
@@ -111,8 +124,9 @@ internal sealed partial class OverlayCommunitySource
                         // Manual scenes and their in-flight reads remain untouched.
                         if (_choice.Mode == "auto")
                         {
-                            _revision++;
+                            InvalidateRead();
                             _content = null;
+                            AdoptWorkspace(code);
                             if (_lastDemand is not null && _wake.CurrentCount == 0) _wake.Release();
                         }
                     }
@@ -127,7 +141,9 @@ internal sealed partial class OverlayCommunitySource
                     if (_choice.Revision != revision) return Error(request, "conflict");
                     var saved = _choiceStore?.Save(scope.Owner!, revision, mode, code, () => !_disposed && _owner() == scope)
                         ?? throw new IOException("Source store unavailable.");
-                    _choice = saved; _explicitCode = code; _revision++; _content = null;
+                    _choice = saved; _explicitCode = code; InvalidateRead(); _content = null;
+                    if (mode == "community") _focusedModuleCommunity = code;
+                    AdoptWorkspace();
                     if (_lastDemand is not null && _wake.CurrentCount == 0) _wake.Release();
                 }
                 var content = Read();
@@ -137,8 +153,14 @@ internal sealed partial class OverlayCommunitySource
                 var status = actual is not null ? "ready" : catalogFailed || _catalogAt == default ? "unavailable" : _choice.Mode == "auto" && _catalog.Count == 0 ? "local" :
                     _choice.Mode == "room" || _choice.Mode == "community" && !_catalog.Any(x => x.Code == _choice.Code)
                         ? "unavailable" : _lastDemand is null || _now() - _lastDemand > TimeSpan.FromSeconds(20) ? "standby" : "loading";
+                var selection = ReadSourceSelection();
+                if (selection is not null) { actual = selection.ActualId; status = selection.Status; }
                 return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, revision = _choice.Revision,
                     mode = _choice.Mode, code = _choice.Code, actualId = actual, status,
+                    sourceOwnerKey = OverlaySceneChoiceStore.Hash(scope.Owner!),
+                    automaticPresetSourceId = ReadPresetTrigger(catalogFailed),
+                    presetBindingId = selection?.BindingId, temporarySourceId = selection?.TemporaryId,
+                    resolvedSourceIds = selection?.ResolvedSourceIds,
                     organizations = _catalog.Select(x => new { code = x.Code, name = x.Name }).ToArray() }), []);
             }
         }

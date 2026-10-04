@@ -35,6 +35,12 @@ internal static class CommunityWorkspaceClientTests
             }
             Check(path == "/api/fleets/workspace", "never requests legacy bulk snapshots");
             var payload = Workspace();
+            if (state == "ship-labels")
+            {
+                payload["members"]![0]!["online"] = true;
+                payload["members"]![0]!["liveStatus"] = "InGame";
+                payload["members"]![0]!["ship"] = "ANVL_Lightning_F8C";
+            }
             if (state == "main-menu") payload["members"]![0]!["hasServerSession"] = false;
             if (state == "invalid-session") payload["members"]![0]!["hasServerSession"] = "false";
             if (state == "central-zone") payload["timeZoneId"] = "Central America Standard Time";
@@ -61,6 +67,12 @@ internal static class CommunityWorkspaceClientTests
         state = "main-menu";
         var mainMenu = JsonSerializer.SerializeToElement(await client.ReadWorkspaceAsync("test-bearer", query, "one", default));
         Check(!mainMenu.GetProperty("members")[0].GetProperty("hasServerSession").GetBoolean(), "explicit no-server state survives the bridge");
+        state = "ship-labels";
+        var shipProjection = JsonSerializer.SerializeToElement(await client.ReadWorkspaceAsync("test-bearer", query, "one", default));
+        Check(shipProjection.GetProperty("members")[0].TryGetProperty("shipLabels", out var shipLabels) &&
+            shipLabels.ValueKind == JsonValueKind.Object &&
+            shipLabels.GetProperty("zhHans").GetString() == StarBridge.HostRuntime.Presence.GameShipNames.Find("ANVL_Lightning_F8C")!.ChineseName,
+            "Real workspace read supplies the same catalog labels as room and Native.");
         state = "ok";
         Check(memberRef.Length == 32 && member.GetProperty("gameName").GetString() == "", "opaque member ref does not reconstruct hidden game IDs");
         Check(!response.GetRawText().Contains("account:member-one") && !response.GetRawText().Contains("private-administration-data"), "whitelist excludes source identities and extra admin fields");

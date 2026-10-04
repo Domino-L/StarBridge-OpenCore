@@ -30,7 +30,9 @@ internal static class NotificationSettingsTests
             Check(read.Status == "ok" && read.Payload.GetProperty("inAppEnabled").GetBoolean(), "Default device preference available without an account");
             Check(!read.Payload.GetProperty("windowsEnabled").GetBoolean(), "Desktop notification opt-in defaults off");
             File.WriteAllText(Path.Combine(root, "notification-settings.v1.json"), "{\"schemaVersion\":1,\"revision\":0,\"inAppEnabled\":true,\"position\":\"bottomRight\",\"preview\":\"sourceOnly\"}");
-            foreach (var name in NotificationSettingsBridgeDispatcher.AdvertisedCapabilities) Check(!BridgeRequestPolicy.RequiresAccountContext(name), "No account for local preferences");
+            foreach (var name in NotificationSettingsBridgeDispatcher.AdvertisedCapabilities)
+                Check(BridgeRequestPolicy.RequiresAccountContext(name) == (name == "gameIdentity.notifyMismatch"),
+                    "Only identity notification requires an account; local preferences remain accountless");
             Check((await Save(0)).Status == "ok", "Save through composite");
             using (var reopened = new NotificationSettingsBridgeDispatcher(root, () => generation)) {
                 var saved = (await reopened.DispatchAsync(BridgeEnvelope.Request("notificationSettings.read", "reopen", 3, new { schemaVersion = 1 }))).Response;

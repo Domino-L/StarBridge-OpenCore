@@ -45,7 +45,7 @@ internal static class OverlaySettingsTests
                 StringComparer.OrdinalIgnoreCase);
 
             using var dispatcher = new OverlayBridgeDispatcher(
-                root,
+                new OverlaySettingsStore(root), new OverlayWorkspaceStore(root),
                 () => 6,
                 () => GameLogSessionSnapshot.Empty);
             var batch = await dispatcher.DispatchAsync(Request(
@@ -396,7 +396,7 @@ internal static class OverlaySettingsTests
         {
             var runtime = new RecordingOverlayRuntime();
             using var dispatcher = new OverlayBridgeDispatcher(
-                root,
+                new OverlaySettingsStore(root), new OverlayWorkspaceStore(root),
                 () => 12,
                 () => GameLogSessionSnapshot.Empty,
                 runtime);
@@ -404,6 +404,7 @@ internal static class OverlaySettingsTests
             await dispatcher.InitializeRuntimeAsync();
             Require(runtime.Commands.SequenceEqual([InformationOverlayRuntimeCommand.Sync]),
                 "runtime initializes from saved workspace");
+            Require(runtime.LastWorkspace?.Sources is null, "v1 production storage leaves the module-source runtime disabled");
 
             var persistedBefore = await dispatcher.DispatchAsync(Request(
                 "overlay.getWorkspace",
@@ -490,6 +491,79 @@ internal static class OverlaySettingsTests
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    internal static async Task PassesSavedModuleSourcesToRuntime()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "starbridge-module-runtime-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new OverlayWorkspaceStore(root, enableSourcePresets: true);
+            var state = store.Load();
+            var sources = new OverlayPresetSources(new(OverlaySourceMode.Room), modules:
+                new Dictionary<OverlaySourceModule, OverlaySourceBinding> { [OverlaySourceModule.Chat] = OverlaySourceBinding.Automatic });
+            state = store.Apply(new(state.Revision, OverlayWorkspaceMutationKind.ConfigurePresetSources,
+                PresetId: state.ActivePresetId, Sources: sources));
+            var runtime = new RecordingOverlayRuntime();
+            using var dispatcher = new OverlayBridgeDispatcher(new OverlaySettingsStore(root), store,
+                () => 12, () => GameLogSessionSnapshot.Empty, runtime);
+            await dispatcher.InitializeRuntimeAsync();
+            Require(runtime.LastWorkspace?.Sources?.Binding.Mode == OverlaySourceMode.Room &&
+                runtime.LastWorkspace.Sources.Modules[OverlaySourceModule.Chat].Mode == OverlaySourceMode.Auto,
+                "saved v2 module choices reach runtime initialization");
+            var persisted = (await dispatcher.DispatchAsync(Request("overlay.getWorkspace", 12, new { schemaVersion = 1 }))).Response.Payload;
+            var draft = new
+            {
+                expectedRevision = persisted.GetProperty("revision").GetInt64(), settings = persisted.GetProperty("settings"),
+                layout = persisted.GetProperty("layout"), hotkey = new { binding = "Alt+O", enabled = false }
+            };
+            var opened = await dispatcher.DispatchAsync(Request("overlay.runtime.open", 12, new { schemaVersion = 1, workspace = draft }));
+            Require(opened.Response.Status == BridgeResponseStatuses.Ok && runtime.LastWorkspace?.Sources?.Binding.Mode == OverlaySourceMode.Room,
+                "a display draft retains Host-saved module choices instead of falling back to legacy sources");
+            var unsafeDraft = new { draft.expectedRevision, draft.settings, draft.layout, draft.hotkey,
+                sources = new { ownerKey = "caller-asserted-owner", validUntil = "2100-01-01" } };
+            var rejected = await dispatcher.DispatchAsync(Request("overlay.runtime.open", 12,
+                new { schemaVersion = 1, workspace = unsafeDraft }));
+            Require(rejected.Response.Status != BridgeResponseStatuses.Ok, "draft must not inject source authority or bypass the source UI gate");
+            Require(store.Load().Revision == state.Revision, "runtime opening does not persist or activate a draft");
+
+            File.WriteAllText(Path.Combine(root, $"overlay.{state.ActivePresetId}.workspace.json"), "broken-fixture");
+            Require(store.Load().Presets.Single(preset => preset.IsActive).StorageState == "corrupt", "fixture damages the active v2 document");
+            await dispatcher.InitializeRuntimeAsync();
+            Require(runtime.LastWorkspace!.HasInvalidSourceConfiguration,
+                "a damaged v2 preset initializes unavailable rather than preventing the rest of the client from starting");
+            var closed = await dispatcher.DispatchAsync(Request("overlay.runtime.close", 12, new { schemaVersion = 1 }));
+            Require(closed.Response.Status == BridgeResponseStatuses.Ok, "a damaged preset must not prevent closing the window");
+            Require(runtime.LastWorkspace is { SourcePresetsEnabled: true, Sources: null, HasInvalidSourceConfiguration: true },
+                "closing a damaged v2 preset retains its mode and cannot install a legacy workspace");
+            var closedWithDraft = await dispatcher.DispatchAsync(Request("overlay.runtime.close", 12,
+                new { schemaVersion = 1, workspace = draft }));
+            Require(closedWithDraft.Response.Status == BridgeResponseStatuses.Ok && runtime.LastWorkspace!.HasInvalidSourceConfiguration,
+                "the ordinary client close request can still close with an old display draft after preset damage");
+            var reopen = await dispatcher.DispatchAsync(Request("overlay.runtime.open", 12, new { schemaVersion = 1 }));
+            Require(reopen.Response.Error?.Code == "overlay.workspace_invalid_preset", "reopening cannot bypass damaged preset protection");
+            var beforeRename = store.Load();
+            var renamed = await dispatcher.DispatchAsync(Request("overlay.updateWorkspace", 12, new
+            {
+                schemaVersion = 1, expectedRevision = beforeRename.Revision, action = "renamePreset",
+                presetId = beforeRename.ActivePresetId, name = "Damaged fixture"
+            }));
+            var afterRename = store.Load();
+            Require(afterRename.Revision != beforeRename.Revision && afterRename.Presets.Single(preset => preset.IsActive).Name == "Damaged fixture",
+                "the metadata mutation actually committed before runtime synchronization");
+            Require(renamed.Response.Status == BridgeResponseStatuses.Ok &&
+                runtime.LastWorkspace!.HasInvalidSourceConfiguration,
+                "a permitted metadata save reports success while the damaged source configuration remains unavailable");
+            Require(File.ReadAllText(Path.Combine(root, $"overlay.{state.ActivePresetId}.workspace.json")) == "broken-fixture",
+                "metadata synchronization never repairs or overwrites the quarantined document implicitly");
+        }
+        finally
+        {
+            Require(Path.GetDirectoryName(Path.GetFullPath(root)) == Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)
+                && Path.GetFileName(root).StartsWith("starbridge-module-runtime-", StringComparison.Ordinal), "bounded fixture cleanup");
+            Directory.Delete(root, true);
         }
     }
 

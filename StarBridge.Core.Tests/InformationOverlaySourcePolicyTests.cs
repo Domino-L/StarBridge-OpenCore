@@ -6,6 +6,12 @@ internal static class InformationOverlaySourcePolicyTests
 {
     internal static void RunAll()
     {
+        if (InformationOverlayServerEvidence.CanReportPeerCount(true, true, 2, 1) ||
+            InformationOverlayServerEvidence.CanReportPeerCount(true, false, 0, 0) ||
+            InformationOverlayServerEvidence.CanReportPeerCount(false, true, 1, 1) ||
+            !InformationOverlayServerEvidence.CanReportPeerCount(true, true, 2, 2) ||
+            !InformationOverlayServerEvidence.CanReportPeerCount(true, true, 0, 0))
+            throw new Exception("Incomplete room server evidence must not produce a confirmed count.");
         void Check(OverlayScenePreference preference, bool room, bool fleet, bool community,
             bool explicitCommunity, InformationOverlaySourceKind kind, bool available)
         {

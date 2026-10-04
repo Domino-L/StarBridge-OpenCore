@@ -13,12 +13,23 @@ internal static class RoomOverlayProjectionTests
             [new("Callsign", "Case_Handle", true, "InGame", "", "", "US")],
             [new(2, "Callsign", "Case_Handle", "Chat text", DateTimeOffset.UtcNow, false)]);
         var projected = NativeInformationOverlayRuntime.ProjectRoom(content, OverlayScenePreference.Auto, "zh");
+        foreach (var (language, expected) in new[] {
+            ("zh", "[浮层预设] 请在客户端查看"), ("zh-Hant", "[浮層預設] 請在客戶端查看"),
+            ("en", "[Overlay preset] View in the client") })
+        {
+            var shared = content with { Messages = [content.Messages[0] with { Text = "", AttachmentKind = "overlay_preset" }] };
+            var attachment = NativeInformationOverlayRuntime.ProjectRoom(shared, OverlayScenePreference.Auto, language).Chat.Single();
+            Check(attachment.Text == expected, "Attachment-only messages have a localized body for list and barrage.");
+            shared = shared with { Messages = [shared.Messages[0] with { Text = "Caption" }] };
+            Check(NativeInformationOverlayRuntime.ProjectRoom(shared, OverlayScenePreference.Auto, language).Chat.Single().Text == "Caption\n" + expected,
+                "Preserve captions alongside the attachment hint.");
+        }
         Check(projected.Scene.HasContent && projected.Scene.Context.Kind == OverlaySceneKind.PartyRoom,
             "Auto selects authoritative room.");
         var player = projected.Scene.Players.Single();
         Check(player.Name == "Case_Handle" && player.Callsign == "Callsign" && player.IsSelf,
             "Shared WPF row projection preserves identity and self rules.");
-        Check(player.ServerShard == "US", "No concrete shard in room overlay.");
+        Check(player.ServerShard == "" && player.ServerRegion == "US", "Region-only room data is never an exact server shard.");
         Check(projected.Chat.Single().IsSelf && projected.Chat.Single().ChannelId == "room",
             "Chat is scoped to current room and authoritative local handle.");
         Check(projected.Command.NoticeText!.Contains("Room title"), "Notice uses real room title.");

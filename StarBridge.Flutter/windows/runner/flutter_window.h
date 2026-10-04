@@ -16,6 +16,7 @@ class ApplicationLifecycleBridge;
 class HangarBrowserBridge;
 class OverlayEditorWindow;
 class MenuOverlayBridge;
+class FriendsWindowBridge;
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -53,6 +54,9 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<NativeHostBridge> native_host_bridge_;
   std::unique_ptr<HangarBrowserBridge> hangar_browser_bridge_;
   std::unique_ptr<OverlayEditorWindow> overlay_editor_window_;
+  std::unique_ptr<FriendsWindowBridge> friends_window_bridge_;
+  std::unique_ptr<FriendsWindowBridge> messages_window_bridge_;
+  std::unique_ptr<FriendsWindowBridge> notifications_window_bridge_;
 #ifdef STARBRIDGE_ENABLE_MENU_OVERLAY
   std::unique_ptr<MenuOverlayBridge> menu_overlay_bridge_;
 #endif

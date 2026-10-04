@@ -5,4 +5,5 @@ using System.Runtime.Versioning;
 [assembly: InternalsVisibleTo("Star Bridge")]
 [assembly: InternalsVisibleTo("StarBridge.Desktop.Tests")]
 [assembly: InternalsVisibleTo("StarBridge.HostRuntime.Tests")]
+[assembly: InternalsVisibleTo("StarBridge.OverlayRuntime.Windows.Tests")]
 [assembly: InternalsVisibleTo("StarBridge.UpdateHelper")]

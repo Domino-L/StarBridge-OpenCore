@@ -3,12 +3,17 @@ import 'package:flutter/material.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../shared/ships/ship_catalog_display.dart';
 import 'community_ship_distribution_chart.dart';
-import 'community_ship_statistics.dart';
+import 'community_fleet_summary.dart';
 import 'community_ships_copy.dart';
 
 class CommunityFleetStatisticsDialog extends StatelessWidget {
-  const CommunityFleetStatisticsDialog({required this.statistics, super.key});
-  final CommunityShipStatistics statistics;
+  const CommunityFleetStatisticsDialog({
+    required this.statistics,
+    this.onClose,
+    super.key,
+  });
+  final CommunityFleetSummary statistics;
+  final VoidCallback? onClose;
   @override
   Widget build(BuildContext context) {
     final stats = statistics;
@@ -59,7 +64,7 @@ class CommunityFleetStatisticsDialog extends StatelessWidget {
                       LayoutBuilder(
                         builder: (context, constraints) {
                           final metrics = [
-                            metric('count', '${stats.ships.length}'),
+                            metric('count', '${stats.shipCount}'),
                             metric('modelCount', '${stats.modelCount}'),
                             metric(
                               'sharingMembers',
@@ -93,7 +98,7 @@ class CommunityFleetStatisticsDialog extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        '${t('pricedCoverage')} ${stats.pricedCount} / ${stats.ships.length} · ${t('knownValueHint')}',
+                        '${t('pricedCoverage')} ${stats.pricedCount} / ${stats.shipCount} · ${t('knownValueHint')}',
                         style: text.bodySmall?.copyWith(
                           color: colors.textSecondary,
                         ),
@@ -108,7 +113,7 @@ class CommunityFleetStatisticsDialog extends StatelessWidget {
               Align(
                 alignment: AlignmentDirectional.centerEnd,
                 child: TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: onClose ?? () => Navigator.of(context).pop(),
                   child: Text(t('close')),
                 ),
               ),

@@ -5,7 +5,9 @@
 #include <functional>
 #include <memory>
 
-// One lazily created auxiliary Flutter view in this process. No plugin/Host,
+// One auxiliary Flutter view prepared hidden during native startup, before the
+// main window becomes interactive. Both engines stay on the platform thread.
+// No plugin/Host,
 // credentials, application bootstrap or second tray icon is created in it.
 class TraySurfaceBridge {
  public:

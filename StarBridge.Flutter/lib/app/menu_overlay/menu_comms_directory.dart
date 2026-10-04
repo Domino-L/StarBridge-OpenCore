@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../shell/widgets/attention_badge.dart';
+
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../features/direct_messages/communication_time_formatter.dart';
 import 'menu_comms_view.dart';
@@ -66,14 +68,17 @@ class MenuCommsDirectory extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         if (view.name == null && view.refreshing) const MenuLoading(),
-        TextFormField(
-          key: const ValueKey('menu-comms-search'),
-          initialValue: query,
-          decoration: const InputDecoration(
-            hintText: '搜索会话或消息摘要',
-            isDense: true,
+        KeyedSubtree(
+          key: ValueKey('menu-comms-search-${view.profileKey ?? ''}'),
+          child: TextFormField(
+            key: const ValueKey('menu-comms-search'),
+            initialValue: query,
+            decoration: const InputDecoration(
+              hintText: '搜索会话或消息摘要',
+              isDense: true,
+            ),
+            onChanged: onQuery,
           ),
-          onChanged: onQuery,
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -183,26 +188,7 @@ class MenuCommsDirectory extends StatelessWidget {
                                           ),
                                         ),
                                         if (row.unread > 0)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 5,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: context.tokens.colors.info,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              row.unread > 99
-                                                  ? '99+'
-                                                  : '${row.unread}',
-                                              style: const TextStyle(
-                                                color: Colors.black,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ),
+                                          AttentionCount(count: row.unread),
                                       ],
                                     ),
                                     if ((view.previews[row.key] ?? '')

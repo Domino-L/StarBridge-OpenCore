@@ -158,7 +158,7 @@ public static class PartyRoomTagCatalog
             Node("special_stanton", "斯坦顿星系",
                 Node("special_stanton_asd_onyx", "ASD玛瑙设施"),
                 Node("special_stanton_laser_mining_station", "激光采矿站"),
-                Node("special_stanton_siege_orison", "奥里森之围（尚未开始）")),
+                Node("special_stanton_siege_orison", "奥里森之围")),
             Node("special_pyro", "派罗星系",
                 Node("special_pyro_asd_stormbreaker", "ASD风暴突破者")),
             Node("special_nyx", "尼克斯星系",

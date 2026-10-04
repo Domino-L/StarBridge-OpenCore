@@ -72,6 +72,27 @@ void answer(CommandPort port, FriendsSnapshot snapshot) => port
     .complete(FriendsReadResult(FriendsReadState.ready, snapshot: snapshot));
 
 void main() {
+  testWidgets('friend Game ID is projected without exposing it to requests', (
+    tester,
+  ) async {
+    final port = CommandPort(), views = <Map<String, Object?>>[];
+    final lease = MenuFriendsSession(port, views.add)..show(true);
+    answer(port, directory('friend'));
+    await tester.pump();
+    final friend = MenuFriendsView.parse(jsonEncode(views.last));
+    expect(friend.gameIds[friend.rows.single.key], 'fixture');
+    lease.dispose();
+
+    final requestPort = CommandPort(), requestViews = <Map<String, Object?>>[];
+    final requestLease = MenuFriendsSession(requestPort, requestViews.add)
+      ..show(true);
+    answer(requestPort, directory('incoming'));
+    await tester.pump();
+    final incoming = MenuFriendsView.parse(jsonEncode(requestViews.last));
+    expect(incoming.requests, hasLength(1));
+    expect(incoming.gameIds, isEmpty);
+    requestLease.dispose();
+  });
   testWidgets(
     'confirmation expiry and rejected result require a fresh explicit decision',
     (tester) async {

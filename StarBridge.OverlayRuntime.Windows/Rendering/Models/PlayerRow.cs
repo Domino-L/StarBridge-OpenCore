@@ -43,6 +43,10 @@ public sealed record PlayerRow(
     bool ArrivalPendingConfirmation = false,
     string? ArrivalTargetCode = null)
 {
+    public bool RealtimeStateUnknown { get; init; }
+    public string? LocationHiddenReason { get; init; }
+    public bool IsLowConfidenceLocationHidden => SharedLocationVisibility.NormalizeReason(LocationHiddenReason,
+        SharedLocationText, SharedPresence == PlayerPresenceKind.InGame, ArrivalPendingConfirmation) is not null;
     // Callsign 在无呼号时回落为游戏 ID（DisplayCallsign），此时两行会重复，故留空。
     public string GameId => string.Equals(Name, Callsign, StringComparison.OrdinalIgnoreCase)
         ? ""
@@ -52,23 +56,23 @@ public sealed record PlayerRow(
     public MediaBrush StatusBrush => PlayerPresencePresentation.Brush(Presence);
     public string SharedOnlineStatusValue => SharedOnlineStatus ?? Status;
     public string? SharedLiveStatusValue => SharedLiveStatus ?? LiveStatus;
-    public PlayerPresenceKind SharedPresence => PlayerPresencePresentation.ResolveShared(SharedLiveStatusValue, SharedOnlineStatusValue);
-    public string SharedPresenceText => PlayerPresencePresentation.Format(SharedPresence);
+    public PlayerPresenceKind SharedPresence => RealtimeStateUnknown ? PlayerPresenceKind.Offline : PlayerPresencePresentation.ResolveShared(SharedLiveStatusValue, SharedOnlineStatusValue);
+    public string SharedPresenceText => RealtimeStateUnknown ? "未知" : PlayerPresencePresentation.Format(SharedPresence);
     public MediaBrush SharedStatusBrush => PlayerPresencePresentation.Brush(SharedPresence);
     public string SharedShipText => SharedShip ?? Ship;
     public string SharedLocationText => SharedLocation ?? Location;
-    public string SharedShipDisplayText => ShipDisplayNamePresentation.ResolveChinese(
+    public string SharedShipDisplayText => RealtimeStateUnknown ? "—" : ShipDisplayNamePresentation.ResolveChinese(
         PlayerSessionStatePresentation.ResolveShip(
             SharedPresence,
             ResolveSharedServerSession(),
             SharedShipText),
         ShipDisplayNamePresentation.UnknownShip);
-    public string SharedLocationDisplayText => LocationArrivalPresentation.ResolveLocation(
+    public string SharedLocationDisplayText => RealtimeStateUnknown ? "—" : IsLowConfidenceLocationHidden ? "低可信度位置" : LocationArrivalPresentation.ResolveLocation(
         SharedPresence,
         ResolveSharedServerSession(),
         SharedLocationText,
         ArrivalPendingConfirmation);
-    public string SharedLocationCompactDisplayText => LocationArrivalPresentation.ResolveCompactLocation(
+    public string SharedLocationCompactDisplayText => RealtimeStateUnknown ? "—" : IsLowConfidenceLocationHidden ? "低可信度位置" : LocationArrivalPresentation.ResolveCompactLocation(
         SharedPresence,
         ResolveSharedServerSession(),
         SharedLocationText,
@@ -80,7 +84,7 @@ public sealed record PlayerRow(
     public Visibility LocationArrivalBadgeVisibility => string.IsNullOrWhiteSpace(LocationArrivalBadgeText)
         ? Visibility.Collapsed
         : Visibility.Visible;
-    public string SharedLocationToolTip => LocationArrivalPresentation.ResolveDetail(
+    public string SharedLocationToolTip => IsLowConfidenceLocationHidden ? "对方仅共享已确认的位置。" : LocationArrivalPresentation.ResolveDetail(
         ArrivalPendingConfirmation,
         SharedPresence,
         ResolveSharedServerSession(),
@@ -132,4 +136,3 @@ public sealed record PlayerRow(
             : null;
     }
 }
-

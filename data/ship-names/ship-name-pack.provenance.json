@@ -1,6 +1,6 @@
 {
     "schemaVersion":  1,
-    "packRevision":  "2026-07-26.3",
+    "packRevision":  "2026-09-30.1",
     "coverage":  [
                      {
                          "selector":  "*",
@@ -12,6 +12,16 @@
                      }
                  ],
     "entryOverrides":  [
+                           {
+                               "runtimeId": "AEGS_Sabre_Raven_EX",
+                               "sourceType": "field-observation",
+                               "sourceName": "StarBridge maintainer field observation",
+                               "sourceReference": "Exact runtime identifier observed independently; approved display model Sabre Raven EX",
+                               "verifiedDate": "2026-09-30",
+                               "translator": "StarBridge maintainer approved display wording",
+                               "licenseOrPermission": "Exact runtime identifier independently observed; display name previously approved by the maintainer. No license claim is made for game identifiers or names.",
+                               "maintainer": "StarBridge contributors"
+                           },
                            {
                                "runtimeId":  "GLSN_Basher",
                                "sourceType":  "field-observation",

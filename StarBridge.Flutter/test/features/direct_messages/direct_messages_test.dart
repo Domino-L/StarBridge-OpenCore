@@ -40,6 +40,37 @@ class Pending implements DirectMessagesPort {
   Future<void> close() => events.close();
 }
 
+final class PresenceFixture implements DirectMessagesPort {
+  PresenceFixture(this.presence);
+  final String? presence;
+  final ExampleDirectMessages _base = ExampleDirectMessages();
+  @override
+  Stream<void> get invalidations => _base.invalidations;
+  @override
+  Future<List<Conversation>> directory() async => [
+    for (final row in await _base.directory())
+      Conversation(
+        row.ref,
+        row.name,
+        row.preview,
+        row.time,
+        row.unread,
+        row.state,
+        avatar: row.avatar,
+        conversationKey: row.conversationKey,
+        gameId: row.gameId,
+        presence: row.state == 'friend' ? presence : null,
+      ),
+  ];
+  @override
+  Future<DirectPage> history(String ref, {int before = 0, int after = 0}) =>
+      _base.history(ref, before: before, after: after);
+  @override
+  void cancel() => _base.cancel();
+  @override
+  Future<void> close() => _base.close();
+}
+
 Widget app(Locale locale, DirectMessagesPort Function() factory) {
   final base = fixtures.page(locale, UnavailableFriendsPort.new) as MaterialApp;
   return MaterialApp(
@@ -55,6 +86,92 @@ Widget app(Locale locale, DirectMessagesPort Function() factory) {
 }
 
 void main() {
+  testWidgets('confirmed sent hint clears after a short acknowledgement', (
+    tester,
+  ) async {
+    final module = DirectMessagesModule(ExampleDirectMessages());
+    addTearDown(module.dispose);
+    await module.refresh();
+    await module.open(module.rows.first);
+    module.editDraft('fixture');
+    await module.send();
+    expect(module.sendStatus, 'sent');
+    await tester.pump(const Duration(seconds: 4));
+    expect(module.sendStatus, isNull);
+  });
+  for (final entry in <String, String>{
+    'online': '在线',
+    'away': '暂离',
+    'inGame': '游戏中',
+    'offline': '离线',
+  }.entries) {
+    testWidgets('private chat shows authorized ${entry.key} on row and header', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(920, 700);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        app(const Locale('zh', 'CN'), () => PresenceFixture(entry.key)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(entry.value), findsOneWidget);
+      await tester.tap(find.text('示例好友  @Example'));
+      await tester.pumpAndSettle();
+      expect(find.text(entry.value), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+  testWidgets(
+    'wide chat keeps directory, searches locally and shows authorized status',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(920, 700);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        app(const Locale('zh', 'CN'), ExampleDirectMessages.new),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('在线'), findsOneWidget);
+      await tester.tap(find.text('示例好友  @Example'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('chat-search')), findsOneWidget);
+      expect(
+        find.widgetWithText(SelectableText, '这是会话历史示例 60'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-search')),
+        'unmatched',
+      );
+      await tester.pump();
+      expect(find.text('没有匹配的会话'), findsOneWidget);
+      expect(find.text('这是会话历史示例 60'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-search')),
+        'Example',
+      );
+      await tester.pump();
+      expect(find.text('没有匹配的会话'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  test(
+    'conversation status never promotes requests or unknown state to online',
+    () {
+      expect(conversationPresence('request_incoming', 'online'), isNull);
+      expect(conversationPresence('accepted', 'away'), isNull);
+      expect(conversationPresence('friend', 'inGame'), 'inGame');
+      expect(conversationPresence('friend', 'online'), 'online');
+      expect(conversationPresence('friend', 'away'), 'away');
+      expect(conversationPresence('friend', null), isNull);
+      expect(conversationPresence('friend', 'offline'), 'offline');
+    },
+  );
   test('opening friend supersedes background refresh without restoring a late list', () async {
     final port = Pending();
     final module = DirectMessagesModule(port);
@@ -71,9 +188,9 @@ void main() {
     await opening;
     port.directoryReply!.complete(const []);
     await refresh;
-    expect(module.selected, friend);
+    expect(module.selected!.ref, friend.ref);
     expect(module.messages, isNotEmpty);
-    expect(module.rows, [friend]);
+    expect(module.rows.map((row) => row.ref), [friend.ref]);
   });
   testWidgets('avatars render inline pixels and reject untrusted peer URLs', (
     tester,
@@ -197,25 +314,22 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(locale, ExampleDirectMessages.new));
       await tester.pumpAndSettle();
-      expect(find.text('示例好友 (Example)'), findsOneWidget);
-      await tester.tap(find.text('示例好友 (Example)'));
+      expect(find.text('示例好友  @Example'), findsOneWidget);
+      await tester.tap(find.text('示例好友  @Example'));
       await tester.pumpAndSettle();
       expect(find.text('这是会话历史示例 60'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
       expect(find.byType(ChatAvatar), findsWidgets);
       expect(tester.takeException(), isNull);
       await tester.tap(
-        find.widgetWithText(
-          TextButton,
-          AppStrings.resolve(locale).text('direct.backList'),
-        ),
+        find.byTooltip(AppStrings.resolve(locale).text('direct.backList')),
       );
       await tester.pumpAndSettle();
       await tester.tap(
         find.text(AppStrings.resolve(locale).text('direct.requests')),
       );
       await tester.pumpAndSettle();
-      expect(find.text('示例用户 (Example_Request)'), findsOneWidget);
+      expect(find.text('示例用户'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });
@@ -245,7 +359,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('示例好友 (Example)'));
+      await tester.tap(find.text('示例好友  @Example'));
       await tester.pumpAndSettle();
       if (Platform.environment['STARBRIDGE_CAPTURE_DIRECT'] == '1') {
         await tester.runAsync(() async {

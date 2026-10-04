@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 
 import 'overlay_preview_identity.dart';
+import 'overlay_preview_sources.dart';
+import 'overlay_scene_controller.dart';
 import 'overlay_workspace_preview_content.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -25,10 +27,16 @@ class OverlayWorkspaceInteractivePreview extends StatelessWidget {
   const OverlayWorkspaceInteractivePreview({
     required this.module,
     required this.editor,
+    this.selectionOnly = false,
+    this.background,
+    this.showGrid,
     super.key,
   });
   final OverlayWorkspaceModule module;
   final OverlayWorkspaceEditorState editor;
+  final bool selectionOnly;
+  final Widget? background;
+  final bool? showGrid;
   @override
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: module.projection,
@@ -39,7 +47,12 @@ class OverlayWorkspaceInteractivePreview extends StatelessWidget {
         settings: projection.settings!,
         controller: editor,
         previewIdentity: module.previewIdentity,
+        sources: projection.sources,
+        sourceScenes: module.sourceScenes,
         canvasOnly: true,
+        selectionOnly: selectionOnly,
+        background: background,
+        showGrid: showGrid,
         showHiddenModules: false,
         onSettingChanged: module.updateSetting,
         onEventNotificationPlacement: module.updateEventNotificationPlacement,
@@ -64,6 +77,8 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
     this.onEventNotificationGestureStart,
     this.onEventNotificationGestureEnd,
     this.previewIdentity,
+    this.sources,
+    this.sourceScenes,
     this.controller,
     this.fullScreen = false,
     this.fullscreenButton,
@@ -72,6 +87,9 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
     this.editorActions,
     this.canvasOnly = false,
     this.showHiddenModules = true,
+    this.selectionOnly = false,
+    this.background,
+    this.showGrid,
     super.key,
   });
 
@@ -85,6 +103,8 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
   final VoidCallback? onEventNotificationGestureStart;
   final VoidCallback? onEventNotificationGestureEnd;
   final ValueListenable<OverlayPreviewIdentity?>? previewIdentity;
+  final OverlayPresetSources? sources;
+  final ValueListenable<OverlaySceneState>? sourceScenes;
   final OverlayWorkspaceEditorState? controller;
   final bool fullScreen;
   final Widget? fullscreenButton;
@@ -93,6 +113,9 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
   final Widget? editorActions;
   final bool canvasOnly;
   final bool showHiddenModules;
+  final bool selectionOnly;
+  final Widget? background;
+  final bool? showGrid;
   final void Function(OverlayWorkspaceLayoutItem item, bool coalesce) onChanged;
 
   @override
@@ -182,6 +205,14 @@ class _OverlayWorkspaceLayoutWorkbenchState
 
   @override
   Widget build(BuildContext context) {
+    return OverlayPreviewSourceScope(
+      sources: widget.sources,
+      scenes: widget.sourceScenes,
+      child: Builder(builder: _buildContent),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final tokens = context.tokens;
     if (widget.fullScreen) _editor.fullscreenSurfaceSize = _surfaceSize;
     if (widget.canvasOnly) {
@@ -352,7 +383,9 @@ class _OverlayWorkspaceLayoutWorkbenchState
       ),
       child: Stack(
         children: [
-          if (_editor.showGrid)
+          if (widget.background != null)
+            Positioned.fill(child: IgnorePointer(child: widget.background!)),
+          if (widget.showGrid ?? _editor.showGrid)
             Positioned.fill(
               child: IgnorePointer(
                 child: CustomPaint(
@@ -373,6 +406,11 @@ class _OverlayWorkspaceLayoutWorkbenchState
                 (item) =>
                     !(_projectsSampleInformation &&
                         item.key == 'Chat' &&
+                        OverlayPreviewSourceScope.of(
+                              context,
+                              'Chat',
+                            )?.unavailable !=
+                            true &&
                         widget.settings['chatDisplayMode'] ==
                             'FullScreenBarrage'),
               )
@@ -385,6 +423,7 @@ class _OverlayWorkspaceLayoutWorkbenchState
                   width: rect.width * scaleX,
                   height: rect.height * scaleY,
                   child: _CanvasModule(
+                    selectionOnly: widget.selectionOnly,
                     key: Key(
                       widget.canvasOnly
                           ? 'overlay-runtime-preview-${item.key}'
@@ -411,6 +450,7 @@ class _OverlayWorkspaceLayoutWorkbenchState
               }),
           Positioned.fill(
             child: OverlayWorkspaceFixedPreviews(
+              selectionOnly: widget.selectionOnly,
               settings: widget.settings,
               chatTextOpacity:
                   widget.layout
@@ -422,16 +462,19 @@ class _OverlayWorkspaceLayoutWorkbenchState
               simulate: _projectsSampleInformation,
               eventNotificationSnapPixels: _editor.snapPixels,
               eventNotificationSmartSnap: _editor.smartSnap,
-              onEventNotificationPlacement: _editor.layoutLocked
+              onEventNotificationPlacement:
+                  _editor.layoutLocked || widget.selectionOnly
                   ? null
                   : widget.onEventNotificationPlacement,
-              onEventNotificationGestureStart: _editor.layoutLocked
+              onEventNotificationGestureStart:
+                  _editor.layoutLocked || widget.selectionOnly
                   ? null
                   : widget.onEventNotificationGestureStart,
-              onEventNotificationGestureEnd: _editor.layoutLocked
+              onEventNotificationGestureEnd:
+                  _editor.layoutLocked || widget.selectionOnly
                   ? null
                   : widget.onEventNotificationGestureEnd,
-              onSelected: widget.fullScreen
+              onSelected: widget.fullScreen || widget.selectionOnly
                   ? (group) {
                       _panelGroup = group;
                       _editor.change(() {
@@ -523,10 +566,12 @@ class _CanvasModule extends StatefulWidget {
     required this.onResizeStart,
     required this.onResize,
     required this.onResizeEnd,
+    this.selectionOnly = false,
     super.key,
   });
   final OverlayWorkspaceLayoutItem item;
   final bool selected, isVisible, simulate;
+  final bool selectionOnly;
   final OverlayWorkspaceSettings settings;
   final Size referenceSize;
   final OverlayPreviewIdentity? previewIdentity;
@@ -566,7 +611,9 @@ class _CanvasModuleState extends State<_CanvasModule> {
       button: true,
       child: LayoutBuilder(
         builder: (context, constraints) => MouseRegion(
-          cursor: item.isLocked
+          cursor: widget.selectionOnly
+              ? SystemMouseCursors.click
+              : item.isLocked
               ? SystemMouseCursors.basic
               : SystemMouseCursors.move,
           child: Listener(
@@ -577,7 +624,7 @@ class _CanvasModuleState extends State<_CanvasModule> {
                 return;
               }
               widget.onSelected();
-              if (item.isLocked) return;
+              if (item.isLocked || widget.selectionOnly) return;
               _pointer = event.pointer;
               _previous = event.position;
               _resizing =
@@ -590,7 +637,11 @@ class _CanvasModuleState extends State<_CanvasModule> {
               }
             },
             onPointerMove: (event) {
-              if (event.pointer != _pointer || item.isLocked) return;
+              if (event.pointer != _pointer ||
+                  item.isLocked ||
+                  widget.selectionOnly) {
+                return;
+              }
               final delta = event.position - _previous!;
               _previous = event.position;
               if (_resizing) {
@@ -649,7 +700,7 @@ class _CanvasModuleState extends State<_CanvasModule> {
                       style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ),
-                if (!item.isLocked)
+                if (!item.isLocked && !widget.selectionOnly)
                   Positioned(
                     right: 0,
                     bottom: 0,

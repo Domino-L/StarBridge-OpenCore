@@ -63,6 +63,67 @@ public sealed record OverlaySceneSnapshot(
     }
 }
 
+// Native presentation is independent for each module. A room member list must
+// never become the input for an organization overview or announcement receipt.
+internal sealed record OverlayModuleScene(OverlaySceneSnapshot Scene, OverlayCommandState Command,
+    IReadOnlyList<OverlayChatMessage> Chat, string? SourceLabel, bool Available, string? Identity)
+{
+    internal string? ResourceKey { get; init; }
+    internal string? EmptyMessage { get; init; }
+    internal IReadOnlyList<string>? ChatSourceKeys { get; init; }
+}
+
+// Status is presentation metadata, never an announcement, event or chat row.
+// In particular it cannot acquire a countdown, receipt or replay identity.
+internal sealed record OverlayModuleEmptyStates(string? Notice = null, string? Overview = null,
+    string? Members = null, string? Chat = null, string? Events = null)
+{
+    internal static readonly OverlayModuleEmptyStates Empty = new();
+    internal static OverlayModuleEmptyStates From(OverlayModulePresentation? modules) => modules is null ? Empty :
+        new(modules.Notice.EmptyMessage, modules.Overview.EmptyMessage, modules.Members.EmptyMessage,
+            modules.Chat.EmptyMessage, modules.Events.EmptyMessage);
+    internal static string? Message(OverlayResolvedSource source, string language)
+    {
+        if (source.Available || source.UnavailableReason == "module_hidden") return null;
+        var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        var traditional = language is "zh-Hant" or "zh-TW";
+        return source.Mode switch
+        {
+            OverlaySourceMode.Room => zh ? traditional ? "房間資訊暫不可用" : "房间信息暂不可用" : "Room information unavailable",
+            OverlaySourceMode.Community => zh ? traditional ? "此組織暫不可用" : "该组织暂不可用" : "Organization unavailable",
+            _ => zh ? traditional ? "資訊暫不可用" : "信息暂不可用" : "Information unavailable"
+        };
+    }
+}
+
+internal sealed record OverlayModuleSourceLabels(string? Notice = null, string? Overview = null,
+    string? Members = null, string? Chat = null, string? Events = null)
+{
+    internal static readonly OverlayModuleSourceLabels Empty = new();
+    internal static OverlayModuleSourceLabels From(OverlayModulePresentation? modules) => modules is null ? Empty :
+        new(modules.Notice.SourceLabel, modules.Overview.SourceLabel, modules.Members.SourceLabel,
+            modules.Chat.SourceLabel, modules.Events.SourceLabel);
+    internal static string Prefix(string title, string? label, bool deviceLocal) =>
+        deviceLocal || string.IsNullOrWhiteSpace(label) ? title : $"[{label}] {title}";
+}
+
+internal sealed record OverlayModulePresentation(OverlayModuleScene Notice, OverlayModuleScene Overview,
+    OverlayModuleScene Members, OverlayModuleScene Chat, OverlayModuleScene Events, string ScopeKey)
+{
+    // Lease renewal alone is not a visual change. The runtime still reschedules
+    // expiry even when it can avoid rebuilding the ViewModel and render state.
+    internal DateTimeOffset? NextValidationAt { get; init; }
+    internal bool HasSameContent(OverlayModulePresentation? other) => other is not null &&
+        ScopeKey == other.ScopeKey && Same(Notice, other.Notice) && Same(Overview, other.Overview) &&
+        Same(Members, other.Members) && Same(Chat, other.Chat) && Same(Events, other.Events);
+
+    private static bool Same(OverlayModuleScene left, OverlayModuleScene right) =>
+        left.Available == right.Available && left.Identity == right.Identity && left.ResourceKey == right.ResourceKey && left.SourceLabel == right.SourceLabel && left.EmptyMessage == right.EmptyMessage &&
+        (left.ChatSourceKeys ?? []).SequenceEqual(right.ChatSourceKeys ?? []) &&
+        left.Scene.HasContent == right.Scene.HasContent && left.Scene.Context == right.Scene.Context &&
+        left.Scene.Players.SequenceEqual(right.Scene.Players) && left.Command == right.Command && left.Chat.SequenceEqual(right.Chat);
+}
+
 public static partial class OverlaySceneResolver
 {
 
@@ -108,7 +169,7 @@ public static partial class OverlaySceneResolver
             SharedOnlineStatus: online ? "Online" : "Offline",
             SharedLiveStatus: liveStatus,
             SharedShip: ship,
-            SharedLocation: rawLocation);
+            SharedLocation: rawLocation) { LocationHiddenReason = member.LocationHiddenReason };
     }
 
     private static string FormatRoomLocation(string location)

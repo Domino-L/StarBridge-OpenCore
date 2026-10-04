@@ -8,6 +8,7 @@ import '../../localization/app_strings.dart';
 import '../shell_layout_mode.dart';
 import 'attention_badge.dart';
 import 'navigation_prefetch.dart';
+import '../../../design_system/components/coming_soon.dart';
 
 class ShellNavigationItem extends StatelessWidget {
   const ShellNavigationItem({
@@ -34,6 +35,11 @@ class ShellNavigationItem extends StatelessWidget {
     final tokens = context.tokens;
     final strings = AppStrings.of(context);
     final label = strings.text(descriptor.labelKey);
+    final comingSoon =
+        descriptor.availability == FeatureAvailability.comingSoon;
+    final accessibleLabel = comingSoon
+        ? '$label，${strings.text('deferredFeature.title')}'
+        : label;
     final icon = StarBridgeIcon(
       descriptor.icon,
       size: tokens.icons.medium,
@@ -85,6 +91,7 @@ class ShellNavigationItem extends StatelessWidget {
                     SizedBox(width: tokens.space.xs),
                     AttentionCount(count: value),
                   ],
+                  if (comingSoon) const ComingSoonBadge(),
                 ],
               ),
       ),
@@ -92,7 +99,7 @@ class ShellNavigationItem extends StatelessWidget {
     final item = Semantics(
       button: true,
       selected: selected,
-      label: label,
+      label: accessibleLabel,
       child: Material(
         color: selected
             ? tokens.surfaces.selected.fill
@@ -147,7 +154,7 @@ class ShellNavigationItem extends StatelessWidget {
     }
     return NavigationPrefetch(
       prepare: descriptor.prefetch,
-      child: Tooltip(message: label, child: keyboardReady),
+      child: Tooltip(message: accessibleLabel, child: keyboardReady),
     );
   }
 }

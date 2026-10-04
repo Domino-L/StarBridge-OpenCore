@@ -22,6 +22,8 @@ enum AccountIdentityState {
   unknown,
 }
 
+enum AccountScmBindingState { bound, unknown }
+
 enum AccountCompatibilityIdentityState {
   unavailable,
   unlinked,
@@ -127,16 +129,22 @@ final class AccountIdentityProjection {
     required this.state,
     required this.sensitiveWritesAllowed,
     this.authoritativeHandle,
+    this.detectedHandle,
+    this.scmBindingState = AccountScmBindingState.unknown,
   });
 
   const AccountIdentityProjection.unavailable()
     : state = AccountIdentityState.unavailable,
       sensitiveWritesAllowed = false,
-      authoritativeHandle = null;
+      authoritativeHandle = null,
+      detectedHandle = null,
+      scmBindingState = AccountScmBindingState.unknown;
 
   final AccountIdentityState state;
   final bool sensitiveWritesAllowed;
   final String? authoritativeHandle;
+  final String? detectedHandle;
+  final AccountScmBindingState scmBindingState;
 }
 
 @immutable

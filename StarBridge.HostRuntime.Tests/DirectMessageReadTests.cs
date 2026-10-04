@@ -20,17 +20,39 @@ internal static class DirectMessageReadTests
     { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => Task.FromResult(send(request)); }
     private static HttpResponseMessage Ok(object body) => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(body)) };
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
+    private static async Task ConversationPresence()
+    {
+        foreach (var state in new[] { "friend", "accepted", "request_incoming" })
+        foreach (var presence in new string?[] { "AppOnline", "InGame", "Away", "Offline", null })
+        {
+            using var reader = new FriendsReader(new Uri("https://relay.example.test"), new Handler(_ => Ok(new {
+                conversations = new[] { new { user = new { accountId = "fixture-peer", callsign = "Fixture", gameId = "Fixture",
+                    shared = new { presence, serverId = "never-forward-server", location = "never-forward-location" } },
+                    lastMessagePreview = "Synthetic", lastMessageAt = Now, unreadCount = 0, conversationState = state } },
+                totalUnread = 0, serverTime = Now
+            })));
+            var view = (ConversationsView)await reader.ReadChatAsync("fixture", Payload(new { schemaVersion = 1 }), default, "scope");
+            var expected = state == "friend" ? presence switch {
+                "AppOnline" => "online", "InGame" => "inGame", "Away" => "away", "Offline" => "offline", _ => null } : null;
+            Check(view.Conversations.Single().Presence == expected, "Only authorized friend coarse presence crosses chat projection");
+            var wire = JsonSerializer.Serialize(view);
+            Check(!wire.Contains("never-forward") && !wire.Contains("fixture-peer"), "Chat does not export game detail or internal account id");
+        }
+    }
+
     internal static async Task Paging()
     {
+        await ConversationPresence();
         await NotificationMetadata();
         await Receipts();
         await OpenFriend();
         await InvitationCards();
+        await RoomInvitationCards();
         var paths = new List<string>();
         using var reader = new FriendsReader(new Uri("https://relay.example.test"), new Handler(request => {
             Check(request.Method == HttpMethod.Get && request.Headers.Authorization?.Parameter == "token", "Only scoped reads");
             var path = request.RequestUri!.PathAndQuery; paths.Add(path);
-            if (path.Contains("conversations")) { Check(path.EndsWith("includePresence=false"), "No presence"); return Ok(Directory()); }
+            if (path.Contains("conversations")) { Check(path.EndsWith("includePresence=true"), "Request server-authorized presence"); return Ok(Directory()); }
             Check(path.Contains("targetAccountId=target-private") && path.EndsWith("limit=50"), "Resolved target, bounded page");
             return Ok(path.Contains("before=11") ? History(1, 10) : path.Contains("after=60") ? History(61, 62, 62) : History(11, 60));
         }));
@@ -103,6 +125,40 @@ internal static class DirectMessageReadTests
             Check(reads == (fault == "scope" ? 0 : 1), "Invalid account scope is rejected before card fetch.");
         }
     }
+    internal static async Task RoomInvitationCards()
+    {
+        foreach (var fault in new[] { "none", "short", "control", "title", "expiry", "scope" })
+        {
+            var reads = 0;
+            using var reader = new FriendsReader(new Uri("https://relay.example.test"), new Handler(request => {
+                Check(request.Method == HttpMethod.Get, "Invitation viewing is read-only.");
+                if (request.RequestUri!.AbsolutePath.EndsWith("conversations")) return Ok(Directory());
+                reads++;
+                return Ok(new {
+                    targetAccountId = "target-private", messages = new[] { new {
+                        sequence = 1, messageId = "room-card", senderAccountId = "target-private", recipientAccountId = "viewer-private",
+                        text = "", createdAt = Now,
+                        attachment = new { kind = "party_room_invitation", title = fault == "title" ? "" : "Fixture room",
+                            summary = "View before joining", roomInvitationId = fault switch { "short" => "abc", "control" => "invite/other", _ => "fixture-invitation" },
+                            expiresAt = fault == "expiry" ? "invalid" : Now.ToString("O"),
+                            ownerAccountId = "private-owner", overlayPresetPackage = "private-package" }
+                    } }, latestSequence = 1, oldestSequence = 1, hasOlder = false, canSend = true, conversationState = "friend"
+                });
+            }));
+            var directory = (ConversationsView)await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1 }), default, "a:1");
+            try {
+                var page = (DirectHistoryView)await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1, targetRef = directory.Conversations[0].TargetRef }), default, fault == "scope" ? "b:1" : "a:1");
+                Check(fault == "none", "Invalid room card was accepted: " + fault);
+                var json = JsonSerializer.Serialize(page);
+                Check(json.Contains("\"RoomInvitation\":{") && json.Contains("fixture-invitation") && json.Contains("Fixture room"), "Room invitation details must reach the actual bridge response.");
+                Check(!json.Contains("private-owner") && !json.Contains("private-package") && !json.Contains("target-private"), "No unrelated or account data exported.");
+            } catch (AccountBridgeHostException error) {
+                Check(fault != "none" && error.Code == (fault == "scope" ? "directMessages.target_changed" : "directMessages.data_invalid"), "Bounded room invitation validation.");
+            }
+            Check(reads == (fault == "scope" ? 0 : 1), "Scope denied before read.");
+        }
+    }
+
     private static async Task Receipts()
     {
         foreach (var fault in new[] { "none", "newMessage", "noHistory", "scope", "future", "ackTarget", "ackCursor", "403" }) {
@@ -178,9 +234,10 @@ internal static class DirectMessageReadTests
         try { await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1, targetRef = friend.ConversationKey }), default, "scope:1"); throw new Exception("Correlation key accepted as command reference."); }
         catch (AccountBridgeHostException) { }
         await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1, targetRef = friend.ChatTargetRef }), default, "scope:1");
-        await reader.ReadAsync("token", null, default, "scope:1");
-        try { await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1, targetRef = friend.ChatTargetRef }), default, "scope:1"); throw new Exception("Stale friend ref opened."); }
-        catch (AccountBridgeHostException e) { Check(e.Code == "directMessages.target_changed", "Refresh retires old friend references."); }
+        var refreshedFriend = (await reader.ReadAsync("token", null, default, "scope:1")).Friends.Single();
+        Check(refreshedFriend.ChatTargetRef == friend.ChatTargetRef && refreshedFriend.TargetRef != friend.TargetRef,
+            "Refresh replaces mutation references but preserves the same live friend's chat and viewport reference.");
+        await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1, targetRef = friend.ChatTargetRef }), default, "scope:1");
     }
     internal static async Task Guards()
     {

@@ -92,10 +92,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(Key('settings-entry-${entry.id}')), findsOneWidget);
         for (final action in settingsEntryActions[entry.id]!) {
-          final button = tester.widget<OutlinedButton>(
+          expect(
             find.byKey(Key('settings-action-${entry.id}-$action')),
+            findsNothing,
           );
-          expect(button.onPressed, isNull);
         }
         expect(find.byType(TextField), findsNothing);
         expect(find.byType(Switch), findsNothing);

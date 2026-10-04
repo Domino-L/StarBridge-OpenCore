@@ -3,12 +3,15 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
-import '../../design_system/styles/approved_appearance_thumbnail.dart';
+import 'overlay_workspace_appearance_entry.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_models.dart';
+import 'overlay_menu_trigger.dart';
 import 'overlay_workspace_module.dart';
+import 'overlay_scene_controller.dart';
+import 'overlay_preset_settings_dialog.dart';
 
 class OverlayWorkspacePresetBar extends StatefulWidget {
   const OverlayWorkspacePresetBar({
@@ -17,6 +20,10 @@ class OverlayWorkspacePresetBar extends StatefulWidget {
     required this.onImport,
     required this.onExport,
     required this.onOpenAppearance,
+    this.showLegacyScene = true,
+    this.compact = false,
+    this.sourceSelector,
+    this.scenes,
     super.key,
   });
 
@@ -25,6 +32,10 @@ class OverlayWorkspacePresetBar extends StatefulWidget {
   final VoidCallback onImport;
   final VoidCallback onExport;
   final VoidCallback onOpenAppearance;
+  final bool showLegacyScene;
+  final bool compact;
+  final Widget? sourceSelector;
+  final OverlaySceneController? scenes;
 
   @override
   State<OverlayWorkspacePresetBar> createState() =>
@@ -77,6 +88,124 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final snapshot = projection.snapshot!;
+    if (widget.compact) {
+      final active = _activePreset(snapshot);
+      final appearance = snapshot.appearances
+          .where((a) => a.id == projection.settings!['skin'])
+          .firstOrNull;
+      final name = Localizations.localeOf(context).languageCode == 'en'
+          ? appearance?.displayNameEn
+          : appearance?.displayNameZh;
+      return Wrap(
+        key: const Key('overlay-preset-toolbar'),
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 200,
+            child: InputDecorator(
+              decoration: InputDecoration(
+                isDense: true,
+                labelText: _copy(context, 'overlay.workspace.quickPresets'),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  key: ValueKey('overlay-preset-selector-${active.id}'),
+                  value: active.id,
+                  isDense: true,
+                  isExpanded: true,
+                  items: [
+                    for (final preset in snapshot.presets)
+                      DropdownMenuItem(
+                        value: preset.id,
+                        child: Text(
+                          preset.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    DropdownMenuItem(
+                      value: '__new__',
+                      child: Text(
+                        _copy(context, 'overlay.workspace.addPreset'),
+                      ),
+                    ),
+                  ],
+                  onChanged: projection.busy
+                      ? null
+                      : (id) {
+                          if (id == '__new__') {
+                            _createPreset(context);
+                          } else if (id != null) {
+                            _activatePreset(context, id);
+                          }
+                        },
+                ),
+              ),
+            ),
+          ),
+          Material(
+            type: MaterialType.transparency,
+            child: PopupMenuButton<_PresetAction>(
+              key: const Key('overlay-preset-manage'),
+              enabled: !projection.busy,
+              tooltip: _copy(context, 'overlay.workspace.managePresets'),
+              onSelected: (action) => _handleAction(context, action),
+              itemBuilder: (context) => [
+                if (snapshot.sourcePresetsEnabled && active.sources != null)
+                  PopupMenuItem(
+                    value: _PresetAction.settings,
+                    child: Text(
+                      _copy(context, 'overlay.source.presetSettings'),
+                    ),
+                  ),
+                _menuItem(context, _PresetAction.rename),
+                _menuItem(context, _PresetAction.copy),
+                _menuItem(context, _PresetAction.reset),
+                _menuItem(
+                  context,
+                  _PresetAction.delete,
+                  enabled: snapshot.presets.length > 1,
+                ),
+                const PopupMenuDivider(),
+                _menuItem(context, _PresetAction.import),
+                _menuItem(context, _PresetAction.export),
+              ],
+              child: OverlayMenuTrigger(
+                enabled: !projection.busy,
+                label: _copy(context, 'overlay.workspace.managePresets'),
+              ),
+            ),
+          ),
+          if (snapshot.sourcePresetsEnabled && active.sources != null)
+            OutlinedButton(
+              key: const Key('overlay-preset-settings-entry'),
+              onPressed: projection.busy ? null : () => _handleAction(context, _PresetAction.settings),
+              child: Text(_copy(context, 'overlay.source.presetSettings')),
+            ),
+          OutlinedButton(
+            key: const Key('overlay-appearance-center-entry'),
+            onPressed: onOpenAppearance,
+            child: Text(
+              '${_copy(context, 'overlay.workspace.appearance.current')} · ${name ?? _copy(context, 'overlay.workspace.appearance.unknown')}',
+            ),
+          ),
+          if (widget.sourceSelector != null) widget.sourceSelector!,
+          if (!projection.dirty)
+            Text(
+              _copy(context, 'overlay.workspace.savedShort'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (!projection.dirty && module.canRedo)
+            IconButton(
+              tooltip: _copy(context, 'overlay.workspace.redo'),
+              onPressed: projection.busy ? null : module.redo,
+              icon: const StarBridgeIcon(StarBridgeIconSemantic.redo),
+            ),
+        ],
+      );
+    }
     return StarBridgeSurface(
       role: SurfaceRole.panel,
       padding: EdgeInsets.all(tokens.space.md),
@@ -106,6 +235,7 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
                     padding: EdgeInsets.only(right: tokens.space.sm),
                     child: _QuickPresetCard(
                       preset: preset,
+                      showLegacyScene: widget.showLegacyScene,
                       selected: preset.id == snapshot.activePresetId,
                       enabled: !projection.busy,
                       onPressed: () => _activatePreset(context, preset.id),
@@ -192,7 +322,7 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
                   ),
                 ],
               );
-              final appearance = _AppearanceEntry(
+              final appearance = OverlayWorkspaceAppearanceEntry(
                 projection: projection,
                 onPressed: onOpenAppearance,
               );
@@ -276,6 +406,25 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
   Future<void> _handleAction(BuildContext context, _PresetAction action) async {
     final snapshot = projection.snapshot!;
     switch (action) {
+      case _PresetAction.settings:
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => OverlayPresetSettingsDialog(
+            module: module,
+            preset: _activePreset(snapshot),
+            scenes: widget.scenes,
+          ),
+        );
+        return;
+      case _PresetAction.rename:
+        await _nameAction(
+          context,
+          _copy(context, 'overlay.workspace.renameTitle'),
+          (name) => module.renamePreset(snapshot.activePresetId!, name),
+          initialName: _activePreset(snapshot).name,
+        );
+        return;
       case _PresetAction.copy:
         await _nameAction(
           context,
@@ -311,10 +460,11 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
   static Future<void> _nameAction(
     BuildContext context,
     String title,
-    Future<bool> Function(String name) action,
-  ) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
+    Future<bool> Function(String name) action, {
+    String initialName = '',
+  }) async {
+    final controller = TextEditingController(text: initialName);
+    final route = DialogRoute<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
@@ -338,6 +488,8 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
         ],
       ),
     );
+    final name = await Navigator.of(context, rootNavigator: true).push(route);
+    await route.completed;
     controller.dispose();
     if (name != null && name.trim().isNotEmpty) await action(name.trim());
   }
@@ -370,96 +522,7 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
   );
 }
 
-class _AppearanceEntry extends StatelessWidget {
-  const _AppearanceEntry({required this.projection, required this.onPressed});
-
-  final OverlayWorkspaceProjection projection;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final snapshot = projection.snapshot!;
-    final skin = projection.settings!['skin'] as String;
-    final appearance = snapshot.appearances
-        .cast<OverlayWorkspaceAppearance?>()
-        .firstWhere(
-          (entry) => entry?.id == skin,
-          orElse: () =>
-              snapshot.appearances.isEmpty ? null : snapshot.appearances.first,
-        );
-    final locale = Localizations.localeOf(context);
-    final english = locale.languageCode == 'en';
-    final name = appearance == null
-        ? _copy(context, 'overlay.workspace.appearance.unknown')
-        : english
-        ? appearance.displayNameEn
-        : appearance.displayNameZh;
-    final status = appearance?.isAvailable == false
-        ? _copy(context, 'overlay.workspace.appearance.requiresQualification')
-        : _copy(context, 'overlay.workspace.appearance.available');
-    final statusColor = appearance?.isAvailable == false
-        ? tokens.colors.warning
-        : tokens.colors.success;
-    return SizedBox(
-      height: tokens.density.controlHeight + tokens.space.sm,
-      child: Material(
-        color: tokens.surfaces.ground.fill,
-        shape: RoundedRectangleBorder(
-          side: BorderSide(color: tokens.surfaces.panel.border),
-          borderRadius: tokens.shape.small,
-        ),
-        child: InkWell(
-          key: const Key('overlay-appearance-center-entry'),
-          onTap: onPressed,
-          borderRadius: tokens.shape.small,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: tokens.space.sm),
-            child: Row(
-              children: [
-                ApprovedAppearanceThumbnail(skinId: skin),
-                SizedBox(width: tokens.space.sm),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _copy(context, 'overlay.workspace.appearance.current'),
-                        style: Theme.of(context).textTheme.bodySmall
-                            ?.copyWith(color: tokens.colors.textSecondary),
-                      ),
-                      Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(width: tokens.space.sm),
-                Text(
-                  status,
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: statusColor),
-                ),
-                SizedBox(width: tokens.space.xs),
-                StarBridgeIcon(
-                  StarBridgeIconSemantic.forward,
-                  size: tokens.icons.small,
-                  color: tokens.colors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-enum _PresetAction { copy, reset, delete, import, export }
+enum _PresetAction { settings, rename, copy, reset, delete, import, export }
 
 class _PresetNameEditor extends StatelessWidget {
   const _PresetNameEditor({
@@ -591,12 +654,14 @@ class _AddPresetCard extends StatelessWidget {
 class _QuickPresetCard extends StatelessWidget {
   const _QuickPresetCard({
     required this.preset,
+    required this.showLegacyScene,
     required this.selected,
     required this.enabled,
     required this.onPressed,
   });
 
   final OverlayWorkspacePreset preset;
+  final bool showLegacyScene;
   final bool selected;
   final bool enabled;
   final VoidCallback onPressed;
@@ -649,11 +714,12 @@ class _QuickPresetCard extends StatelessWidget {
                     preset.name,
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
-                  Text(
-                    _copy(context, 'overlay.workspace.option.$scene'),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: tokens.colors.textSecondary),
-                  ),
+                  if (showLegacyScene)
+                    Text(
+                      _copy(context, 'overlay.workspace.option.$scene'),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: tokens.colors.textSecondary),
+                    ),
                 ],
               ),
             ],

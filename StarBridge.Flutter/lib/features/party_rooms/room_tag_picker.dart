@@ -73,6 +73,7 @@ Future<Set<String>?> showRoomTagPicker(
   bool filter = false,
 }) => showDialog<Set<String>>(
   context: context,
+  useRootNavigator: false,
   builder: (_) =>
       _TagPicker(options: options, selected: selected, filter: filter),
 );

@@ -7,6 +7,9 @@ import '../../platform/window/menu_preview_window_port.dart';
 
 import 'overlay_preview_identity.dart';
 import 'overlay_scene_controller.dart';
+import 'overlay_preset_auto_switch.dart';
+import 'overlay_source_selection_coordinator.dart';
+import 'overlay_roster_editor.dart';
 import 'overlay_settings_models.dart';
 import 'overlay_settings_port.dart';
 import 'overlay_workspace_module.dart';
@@ -20,6 +23,7 @@ final class OverlaySettingsModule {
         const UnavailableOverlayEditorWindow(),
     ValueListenable<OverlayPreviewIdentity?>? previewIdentity,
     this.scenes,
+    this.roster,
     this.menuPreview,
   }) : workspace = workspacePort == null
            ? null
@@ -27,11 +31,24 @@ final class OverlaySettingsModule {
                workspacePort,
                editorWindow: editorWindow,
                previewIdentity: previewIdentity,
-             );
+               sourceScenes: scenes?.projection,
+             ) {
+    if (workspace != null && scenes != null) {
+      _sourceSelection = OverlaySourceSelectionCoordinator(workspace!, scenes!);
+      _presetAutoSwitch = OverlayPresetAutoSwitch(
+        workspace!,
+        scenes!.projection,
+      );
+    }
+  }
+
+  OverlayPresetAutoSwitch? _presetAutoSwitch;
+  OverlaySourceSelectionCoordinator? _sourceSelection;
 
   final OverlaySettingsPort _port;
   final MenuPreviewWindowPort? menuPreview;
   final OverlaySceneController? scenes;
+  final OverlayRosterPort? roster;
   final OverlayWorkspaceModule? workspace;
   final ValueNotifier<OverlaySettingsProjection> _projection = ValueNotifier(
     const OverlaySettingsProjection.loading(),
@@ -131,6 +148,8 @@ final class OverlaySettingsModule {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _presetAutoSwitch?.dispose();
+    _sourceSelection?.dispose();
     if (menuPreview case final MenuLiveWindowPort menu) menu.dispose();
     _refreshTimer?.cancel();
     _projection.dispose();

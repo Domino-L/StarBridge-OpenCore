@@ -5,7 +5,11 @@ import 'package:flutter/services.dart';
 
 import 'menu_bridge_style.dart';
 import 'menu_organization_view.dart';
+import 'menu_room_view.dart';
+import 'menu_room_lobby_view.dart';
 import 'menu_loading.dart';
+import 'menu_channel_outbox.dart';
+import 'menu_room_preset_view.dart';
 
 typedef MenuFeatureButton = ({
   String key,
@@ -32,15 +36,21 @@ final class MenuFeatureView {
     this.rows = const [],
     this.buttons = const [],
     this.organization,
+    this.room,
+    this.lobby,
     this.chat,
     this.channels = const [],
+    this.rejectedAction,
   });
   final String state, title, notice, scope;
   final bool busy;
   final bool refreshing;
+  final String? rejectedAction;
   final List<MenuFeatureRow> rows;
   final List<MenuFeatureButton> buttons;
   final MenuOrganizationView? organization;
+  final MenuRoomView? room;
+  final MenuRoomLobbyView? lobby;
   final MenuChannelView? chat;
   final List<MenuFeatureRow> channels;
   static MenuFeatureView parse(Object? value) {
@@ -113,10 +123,23 @@ final class MenuFeatureView {
         busy: value['busy'] == true,
         refreshing: value['refreshing'] == true,
         scope: text(value, 'scope', 32),
+        rejectedAction: MenuChannelOutbox.action(value['rejectedAction']),
         buttons: buttons(value['buttons']),
+        room: value['room'] == null ? null : MenuRoomView.parse(value['room']),
+        lobby: value['lobby'] == null
+            ? null
+            : MenuRoomLobbyView.parse(
+                value['lobby'],
+                busy: value['busy'] == true || value['refreshing'] == true,
+                rejectedAction: value['rejectedAction'] as String?,
+              ),
         organization: value['organization'] == null
             ? null
-            : MenuOrganizationView.parse(value['organization'], rawRows.length),
+            : MenuOrganizationView.parse(
+                value['organization'],
+                rawRows.length,
+                keys,
+              ),
         chat: value['chat'] == null
             ? null
             : MenuChannelView.parse(value['chat'], rawRows.length),
@@ -136,7 +159,12 @@ final class MenuFeatureView {
         }).toList(),
       );
     } on Object {
-      return const MenuFeatureView('unavailable');
+      return MenuFeatureView(
+        'unavailable',
+        notice: value is Map && value['organization'] != null
+            ? '组织显示数据校验失败，请刷新重试。'
+            : '',
+      );
     }
   }
 
@@ -178,6 +206,10 @@ final class MenuChannelView {
     this.receipts, {
     this.availability = 'denied',
     this.profiles = const {},
+    this.systemMessages = const {},
+    this.outbox,
+    this.ownAvatar,
+    this.preset,
   });
   final String status;
   final String availability;
@@ -186,6 +218,10 @@ final class MenuChannelView {
   messages;
   final Map<int, String> receipts;
   final Map<int, String> profiles;
+  final Set<int> systemMessages;
+  final MenuChannelOutbox? outbox;
+  final String? ownAvatar;
+  final MenuRoomPresetView? preset;
   static MenuChannelView parse(Object? raw, int count) {
     if (raw is! Map ||
         !const {
@@ -200,6 +236,7 @@ final class MenuChannelView {
         (raw['messages'] as List).length != count) {
       throw const FormatException();
     }
+    final systemMessages = <int>{};
     final messages =
         <({bool self, DateTime time, String role, int? roleColor})>[];
     for (final row in raw['messages'] as List) {
@@ -207,6 +244,11 @@ final class MenuChannelView {
         throw const FormatException();
       }
       final role = row['role'] ?? '', color = row['roleColor'];
+      final kind = row['kind'] ?? 'player';
+      if (!const {'player', 'system'}.contains(kind)) {
+        throw const FormatException();
+      }
+      if (kind == 'system') systemMessages.add(messages.length);
       if (role is! String ||
           role.length > 128 ||
           color != null &&
@@ -231,6 +273,7 @@ final class MenuChannelView {
           index < 0 ||
           index >= count ||
           messages[index].self ||
+          systemMessages.contains(index) ||
           entry.value is! String ||
           !RegExp(r'^a[1-9][0-9]{0,13}$').hasMatch(entry.value as String)) {
         throw const FormatException();
@@ -259,6 +302,12 @@ final class MenuChannelView {
       messages,
       receipts,
       profiles: profiles,
+      systemMessages: systemMessages,
+      outbox: MenuChannelOutbox.parse(raw),
+      preset: MenuRoomPresetView.parse(raw['preset']),
+      ownAvatar: raw['ownAvatar'] == null
+          ? null
+          : MenuFeatureView._avatar(raw['ownAvatar']),
       availability:
           const {'ready', 'denied', 'checking'}.contains(raw['availability'])
           ? raw['availability'] as String
@@ -363,10 +412,14 @@ class MenuFeatureAction extends StatefulWidget {
     required this.action,
     required this.enabled,
     required this.onAction,
+    this.outlined = false,
+    this.buttonStyle,
   });
   final MenuFeatureButton action;
   final bool enabled;
   final void Function(String, String) onAction;
+  final bool outlined;
+  final ButtonStyle? buttonStyle;
   @override
   State<MenuFeatureAction> createState() => _FeatureActionState();
 }
@@ -374,6 +427,17 @@ class MenuFeatureAction extends StatefulWidget {
 class _FeatureActionState extends State<MenuFeatureAction> {
   final input = TextEditingController();
   String? pending;
+  Widget _button({
+    required String label,
+    required VoidCallback? onPressed,
+    required Widget child,
+  }) => widget.outlined
+      ? OutlinedButton(
+          onPressed: onPressed,
+          style: widget.buttonStyle,
+          child: child,
+        )
+      : BridgeMenuAction(label: label, onPressed: onPressed, child: child);
   @override
   void didUpdateWidget(MenuFeatureAction oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -390,9 +454,14 @@ class _FeatureActionState extends State<MenuFeatureAction> {
   Widget build(BuildContext context) {
     final action = widget.action;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: widget.outlined
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(vertical: 4),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: widget.outlined ? MainAxisSize.min : MainAxisSize.max,
+        crossAxisAlignment: widget.outlined
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.stretch,
         children: [
           if (action.input != null)
             TextField(
@@ -425,7 +494,7 @@ class _FeatureActionState extends State<MenuFeatureAction> {
               ],
             ),
           ] else
-            BridgeMenuAction(
+            _button(
               label: action.label,
               onPressed: !widget.enabled
                   ? null

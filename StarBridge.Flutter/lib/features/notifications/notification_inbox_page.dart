@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/routing/open_destination_intent.dart';
+import '../../platform/window/native_viewport_visibility.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'notification_inbox_controller.dart';
 
@@ -17,6 +20,56 @@ class NotificationInboxPage extends StatefulWidget {
 }
 
 class _NotificationInboxPageState extends State<NotificationInboxPage> {
+  final _viewport = GlobalKey();
+  final _rows = <String, GlobalKey>{};
+  final _attempted = <InboxItem>{};
+  Timer? _readTimer;
+
+  // Both the main and detached notification views use this visibility gate.
+  // Background fetching and offscreen cache construction are not reading.
+  void _readVisible() {
+    if (!mounted ||
+        !NativeViewportScope.isActive(context) ||
+        !TickerMode.valuesOf(context).enabled ||
+        ModalRoute.of(context)?.isCurrent == false ||
+        (WidgetsBinding.instance.lifecycleState != null &&
+            WidgetsBinding.instance.lifecycleState !=
+                AppLifecycleState.resumed)) {
+      return;
+    }
+    final c = widget.controller;
+    if (!c.ready || c.busy || c.error != null) return;
+    final viewport = _viewport.currentContext?.findRenderObject();
+    if (viewport is! RenderBox || !viewport.hasSize) return;
+    final bounds = viewport.localToGlobal(Offset.zero) & viewport.size;
+    final visible = <InboxItem>[];
+    for (final item in c.items) {
+      if (item.read || _attempted.contains(item)) continue;
+      final row = _rows[item.reference]?.currentContext?.findRenderObject();
+      if (row is! RenderBox || !row.attached || !row.hasSize) continue;
+      final rect = row.localToGlobal(Offset.zero) & row.size;
+      // Require meaningful content exposure, not a one-pixel edge intersection.
+      final overlap = bounds.intersect(rect);
+      if (overlap.width > 0 && overlap.height >= 48) visible.add(item);
+    }
+    if (visible.isEmpty) return;
+    _attempted.addAll(visible);
+    unawaited(c.markRead(visible));
+  }
+
+  @override
+  void dispose() {
+    _readTimer?.cancel();
+    super.dispose();
+  }
+
+  void _readClicked(InboxItem item) {
+    final controller = widget.controller;
+    if (!item.read && !controller.busy && _attempted.add(item)) {
+      unawaited(controller.markRead([item]));
+    }
+  }
+
   String filter = 'all', category = 'all';
   String t(String cn, String tw, String en) {
     final locale = Localizations.localeOf(context);
@@ -31,6 +84,10 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
   void initState() {
     super.initState();
     widget.controller.refresh(reuseFresh: true);
+    _readTimer = Timer.periodic(
+      const Duration(milliseconds: 600),
+      (_) => _readVisible(),
+    );
   }
 
   String label(String category) => switch (category) {
@@ -45,7 +102,8 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
   String? route(InboxItem item) => switch (item.target) {
     'friend_requests' => '/friends',
     'fleet_applications' => '/communities',
-    'room_invitations' || 'room_applications' => '/rooms',
+    'room_invitations' => '/rooms/invitations',
+    'room_applications' => '/rooms',
     'overlay_settings' => '/overlay',
     _ => null,
   };
@@ -54,6 +112,9 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
     listenable: widget.controller,
     builder: (context, _) {
       final c = widget.controller;
+      _attempted.removeWhere((item) => !c.items.contains(item));
+      final references = c.items.map((item) => item.reference).toSet();
+      _rows.removeWhere((reference, _) => !references.contains(reference));
       final colors = context.tokens.colors;
       final visible = c.items
           .where(
@@ -67,6 +128,7 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
           )
           .toList();
       return ListView(
+        key: _viewport,
         padding: const EdgeInsets.all(24),
         children: [
           Wrap(
@@ -96,14 +158,13 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
                 spacing: 8,
                 children: [
                   TextButton(
-                    onPressed: c.busy ? null : c.refresh,
-                    child: Text(t('刷新', '重新整理', 'Refresh')),
-                  ),
-                  OutlinedButton(
-                    onPressed: c.busy || !visible.any((x) => !x.read)
+                    onPressed: c.busy
                         ? null
-                        : () => c.markRead(visible),
-                    child: Text(t('当前列表标为已读', '目前清單標為已讀', 'Mark list as read')),
+                        : () {
+                            _attempted.clear();
+                            c.refresh();
+                          },
+                    child: Text(t('刷新', '重新整理', 'Refresh')),
                   ),
                 ],
               ),
@@ -176,6 +237,7 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
             ),
           for (final item in visible)
             Card.outlined(
+              key: _rows.putIfAbsent(item.reference, GlobalKey.new),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -217,26 +279,27 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
                     Wrap(
                       spacing: 12,
                       children: [
-                        if (!item.read)
-                          TextButton(
-                            onPressed: c.busy ? null : () => c.markRead([item]),
-                            child: Text(t('标为已读', '標為已讀', 'Mark as read')),
-                          ),
                         if (item.available &&
                             item.target == 'account_safety' &&
                             widget.openSafety != null)
                           OutlinedButton(
-                            onPressed: widget.openSafety,
+                            onPressed: () {
+                              _readClicked(item);
+                              widget.openSafety?.call();
+                            },
                             child: Text(
                               t('查看账号状态', '查看帳號狀態', 'View account status'),
                             ),
                           ),
                         if (item.available && route(item) != null)
                           OutlinedButton(
-                            onPressed: () => Actions.invoke(
-                              context,
-                              OpenDestinationIntent(route(item)!),
-                            ),
+                            onPressed: () {
+                              _readClicked(item);
+                              Actions.invoke(
+                                context,
+                                OpenDestinationIntent(route(item)!),
+                              );
+                            },
                             child: Text(
                               t('前往相关页面', '前往相關頁面', 'Open related page'),
                             ),

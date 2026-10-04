@@ -48,7 +48,10 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
   @override
   void didUpdateWidget(MenuCommsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.view.state == 'idle' || widget.view.state == 'restricted') {
+    if (widget.view.state == 'idle' ||
+        widget.view.state == 'restricted' ||
+        (widget.view.profileKey != null &&
+            widget.view.profileKey != oldWidget.view.profileKey)) {
       _query = '';
       _group = 'all';
     }

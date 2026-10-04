@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../design_system/icons/starbridge_icon.dart';
-import '../../design_system/icons/icon_semantic.dart';
+import 'room_preset_choices.dart';
 
 import 'room_action_dialogs.dart';
 import 'room_chat_module.dart';
 import 'room_preset_port.dart';
+import '../overlay_settings/overlay_preset_inspection_port.dart';
+import '../overlay_settings/overlay_preset_import_preview.dart';
 
 Future<void> roomPresetDialog(
   BuildContext context,
@@ -81,9 +82,41 @@ class _PresetDialogState extends State<_PresetDialog> {
       _busy = true;
       _error = null;
     });
+    var writeStarted = false;
     try {
       final String? result;
       if (widget.message case final message?) {
+        final inspector = widget.module.presets;
+        if (inspector is OverlayPresetInspectionPort) {
+          final preview = await (inspector as OverlayPresetInspectionPort)
+              .inspectPreset(
+                message.attachment!['overlayPresetPackage'] as String,
+                catalog.revision,
+              );
+          if (!mounted ||
+              _closing ||
+              !widget.module.isCurrentContext(_context)) {
+            return;
+          }
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (_) => OverlayPresetImportPreview(
+              name: preview.name,
+              settings: preview.settings,
+              layout: preview.layout,
+              currentSettings: null,
+              sources: preview.sources,
+              removedOrganizationBindings: preview.removedOrganizationBindings,
+            ),
+          );
+          if (!mounted ||
+              _closing ||
+              !widget.module.isCurrentContext(_context) ||
+              confirmed != true) {
+            return;
+          }
+        }
+        writeStarted = true;
         result = await widget.module.importPreset(
           message,
           catalog.revision,
@@ -108,7 +141,7 @@ class _PresetDialogState extends State<_PresetDialog> {
     } on Object {
       if (mounted) {
         setState(
-          () => _error = widget.message == null
+          () => _error = widget.message == null || !writeStarted
               ? 'unavailable'
               : 'presetImportUnknown',
         );
@@ -174,14 +207,11 @@ class _PresetDialogState extends State<_PresetDialog> {
                     ] else if (catalog.presets.isEmpty)
                       Text(t('noPresets'))
                     else
-                      for (final choice in catalog.presets)
-                        ListTile(
-                          title: Text(choice.name),
-                          trailing: const StarBridgeIcon(
-                            StarBridgeIconSemantic.forward,
-                          ),
-                          onTap: _busy ? null : () => _act(catalog, choice),
-                        ),
+                      RoomPresetChoices(
+                        choices: catalog.presets,
+                        enabled: !_busy,
+                        onSelected: (choice) => _act(catalog, choice),
+                      ),
                     if (_busy) const LinearProgressIndicator(),
                     if (_error != null) Text(t(_error!)),
                   ],

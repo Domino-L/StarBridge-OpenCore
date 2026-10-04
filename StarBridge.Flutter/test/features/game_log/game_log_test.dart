@@ -53,7 +53,7 @@ class Harness {
       selection = 'automatic';
   final channels = <String>['LIVE', 'PTU'];
   final verifiedChannels = <String>[];
-  String? handle, path, error, observedAtUtc;
+  String? handle, recentHandle, path, error, observedAtUtc;
   bool hold = false, wrongOwner = false, enabled = false;
   int changes = 0;
   BridgeEnvelope? held;
@@ -103,6 +103,7 @@ class Harness {
     if (r.name == 'gameLog.stop') {
       enabled = false;
       handle = null;
+      recentHandle = null;
       match = 'unknown';
       state = 'stopped';
     }
@@ -137,6 +138,7 @@ class Harness {
                   'observedAtUtc': observedAtUtc,
                   'path': path,
                   'handle': handle,
+                  'recentHandle': recentHandle,
                   'expectedHandle': 'Pilot_A',
                   'match': match,
                   'enabled': enabled,
@@ -190,6 +192,44 @@ class Harness {
 }
 
 void main() {
+  testWidgets(
+    'offline recent identity refreshes policy without live presence',
+    (tester) async {
+      final h = Harness()
+        ..enabled = true
+        ..state = 'notRunning'
+        ..recentHandle = 'Pilot-B';
+      await tester.pump();
+      await tester.pumpWidget(
+        support.app(GameLogPanel(controller: h.controller)),
+      );
+      await tester.pumpAndSettle();
+      expect(h.controller.value.recentHandle, 'Pilot-B');
+      expect(h.controller.value.handle, isNull);
+      expect(h.controller.value.sessionState, 'unavailable');
+      expect(h.controller.value.serverState, 'unknown');
+      expect(h.changes, 1);
+      expect(find.textContaining('非在线状态'), findsOneWidget);
+      expect(find.textContaining('Pilot-B'), findsOneWidget);
+      final unchanged = h.controller.run();
+      await tester.pump();
+      await unchanged;
+      expect(h.changes, 1);
+      h.recentHandle = 'Pilot-C';
+      final changed = h.controller.run();
+      await tester.pump();
+      await changed;
+      expect(h.changes, 2);
+      final stop = h.controller.run(command: 'stop');
+      await tester.pump();
+      await stop;
+      expect(h.controller.value.recentHandle, isNull);
+      expect(h.changes, 3);
+      await tester.pumpWidget(const SizedBox());
+      await h.close(tester);
+    },
+  );
+
   testWidgets(
     'last check uses Host time and survives a failed background read',
     (tester) async {

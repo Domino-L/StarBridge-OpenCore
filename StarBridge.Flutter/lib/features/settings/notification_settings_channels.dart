@@ -327,6 +327,20 @@ class NotificationPreviewPanel extends StatelessWidget {
                       .replaceAll('{applications}', '2'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
+                if (settings.localInAppOnly &&
+                    settings.previewMode !=
+                        NotificationPreviewMode.hiddenDetails) ...[
+                  SizedBox(height: tokens.space.xs),
+                  Text(
+                    AppStrings.of(context).text(
+                      settings.previewMode ==
+                              NotificationPreviewMode.fullContent
+                          ? 'settings.notification.local.directExample.full'
+                          : 'settings.notification.local.directExample.source',
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ],
             ),
           ),

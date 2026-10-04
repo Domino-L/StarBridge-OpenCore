@@ -15,6 +15,7 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
     required this.projection,
     required this.onAction,
     this.showPreview = false,
+    this.compact = false,
     this.fullscreenButton,
     this.editorCanvas,
     super.key,
@@ -23,6 +24,7 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
   final OverlayWorkspaceProjection projection;
   final VoidCallback onAction;
   final bool showPreview;
+  final bool compact;
   final Widget? fullscreenButton;
   final Widget? editorCanvas;
 
@@ -47,23 +49,63 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
           }
         : switch (runtime.windowState) {
             'open' => 'overlay.runtime.open',
+            'opening' => 'overlay.runtime.opening',
             'failed' => 'overlay.runtime.failed',
             'unavailable' => 'overlay.runtime.unavailable',
             _ => 'overlay.runtime.closed',
           };
     final descriptionKey = switch (runtime.windowState) {
       'open' => 'overlay.runtime.openDescription',
+      'opening' => 'overlay.runtime.preparingDescription',
       'failed' => _runtimeFailureDescription(runtime.failureCode),
       'unavailable' => _runtimeFailureDescription(runtime.failureCode),
       _ => 'overlay.runtime.closedDescription',
     };
     final actionKey = switch (runtime.windowState) {
       'open' => 'overlay.runtime.closeAction',
+      'opening' => 'overlay.runtime.cancelOpenAction',
       'failed' => 'overlay.runtime.retryAction',
       'unavailable' => 'overlay.runtime.checkAction',
       _ => 'overlay.runtime.openAction',
     };
 
+    if (compact) {
+      return Row(
+        key: const Key('overlay-runtime-card'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message:
+                '${_copy(context, descriptionKey)}\n${_copy(context, 'overlay.runtime.hotkey.${runtime.hotkeyState}')}\n${_copy(context, 'overlay.runtime.follow.${runtime.followGameState}')}'
+                '${runtime.usedFallbackSkin ? '\n${_copy(context, 'overlay.runtime.skinFallback')}' : ''}',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _copy(context, titleKey),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton(
+            key: const Key('overlay-runtime-action'),
+            onPressed: projection.busy ? null : onAction,
+            child: Text(_copy(context, actionKey)),
+          ),
+        ],
+      );
+    }
     return StarBridgeSurface(
       key: const Key('overlay-runtime-card'),
       role: SurfaceRole.panel,
@@ -83,7 +125,9 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
                       color: accent.withValues(alpha: 0.12),
                       borderRadius: tokens.shape.small,
                     ),
-                    child: projection.runtimeBusy
+                    child:
+                        projection.runtimeBusy ||
+                            runtime.windowState == 'opening'
                         ? SizedBox.square(
                             dimension: 18,
                             child: CircularProgressIndicator(

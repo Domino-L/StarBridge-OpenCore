@@ -14,10 +14,14 @@ import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart'
 
 import 'desktop_notification_test.dart' show DesktopFake;
 import '../friends/social_layout_test.dart' show app, loadFonts;
+
 import 'package:starbridge_flutter/features/direct_messages/direct_messages_page.dart';
 import 'package:starbridge_flutter/features/communities/communities_page.dart';
+import 'package:starbridge_flutter/app/routing/open_destination_intent.dart';
+import 'package:starbridge_flutter/features/party_rooms/party_rooms_page.dart';
 
-class _DirectDesktop extends _Desktop implements DesktopNotificationDestinationPort {
+class _DirectDesktop extends _Desktop
+    implements DesktopNotificationDestinationPort {
   String destination = 'directMessages';
   @override
   Future<String?> consumeDestination(DesktopReminderActivation value) async =>
@@ -64,15 +68,71 @@ class _Rooms implements PartyRoomsPort {
 
 void main() {
   setUpAll(loadFonts);
-  testWidgets('organization notification opens directory without room reads', (tester) async {
+  testWidgets(
+    'inbox destination opens actual room invitations without joining',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rooms = _Rooms();
+      final navigation = ValueNotifier<OpenDestinationIntent?>(null);
+      addTearDown(navigation.dispose);
+      final composition = AppComposition.forTest(
+        windowChrome: InMemoryWindowChrome(),
+        partyRoomsPort: rooms,
+      );
+      await tester.pumpWidget(
+        StarBridgeApp(composition: composition, navigationRequests: navigation),
+      );
+      await tester.pumpAndSettle();
+      navigation.value = const OpenDestinationIntent('/rooms/invitations');
+      await tester.pumpAndSettle();
+      expect(find.byType(PartyRoomsPage), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(rooms.reads, greaterThan(0));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets('friend notification opens action inbox without room reads', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final desktop = _DirectDesktop()..destination = 'notificationInbox';
+    final rooms = _Rooms();
+    final composition = AppComposition.forTest(
+      windowChrome: InMemoryWindowChrome(),
+      desktopNotifications: desktop,
+      partyRoomsPort: rooms,
+    );
+    await tester.pumpWidget(StarBridgeApp(composition: composition));
+    await tester.pumpAndSettle();
+    final reads = rooms.reads;
+    desktop.clicks.add(DesktopReminderActivation('d' * 32, 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(NotificationInboxPage), findsOneWidget);
+    expect(find.byType(DirectMessagesPage), findsNothing);
+    expect(rooms.reads, reads);
+    await tester.pumpWidget(const SizedBox());
+    await desktop.clicks.close();
+  });
+  testWidgets('organization notification opens directory without room reads', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final desktop = _DirectDesktop()..destination = 'communities';
     final rooms = _Rooms();
-    final composition = AppComposition.forTest(windowChrome: InMemoryWindowChrome(),
-        desktopNotifications: desktop, partyRoomsPort: rooms);
+    final composition = AppComposition.forTest(
+      windowChrome: InMemoryWindowChrome(),
+      desktopNotifications: desktop,
+      partyRoomsPort: rooms,
+    );
     await tester.pumpWidget(StarBridgeApp(composition: composition));
     await tester.pumpAndSettle();
     final reads = rooms.reads;
@@ -84,25 +144,31 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await desktop.clicks.close();
   });
-  testWidgets('private notification opens inbox without refreshing room activity', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final desktop = _DirectDesktop();
-    final rooms = _Rooms();
-    final composition = AppComposition.forTest(windowChrome: InMemoryWindowChrome(),
-        desktopNotifications: desktop, partyRoomsPort: rooms);
-    await tester.pumpWidget(StarBridgeApp(composition: composition));
-    await tester.pumpAndSettle();
-    final reads = rooms.reads;
-    desktop.clicks.add(DesktopReminderActivation('b' * 32, 1));
-    await tester.pumpAndSettle();
-    expect(find.byType(DirectMessagesPage), findsOneWidget);
-    expect(rooms.reads, reads);
-    await tester.pumpWidget(const SizedBox());
-    await desktop.clicks.close();
-  });
+  testWidgets(
+    'private notification opens inbox without refreshing room activity',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final desktop = _DirectDesktop();
+      final rooms = _Rooms();
+      final composition = AppComposition.forTest(
+        windowChrome: InMemoryWindowChrome(),
+        desktopNotifications: desktop,
+        partyRoomsPort: rooms,
+      );
+      await tester.pumpWidget(StarBridgeApp(composition: composition));
+      await tester.pumpAndSettle();
+      final reads = rooms.reads;
+      desktop.clicks.add(DesktopReminderActivation('b' * 32, 1));
+      await tester.pumpAndSettle();
+      expect(find.byType(DirectMessagesPage), findsOneWidget);
+      expect(rooms.reads, reads);
+      await tester.pumpWidget(const SizedBox());
+      await desktop.clicks.close();
+    },
+  );
   test(
     'notification refresh waits for background read and then reads afresh',
     () async {

@@ -69,6 +69,9 @@ internal static class CommunityHangarSharingClientTests
             var read = await Read();
             Check(writes == 0 && gets == 2 && read.GetProperty("options").GetArrayLength() == 2, "read pages all memberships without writes");
             var options = read.GetProperty("options").EnumerateArray().ToArray();
+            Check(options[0].GetProperty("communityCode").GetString() == "A" &&
+                options[1].GetProperty("communityCode").GetString() == "B",
+                "join prompt matches authoritative codes, never duplicate display names");
             Check(options[0].GetProperty("selected").GetBoolean() && !options[1].GetProperty("selected").GetBoolean(), "new membership is not auto selected");
             var command = Command(read, options.Select(o => o.GetProperty("targetRef").GetString()!).ToArray());
             Check((await client.SaveHangarSharingAsync("fixture-bearer", command, "other-account", () => { }, default)).Status == "rejected" && writes == 0,

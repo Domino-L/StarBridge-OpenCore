@@ -3,12 +3,43 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/settings/event_sharing_controller.dart';
 import 'package:starbridge_flutter/features/settings/event_scope_editor.dart';
+import 'package:starbridge_flutter/features/settings/community_sharing.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_connection.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  test('joined event choice is independent, membership-bound and skips an already-confirmed retry', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    await h.ready();
+    final target = CommunitySharingTarget(
+      code: 'B',
+      name: 'B',
+      joinedAt: Harness.joined,
+    );
+    expect(h.controller.hasCommunityChoice(target), isFalse);
+    const all = EventSharingChoice(
+      enabled: true,
+      selectedTypes: EventSharingChoice.allTypes,
+    );
+    expect(await h.controller.saveJoinedCommunityChoice(target, all), isTrue);
+    expect(h.controller.choice('B'), all);
+    expect(h.controller.choice('A').enabled, isFalse);
+    expect(h.controller.choice(null).enabled, isFalse);
+    expect(await h.controller.saveJoinedCommunityChoice(target, all), isTrue);
+    expect(h.writes.length, 1);
+    await h.controller.change(
+      'B',
+      const EventSharingChoice(enabled: false, selectedTypes: 8),
+    );
+    expect(h.controller.hasCommunityChoice(target), isTrue);
+    expect(h.controller.choice('B').enabled, isFalse);
+    h.joinedAt = '2026-09-14T00:00:00.0000001+00:00';
+    expect(await h.controller.saveJoinedCommunityChoice(target, all), isFalse);
+    expect(h.writes.length, 2);
+  });
   test(
     'single CAS save keeps other scopes and exact membership timestamp',
     () async {

@@ -2,21 +2,23 @@ import 'dart:async';
 
 import '../../features/communities/communities_module.dart';
 import '../../features/communities/community_workspace_port.dart';
+import '../../features/communities/community_overview_reader.dart';
 import '../../features/communities/community_announcements_port.dart';
 import '../../features/communities/community_chat_port.dart';
-import '../../features/communities/community_chat_controller.dart';
 import '../../features/communities/community_ships_port.dart';
-import '../../features/communities/community_member_runtime.dart';
-import '../../features/communities/community_workspace_copy.dart';
+import 'menu_organization_member_presentation.dart';
 import 'menu_feature_session.dart';
-import 'menu_organization_view.dart';
 import 'menu_organization_presentation.dart';
+import 'menu_organization_sections.dart';
+import 'menu_organization_ships.dart';
+import 'menu_organization_shell.dart';
 import '../../platform/window/menu_profile_navigation.dart';
 import 'menu_organization_avatars.dart';
+import 'menu_announcement_details_session.dart';
+import 'menu_directory_logos.dart';
+import 'menu_organization_previews.dart';
 import 'menu_chat_archive.dart';
-import 'menu_channel_avatars.dart';
-import 'menu_account_avatar.dart';
-import '../../features/communities/community_own_avatar.dart';
+import 'menu_organization_chat_session.dart';
 
 final class MenuOrganizationsSession extends MenuFeatureSession
     implements MenuProfileTargets {
@@ -25,71 +27,188 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     void Function(Map<String, Object?>) publish, {
     this.chatOnly = false,
     this.archive,
+    CommunityOverviewReader? overview,
   }) : super(publish, port.invalidations) {
-    if (chatOnly) _tab = 'chat';
+    _shell.overview = overview;
+    if (organizationSections(port).containsKey('chat')) _tab = 'chat';
   }
   final bool chatOnly;
+  late final _announcementDetails = MenuAnnouncementDetailsSession(
+    grant: (run) => button('详情', (_) => run(), silent: true),
+    changed: () => emit(currentView),
+    denied: _announcementDenied,
+    isCurrent: (target) =>
+        visible && !disposed && _tab == 'announcements' && _selected == target,
+  );
+  void _announcementDenied() {
+    if (!visible || disposed) return;
+    // Retire the read AND its busy gate through the existing visibility path.
+    // Clear all section snapshots before re-reading the authorized directory.
+    super.show(false);
+    _reset();
+    emit({'state': 'unavailable'});
+    super.show(true);
+  }
+
+  @override
+  void changeScope() {
+    _announcementDetails.clear();
+    super.changeScope();
+  }
+
+  @override
+  void show(bool value) {
+    if (!value) _announcementDetails.clear();
+    super.show(value);
+  }
+
+  final _shell = MenuOrganizationShell();
+  final _ships = MenuOrganizationShips();
   final MenuChatArchive? archive;
-  final _chats = <String, CommunityChatController>{};
+  String _readStage = 'directory';
+  late final _chatData = MenuOrganizationChatSession(
+    port,
+    this,
+    archive: archive,
+    selected: () => _selected,
+    nextProfileKey: () => 'om${++_profileSerial}',
+    observed: (target, messages, unread) =>
+        _previews?.observe(target, messages, unread),
+    chatSelected: () => chatOnly || _tab == 'chat',
+  );
+  @override
+  Map<String, Object?>? failedWrite() => _chatData.failedWrite();
+  @override
+  Map<String, Object?>? get writingView => _chatData.writingView;
+
   List<CommunityCard> _channelCards = const [];
   String? _channelNext;
   final _channelLogos = <String, String?>{};
-  final _chatViews = <String, Map<String, Object?>>{};
-  final _messagePhotos = <String, Map<String, String>>{};
-  final _photoMessages = <String, List<CommunityChatMessage>>{};
-  late final _ownPhoto = MenuAccountAvatar(() {
-    final cached = _chatViews[_selected];
-    if (visible && cached != null) emit({'state': 'ready', ...cached});
+  List<String> _navigationTargets = const [];
+  late final _previews = port is CommunityChatPort
+      ? MenuOrganizationPreviews(port as CommunityChatPort, (target, preview) {
+          final index = _navigationTargets.indexOf(target);
+          if (disposed || index < 0) return;
+          _navigation = [
+            for (var i = 0; i < _navigation.length; i++)
+              {..._navigation[i], if (i == index) ...preview},
+          ];
+          _publishNavigation();
+        })
+      : null;
+  void _publishNavigation() {
+    if (chatOnly && _directoryView != null) {
+      _directoryView = {..._directoryView!, 'channels': channelRows()};
+      if (visible && _selected == null) {
+        emit({'state': 'ready', ..._directoryView!});
+      }
+    }
+    final cached = _chatData.views[_selected];
+    if (cached != null) {
+      _chatData.views[_selected!] = organizationNavigationProjection(
+        cached,
+        _navigation,
+        _selectedLogo,
+      );
+    }
+    final shown = organizationVisibleNavigation(
+      currentView,
+      _tab,
+      _navigation,
+      _selectedLogo,
+    );
+    if (visible && shown != null) {
+      emit(shown);
+    }
+  }
+
+  late final _directoryLogos = MenuDirectoryLogos(port, (target, logo) {
+    if (disposed || !_channelCards.any((card) => card.targetRef == target)) {
+      return;
+    }
+    _channelLogos[target] = logo;
+    if (_selected == target) _selectedLogo = logo;
+    _navigation = [
+      for (var i = 0; i < _navigation.length; i++)
+        {
+          ..._navigation[i],
+          if (_navigationTargets[i] == target) 'avatar': logo,
+        },
+    ];
+    _publishNavigation();
   });
+
+  Future<String?> _directoryLogo(CommunityCard card) async {
+    if (chatOnly && card.logo != null) {
+      return await _avatars.logo(card.logo) ?? _channelLogos[card.targetRef];
+    }
+    return _directoryLogos.read(card);
+  }
+
   @override
   void emit(Map<String, Object?> view) {
-    final Object source = port;
-    final own = _ownPhoto.read(
-      source is CommunityOwnAvatarSource ? source.ownAvatarImageData : null,
-    );
-    super.emit(
-      organizationPortraits(
-        view,
-        own,
-        _photoMessages[_selected],
-        _messagePhotos[_selected],
-      ),
-    );
+    view = _chatData.projectDelivery(view);
+    view = _avatars.project(view);
+    view = _announcementDetails.project(view);
+    _shell.observe(view, chatOnly ? null : port, this);
+    super.emit(_chatData.projectPortraits(view));
   }
 
   Map<String, Object?>? _directoryView;
   @override
-  bool get backgroundReads => chatOnly;
+  bool get backgroundReads =>
+      chatOnly || _tab == 'chat' || _tab == 'announcements';
   @override
   Duration get refreshInterval => Duration(seconds: chatOnly ? 3 : 15);
   @override
   Map<String, Object?>? failedRead(Object error) {
-    if (!chatOnly ||
-        !(error is TimeoutException ||
-            error is CommunityFailure && error.code == 'unavailable')) {
-      _chatViews.clear();
-      _chatProfiles.clear();
-      _photoMessages.clear();
-      _messagePhotos.clear();
-      _chatAvatars.clear();
+    if (!organizationTransientRead(error)) {
+      _announcementDetails.clear();
+      if (error is CommunityFailure &&
+              const {
+                'identityUnavailable',
+                'notAllowed',
+                'notFound',
+                'refreshRequired',
+              }.contains(error.code) ||
+          error is StateError && error.message == 'restricted') {
+        _closeChats();
+      }
+      _ships.clear();
+      _shell.clear();
+      _chatData.views.clear();
+      _chatData.clearProfiles();
+      _chatData.portraits.clear();
       _directoryView = null;
-      return null;
+      _previews?.clear();
+      _directoryLogos.clear();
+      _channelLogos.clear();
+      _selectedLogo = null;
+      _navigation = const [];
+      _navigationTargets = const [];
+      _channelCards = const [];
+      return chatOnly ? null : organizationReadFailure(error, _readStage);
     }
-    final cached = readingView;
-    final failed = cached == null
-        ? null
-        : {
-            ...cached,
-            'refreshing': false,
-            'notice': silentRead ? '' : '暂时无法连接，已保留聊天记录和草稿。',
-          };
-    if (failed != null && _selected != null) _chatViews[_selected!] = failed;
+    if (!chatOnly) {
+      return _shell.failed(_selected, _tab, _query, _offset) ??
+          organizationReadFailure(error, _readStage);
+    }
+    final failed = organizationRetainedRead(
+      readingView,
+      quiet: silentRead && chatOnly,
+    );
+    if (failed != null && _selected != null) {
+      _chatData.views[_selected!] = failed;
+    }
     return failed;
   }
 
   @override
   Map<String, Object?>? get readingView {
-    final source = _selected == null ? _directoryView : _chatViews[_selected];
+    if (!chatOnly) return _shell.loading(_selected, _tab, _query, _offset);
+    final source = _selected == null
+        ? _directoryView
+        : _chatData.views[_selected];
     if (source == null) {
       if (_channelCards.isEmpty) return null;
       return {'state': 'ready', 'channels': channelRows()};
@@ -97,161 +216,210 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     return organizationRefreshingView(source, channelRows());
   }
 
-  int _sentRevision = 0;
-  String _sendStatus = 'idle';
-  String? _failedVisibleMessageRef;
   final CommunitiesPort port;
   String? _selected, _after;
+  List<Map<String, Object?>> _navigation = const [];
   String _tab = 'members';
   int _offset = 0;
   String _query = '';
   String _directoryQuery = '';
+  void _selectPage(int offset, [String? query]) {
+    _shell.sectionTransition = true;
+    _offset = offset;
+    if (query != null) _query = query;
+  }
+
+  List<Map<String, Object?>> _pageButtons(int? next) => [
+    if (next != null)
+      button('下一页', (_) async {
+        _selectPage(next);
+      }),
+    if (_offset > 0)
+      button('首页', (_) async {
+        _selectPage(0);
+      }),
+  ];
+
   String? _selectedLogo;
-  CommunityChatController? _chat;
-  final _avatars = MenuOrganizationAvatars();
-  final _chatAvatars = MenuChannelAvatars();
+  late final _avatars = MenuOrganizationAvatars(onChanged: _refreshPortraits);
+  void _refreshPortraits() {
+    if (visible && !disposed) emit(currentView);
+  }
+
   final _profiles = <String, MenuProfileTarget>{};
-  // Chat avatar keys survive quiet polls; authority stays in the primary engine.
-  final _chatProfiles =
-      <
-        String,
-        ({String target, CommunityChatMessage message, DateTime expires})
-      >{};
   int _profileSerial = 0;
   @override
   MenuProfileTarget? profileTarget(String key) {
-    final binding = _chatProfiles[key];
-    if (binding != null) {
-      final identity = accountEpoch;
-      bool valid() =>
-          currentAccount(identity) &&
-          visible &&
-          _selected == binding.target &&
-          _chatProfiles[key]?.message.senderRef == binding.message.senderRef &&
-          _chatProfiles[key]?.message.isSelf == binding.message.isSelf &&
-          DateTime.now().isBefore(binding.expires);
-      if (!valid()) return null;
-      final message = binding.message;
-      final Object source = port;
-      return MenuProfileTarget(
-        source: message.isSelf ? 'self' : 'community',
-        reference: message.isSelf ? '' : message.senderRef,
-        contextRef: message.isSelf ? null : binding.target,
-        refreshReference: message.isSelf
-            ? null
-            : () async {
-                if (!currentAccount(identity)) throw StateError('retired');
-                final page = await (port as CommunityChatPort).readChat(
-                  binding.target,
-                  before: message.sequence + 1,
-                );
-                if (!currentAccount(identity) ||
-                    page.targetRef != binding.target) {
-                  throw StateError('retired');
-                }
-                final author = page.messages
-                    .where((m) => m.sequence == message.sequence && !m.isSelf)
-                    .firstOrNull;
-                if (author == null) throw StateError('retired');
-                return author.senderRef;
-              },
-        query: message.gameId,
-        avatar: message.isSelf && source is CommunityOwnAvatarSource
-            ? _ownPhoto.read(source.ownAvatarImageData)
-            : _messagePhotos[binding.target]?[message.messageRef],
-        isCurrent: valid,
-        isAccountCurrent: () => currentAccount(identity),
-      );
-    }
+    final chat = _chatData.profileTarget(key);
+    if (chat != null) return chat;
     final target = _profiles[key];
     return target?.isCurrent() == true ? target : null;
   }
 
   @override
-  void reset() {
+  void reset() => _reset();
+
+  void _reset({bool keepDeliveries = false}) {
+    _ships.clear();
+    _shell.clear();
     changeScope();
     _selected = _after = null;
+    _navigation = const [];
+    _navigationTargets = const [];
+    _previews?.clear();
+    _directoryLogos.clear();
     _channelCards = const [];
     _channelNext = null;
     _channelLogos.clear();
-    _chatViews.clear();
-    _messagePhotos.clear();
-    _photoMessages.clear();
-    _ownPhoto.clear();
+    _chatData.clear();
     _directoryView = null;
-    _tab = chatOnly ? 'chat' : 'members';
-    _sentRevision = 0;
-    _sendStatus = 'idle';
-    _failedVisibleMessageRef = null;
+    _tab = organizationSections(port).containsKey('chat') ? 'chat' : 'members';
     _offset = 0;
     _query = '';
     _directoryQuery = '';
     _selectedLogo = null;
     _avatars.clear();
-    _chatAvatars.clear();
     _profiles.clear();
-    _chatProfiles.clear();
-    for (final chat in _chats.values) {
-      chat.dispose();
+    if (keepDeliveries) {
+      _chatData.active?.setReadingContext(visible: false, foreground: false);
+      _chatData.active = null;
+    } else {
+      _closeChats();
     }
-    _chats.clear();
-    if (!chatOnly) _chat?.dispose();
-    _chat = null;
   }
+
+  void _closeChats() => _chatData.closeChats();
 
   @override
   Future<void> closePort() {
-    for (final chat in _chats.values) {
-      chat.dispose();
-    }
-    _chats.clear();
-    if (!chatOnly) _chat?.dispose();
+    _closeChats();
     _avatars.dispose();
-    _chatAvatars.dispose();
-    _ownPhoto.dispose();
+    _directoryLogos.dispose();
+    _previews?.dispose();
+    _chatData.dispose();
     return port.close();
   }
 
-  List<Map<String, Object?>> channelRows() => [
-    for (final item in _channelCards)
-      {
-        'title': item.name,
-        'avatar': _channelLogos[item.targetRef],
-        'detail': _selected == item.targetRef ? '当前组织频道' : '组织频道',
-        'buttons': [
-          button('打开组织会话', (_) async {
-            if (_selected == item.targetRef) return;
-            changeScope();
-            _chat?.setReadingContext(visible: false, foreground: false);
-            _chat = null;
-            _selected = item.targetRef;
-            _selectedLogo = _channelLogos[item.targetRef];
-            _failedVisibleMessageRef = null;
-            _sentRevision = 0;
-            _sendStatus = 'idle';
-          }),
-        ],
+  List<Map<String, Object?>> channelRows() => organizationChannelRows(
+    _channelCards,
+    _channelLogos,
+    _selected,
+    (item) => button('打开组织会话', (_) async {
+      if (_selected == item.targetRef) return;
+      changeScope();
+      _chatData.active?.setReadingContext(visible: false, foreground: false);
+      _chatData.active = null;
+      _selected = item.targetRef;
+      _selectedLogo = _channelLogos[item.targetRef];
+      _chatData.failedVisibleMessageRef = null;
+      _chatData.sentRevision = 0;
+      _chatData.sendStatus = 'idle';
+    }),
+  );
+
+  Future<void> _readNavigation(int epoch) async {
+    final cards = await _shell.readCards(
+      (cursor) =>
+          _directoryLogos.readDirectory(view: 'mine', query: '', after: cursor),
+      () {
+        if (!current(epoch)) throw StateError('retired');
       },
-  ];
+    );
+    for (final previous in _channelCards) {
+      final matches = cards.where((c) => sameMenuOrganization(previous, c));
+      if (matches.length != 1 ||
+          currentMenuOrganization(_channelCards, previous) == null) {
+        continue;
+      }
+      final renewed = matches.single;
+      if (previous.targetRef == renewed.targetRef) continue;
+      _previews?.rebind(previous.targetRef, renewed.targetRef);
+      _chatData.rebind(previous.targetRef, renewed.targetRef);
+      if (_selected != previous.targetRef) continue;
+      _shell.rebind(previous.targetRef, renewed);
+      _chatData.portraits.rebind(previous.targetRef, renewed.targetRef);
+      _chatData.clearProfiles();
+      _selected = renewed.targetRef;
+    }
+    for (final target in _chatData.targets.toList()) {
+      if (!cards.any((c) => c.targetRef == target)) {
+        _chatData.remove(target);
+        _chatData.views.remove(target);
+        _chatData.portraits.remove(target);
+      }
+    }
+    if (_selected != null && !cards.any((c) => c.targetRef == _selected)) {
+      _chatData.remove(_selected!);
+      _chatData.active = null;
+      _avatars.clear();
+      _selected = null;
+      _query = '';
+      _offset = 0;
+      changeScope();
+    }
+    _selected ??= cards.firstOrNull?.targetRef;
+    _channelCards = cards;
+    _directoryLogos.retain(cards);
+    _channelLogos.removeWhere(
+      (key, _) => !cards.any((c) => c.targetRef == key),
+    );
+    final navigation = <Map<String, Object?>>[];
+    // First paint uses authorized metadata; previews never hold it hostage.
+    for (final card in cards) {
+      final logo = await _directoryLogos.read(card);
+      if (!current(epoch)) throw StateError('retired');
+      _channelLogos[card.targetRef] = logo;
+      if (card.targetRef == _selected) _selectedLogo = logo;
+      final action = button('切换组织', (_) async {
+        final active = currentMenuOrganization(_channelCards, card);
+        if (active == null || _selected == active.targetRef) return;
+        if ((_previews?.value(active.targetRef)['unread'] as int? ?? 0) > 0) {
+          _tab = 'chat';
+        }
+        _chatData.active?.setReadingContext(visible: false, foreground: false);
+        _chatData.active = null;
+        _selected = active.targetRef;
+        _chatData.sendStatus = 'idle';
+        _chatData.sentRevision = 0;
+        _selectedLogo = _channelLogos[active.targetRef];
+        _query = '';
+        _offset = 0;
+        _avatars.clear();
+        changeScope();
+      });
+      navigation.add(<String, Object?>{
+        'name': card.name,
+        ...?_previews?.value(card.targetRef),
+        'avatar': _channelLogos[card.targetRef] ?? logo,
+        'selected': card.targetRef == _selected,
+        'key': action['key'],
+      });
+    }
+    if (!current(epoch)) throw StateError('retired');
+    _navigation = navigation;
+    _navigationTargets = cards.map((card) => card.targetRef).toList();
+  }
 
   @override
   Future<Map<String, Object?>> read() async {
     final epoch = generation;
+    _readStage = 'directory';
+    if (!chatOnly) await _readNavigation(epoch);
     _profiles.clear();
     final actions = <Map<String, Object?>>[], rows = <Map<String, Object?>>[];
+    final sections = <String, Object?>{};
     final presentation = <Map<String, Object?>>[];
+    Map<String, Object?>? fleetStatistics;
     final receipts = <String, String>{};
     final messageProfiles = <String, String>{};
     final messagePresentation = <Map<String, Object?>>[];
     if (_selected == null) {
-      final directory = await port.read(
+      final directory = await _directoryLogos.readDirectory(
         view: 'mine',
         query: _directoryQuery,
         after: _after,
       );
-      final logos = await Future.wait(
-        directory.items.map((item) => _avatars.logo(item.logo)),
-      );
+      final logos = await Future.wait(directory.items.map(_directoryLogo));
       if (!current(epoch)) throw StateError('retired');
       if (chatOnly) {
         _channelCards = directory.items;
@@ -321,7 +489,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       return result;
     }
     final target = _selected!;
-    if (chatOnly && archive != null && !_chatViews.containsKey(target)) {
+    if (chatOnly && archive != null && !_chatData.views.containsKey(target)) {
       try {
         final local = await archive!
             .load('organization', target)
@@ -362,7 +530,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
               ],
             },
           };
-          _chatViews[target] = cached;
+          _chatData.views[target] = cached;
           emit(cached);
         }
       } on Object {
@@ -372,13 +540,15 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     if (chatOnly &&
         (_channelCards.isEmpty ||
             !_channelCards.any((c) => c.targetRef == target))) {
-      final directory = await port.read(view: 'mine', query: '', after: _after);
+      final directory = await _directoryLogos.readDirectory(
+        view: 'mine',
+        query: '',
+        after: _after,
+      );
       if (!current(epoch)) throw StateError('retired');
       _channelCards = directory.items;
       _channelNext = directory.next;
-      final logos = await Future.wait(
-        directory.items.map((item) => _avatars.logo(item.logo)),
-      );
+      final logos = await Future.wait(directory.items.map(_directoryLogo));
       if (!current(epoch)) throw StateError('retired');
       for (var i = 0; i < directory.items.length; i++) {
         _channelLogos[directory.items[i].targetRef] = logos[i];
@@ -387,7 +557,8 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     }
     // The authenticated chat endpoint checks membership itself. Chat must not
     // wait for member presence, roster media or a second directory round trip.
-    final workspace = chatOnly
+    _readStage = 'workspace';
+    final workspace = chatOnly || _tab == 'chat'
         ? null
         : await (port as CommunityWorkspacePort).readWorkspace(
             target,
@@ -401,7 +572,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       actions.add(
         button('返回组织列表', (_) async {
           final query = _directoryQuery;
-          reset();
+          _reset(keepDeliveries: true);
           _directoryQuery = query;
         }),
       );
@@ -420,28 +591,17 @@ final class MenuOrganizationsSession extends MenuFeatureSession
         }),
       );
     }
-    for (final entry in const {
-      'members': '成员',
-      'announcements': '公告',
-      'chat': '聊天',
-      'ships': '舰船',
-    }.entries) {
+    for (final entry in organizationSections(port).entries) {
       if (chatOnly) continue;
-      if ((entry.key == 'announcements' &&
-              port is! CommunityAnnouncementsPort) ||
-          (entry.key == 'chat' && port is! CommunityChatPort) ||
-          (entry.key == 'ships' && port is! CommunityShipsPort)) {
-        continue;
-      }
-      actions.add(
-        button(entry.value, (_) async {
-          if (_tab == entry.key) return;
-          changeScope();
-          _tab = entry.key;
-          _offset = 0;
-          _query = '';
-        }),
-      );
+      final action = button(entry.value, (_) async {
+        if (_tab == entry.key) return;
+        changeScope();
+        _tab = entry.key;
+        if (_tab != 'ships') _ships.statisticsOpen = false;
+        _selectPage(0, '');
+      });
+      actions.add(action);
+      sections[entry.key] = action['key'];
     }
     String notice = '';
     var total = workspace?.totalCount ?? 0,
@@ -449,8 +609,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     if (_tab == 'members') {
       actions.add(
         button('搜索成员', (value) async {
-          _query = value.trim();
-          _offset = 0;
+          _selectPage(0, value.trim());
         }, input: '搜索成员、呼号或职务'),
       );
       final avatars = await Future.wait(
@@ -472,45 +631,15 @@ final class MenuOrganizationsSession extends MenuFeatureSession
           isCurrent: () => current(epoch) && _selected == target,
           isAccountCurrent: () => currentAccount(identity),
         );
-        final runtime = communityMemberRuntime(
+        final display = organizationMemberPresentation(
           member,
-          text: (key) => communityWorkspaceCopy[key]?.$1 ?? '—',
-          regionText: (value) => value,
+          avatars[i],
+          profileKey,
         );
-        final presence = organizationPresence(member.online, member.liveStatus);
-        final activity = organizationPresenceText(presence);
-        rows.add({
-          'title': member.displayName,
-          'detail':
-              '${member.roleTitle} · $activity\n${runtime.server} · ${runtime.ship} · ${runtime.location}',
-        });
-        presentation.add({
-          'handle': member.gameName,
-          'role': member.roleTitle,
-          'roleColor': member.roleColor,
-          'presence': presence,
-          'isSelf': member.isSelf,
-          'avatar': avatars[i],
-          'profileKey': profileKey,
-          'ship': runtime.ship,
-          'location': runtime.location,
-          'server': runtime.server,
-        });
+        rows.add(display.row);
+        presentation.add(_avatars.bind(display.presentation, target, member));
       }
-      if (workspace.next != null) {
-        actions.add(
-          button('下一页', (_) async {
-            _offset = workspace.next!;
-          }),
-        );
-      }
-      if (_offset > 0) {
-        actions.add(
-          button('首页', (_) async {
-            _offset = 0;
-          }),
-        );
-      }
+      actions.addAll(_pageButtons(workspace.next));
     } else if (_tab == 'announcements' && port is CommunityAnnouncementsPort) {
       final page = await (port as CommunityAnnouncementsPort).readAnnouncements(
         target,
@@ -519,232 +648,118 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       if (!current(epoch) || page.targetRef != target) {
         throw StateError('retired');
       }
-      for (final item in [?page.current, ...page.history]) {
-        rows.add({'title': item.title, 'detail': item.content});
-      }
-      if (page.next != null) {
-        actions.add(
-          button('下一页', (_) async {
-            _offset = page.next!;
-          }),
-        );
-      }
-      if (_offset > 0) {
-        actions.add(
-          button('首页', (_) async {
-            _offset = 0;
-          }),
-        );
-      }
-    } else if (_tab == 'chat' && port is CommunityChatPort) {
-      if (chatOnly) {
-        if (!_chats.containsKey(target) && _chats.length >= 12) {
-          _chats.remove(_chats.keys.first)?.dispose();
-        }
-        _chat = _chats.putIfAbsent(
-          target,
-          () => CommunityChatController(port as CommunityChatPort, target),
-        );
-      } else {
-        _chat ??= CommunityChatController(port as CommunityChatPort, target);
-      }
-      final chat = _chat!;
-      await chat.refresh(silent: silentRead);
-      if (!current(epoch)) {
-        throw StateError('retired');
-      }
-      if (chat.invalidated) {
-        _chatViews.remove(target);
-        throw StateError('restricted');
-      }
-      if (chat.error != null) throw CommunityFailure(chat.error!);
-      if (chat.localHistoryUnavailable) notice = '消息已读取，但本机记录保存失败；重启后可能需要重新读取。';
-      if (archive != null) {
-        actions.add(
-          button('清除本机记录', (_) async {
-            await archive!.clear('organization', target);
-            _chatViews.remove(target);
-          }, confirm: '清除此会话的本机缓存？在线消息不会删除，后续读取可再次缓存。'),
-        );
-      }
-      if (_sendStatus == 'unknown' &&
-          !chat.sendUncertain &&
-          chat.sendError == null &&
-          chat.draft.isEmpty) {
-        _sendStatus = 'sent';
-        _sentRevision++;
-      }
-      if (chatOnly) {
-        final senders = chat.messages.map((m) => m.senderRef).toSet();
-        _chatProfiles.removeWhere(
-          (_, b) =>
-              b.target != target || !senders.contains(b.message.senderRef),
-        );
-      }
-      for (final (index, message) in chat.messages.indexed) {
-        rows.add({
-          'title': message.callsign.isEmpty ? message.gameId : message.callsign,
-          'detail':
-              '${message.text}${message.hasAttachment ? "\n[附件请在客户端查看]" : ""}',
-        });
-        if (chatOnly) {
-          final key =
-              _chatProfiles.entries
-                  .where(
-                    (e) =>
-                        e.value.target == target &&
-                        e.value.message.senderRef == message.senderRef &&
-                        e.value.message.isSelf == message.isSelf,
-                  )
-                  .firstOrNull
-                  ?.key ??
-              'om${++_profileSerial}';
-          _chatProfiles[key] = (
-            target: target,
-            message: message,
-            expires: DateTime.now().add(const Duration(minutes: 2)),
-          );
-          messageProfiles['$index'] = key;
-          messagePresentation.add({
-            'self': message.isSelf,
-            'time': message.createdAt.toUtc().toIso8601String(),
-            'role': message.roleTitle,
-            'roleColor': message.roleColor,
-          });
-          if (!message.isSelf &&
-              message.sequence > chat.confirmedReadThrough &&
-              chat.receiptError == null) {
-            receipts['$index'] =
-                button('读取消息', (_) async {
-                      _failedVisibleMessageRef = message.messageRef;
-                      chat.setReadingContext(visible: true, foreground: true);
-                      try {
-                        await chat.acknowledgeVisible(message.messageRef);
-                      } finally {
-                        chat.setReadingContext(
-                          visible: false,
-                          foreground: false,
-                        );
-                      }
-                    }, silent: true)['key']
-                    as String;
-          }
-        }
-      }
-      if (chat.canSubmit) {
-        actions.add(
-          button(
-            '发送消息',
-            (text) async {
-              if (text.trim().isEmpty || text.length > 1000) return;
-              chat.updateDraft(text);
-              await chat.submit();
-              _sendStatus = chat.sendUncertain
-                  ? 'unknown'
-                  : chat.sendError != null
-                  ? 'rejected'
-                  : 'sent';
-              if (_sendStatus == 'sent') _sentRevision++;
-            },
-            input: '输入消息',
-            limit: 1000,
-          ),
-        );
-      }
-      if (chat.sendUncertain) {
-        notice = '发送结果未确认，请刷新聊天记录核对。';
-      } else if (chat.sendError != null) {
-        notice = '消息未发送，可重新编辑后提交。';
-      }
-      if (chat.hasOlder) {
-        actions.add(
-          button('较早消息', (_) async {
-            await chat.loadOlder();
-          }),
-        );
-      }
-      if (!silentRead &&
-          chat.receiptError != null &&
-          _failedVisibleMessageRef != null) {
-        actions.add(
-          button('重试已读同步', (_) async {
-            chat.setReadingContext(visible: true, foreground: true);
-            try {
-              await chat.acknowledgeVisible(
-                _failedVisibleMessageRef!,
-                retry: true,
-              );
-            } finally {
-              chat.setReadingContext(visible: false, foreground: false);
-            }
-          }),
-        );
-      }
-    } else if (_tab == 'ships' && port is CommunityShipsPort) {
-      final page = await (port as CommunityShipsPort).readShips(
+      final announcements = [?page.current, ...page.history];
+      _announcementDetails.sync(
+        port as CommunityAnnouncementsPort,
         target,
-        offset: _offset,
-        query: CommunityShipQuery(text: _query),
+        announcements,
       );
-      if (!current(epoch) || page.targetRef != target) {
-        throw StateError('retired');
+      for (final item in announcements) {
+        rows.add({'title': item.title, 'detail': item.content});
+        presentation.add({
+          'announcement': _announcementDetails.binding(item),
+          'announcementState': item.state,
+          'announcementTime':
+              (item == page.current ? item.publishedAt : item.updatedAt)
+                  .toUtc()
+                  .toIso8601String(),
+          'currentAnnouncement': item == page.current,
+        });
       }
+      actions.addAll(_pageButtons(page.next));
+    } else if (_tab == 'chat' && port is CommunityChatPort) {
+      _readStage = 'chat';
+      final chat = await _chatData.read(target, epoch);
+      if (!current(epoch)) throw StateError('retired');
+      rows.addAll(chat.rows);
+      actions.addAll(chat.actions);
+      messagePresentation.addAll(chat.messages);
+      messageProfiles.addAll(chat.profiles);
+      receipts.addAll(chat.receipts);
+      notice = chat.notice;
+    } else if (_tab == 'ships' && port is CommunityShipsPort) {
+      final fleet = await _ships.read(
+        port as CommunityShipsPort,
+        port as CommunityWorkspacePort,
+        _avatars,
+        target,
+        _offset,
+        _query,
+        () {
+          if (!current(epoch)) throw StateError('retired');
+        },
+      );
+      final page = fleet.page;
+      rows.addAll(fleet.rows);
+      presentation.addAll(fleet.presentation);
+      fleetStatistics = fleet.statistics;
+      notice = fleet.notice;
       total = page.totalCount;
       matched = page.matchedCount;
       actions.add(
         button('搜索舰船', (value) async {
-          _query = value.trim();
-          _offset = 0;
+          _selectPage(0, value.trim());
         }, input: '搜索舰船、所有者或用途'),
       );
-      for (final ship in page.ships) {
-        rows.add({
-          'title': ship.displayName,
-          'detail': ship.englishName ?? ship.manufacturer ?? '',
-        });
-        presentation.add(organizationShipPresentation(ship));
-      }
+      actions.add(
+        button('舰队统计', (_) async {
+          _ships.statisticsOpen = true;
+          _shell.sectionTransition = true;
+        }),
+      );
+      actions.add(
+        button('关闭统计', (_) async {
+          _ships.statisticsOpen = false;
+        }, silent: true),
+      );
       if (page.next != null) {
         actions.add(
           button('下一页', (_) async {
-            _offset = page.next!;
+            _selectPage(page.next!);
           }),
         );
       }
       if (_offset > 0) {
         actions.add(
           button('首页', (_) async {
-            _offset = 0;
+            _selectPage(0);
           }),
         );
       }
     } else {
       throw StateError('unsupported');
     }
+    final card = _channelCards.where((c) => c.targetRef == target).firstOrNull;
     final result = <String, Object?>{
       if (chatOnly) 'channels': channelRows(),
       'title':
           workspace?.name ??
-          _channelCards.where((c) => c.targetRef == target).firstOrNull?.name ??
+          _navigation
+              .where((row) => row['selected'] == true)
+              .firstOrNull?['name'] ??
+          card?.name ??
           '组织频道',
       'rows': rows,
       'buttons': actions,
       'notice': notice,
-      if (chatOnly)
+      if (_tab == 'chat')
         'chat': {
-          'status': _sendStatus,
-          'availability': _chat?.canSubmit == true ? 'ready' : 'denied',
-          'revision': _sentRevision,
+          ..._chatData.deliveryProjection(_chatData.active!, coherent: true),
+          'status': _chatData.sendStatus,
+          'availability': _chatData.active?.canSubmit == true
+              ? 'ready'
+              : 'denied',
+          'revision': _chatData.sentRevision,
           'messages': messagePresentation,
           'profiles': messageProfiles,
           'receipts': receipts,
         },
       'organization': {
         'tab': _tab,
-        'code': workspace?.code ?? '',
-        'description': workspace?.description ?? '',
+        'sections': sections,
+        'navigation': _navigation,
+        ..._shell.project(target, workspace, card),
         'logo': _selectedLogo,
-        'activeTime': workspace?.activeTime ?? '',
         'query': _query,
         'total': total,
         'matched': matched,
@@ -752,44 +767,14 @@ final class MenuOrganizationsSession extends MenuFeatureSession
         'rows': presentation.isEmpty
             ? [for (final _ in rows) <String, Object?>{}]
             : presentation,
+        'fleetStatistics': fleetStatistics,
       },
     };
-    if (chatOnly) {
-      if (!_chatViews.containsKey(target) && _chatViews.length >= 24) {
-        final expired = _chatViews.keys.first;
-        _chatViews.remove(expired);
-        _photoMessages.remove(expired);
-        _messagePhotos.remove(expired);
-      }
-      _chatViews[target] = result;
-      final messages = List<CommunityChatMessage>.of(
-        _chat?.messages ?? const [],
-      );
-      _photoMessages[target] = messages;
-      final photos = _messagePhotos.putIfAbsent(target, () => {});
-      final references = messages.map((m) => m.messageRef).toSet();
-      photos.removeWhere((key, _) => !references.contains(key));
-      final account = accountEpoch;
-      // First paint and permissions never wait for photos. Use account identity,
-      // not a poll generation: an unrelated background read must not lose media.
-      unawaited(
-        _chatAvatars
-            .load(
-              port as CommunityChatPort,
-              target,
-              messages,
-              onPhoto: (index, photo) {
-                if (!currentAccount(account)) return;
-                final reference = messages[index].messageRef;
-                if (photos[reference] == photo) return;
-                photos[reference] = photo;
-                final latest = _chatViews[target];
-                if (visible && _selected == target && latest != null) {
-                  emit({'state': 'ready', ...latest});
-                }
-              },
-            )
-            .then((_) {}),
+    if (_tab == 'chat') _chatData.cache(target, result);
+    if (!chatOnly && !_shell.reusingDirectory) {
+      _previews?.refresh(
+        _navigationTargets,
+        observedTarget: _tab == 'chat' ? target : null,
       );
     }
     return result;

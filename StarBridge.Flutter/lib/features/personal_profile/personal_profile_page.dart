@@ -58,6 +58,7 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
   bool _editing = false;
   List<PersonalProfileModuleLayoutItem>? _layoutDraft;
   String? _wallpaperDraft;
+  int _wallpaperReadEpoch = 0;
 
   @override
   void initState() {
@@ -71,11 +72,18 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
     if (oldWidget.module != widget.module) {
       oldWidget.module.projection.removeListener(_onProfileChanged);
       widget.module.projection.addListener(_onProfileChanged);
+      _wallpaperReadEpoch++;
       _clearDraft();
     }
   }
 
   void _onProfileChanged() {
+    if (widget.module.projection.value.availability ==
+        PersonalProfileAvailability.loading) {
+      // A fast refresh can finish before loading gets painted. Still retire the
+      // previous image failure and its bounded retry state for this new read.
+      _wallpaperReadEpoch++;
+    }
     if (widget.module.projection.value.availability !=
             PersonalProfileAvailability.available &&
         (_editing || _visitorPreview)) {
@@ -130,7 +138,10 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
           fit: StackFit.expand,
           children: [
             Positioned.fill(
-              child: PersonalProfileWallpaperBackdrop(wallpaperId: wallpaperId),
+              child: PersonalProfileWallpaperBackdrop(
+                key: ValueKey(_wallpaperReadEpoch),
+                wallpaperId: wallpaperId,
+              ),
             ),
             Scrollbar(
               controller: _scrollController,

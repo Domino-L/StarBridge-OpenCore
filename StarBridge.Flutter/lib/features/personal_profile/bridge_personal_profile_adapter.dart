@@ -232,7 +232,7 @@ PersonalProfileSnapshot _parseSnapshot(Map<String, Object?> payload) {
     shipWishlist: _parseTags(_stringList(content, 'shipWishlist')),
     favoriteShips: favoriteShips,
     hangarSummary: _toHangarSummary(
-      ships,
+      ships.where((ship) => ship.isInventoryEntry).toList(growable: false),
       isAvailable: hangar?['ships'] is List,
       unresolvedFavoriteCount: favoriteCodes.length - favoriteShips.length,
     ),
@@ -461,12 +461,14 @@ PersonalProfileHangarSummary _toHangarSummary(
             : _classifyTag(entry.key),
       ),
   ]..sort((first, second) => second.count.compareTo(first.count));
-  final recent = ships.isEmpty
-      ? null
-      : (ships.toList()..sort(
-              (first, second) => second.importedAt.compareTo(first.importedAt),
-            ))
-            .first;
+  final datedShips =
+      ships
+          .where((ship) => ship.importedAt != null && ship.importedAt!.year > 1)
+          .toList()
+        ..sort(
+          (first, second) => second.importedAt!.compareTo(first.importedAt!),
+        );
+  final recent = datedShips.isEmpty ? null : datedShips.first;
   final latestSync = ships
       .map((ship) => ship.syncedAt)
       .whereType<DateTime>()
@@ -676,6 +678,7 @@ final class _RelayShip {
     required this.importedAt,
     required this.syncedAt,
     required this.roleCategory,
+    required this.isInventoryEntry,
     this.presentation,
   });
 
@@ -685,19 +688,19 @@ final class _RelayShip {
     return _RelayShip(
       code: code,
       displayName: _optionalString(value, 'displayName') ?? code,
-      importedAt:
-          DateTime.tryParse(_optionalString(value, 'importedAt') ?? '') ??
-          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      importedAt: DateTime.tryParse(_optionalString(value, 'importedAt') ?? ''),
       syncedAt: DateTime.tryParse(_optionalString(value, 'syncedAt') ?? ''),
       roleCategory: _optionalString(value, 'roleCategory') ?? '',
+      isInventoryEntry: value['isInventoryEntry'] != false,
       presentation: p == null ? null : profileHangarShip(value, code),
     );
   }
 
   final String code;
   final String displayName;
-  final DateTime importedAt;
+  final DateTime? importedAt;
   final DateTime? syncedAt;
   final String roleCategory;
+  final bool isInventoryEntry;
   final LocalHangarShip? presentation;
 }

@@ -33,15 +33,23 @@ internal sealed partial class PartyRoomReader
         var (path, body, operation) = BuildCommand(payload);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
-        if (operation is "update" or "close" or "decide")
+        if (operation is "update" or "close" or "decide" or "remove" or "transferHost")
         {
             RoomDirectoryView directory;
             try { directory = await ReadAsync(bearer, deadline.Token); }
             catch (AccountBridgeHostException error) when (error.Code is not ("party_rooms.identity_unavailable" or "party_rooms.forbidden"))
             { throw new AccountBridgeHostException("party_rooms.command_unavailable"); }
+            if (operation == "transferHost" && !directory.SupportsHostTransfer)
+                return new("rejected", "unavailable", directory, null);
             var target = payload.GetProperty("data").GetProperty("roomId").GetString();
             var current = directory.Rooms.SingleOrDefault(room => room.RoomId == directory.CurrentRoomId && room.RoomId == target);
             if (current?.ViewerIsHost != true) return new("rejected", "notHost", directory, null);
+            if (body is PartyRoomTransferHostRequest transfer && !current.Members.Any(member =>
+                !member.IsHost && !member.IsSelf && member.RemovalToken == transfer.MemberToken))
+                return new("rejected", "memberGone", directory, null);
+            if (body is PartyRoomRemoveMemberRequest removal && !current.Members.Any(member =>
+                !member.IsHost && member.RemovalToken == removal.RemovalToken))
+                return new("rejected", "memberGone", directory, null);
             if (body is PartyRoomUpdateRequest update && update.Capacity < current.Members.Length)
                 return new("rejected", "capacityTooSmall", directory, null);
             if (body is PartyRoomApplicationDecisionRequest decision && !current.PendingApplications.Any(item => item.ApplicationId == decision.ApplicationId))
@@ -81,6 +89,8 @@ internal sealed partial class PartyRoomReader
                 "resolve" => status == "resolved",
                 "update" => status == "updated",
                 "close" => status == "closed",
+                "remove" => status == "removed",
+                "transferHost" => status == "hostTransferred",
                 "decide" => body is PartyRoomApplicationDecisionRequest decision &&
                     status == (decision.Approve ? "joined" : "rejected"),
                 _ => false
@@ -97,7 +107,21 @@ internal sealed partial class PartyRoomReader
             }
             // Never infer membership from a command's room object: pending requests
             // also return a room. Re-read the authoritative membership instead.
-            try { return new(status, null, await ReadAsync(bearer, deadline.Token), null); }
+            try
+            {
+                RoomDirectoryView confirmed;
+                try { confirmed = await ReadAsync(bearer, deadline.Token); }
+                catch (AccountBridgeHostException readError) when (
+                    readError.Code == "party_rooms.read_unavailable" && readError.Retryable &&
+                    !deadline.IsCancellationRequested)
+                {
+                    // One bounded read-only recovery within the same deadline.
+                    // Never retry the accepted POST, authority rejection or
+                    // invalid contract; unresolved results still require refresh.
+                    confirmed = await ReadAsync(bearer, deadline.Token);
+                }
+                return new(status, null, confirmed, null);
+            }
             catch (Exception errorAfterWrite) when (errorAfterWrite is AccountBridgeHostException or OperationCanceledException)
             { return new(status, "refreshRequired", null, null); }
         }
@@ -132,6 +156,16 @@ internal sealed partial class PartyRoomReader
             }
             switch (operation)
             {
+                case "transferHost":
+                    Only("roomId", "memberToken");
+                    var memberToken = Bounded("memberToken", 32);
+                    if (!Guid.TryParseExact(memberToken, "N", out _)) throw Invalid();
+                    return ("/api/party-rooms/host/transfer", new PartyRoomTransferHostRequest(Bounded("roomId", 128), memberToken), operation);
+                case "remove":
+                    Only("roomId", "removalToken");
+                    var removalToken = Bounded("removalToken", 32);
+                    if (!Guid.TryParseExact(removalToken, "N", out _)) throw Invalid();
+                    return ("/api/party-rooms/members/remove", new PartyRoomRemoveMemberRequest(Bounded("roomId", 128), removalToken), operation);
                 case "close":
                     Only("roomId");
                     return ("/api/party-rooms/close", new PartyRoomCloseRequest(Bounded("roomId", 128)), operation);
@@ -210,6 +244,8 @@ internal sealed partial class PartyRoomReader
         "这条申请已经处理或失效。" => "applicationGone",
         "该玩家已经加入其他房间。" => "applicantMoved",
         "人数上限不能低于当前成员数。" => "capacityTooSmall",
+        "只有房主可以移出成员。" or "只有当前房主可以转移房主。" => "notHost",
+        "该成员已离开或不能被移出。" or "该成员已离开或不能接任房主，请刷新后重试。" => "memberGone",
         "只有房主可以修改房间设置。" or "只有房主可以处理加入申请。" or "只有房主可以关闭房间。" => "notHost",
         _ => "rejected"
     };

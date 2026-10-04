@@ -8,6 +8,32 @@ import '../features/friends/social_layout_test.dart'
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets('icon counters reuse the same capped count and hide zero', (
+    tester,
+  ) async {
+    size(tester, const Size(240, 100));
+    for (final count in [0, 1, 99, 100]) {
+      await tester.pumpWidget(
+        app(
+          Center(
+            child: AttentionIconBadge(
+              count: count,
+              child: const SizedBox(width: 28, height: 28),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(AttentionCount),
+        count == 0 ? findsNothing : findsOneWidget,
+      );
+      if (count > 0) {
+        expect(find.text(count > 99 ? '99+' : '$count'), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
   testWidgets(
     'badge is inside the button, separate from icon and fully clickable',
     (tester) async {

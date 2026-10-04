@@ -14,6 +14,7 @@ import 'menu_workspace_controller.dart';
 import 'menu_profile_view.dart';
 import 'menu_feature_view.dart';
 import 'menu_organizations_panel.dart';
+import 'menu_rooms_panel.dart';
 import 'menu_local_tools.dart';
 import 'menu_clock.dart';
 import 'menu_overlay_theme.dart';
@@ -99,6 +100,13 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   Size get _initialViewport =>
       context.getInheritedWidgetOfExactType<MediaQuery>()?.data.size ??
       const Size(1200, 800);
+  static Rect _initialOrganizationBounds(Size viewport) {
+    final width = (viewport.width - 48).clamp(320.0, 900.0);
+    final height = (viewport.height - 180).clamp(200.0, 620.0);
+    // Initial placement only: never clamp a restored or manually moved window.
+    return Rect.fromLTWH((viewport.width - width) / 2, 64, width, height);
+  }
+
   List<MenuPanelSpec> get _specs => [
     if (widget.onFeatureVisible != null)
       for (final id in const ['organizations', 'rooms', 'hud'])
@@ -107,6 +115,9 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
           initialBounds: id == 'organizations'
               ? const Rect.fromLTWH(168, 132, 900, 620)
               : const Rect.fromLTWH(168, 132, 680, 550),
+          viewportBounds: id == 'organizations'
+              ? _initialOrganizationBounds
+              : null,
           minimumSize: const Size(320, 200),
         ),
     if (widget.localCall != null)
@@ -209,10 +220,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
       'hud',
       'organizationChat',
     ]) {
-      final shown =
-          widget.visible &&
-          (workspace.isOpen(id) ||
-              (workspace.isOpen('comms') && id == 'organizationChat'));
+      final shown = widget.visible && workspace.isOpen(id);
       if (shown != _featuresShown.contains(id)) {
         shown ? _featuresShown.add(id) : _featuresShown.remove(id);
         widget.onFeatureVisible?.call(id, shown);
@@ -598,11 +606,23 @@ class _Workspace extends StatelessWidget {
             icon: StarBridgeIconSemantic.friends,
             builder: (_, _) => entry.key == 'organizations'
                 ? MenuOrganizationsPanel(
+                    active:
+                        controller.activeId == 'organizations' &&
+                        controller.visible,
                     view:
                         features[entry.key] ?? const MenuFeatureView('loading'),
                     onProfile: onProfile == null
                         ? null
                         : (key) => onProfile!('organizations', key),
+                    onAction: (key, value) =>
+                        onFeatureAction!(entry.key, key, value),
+                  )
+                : entry.key == 'rooms'
+                ? MenuRoomsPanel(
+                    view:
+                        features[entry.key] ?? const MenuFeatureView('loading'),
+                    active:
+                        controller.activeId == 'rooms' && controller.visible,
                     onAction: (key, value) =>
                         onFeatureAction!(entry.key, key, value),
                   )
@@ -696,14 +716,6 @@ class _Workspace extends StatelessWidget {
                 active: controller.activeId == 'comms' && controller.visible,
                 embedded: true,
                 view: comms!,
-                organization: features['organizationChat'],
-                onOrganizationProfile: onProfile == null
-                    ? null
-                    : (key) => onProfile!('organizationChat', key),
-                organizationSelected: commsChannel == 'organizationChat',
-                onConversationKind: onCommsChannel,
-                onOrganizationAction: (key, value) =>
-                    onFeatureAction?.call('organizationChat', key, value),
                 onClose: () => controller.close('comms'),
                 onAction: onCommsAction!,
                 onCompose: onCommsCompose,

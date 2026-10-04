@@ -123,6 +123,42 @@ class OwnArchive extends Archive {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
+    'late chat portraits cannot replace the selected members page',
+    () async {
+      final port = PhotoPort()..gate = Completer<void>();
+      port.workspaceGate.complete();
+      final chat = Completer<MenuFeatureView>();
+      final members = Completer<MenuFeatureView>();
+      final views = <MenuFeatureView>[];
+      final session = MenuOrganizationsSession(port, (raw) {
+        final view = MenuFeatureView.parse(raw);
+        views.add(view);
+        if (view.organization?.tab == 'chat' &&
+            view.organization!.sections['members'] != null &&
+            !chat.isCompleted) {
+          chat.complete(view);
+        }
+        if (view.organization?.tab == 'members' && !members.isCompleted) {
+          members.complete(view);
+        }
+      });
+      addTearDown(session.dispose);
+      session.show(true);
+      final ready = await chat.future.timeout(const Duration(seconds: 3));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      session.act(ready.organization!.sections['members']!, '');
+      await members.future.timeout(const Duration(seconds: 3));
+      views.clear();
+      port.gate!.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(views.every((view) => view.organization?.tab != 'chat'), isTrue);
+      expect(
+        MenuFeatureView.parse(session.currentView).organization!.tab,
+        'members',
+      );
+    },
+  );
+  test(
     'own photo is visible on local messages even when the online read fails',
     () async {
       final port = PhotoPort()..failChat = true;

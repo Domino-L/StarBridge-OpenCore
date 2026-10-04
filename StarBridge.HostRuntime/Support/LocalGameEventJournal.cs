@@ -126,7 +126,10 @@ public sealed class LocalGameEventJournal : IDisposable
         string? detail = null,
         DateTimeOffset? occurredAt = null,
         long? expectedClearRevision = null,
-        Func<bool>? canAppend = null)
+        Func<bool>? canAppend = null,
+        LifeEventContext lifeContext = LifeEventContext.Unknown,
+        string? displayValue = null,
+        string? displayPlayer = null)
     {
         var timestamp = occurredAt ?? _nowProvider();
         var entry = new LocalEventEntry(
@@ -135,7 +138,10 @@ public sealed class LocalGameEventJournal : IDisposable
             NormalizeCategory(category),
             NormalizeText(eventType, 80, "Unknown"),
             NormalizeText(title, 180, "未命名事件"),
-            NormalizeText(detail, 500, ""));
+            NormalizeText(detail, 500, ""))
+        { LifeContext = Enum.IsDefined(lifeContext) ? lifeContext : LifeEventContext.Unknown,
+            DisplayValue = string.IsNullOrWhiteSpace(displayValue) ? null : NormalizeText(displayValue, 180, ""),
+            DisplayPlayer = string.IsNullOrWhiteSpace(displayPlayer) ? null : NormalizeText(displayPlayer, 80, "") };
         var changed = false;
         Action<LocalEventEntry>? listeners = null;
         lock (_stateLock)

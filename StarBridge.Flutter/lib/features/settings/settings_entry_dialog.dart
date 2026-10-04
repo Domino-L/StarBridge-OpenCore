@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
-import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/components/coming_soon.dart';
+import '../../app/feature_registry.dart' show FeatureAvailability;
 import 'settings_capability_catalog.dart';
 import 'settings_entry_catalog.dart';
 
@@ -20,6 +21,10 @@ class SettingsEntryOverrides extends InheritedWidget {
           .dependOnInheritedWidgetOfExactType<SettingsEntryOverrides>()
           ?.openers ??
       const {};
+  static FeatureAvailability availabilityFor(BuildContext context, String id) =>
+      of(context).containsKey(id)
+      ? FeatureAvailability.available
+      : FeatureAvailability.comingSoon;
   @override
   bool updateShouldNotify(SettingsEntryOverrides oldWidget) =>
       oldWidget.openers != openers;
@@ -57,7 +62,6 @@ class SettingsCapabilityEntryDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    final tokens = context.tokens;
     String t(String key) => settingsEntryText(strings, key);
     return AlertDialog(
       key: Key('settings-entry-${capability.id}'),
@@ -66,38 +70,7 @@ class SettingsCapabilityEntryDialog extends StatelessWidget {
       title: Text(strings.text(capability.titleKey)),
       content: SizedBox(
         width: 560,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              t('unavailable'),
-              style: Theme.of(context).textTheme.labelLarge
-                  ?.copyWith(color: tokens.colors.warning),
-            ),
-            SizedBox(height: tokens.space.sm),
-            Text(t('notice')),
-            SizedBox(height: tokens.space.lg),
-            Text(t('options'), style: Theme.of(context).textTheme.labelLarge),
-            SizedBox(height: tokens.space.sm),
-            for (final action in settingsEntryActions[capability.id]!)
-              Padding(
-                padding: EdgeInsets.only(bottom: tokens.space.sm),
-                child: OutlinedButton(
-                  key: Key('settings-action-${capability.id}-$action'),
-                  onPressed: null,
-                  style: OutlinedButton.styleFrom(
-                    disabledForegroundColor: tokens.colors.textSecondary,
-                    alignment: AlignmentDirectional.centerStart,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: Text(t(action)),
-                ),
-              ),
-          ],
-        ),
+        child: ComingSoonSection(title: strings.text(capability.titleKey)),
       ),
       actions: [
         TextButton(

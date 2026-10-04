@@ -30,7 +30,7 @@ class OverlaySettingsPage extends StatelessWidget {
   Widget _content(BuildContext context) {
     final workspace = module.workspace;
     if (workspace != null) {
-      return OverlayWorkspacePage(module: workspace, scenes: module.scenes);
+      return OverlayWorkspacePage(module: workspace, scenes: module.scenes, roster: module.roster);
     }
     return ValueListenableBuilder<OverlaySettingsProjection>(
       valueListenable: module.projection,

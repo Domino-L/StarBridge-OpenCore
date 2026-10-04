@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'community_workspace_members.dart';
@@ -10,6 +11,7 @@ import 'package:flutter/services.dart';
 import '../../platform/window/native_viewport_visibility.dart';
 
 import 'community_workspace_controller.dart';
+import 'community_activity_port.dart';
 import 'community_workspace_session.dart';
 import 'community_workspace_copy.dart';
 import 'community_workspace_port.dart';
@@ -29,6 +31,7 @@ import 'community_ships_port.dart';
 import 'community_ships_panel.dart';
 import 'community_ships_copy.dart' show communityShipsCulture;
 import 'community_section_stack.dart';
+import 'community_section_navigation.dart';
 import 'community_announcements_port.dart';
 import 'community_announcements_dialog.dart';
 import '../../design_system/controls/semantic_action_style.dart';
@@ -95,14 +98,23 @@ class CommunityWorkspaceViewState extends State<CommunityWorkspaceView>
 
   @override
   Future<void> refreshVisibleCommunity() async {
-    if (model.busy || _refreshingMembership || _leaving) return;
+    if (_refreshingMembership || _leaving) return;
     // Reuse the existing account-scoped page and media; never rebind the
     // directory or ask about drafts for a background metadata read.
     if (model.error == 'identityUnavailable' || model.error == 'notAllowed') {
       return;
     }
-    await model.load(silent: true);
+    await model.refreshFromActivity();
   }
+
+  @override
+  Stream<void>? get communityChanges => widget.port is CommunityActivityPort
+      ? (widget.port as CommunityActivityPort).workspaceChanges
+      : null;
+  @override
+  bool get communityEventsHealthy =>
+      widget.port is CommunityActivityPort &&
+      (widget.port as CommunityActivityPort).activityHealthy;
 
   Future<bool> confirmLeave() async =>
       await (_settingsKey.currentState?.confirmLeave() ??
@@ -563,7 +575,10 @@ class CommunityWorkspaceViewState extends State<CommunityWorkspaceView>
               TextButton.icon(
                 key: const ValueKey('community-settings-back'),
                 onPressed: () => _selectSection('members'),
-                icon: const StandardIcon(StandardIconSemantic.arrowBack, size: 18),
+                icon: const StandardIcon(
+                  StandardIconSemantic.arrowBack,
+                  size: 18,
+                ),
                 label: Text(communitySettingsText(context, 'back')),
               ),
               const SizedBox(width: 16),
@@ -661,48 +676,18 @@ class CommunityWorkspaceViewState extends State<CommunityWorkspaceView>
         Row(
           children: [
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final item in [
-                      ('members', true),
-                      ('chat', canOpenChat),
-                      ('ships', canOpenShips),
-                      // WPF broadcasts have no Flutter port yet. Keep the location
-                      // explicit without inventing a send action or permission.
-                      ('broadcast', false),
-                      if (canManage) ('manage', true),
-                    ])
-                      Padding(
-                        padding: const EdgeInsetsDirectional.only(end: 8),
-                        child: Tooltip(
-                          message: item.$2 ? '' : t('sectionUnavailable'),
-                          child: ChoiceChip(
-                            key: ValueKey('community-section-${item.$1}'),
-                            label: Text(t('section.${item.$1}')),
-                            showCheckmark: false,
-                            labelStyle: Theme.of(context).textTheme.labelLarge,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            elevation: 0,
-                            pressElevation: 0,
-                            chipAnimationStyle: ChipAnimationStyle(
-                              enableAnimation: AnimationStyle.noAnimation,
-                              selectAnimation: AnimationStyle.noAnimation,
-                              avatarDrawerAnimation: AnimationStyle.noAnimation,
-                              deleteDrawerAnimation: AnimationStyle.noAnimation,
-                            ),
-                            selected: section == item.$1,
-                            onSelected: item.$2
-                                ? (_) => _selectSection(item.$1)
-                                : null,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+              child: CommunitySectionNavigation(
+                chatUnreadCount: model.chatUnreadCount,
+                sections: {
+                  'members': true,
+                  'chat': canOpenChat,
+                  'ships': canOpenShips,
+                  // Not connected yet; never invent a broadcast capability.
+                  'broadcast': false,
+                  if (canManage) 'manage': true,
+                },
+                selected: section,
+                onSelected: _selectSection,
               ),
             ),
             if (widget.actions != null) widget.actions!,

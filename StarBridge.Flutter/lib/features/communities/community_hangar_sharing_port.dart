@@ -29,8 +29,14 @@ final class CommunityHangarSharingOutcome {
 }
 
 final class CommunityHangarOption {
-  const CommunityHangarOption(this.targetRef, this.name, this.selected);
+  const CommunityHangarOption(
+    this.targetRef,
+    this.name,
+    this.selected, {
+    this.communityCode,
+  });
   final String targetRef, name;
+  final String? communityCode;
   final bool selected;
 }
 
@@ -60,6 +66,7 @@ final class CommunityHangarSharing {
       throw const FormatException();
     }
     final seen = <String>{};
+    final codes = <String>{};
     final options = <CommunityHangarOption>[];
     var selectedCount = 0;
     for (final row in rows) {
@@ -67,16 +74,31 @@ final class CommunityHangarSharing {
       final reference = row['targetRef'];
       final name = row['name'];
       final selected = row['selected'];
+      final code = row['communityCode'];
       if (!validReference(reference) ||
           !seen.add(reference as String) ||
           name is! String ||
           name.length > 512 ||
           name.contains(RegExp(r'[\x00-\x1f\x7f]')) ||
-          selected is! bool) {
+          selected is! bool ||
+          code != null &&
+              (code is! String ||
+                  code.isEmpty ||
+                  code.length > 256 ||
+                  code.trim() != code ||
+                  code.contains(RegExp(r'[\x00-\x1f\x7f]')) ||
+                  !codes.add(code.toLowerCase()))) {
         throw const FormatException();
       }
       if (selected) selectedCount++;
-      options.add(CommunityHangarOption(reference, name, selected));
+      options.add(
+        CommunityHangarOption(
+          reference,
+          name,
+          selected,
+          communityCode: code as String?,
+        ),
+      );
     }
     if (selectedCount > maximumTargets || !explicit && selectedCount != 0) {
       throw const FormatException();

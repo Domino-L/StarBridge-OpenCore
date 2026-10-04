@@ -84,6 +84,7 @@ internal sealed partial class CommunityClient
 
     private void DisposeMembershipReads()
     {
+        StopBackgroundObservations();
         MembershipRead[] pending;
         lock (_membershipReadLock)
         {

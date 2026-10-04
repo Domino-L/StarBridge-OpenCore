@@ -8,11 +8,96 @@ import 'package:starbridge_flutter/design_system/styles/future_restraint_style.d
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/hangar/hangar_combat_icon.dart';
+import 'package:starbridge_flutter/features/hangar/hangar_read_diagnostics.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_page.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_ship_row.dart';
+import 'package:starbridge_flutter/features/hangar/bridge_local_hangar.dart';
+import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
+
+import 'bridge_local_hangar_test.dart' show LocalConnection;
 
 void main() {
+  testWidgets(
+    'real adapter displays unsaved local hangar when optional profile display is omitted',
+    (tester) async {
+      HangarReadDiagnostics.clear();
+      addTearDown(HangarReadDiagnostics.clear);
+      final connection = LocalConnection()
+        ..legacy = true
+        ..emptyRevision = 0
+        ..profilePayload = {'schemaVersion': 1, 'profile': <String, Object?>{}};
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 7,
+      );
+      addTearDown(session.close);
+      var readerOpens = 0;
+      await tester.pumpWidget(
+        _app(
+          BridgeLocalHangar(session, diagnosticCapture: true),
+          onRead: () => readerOpens++,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('尚未保存机库'), findsOneWidget);
+      expect(find.textContaining('暂时无法读取本机机库'), findsNothing);
+      expect(find.byKey(const Key('local-hangar-retry')), findsNothing);
+      expect(find.byKey(const Key('local-hangar-summary')), findsNothing);
+      expect(find.textContaining('保存在本机'), findsNothing);
+      expect(find.text('0 艘舰船'), findsNothing);
+      expect(HangarReadDiagnostics.entries, isEmpty);
+      expect(readerOpens, 0);
+      expect(connection.requests.map((r) => r.name), [
+        'account.getCurrent',
+        'hangarReader.inventory',
+        'personalProfile.getSelf',
+      ]);
+      await tester.tap(find.byKey(const Key('local-hangar-read')));
+      await tester.pumpAndSettle();
+      expect(readerOpens, 1);
+      expect(connection.requests, hasLength(3));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('diagnostic failure panel is selectable and build gated', (
+    tester,
+  ) async {
+    HangarReadDiagnostics.clear();
+    addTearDown(HangarReadDiagnostics.clear);
+    final port = _LocalPort();
+    await tester.pumpWidget(_app(port));
+    await expectLater(
+      HangarReadDiagnostics.capture(
+        HangarReadStage.inventory,
+        () async => throw const LocalHangarFailure('hangar.unavailable'),
+        enabled: true,
+      ),
+      throwsA(isA<LocalHangarFailure>()),
+    );
+    port.reads.single.completeError(
+      const LocalHangarFailure('private-payload'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('暂时无法读取本机机库'), findsOneWidget);
+    final panel = find.byKey(const Key('hangar-read-diagnostics'));
+    expect(
+      panel,
+      HangarReadDiagnostics.enabled ? findsOneWidget : findsNothing,
+    );
+    if (HangarReadDiagnostics.enabled) {
+      expect(
+        tester.widget<SelectableText>(panel).data,
+        contains('inventory localHangar hangar.unavailable'),
+      );
+      expect(
+        tester.widget<SelectableText>(panel).data,
+        isNot(contains('private-payload')),
+      );
+    }
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('ship detail image fills its frame with proportional cropping', (
     tester,
   ) async {

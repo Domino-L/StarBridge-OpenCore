@@ -26,7 +26,9 @@ internal sealed partial class ScmAccountBridgeHost
             .OrderByDescending(x => x.CreatedAt).Select(x => {
                 var reference = Guid.NewGuid().ToString("N");
                 ids.Add(reference, x.NotificationId);
-                return new { reference, x.Category, x.Priority, x.Title, x.Body, x.CreatedAt,
+                var eventKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(context) + "\n" + x.NotificationId))).ToLowerInvariant();
+                return new { reference, eventKey, x.Category, x.Priority, x.Title, x.Body, x.CreatedAt,
                     read = x.ReadAt is not null, x.ActionTarget, x.ActionLabel, x.IsAvailable, x.GroupCount };
             }).ToArray();
         _inboxLease = new(context, generation, DateTimeOffset.UtcNow.AddMinutes(10), ids);

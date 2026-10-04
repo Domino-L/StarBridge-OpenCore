@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -16,6 +17,8 @@ import 'community_chat_copy.dart';
 import 'community_workspace_image.dart';
 import 'community_preset_port.dart';
 import 'community_preset_dialog.dart';
+import '../overlay_settings/overlay_shared_preset_card.dart';
+import '../overlay_settings/overlay_preset_transfer.dart';
 
 class CommunityChatMessageTile extends StatefulWidget {
   const CommunityChatMessageTile({
@@ -37,6 +40,7 @@ class CommunityChatMessageTile extends StatefulWidget {
 class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
   CommunityChatDetail? detail;
   Uint8List? avatar;
+  OverlayPresetTransfer? preview;
   bool failed = false, loading = false, invalidated = false;
   int epoch = 0;
   late StreamSubscription<void> changes;
@@ -47,12 +51,19 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
   }
 
   void _bind() {
+    final ready = widget.mediaCache?.peek(widget.message);
+    if (ready != null) {
+      detail = CommunityChatDetail(null, ready.attachment);
+      avatar = ready.avatar;
+      preview = ready.preview;
+    }
     changes = widget.port.invalidations.listen((_) {
       epoch++;
       invalidated = true;
       if (mounted) {
         setState(() {
           detail = null;
+          preview = null;
           avatar = null;
           loading = false;
         });
@@ -74,6 +85,7 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
       epoch++;
       unawaited(changes.cancel());
       detail = null;
+      preview = null;
       avatar = null;
       failed = loading = invalidated = false;
       _bind();
@@ -99,6 +111,7 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
         if (!mounted || current != epoch || invalidated) return;
         setState(() {
           detail = CommunityChatDetail(null, result.attachment);
+          preview = result.preview;
           avatar = result.avatar;
         });
         return;
@@ -152,13 +165,17 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
         name: sender,
         avatarBytes: avatar,
         isSelf: message.isSelf,
-        target: UserTarget.community(widget.targetRef, message.senderRef, query: message.gameId),
+        target: UserTarget.community(
+          widget.targetRef,
+          message.senderRef,
+          query: message.gameId,
+        ),
         child: SizedBox(
           width: 36,
           height: 36,
           child: CommunityWorkspaceImage(
             bytes: avatar,
-            loading: loading && !invalidated,
+            loading: loading && avatar == null && !invalidated,
             loadFailed: failed,
             icon: StandardIconSemantic.person,
             maxWidth: 96,
@@ -186,58 +203,40 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
           ),
           if (message.text.isNotEmpty) SelectableText(message.text),
           if (message.hasAttachment)
-            SizedBox(
-              height: 176,
-              width: 360,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: card != null
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              t('preset'),
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                            Text(
-                              card['title'] as String,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              card['summary'] as String,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (widget.port is CommunityPresetPort &&
-                                (widget.port as CommunityPresetPort)
-                                    .communityPresetsAvailable)
-                              TextButton(
-                                onPressed: invalidated
-                                    ? null
-                                    : () => showDialog<void>(
-                                        context: context,
-                                        barrierDismissible: false,
-                                        builder: (_) => CommunityPresetDialog(
-                                          port:
-                                              widget.port
-                                                  as CommunityPresetPort,
-                                          attachment: card,
-                                        ),
-                                      ),
-                                child: Text(t('importPreset')),
-                              ),
-                          ],
-                        )
-                      : Center(
-                          child: loading
-                              ? const CircularProgressIndicator()
-                              : Text(t('mediaFailed')),
+            if (card != null)
+              OverlaySharedPresetCard(
+                name: card['title'] as String,
+                preview: preview,
+                onInspect:
+                    !invalidated &&
+                        widget.port is CommunityPresetPort &&
+                        (widget.port as CommunityPresetPort)
+                            .communityPresetsAvailable
+                    ? () => showDialog<void>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (_) => CommunityPresetDialog(
+                          port: widget.port as CommunityPresetPort,
+                          attachment: card,
                         ),
+                      )
+                    : null,
+              )
+            else
+              SizedBox(
+                height: 176,
+                width: 360,
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Center(
+                      child: loading
+                          ? const CircularProgressIndicator()
+                          : Text(t('mediaFailed')),
+                    ),
+                  ),
                 ),
               ),
-            ),
           if (failed)
             TextButton.icon(
               onPressed: invalidated ? null : () => _load(retry: true),

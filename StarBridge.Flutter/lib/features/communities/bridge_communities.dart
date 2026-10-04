@@ -7,6 +7,7 @@ import 'community_creation_port.dart';
 import 'community_logo_port.dart';
 import 'community_image_data.dart';
 import 'community_workspace_port.dart';
+import 'community_directory_metadata_port.dart';
 import 'community_visitor_profile_port.dart';
 import '../personal_profile/bridge_personal_profile_adapter.dart';
 import '../personal_profile/personal_profile_models.dart';
@@ -25,6 +26,7 @@ final class BridgeCommunities extends CommunityBridgeTransport
         CommunityVisitorProfilePort,
         CommunityCreationPort,
         CommunityLogoPort,
+        CommunityDirectoryMetadataPort,
         CommunityWorkspacePort {
   BridgeCommunities(super.session, {super.ownAvatar});
   @override
@@ -63,6 +65,34 @@ final class BridgeCommunities extends CommunityBridgeTransport
     required String query,
     String? after,
     String? filters,
+  }) => _readDirectory(
+    view: view,
+    query: query,
+    after: after,
+    filters: filters,
+    hydrateLogos: true,
+  );
+
+  @override
+  Future<CommunityDirectory> readDirectoryMetadata({
+    required String view,
+    required String query,
+    String? after,
+    String? filters,
+  }) => _readDirectory(
+    view: view,
+    query: query,
+    after: after,
+    filters: filters,
+    hydrateLogos: false,
+  );
+
+  Future<CommunityDirectory> _readDirectory({
+    required String view,
+    required String query,
+    String? after,
+    String? filters,
+    required bool hydrateLogos,
   }) async {
     final epoch = requestEpoch;
     void current() {
@@ -82,6 +112,8 @@ final class BridgeCommunities extends CommunityBridgeTransport
       if (result.view != view || result.query != query.trim()) {
         throw const FormatException();
       }
+      current();
+      if (!hydrateLogos) return result;
       final rows = (value['items'] as List)
           .map((row) => Map<String, Object?>.from(row as Map))
           .toList();
@@ -386,6 +418,7 @@ CommunityDirectory parseCommunityDirectory(Map<String, Object?> value) {
       joinMode: mode,
       actions: List.unmodifiable(actions),
       logo: logo is String && decodeCommunityLogo(logo) != null ? logo : null,
+      logoDeferred: row['logoDeferred'] == true,
     );
   }).toList();
   return CommunityDirectory(

@@ -25,15 +25,21 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
   int accountEpoch = 0;
   int generation = 0, _serial = 0;
   int _scope = 0;
+  String? _rejectedAction;
   final _silentKeys = <String>{};
   bool silentRead = false;
-  void changeScope() => _scope++;
+  void changeScope() {
+    _scope++;
+    _rejectedAction = null;
+  }
+
   final _actions =
       <
         String,
         ({DateTime expires, Future<void> Function(String) run, bool silent})
       >{};
   Map<String, Object?> _view = const {'state': 'loading'};
+  Map<String, Object?> get currentView => _view;
   void reset();
   Future<Map<String, Object?>> read();
   Future<void> closePort();
@@ -44,6 +50,8 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
   Duration get refreshInterval => const Duration(seconds: 15);
   Map<String, Object?>? get readingView => null;
   Map<String, Object?>? failedRead(Object error) => null;
+  Map<String, Object?>? failedWrite() => null;
+  Map<String, Object?>? get writingView => null;
   Map<String, Object?> button(
     String label,
     Future<void> Function(String) run, {
@@ -74,7 +82,16 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
   bool current(int epoch) => !disposed && visible && epoch == generation;
   bool currentAccount(int epoch) => !disposed && epoch == accountEpoch;
   void emit(Map<String, Object?> view) {
-    _view = {...view, 'scope': 's$_scope'};
+    if (view['rejectedAction'] case final String key) {
+      _rejectedAction = key;
+    }
+    // Cross-window updates may be coalesced. Keep the most recent rejection
+    // just like local acceptance, until the editor's scope is retired.
+    _view = {
+      ...view,
+      if (_rejectedAction != null) 'rejectedAction': _rejectedAction,
+      'scope': 's$_scope',
+    };
     if (visible && !disposed) publish(_view);
   }
 
@@ -89,7 +106,7 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     _timer?.cancel();
     if (value) {
       if (_writing) {
-        emit({'state': 'loading', 'notice': '正在确认上次操作，请稍候。'});
+        emit(writingView ?? {'state': 'loading', 'notice': '正在确认上次操作，请稍候。'});
       } else {
         unawaited(refresh());
       }
@@ -108,7 +125,7 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     _actions.removeWhere(
       (_, action) => !DateTime.now().isBefore(action.expires),
     );
-    final retained = backgroundReads ? readingView : null;
+    final retained = readingView;
     if (retained != null && !silent) {
       emit({...retained, 'refreshing': true});
     } else if (!silent) {
@@ -132,11 +149,22 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
 
   @override
   void act(String key, String value) {
-    if (disposed ||
-        !visible ||
-        (_busy && !backgroundReads) ||
-        _writing ||
-        value.length > 2048) {
+    if (disposed) return;
+    if (!visible) {
+      if (_view['chat'] is Map &&
+          (_view['chat'] as Map)['outboxVersion'] == 1 &&
+          RegExp(r'^a[1-9][0-9]{0,13}$').hasMatch(key)) {
+        _rejectedAction = key;
+      }
+      return;
+    }
+    if ((_busy && !backgroundReads) || _writing || value.length > 2048) {
+      // A renderer can still be handling the previous frame's enabled button.
+      // Reject the handoff explicitly; it must not leave an editor waiting.
+      if (!_silentKeys.contains(key) &&
+          RegExp(r'^a[1-9][0-9]{0,13}$').hasMatch(key)) {
+        emit({..._view, 'rejectedAction': key});
+      }
       return;
     }
     if (key == 'refresh') {
@@ -146,7 +174,11 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     final action = _actions[key];
     if (action == null || !DateTime.now().isBefore(action.expires)) {
       if (_silentKeys.contains(key)) return;
-      emit({..._view, 'notice': '内容已更新，请刷新后重试。'});
+      emit({
+        ..._view,
+        if (RegExp(r'^a[1-9][0-9]{0,13}$').hasMatch(key)) 'rejectedAction': key,
+        'notice': '内容已更新，请刷新后重试。',
+      });
       return;
     }
     if (action.silent) {
@@ -182,7 +214,10 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
       if (currentAccount(account)) {
         generation++;
         _actions.clear();
-        emit({'state': 'unavailable', 'notice': '操作结果未确认，请刷新核对，不要重复提交。'});
+        emit(
+          failedWrite() ??
+              {'state': 'unavailable', 'notice': '操作结果未确认，请刷新核对，不要重复提交。'},
+        );
       }
     } finally {
       if (currentAccount(account)) _writing = false;

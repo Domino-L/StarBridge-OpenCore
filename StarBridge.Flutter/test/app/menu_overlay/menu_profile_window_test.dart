@@ -6,9 +6,42 @@ import 'package:starbridge_flutter/app/menu_overlay/menu_profile_view.dart';
 import '../../features/friends/social_layout_test.dart'
     show app, size, loadFonts;
 import 'menu_profiles_session_test.dart' show fixtureProfile;
+import 'menu_chat_media_test.dart' show photo;
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets(
+    'unchanged affiliation image keeps its decoded provider across refresh',
+    (tester) async {
+      size(tester, const Size(900, 650));
+      MenuProfileView ready() {
+        final encoded = MenuProfileView.encode(fixtureProfile);
+        final rows = encoded['affiliations'] as List;
+        (rows.single as Map)['image'] = photo;
+        return MenuProfileView.parse(encoded);
+      }
+
+      Future<void> show(MenuProfileView view) async {
+        await tester.pumpWidget(
+          app(MenuProfileWindowPage(view: view, onRefresh: () {})),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await show(ready());
+      final finder = find.byKey(
+        const Key('profile-affiliation-logo-featuredCommunity'),
+      );
+      final first = tester.widget<Image>(finder).image;
+      await show(ready());
+      expect(tester.widget<Image>(finder).image, first);
+      await show(const MenuProfileView('revoked'));
+      expect(finder, findsNothing);
+      await show(ready());
+      expect(tester.widget<Image>(finder).image, isNot(first));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'existing visitor page fits a resized tool and clears on revocation',
     (tester) async {

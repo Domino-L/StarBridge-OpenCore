@@ -24,16 +24,16 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.local.previewTitle': '弹出提醒显示多少内容',
   'settings.notification.local.position': '弹出位置（应用内与桌面）',
   'settings.notification.local.preview.fullContent':
-      '显示新邀请和加入申请的数量，不展示聊天正文或个人资料。',
-  'settings.notification.local.preview.sourceOnly': '只显示房间提醒，不显示数量。',
-  'settings.notification.local.preview.hiddenDetails': '只显示有新通知，不显示来源或数量。',
+      '私信显示发送者和一行正文；房间提醒显示邀请和申请数量。',
+  'settings.notification.local.preview.sourceOnly': '显示私信发送者或提醒来源，不显示正文和数量。',
+  'settings.notification.local.preview.hiddenDetails': '只显示有新提醒，不显示发送者、正文或数量。',
   'settings.notification.local.description': '这些设置保存在本机，保存后生效。',
   'settings.notification.local.enabled': '显示应用内弹出提醒',
   'settings.notification.local.enabledDescription':
-      '使用客户端时，提示新的房间邀请和加入申请。关闭后，未读气泡仍会保留。',
-  'settings.notification.local.pending': '私信桌面通知、来源规则和游玩提醒仍在接入中。',
+      '使用客户端时，提示新的私信、好友申请和房间提醒。关闭后，未读气泡仍会保留。',
+  'settings.notification.local.pending': '提醒内容会按上方选择的隐私档位显示。',
   'settings.notification.local.overlayDescription':
-      '游戏在前台且浮层公告已开启时，提醒新的房间邀请和加入申请。不会自动打开浮层。',
+      '游戏在前台且浮层公告已开启时，提醒新的房间邀请和加入申请；私信还需开启浮层的好友通信事件。正文同时遵循消息预览和隐私设置。不会自动打开浮层。',
   'settings.notification.local.windowsDescription':
       '后台显示已开启的桌面提醒；游戏、全屏或系统免打扰时保持安静。',
   'settings.notification.local.desktopTest': '测试 Windows 通知',
@@ -43,6 +43,13 @@ const simplifiedNotificationSettingsStrings = <String, String>{
       '暂未显示提醒。请检查系统免打扰、游戏或全屏状态；旧版 Windows 可能不支持。',
   'settings.notification.local.genericTitle': '新通知',
   'settings.notification.local.roomTitle': '房间提醒',
+  'settings.notification.local.directTitle': '收到新私信',
+  'settings.notification.local.directFrom': '{sender} 发来私信',
+  'settings.notification.local.directPreview': '{message}',
+  'settings.notification.local.directExample.full': '示例用户发来私信：你好',
+  'settings.notification.local.directExample.source': '示例用户发来私信',
+  'settings.notification.local.friendTitle': '新的好友申请',
+  'settings.notification.local.socialBody': '打开消息与通知查看。',
   'settings.notification.local.hiddenBody': '你有新的通知，请打开通知页查看。',
   'settings.notification.local.sourceBody': '有新的房间消息，请前往房间查看。',
   'settings.notification.local.fullBody':
@@ -177,16 +184,16 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.local.previewTitle': '彈出提醒顯示多少內容',
   'settings.notification.local.position': '彈出位置（應用內與桌面）',
   'settings.notification.local.preview.fullContent':
-      '顯示新邀請和加入申請的數量，不展示聊天正文或個人資料。',
-  'settings.notification.local.preview.sourceOnly': '只顯示房間提醒，不顯示數量。',
-  'settings.notification.local.preview.hiddenDetails': '只顯示有新通知，不顯示來源或數量。',
+      '私訊顯示傳送者和一行內文；房間提醒顯示邀請和申請數量。',
+  'settings.notification.local.preview.sourceOnly': '顯示私訊傳送者或提醒來源，不顯示內文和數量。',
+  'settings.notification.local.preview.hiddenDetails': '只顯示有新提醒，不顯示傳送者、內文或數量。',
   'settings.notification.local.description': '這些設定儲存在本機，儲存後生效。',
   'settings.notification.local.enabled': '顯示應用程式內彈出提醒',
   'settings.notification.local.enabledDescription':
-      '使用用戶端時，提示新的房間邀請和加入申請。關閉後，未讀氣泡仍會保留。',
-  'settings.notification.local.pending': '私訊桌面通知、來源規則和遊玩提醒仍在接入中。',
+      '使用用戶端時，提示新的私訊、好友申請和房間提醒。關閉後，未讀氣泡仍會保留。',
+  'settings.notification.local.pending': '提醒內容會依上方選擇的隱私等級顯示。',
   'settings.notification.local.overlayDescription':
-      '遊戲在前台且浮層公告已開啟時，提醒新的房間邀請和加入申請。不會自動開啟浮層。',
+      '遊戲在前台且浮層公告已開啟時，提醒新的房間邀請和加入申請；私訊還需開啟浮層的好友通訊事件。內文同時遵循訊息預覽和隱私設定。不會自動開啟浮層。',
   'settings.notification.local.windowsDescription':
       '背景顯示已開啟的桌面提醒；遊戲、全螢幕或系統勿擾時保持安靜。',
   'settings.notification.local.desktopTest': '測試 Windows 通知',
@@ -196,6 +203,13 @@ const traditionalNotificationSettingsStrings = <String, String>{
       '暫未顯示提醒。請檢查系統勿擾、遊戲或全螢幕狀態；舊版 Windows 可能不支援。',
   'settings.notification.local.genericTitle': '新通知',
   'settings.notification.local.roomTitle': '房間提醒',
+  'settings.notification.local.directTitle': '收到新私訊',
+  'settings.notification.local.directFrom': '{sender} 傳來私訊',
+  'settings.notification.local.directPreview': '{message}',
+  'settings.notification.local.directExample.full': '範例使用者傳來私訊：你好',
+  'settings.notification.local.directExample.source': '範例使用者傳來私訊',
+  'settings.notification.local.friendTitle': '新的好友申請',
+  'settings.notification.local.socialBody': '開啟訊息與通知查看。',
   'settings.notification.local.hiddenBody': '你有新的通知，請開啟通知頁查看。',
   'settings.notification.local.sourceBody': '有新的房間訊息，請前往房間查看。',
   'settings.notification.local.fullBody':
@@ -335,16 +349,18 @@ const englishNotificationSettingsStrings = <String, String>{
   'settings.notification.local.previewTitle': 'Pop-up notification content',
   'settings.notification.local.position':
       'Pop-up position (in-app and desktop)',
-  'settings.notification.local.preview.fullContent': 'Show counts of new invitations and join requests, without chat text or personal information.',
+  'settings.notification.local.preview.fullContent': 'Show a direct-message sender and one line of text; show invitation and join-request counts for room alerts.',
   'settings.notification.local.preview.sourceOnly':
-      'Show that this is a room notification, without counts.',
-  'settings.notification.local.preview.hiddenDetails': 'Show only that there is a new notification, without its source or counts.',
+      'Show the direct-message sender or alert source, without text or counts.',
+  'settings.notification.local.preview.hiddenDetails':
+      'Show only that there is a new alert, without sender, text or counts.',
   'settings.notification.local.description':
       'Stored on this device. Changes take effect after saving.',
   'settings.notification.local.enabled': 'Show in-app pop-up notifications',
-  'settings.notification.local.enabledDescription': 'Show new room invitations and join requests while using the app. Turning this off keeps unread badges.',
-  'settings.notification.local.pending': 'Direct-message desktop notifications, source rules and play reminders are still being connected.',
-  'settings.notification.local.overlayDescription': 'Show new room invitations and join requests while the game is foreground and the overlay announcement is enabled. Does not open the overlay automatically.',
+  'settings.notification.local.enabledDescription': 'Show new direct messages, friend requests and room alerts while using the app. Turning this off keeps unread badges.',
+  'settings.notification.local.pending':
+      'Alert content follows the privacy level selected above.',
+  'settings.notification.local.overlayDescription': 'Show new room invitations and join requests while the game is foreground and overlay announcements are enabled. Direct messages also require friend communication events; text follows both message preview and privacy settings. Does not open the overlay automatically.',
   'settings.notification.local.windowsDescription': 'Show enabled desktop alerts in the background. Stay quiet during games, full-screen apps and system Do Not Disturb.',
   'settings.notification.local.desktopTest': 'Test Windows notification',
   'settings.notification.local.desktopTestBody':
@@ -354,6 +370,16 @@ const englishNotificationSettingsStrings = <String, String>{
   'settings.notification.local.desktopFailed': 'Not shown. Check Do Not Disturb, games or full-screen apps. Older Windows versions may not support this feature.',
   'settings.notification.local.genericTitle': 'New notification',
   'settings.notification.local.roomTitle': 'Room notification',
+  'settings.notification.local.directTitle': 'New direct message',
+  'settings.notification.local.directFrom': 'Direct message from {sender}',
+  'settings.notification.local.directPreview': '{message}',
+  'settings.notification.local.directExample.full':
+      'Example user sent a direct message: Hello',
+  'settings.notification.local.directExample.source':
+      'Direct message from example user',
+  'settings.notification.local.friendTitle': 'New friend request',
+  'settings.notification.local.socialBody':
+      'Open messages and notifications to review.',
   'settings.notification.local.hiddenBody':
       'You have new notifications. Open Notifications to view them.',
   'settings.notification.local.sourceBody':

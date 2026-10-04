@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/shell/chrome/presence_color.dart';
+import '../common/social_identity_text.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -9,15 +10,28 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
 import 'room_display.dart';
+import 'room_member_menu.dart';
+import 'room_member_policy.dart';
 
 class RoomMembersPanel extends StatefulWidget {
   const RoomMembersPanel({
     super.key,
     required this.room,
     required this.serverTime,
+    this.onRemove,
+    this.onTransfer,
+    this.memberBuilder,
+    this.listKey,
   });
   final PartyRoom room;
   final DateTime serverTime;
+  final void Function(RoomMember)? onRemove;
+  final void Function(RoomMember)? onTransfer;
+
+  /// A transport-specific renderer may supply an already-authorized row without
+  /// giving this presentation widget command tokens or account references.
+  final Widget Function(BuildContext, int, RoomMember)? memberBuilder;
+  final Key? listKey;
   @override
   State<RoomMembersPanel> createState() => _RoomMembersPanelState();
 }
@@ -147,11 +161,31 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
           const SizedBox(height: 10),
           Expanded(
             child: ListView.separated(
-              key: ValueKey('room-details-${room.id}'),
+              key: widget.listKey ?? ValueKey('room-details-${room.id}'),
               itemCount: room.members.length,
               separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (_, index) =>
-                  RoomMemberBanner(member: room.members[index]),
+              itemBuilder: (context, index) =>
+                  widget.memberBuilder?.call(
+                    context,
+                    index,
+                    room.members[index],
+                  ) ??
+                  RoomMemberBanner(
+                    member: room.members[index],
+                    trailing:
+                        canRemoveRoomMember(room, room.members[index]) &&
+                            (widget.onRemove != null ||
+                                widget.onTransfer != null)
+                        ? RoomMemberMenu(
+                            onRemove: widget.onRemove == null
+                                ? null
+                                : () => widget.onRemove!(room.members[index]),
+                            onTransfer: widget.onTransfer == null
+                                ? null
+                                : () => widget.onTransfer!(room.members[index]),
+                          )
+                        : null,
+                  ),
             ),
           ),
         ],
@@ -161,8 +195,15 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
 }
 
 class RoomMemberBanner extends StatelessWidget {
-  const RoomMemberBanner({super.key, required this.member});
+  const RoomMemberBanner({
+    super.key,
+    required this.member,
+    this.portrait,
+    this.trailing,
+  });
   final RoomMember member;
+  final Widget? portrait;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -171,18 +212,21 @@ class RoomMemberBanner extends StatelessWidget {
     final identity = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        RoomAvatar(member: member, size: 40),
+        portrait ?? RoomAvatar(member: member, size: 40),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                member.displayName.isEmpty
+              SocialIdentityText(
+                callsign: member.callsign.isEmpty && member.gameId.isEmpty
                     ? t('unnamedMember')
-                    : member.displayName,
-                style: Theme.of(context).textTheme.bodyMedium
+                    : member.callsign,
+                gameId: member.gameId,
+                callsignStyle: Theme.of(context).textTheme.bodyMedium
                     ?.copyWith(fontWeight: FontWeight.w600),
+                gameIdColor: colors.textSecondary,
+                maxLines: 2,
               ),
               if (member.isHost)
                 Text(
@@ -218,18 +262,12 @@ class RoomMemberBanner extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           flex: 4,
-          child: RoomFact(
-            t('ship'),
-            member.ship.isEmpty ? t('notShared') : member.ship,
-          ),
+          child: RoomFact(t('ship'), roomShip(context, member)),
         ),
         const SizedBox(width: 12),
         Expanded(
           flex: 3,
-          child: RoomFact(
-            t('location'),
-            member.location.isEmpty ? t('notShared') : member.location,
-          ),
+          child: RoomFact(t('location'), roomLocation(context, member)),
         ),
       ],
     );
@@ -242,18 +280,30 @@ class RoomMemberBanner extends StatelessWidget {
         border: Border.all(color: colors.textSecondary.withValues(alpha: .2)),
       ),
       child: LayoutBuilder(
-        builder: (context, constraints) => constraints.maxWidth >= 520
+        builder: (context, constraints) => constraints.maxWidth >= 640
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(width: 205, child: identity),
                   const SizedBox(width: 16),
                   Expanded(child: facts),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 40, child: trailing),
                 ],
               )
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [identity, const SizedBox(height: 12), facts],
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: identity),
+                      ?trailing,
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  facts,
+                ],
               ),
       ),
     );

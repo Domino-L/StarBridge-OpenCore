@@ -11,6 +11,7 @@
 #include "native_host_bridge.h"
 #include "hangar_browser_bridge.h"
 #include "overlay_editor_window.h"
+#include "friends_window_bridge.h"
 #ifdef STARBRIDGE_ENABLE_MENU_OVERLAY
 #include "menu_overlay_bridge.h"
 #endif
@@ -23,7 +24,8 @@ constexpr wchar_t kFlutterWindowOwnerProperty[] =
 
 void PickGameLog(
     HWND owner,
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+    bool overlay_background = false) {
   if (!IsWindow(owner)) {
     result->Error("gameplay_log_picker_unavailable",
                   "The application window is unavailable.");
@@ -34,11 +36,13 @@ void PickGameLog(
   OPENFILENAMEW dialog{};
   dialog.lStructSize = sizeof(dialog);
   dialog.hwndOwner = owner;
-  dialog.lpstrFilter = L"Game.log\0Game.log\0\0";
+  dialog.lpstrFilter = overlay_background
+      ? L"Images (PNG, JPEG, WebP)\0*.png;*.jpg;*.jpeg;*.webp\0\0"
+      : L"Game.log\0Game.log\0\0";
   dialog.nFilterIndex = 1;
   dialog.lpstrFile = file_path.data();
   dialog.nMaxFile = static_cast<DWORD>(file_path.size());
-  dialog.lpstrTitle = L"Select Game.log";
+  dialog.lpstrTitle = overlay_background ? L"Select local overlay preview background" : L"Select Game.log";
   dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
                  OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_DONTADDTORECENT;
   if (!GetOpenFileNameW(&dialog)) {
@@ -87,6 +91,12 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  friends_window_bridge_ = std::make_unique<FriendsWindowBridge>(
+      GetHandle(), flutter_controller_->engine()->messenger());
+  messages_window_bridge_ = std::make_unique<FriendsWindowBridge>(
+      GetHandle(), flutter_controller_->engine()->messenger(), L"data", "messages");
+  notifications_window_bridge_ = std::make_unique<FriendsWindowBridge>(
+      GetHandle(), flutter_controller_->engine()->messenger(), L"data", "notifications");
 #ifdef STARBRIDGE_ENABLE_MENU_OVERLAY
   menu_overlay_bridge_ = std::make_unique<MenuOverlayBridge>(
       flutter_controller_->engine()->messenger(), GetHandle());
@@ -136,7 +146,7 @@ bool FlutterWindow::OnCreate() {
   gameplay_files_channel_->SetMethodCallHandler(
       [owner = GetHandle(), dialog_open = std::make_shared<bool>(false)](
           const auto& call, auto result) {
-        if (call.method_name() != "pickGameLog") {
+        if (call.method_name() != "pickGameLog" && call.method_name() != "pickOverlayBackground") {
           result->NotImplemented();
           return;
         }
@@ -147,7 +157,7 @@ bool FlutterWindow::OnCreate() {
           return;
         }
         *dialog_open = true;
-        PickGameLog(owner, std::move(result));
+        PickGameLog(owner, std::move(result), call.method_name() == "pickOverlayBackground");
         *dialog_open = false;
       });
   native_host_bridge_ = std::make_unique<NativeHostBridge>(
@@ -188,6 +198,9 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  friends_window_bridge_.reset();
+  messages_window_bridge_.reset();
+  notifications_window_bridge_.reset();
 #ifdef STARBRIDGE_ENABLE_MENU_OVERLAY
   menu_overlay_bridge_.reset();
 #endif
@@ -288,6 +301,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       }
     }
     return 0;
+  }
+
+  if (message == WM_NCACTIVATE) {
+    // Flutter paints the entire custom frame. Letting DefWindowProc repaint
+    // the native thick frame on every focus change briefly exposes a bright
+    // system-coloured outline before Flutter's next frame.
+    return TRUE;
   }
 
   if (message == WM_NCHITTEST) {

@@ -118,6 +118,7 @@ void main() {
       await tester.tap(find.byKey(const Key('hangar-reader-action')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('local-hangar-save-panel')), findsOneWidget);
+      expect(find.textContaining('不会自动开启共享或更改共享范围'), findsOneWidget);
       expect(port.writes, 0);
       await tester.tap(find.byKey(const Key('local-hangar-confirm')));
       await tester.pump();

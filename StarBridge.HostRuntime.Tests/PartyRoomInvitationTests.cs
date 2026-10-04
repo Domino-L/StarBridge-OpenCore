@@ -10,9 +10,15 @@ internal static class PartyRoomInvitationTests
 {
     internal static async Task Invitations()
     {
-        byte[] Directory(bool host) {
+        byte[] Directory(bool host, bool includeOtherRoom = false, bool projectedIdentity = false) {
             var root = JsonNode.Parse(PartyRoomReaderTests.Wire(host ? "one" : null, PartyRoomReaderTests.Room("one")))!;
             root["rooms"]![0]!["viewerIsHost"] = host;
+            if (projectedIdentity) {
+                var member = root["rooms"]![0]!["members"]![0]!;
+                member["accountId"] = "";
+                member["publicProfileId"] = host ? "private-member" : null;
+            }
+            if (includeOtherRoom) root["rooms"]!.AsArray().Add(JsonSerializer.SerializeToNode(PartyRoomReaderTests.Room("two")));
             root[host ? "sentInvitations" : "receivedInvitations"] = JsonSerializer.SerializeToNode(new[] {
                 new { invitationId = "invitation-1", roomId = "one", roomTitle = "Test room", inviterCallsign = "房主",
                     inviterGameId = "Host_CN", recipientCallsign = "好友", recipientGameId = "Friend_CN",
@@ -61,6 +67,27 @@ internal static class PartyRoomInvitationTests
         var targets = await reader.ExecuteAsync("bearer-test", Command("inviteTargets", new { roomId = "one" }), default);
         Check(targets.Targets.Length == 1 && targets.Targets[0].TargetRef != "private-target", "Exclude room members; only scoped opaque refs reach Flutter.");
         Check(targets.Targets[0].AlreadyInvited, "Existing outgoing invitations disable repeated invitation UI.");
+        using (var redactedReader = new PartyRoomReader(new Uri("https://relay.example.test"), new Handler(request => {
+            if (request.RequestUri!.AbsolutePath == "/api/friends") return Ok(JsonSerializer.SerializeToUtf8Bytes(new { friends = new[] {
+                new { user = new { accountId = "private-target", callsign = "好友", gameId = "Friend_CN", relationshipState = "friend" } },
+                new { user = new { accountId = "private-member", callsign = "房内成员", gameId = "Member_CN", relationshipState = "friend" } }
+            } }));
+            return Ok(Directory(true, projectedIdentity: true));
+        }))) {
+            var projectedTargets = await redactedReader.ExecuteAsync("bearer-test", Command("inviteTargets", new { roomId = "one" }), default);
+            Check(projectedTargets.Status == "targets" && projectedTargets.Targets.Length == 1,
+                "Invite target read accepts the current service's redacted member identity and excludes existing members.");
+        }
+        using (var multiRoomReader = new PartyRoomReader(new Uri("https://relay.example.test"), new Handler(request => {
+            if (request.RequestUri!.AbsolutePath == "/api/friends") return Ok(JsonSerializer.SerializeToUtf8Bytes(new { friends = new[] {
+                new { user = new { accountId = "private-target", callsign = "好友", gameId = "Friend_CN", relationshipState = "friend" } }
+            } }));
+            return Ok(Directory(true, includeOtherRoom: true));
+        }))) {
+            var multiRoomTargets = await multiRoomReader.ExecuteAsync("bearer-test", Command("inviteTargets", new { roomId = "one" }), default);
+            Check(multiRoomTargets.Status == "targets" && multiRoomTargets.Targets.Length == 1,
+                "Host invite target lookup must select the current owned room when public directory has other rooms.");
+        }
         var invited = await reader.ExecuteAsync("bearer-test", Command("invite", new { roomId = "one", targetRef = targets.Targets[0].TargetRef }), default);
         Check(invited.Status == "invited" && requests.Count(item => item.StartsWith("POST")) == 1, "Already invited is successful and never retried.");
         var count = requests.Count;

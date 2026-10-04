@@ -1,6 +1,12 @@
 import 'direct_send_strings.dart';
 
 const directZhCn = <String, String>{
+  'direct.search': '搜索会话',
+  'direct.noSearchResults': '没有匹配的会话',
+  'direct.presence.online': '在线',
+  'direct.presence.inGame': '游戏中',
+  'direct.presence.away': '暂离',
+  'direct.presence.offline': '离线',
   'direct.readingHint': '仅你与对方可见，看到的消息会同步为已读。',
   'direct.readFailed': '已读状态暂未同步，请刷新消息后重试。',
   ...directSendZhCn,
@@ -44,6 +50,12 @@ const directZhCn = <String, String>{
   'direct.error.limit': '已达到本次历史浏览上限，请回到最新消息。',
 };
 const directZhTw = <String, String>{
+  'direct.search': '搜尋對話',
+  'direct.noSearchResults': '沒有符合的對話',
+  'direct.presence.online': '在線',
+  'direct.presence.inGame': '遊戲中',
+  'direct.presence.away': '暫離',
+  'direct.presence.offline': '離線',
   'direct.readingHint': '僅你與對方可見，看到的訊息會同步為已讀。',
   'direct.readFailed': '已讀狀態暫未同步，請重新整理訊息後重試。',
   ...directSendZhTw,
@@ -87,6 +99,12 @@ const directZhTw = <String, String>{
   'direct.error.limit': '已達到本次歷史瀏覽上限，請回到最新訊息。',
 };
 const directEn = <String, String>{
+  'direct.search': 'Search conversations',
+  'direct.noSearchResults': 'No matching conversations',
+  'direct.presence.online': 'Online',
+  'direct.presence.inGame': 'In game',
+  'direct.presence.away': 'Away',
+  'direct.presence.offline': 'Offline',
   'direct.readingHint': 'Only you and the recipient can see this conversation. Viewed messages are marked as read.',
   'direct.readFailed': 'Read status could not sync. Refresh messages to retry.',
   ...directSendEn,

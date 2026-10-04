@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
@@ -18,6 +20,19 @@ Widget scene(String? source, {double size = 36}) => MaterialApp(
 );
 
 void main() {
+  testWidgets('chat accepts account-sized inline photo while keeping bounded decode', (tester) async {
+    final data = Uint8List(300000);
+    final png = base64Decode(photo.split(',').last);
+    data.setRange(0, png.length, png);
+    await tester.pumpWidget(scene('data:image/png;base64,${base64Encode(data)}'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget);
+    final provider = tester.widget<Image>(find.byType(Image)).image as ResizeImage;
+    expect(provider.width, 96);
+    await tester.pumpWidget(scene('https://untrusted.invalid/avatar.png'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsNothing);
+  });
   testWidgets(
     'chat avatar reuses decoded bytes through repeated parent updates',
     (tester) async {

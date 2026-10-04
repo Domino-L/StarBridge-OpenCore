@@ -22,6 +22,13 @@ final class MenuFriendsSession
     this.presence,
     this.identity,
   }) : _now = now ?? DateTime.now {
+    if (_port is FriendsActivityPort) {
+      _activity = (_port as FriendsActivityPort).changes.listen((_) {
+        if (_disposed || !_active) return;
+        _activityPending = true;
+        _drainActivity();
+      });
+    }
     presence?.addListener(_presenceChanged);
     _subscription = _port.invalidations.listen((_) {
       if (_disposed) return;
@@ -40,6 +47,41 @@ final class MenuFriendsSession
   final ManualPresenceController? presence;
   final ({String name, String handle, String? avatar})? Function()? identity;
   late final _ownAvatar = MenuAccountAvatar(() => _emit(_view));
+  final _peerAvatars = <String, MenuAccountAvatar>{};
+  FriendsSnapshot? _lastSnapshot;
+
+  void _clearPeerAvatars() {
+    _lastSnapshot = null;
+    for (final avatar in _peerAvatars.values) {
+      avatar.dispose();
+    }
+    _peerAvatars.clear();
+  }
+
+  String? _peerAvatar(FriendRow row) {
+    final inline = _avatar(row.avatar);
+    if (inline != null) return inline;
+    final ref = row.targetRef;
+    if (ref == null || row.avatar == null) return null;
+    if (!_peerAvatars.containsKey(ref) && _peerAvatars.length >= 32) {
+      return null;
+    }
+    return _peerAvatars
+        .putIfAbsent(
+          ref,
+          () => MenuAccountAvatar(() {
+            final snapshot = _lastSnapshot;
+            if (!_disposed &&
+                _active &&
+                snapshot != null &&
+                _view['state'] == 'ready') {
+              _project(snapshot, mediaOnly: true);
+            }
+          }),
+        )
+        .read(row.avatar);
+  }
+
   Object? _presenceScope;
   int _presenceSerial = 0;
   String get _presenceKey {
@@ -57,6 +99,21 @@ final class MenuFriendsSession
   final DateTime Function() _now;
   final void Function(Map<String, Object?>) _publish;
   late final StreamSubscription<void> _subscription;
+  StreamSubscription<void>? _activity;
+  bool _activityPending = false;
+  void _drainActivity() {
+    if (_activityPending &&
+        !_disposed &&
+        _active &&
+        !_reading &&
+        !_busy &&
+        !_requiresRefresh &&
+        _query == null) {
+      _activityPending = false;
+      unawaited(_read(silent: true));
+    }
+  }
+
   Timer? _timer;
   int _epoch = 0;
   int _identityEpoch = 0;
@@ -104,9 +161,11 @@ final class MenuFriendsSession
     }
     return MenuChatTarget(
       row.chatTargetRef!,
-      _text(row.name),
+      _text(row.callsign.isEmpty ? row.gameId : row.callsign),
       avatar: _avatar(row.avatar),
       stableKey: row.conversationKey,
+      presence: friendSharedConversationPresence(row),
+      gameId: _text(row.gameId),
     );
   }
 
@@ -305,14 +364,17 @@ final class MenuFriendsSession
   @override
   MenuProfileTarget? profileTarget(String key) {
     final row = _targets[key];
-    final ref = row?.targetRef;
+    // The read identity is independent of rotating one-use command targets.
+    final chat = row?.chatTargetRef;
+    final useChat = chat != null && chat.isNotEmpty;
+    final ref = useChat ? chat : row?.targetRef;
     if (_disposed || !_active || row == null || ref == null || ref.isEmpty) {
       return null;
     }
     final epoch = _epoch;
     final identity = _identityEpoch;
     return MenuProfileTarget(
-      source: 'friend',
+      source: useChat ? 'conversation' : 'friend',
       reference: ref,
       query: row.gameId,
       avatar: _avatar(row.avatar),
@@ -321,7 +383,8 @@ final class MenuFriendsSession
           !_disposed &&
           _active &&
           epoch == _epoch &&
-          _targets[key]?.targetRef == ref,
+          (useChat ? _targets[key]?.chatTargetRef : _targets[key]?.targetRef) ==
+              ref,
     );
   }
 
@@ -345,6 +408,7 @@ final class MenuFriendsSession
   }
 
   void _retire() {
+    _clearPeerAvatars();
     _epoch++;
     _targets = {};
     _pending = null;
@@ -360,6 +424,14 @@ final class MenuFriendsSession
   }
 
   Future<void> _read({bool reconcile = false, bool silent = false}) async {
+    try {
+      await _readCore(reconcile: reconcile, silent: silent);
+    } finally {
+      _drainActivity();
+    }
+  }
+
+  Future<void> _readCore({bool reconcile = false, bool silent = false}) async {
     if (_disposed ||
         !_active ||
         _reading ||
@@ -404,6 +476,7 @@ final class MenuFriendsSession
             : 'unavailable',
       };
       _view = failure;
+      _clearPeerAvatars();
       _emit(failure);
       return;
     }
@@ -418,7 +491,7 @@ final class MenuFriendsSession
     }
   }
 
-  bool _project(FriendsSnapshot snapshot) {
+  bool _project(FriendsSnapshot snapshot, {bool mediaOnly = false}) {
     // Only bounded inline avatars and opaque UI keys cross engines; no target
     // refs, action grants, URLs, endpoints or unfiltered shared maps.
     final rows = _query != null
@@ -429,7 +502,19 @@ final class MenuFriendsSession
         : const <FriendRow>[];
     if (rows.length + requests.length > 5000) {
       _targets = {};
+      _clearPeerAvatars();
       return false;
+    }
+    _lastSnapshot = snapshot;
+    final currentRefs = {
+      ...rows,
+      ...requests,
+    }.map((row) => row.targetRef).toSet();
+    for (final ref
+        in _peerAvatars.keys
+            .where((ref) => !currentRefs.contains(ref))
+            .toList()) {
+      _peerAvatars.remove(ref)!.dispose();
     }
     final previous = {
       for (final e in _targets.entries) e.value.targetRef: e.key,
@@ -446,7 +531,7 @@ final class MenuFriendsSession
         key = previous[ref] ?? 'f${++_serial}';
         _targets[key] = row;
       }
-      final image = _avatar(row.avatar);
+      final image = _peerAvatar(row);
       final avatar = image != null && image.length <= avatarBudget
           ? image
           : null;
@@ -462,9 +547,35 @@ final class MenuFriendsSession
               ? row.gameId
               : row.callsign,
         ),
+        if (row.relationship == 'friend') 'gameId': _text(row.gameId),
         'key': key,
         'avatar': avatar,
-        'presence': switch (row.shared['presence']) {
+        if (row.relationship == 'friend' &&
+            row.shared['presence'] == 'InGame') ...{
+          'details': {
+            for (final field in const [
+              'serverId',
+              'serverRegion',
+              'ship',
+              'location',
+            ])
+              if (row.shared[field] is String)
+                field: _detailText(row.shared[field] as String),
+          },
+          'detailLabels': {
+            for (final field in const ['ship', 'location'])
+              if (row.shared[field] is String &&
+                  row.sharedLabels[field] != null)
+                field: {
+                  for (final locale in const ['en', 'zhHans', 'zhHant'])
+                    if (row.sharedLabels[field]![locale] != null)
+                      locale: _detailText(row.sharedLabels[field]![locale]!),
+                },
+          },
+        },
+        'presence': switch (row.relationship == 'friend'
+            ? row.shared['presence']
+            : null) {
           'InGame' => 'inGame',
           'AppOnline' => 'online',
           'Away' => 'away',
@@ -473,7 +584,7 @@ final class MenuFriendsSession
         },
       });
     }
-    _readAt = _now();
+    if (!mediaOnly) _readAt = _now();
     final pending = _pending;
     if (pending != null &&
         (_targets[pending.key]?.targetRef != pending.ref ||
@@ -503,6 +614,11 @@ final class MenuFriendsSession
     return clean.length <= 128 ? clean : clean.substring(0, 128);
   }
 
+  static String _detailText(String value) {
+    final clean = value.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '').trim();
+    return clean.length <= 512 ? clean : clean.substring(0, 512);
+  }
+
   @override
   void dispose() {
     presence?.removeListener(_presenceChanged);
@@ -510,6 +626,7 @@ final class MenuFriendsSession
     show(false);
     _disposed = true;
     _ownAvatar.dispose();
+    unawaited(_activity?.cancel());
     _epoch++;
     _timer?.cancel();
     unawaited(_subscription.cancel());

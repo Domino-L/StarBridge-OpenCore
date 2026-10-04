@@ -2,9 +2,20 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../direct_messages/direct_messages_module.dart';
+
 enum FriendsSection { friends, incoming, outgoing, blocked }
 
 enum FriendsReadState { idle, loading, ready, signedOut, unavailable }
+
+String? friendSharedConversationPresence(FriendRow row) =>
+    row.relationship == 'friend' ? switch (row.shared['presence']) {
+      'AppOnline' => 'online',
+      'InGame' => 'inGame',
+      'Away' => 'away',
+      'Offline' => 'offline',
+      _ => null,
+    } : null;
 
 List<String> friendActionsFor(String relation) => switch (relation) {
   'none' => const ['send', 'block'],
@@ -27,6 +38,7 @@ final class FriendRow {
     this.conversationKey,
     this.actions = const [],
     this.shared = const {},
+    this.sharedLabels = const {},
   });
   final String callsign, gameId, relationship;
   final DateTime updatedAt;
@@ -36,6 +48,7 @@ final class FriendRow {
   final String? conversationKey;
   final List<String> actions;
   final Map<String, Object?> shared;
+  final Map<String, Map<String, String>> sharedLabels;
   String get name => callsign.isEmpty
       ? gameId
       : gameId.isEmpty
@@ -79,6 +92,10 @@ abstract interface class FriendsPort {
   Future<void> close();
 }
 
+abstract interface class FriendsActivityPort {
+  Stream<void> get changes;
+}
+
 final class FriendCommandResult {
   const FriendCommandResult(this.status, {this.error, this.directory});
   final String status;
@@ -109,6 +126,30 @@ final class UnavailableFriendsPort implements FriendsPort {
 /// The composition may retain this bounded snapshot between page visits.
 /// Typing, account invalidation and disposal retire older results.
 final class FriendsModule extends ChangeNotifier {
+  DirectMessagesModule? _chat;
+  Conversation? requestedConversation;
+  void requestConversation(Conversation conversation) {
+    if (_disposed) return;
+    requestedConversation = conversation;
+    notifyListeners();
+  }
+
+  final incomingAttention = ValueNotifier<int>(0);
+  @override
+  void notifyListeners() {
+    incomingAttention.value =
+        snapshot?.groups[FriendsSection.incoming]?.length ?? 0;
+    super.notifyListeners();
+  }
+
+  String? Function()? detachedVisibleConversation;
+  String? get visibleConversationKey =>
+      detachedVisibleConversation?.call() ??
+      (_chat?.isViewportCurrent?.call() == true
+          ? _chat?.selected?.conversationKey
+          : null);
+  DirectMessagesModule chat(DirectMessagesPort Function() create) =>
+      _chat ??= DirectMessagesModule(create());
   FriendsModule(this._port, {DateTime Function()? now, this.isExample = false})
     : _now = now ?? DateTime.now {
     _subscription = _port.invalidations.listen((_) {
@@ -120,6 +161,7 @@ final class FriendsModule extends ChangeNotifier {
       query = '';
       section = FriendsSection.friends;
       accountRevision++;
+      requestedConversation = null;
       busy = false;
       feedback = null;
       state = FriendsReadState.idle;
@@ -128,6 +170,9 @@ final class FriendsModule extends ChangeNotifier {
     });
   }
   final FriendsPort _port;
+  Stream<void> get changes => _port is FriendsActivityPort
+      ? (_port as FriendsActivityPort).changes
+      : const Stream.empty();
   final bool isExample;
   bool _started = false;
   final DateTime Function() _now;
@@ -145,6 +190,7 @@ final class FriendsModule extends ChangeNotifier {
   FriendsSnapshot? snapshot;
   String query = '', failure = 'unavailable';
   bool get searching => query.trim().isNotEmpty;
+  bool get reading => _readingEpoch != null;
   bool get validQuery =>
       query.trim().length >= 2 &&
       query.trim().length <= 128 &&
@@ -299,6 +345,8 @@ final class FriendsModule extends ChangeNotifier {
 
   @override
   void dispose() {
+    incomingAttention.dispose();
+    _chat?.dispose();
     _disposed = true;
     _epoch++;
     _port.cancelPending();

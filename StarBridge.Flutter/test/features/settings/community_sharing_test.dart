@@ -160,6 +160,7 @@ class SharingFixture
   );
   int revision = 1, writes = 0, applies = 0;
   bool failTargets = false, failSave = false;
+  String publicationState = 'applied';
   Object? targetFailure;
   @override
   bool get communitySharingSupported => true;
@@ -192,7 +193,7 @@ class SharingFixture
     int? revision,
   }) async {
     if (action == 'apply') applies++;
-    return const PrivacyPublicationView('applied', firstUseRequired: false);
+    return PrivacyPublicationView(publicationState, firstUseRequired: false);
   }
 
   @override

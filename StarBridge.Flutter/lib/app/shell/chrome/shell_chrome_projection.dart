@@ -23,7 +23,12 @@ final class ConnectionIssueProjection {
 
 @immutable
 final class OverlaySceneOption {
-  const OverlaySceneOption({required this.id, required this.labelKey, this.label, this.enabled = true});
+  const OverlaySceneOption({
+    required this.id,
+    required this.labelKey,
+    this.label,
+    this.enabled = true,
+  });
 
   final String id;
   final String labelKey;
@@ -39,6 +44,7 @@ final class OverlaySceneProjection {
     required this.actualSceneId,
     required this.canChange,
     this.fallbackReasonKey,
+    this.selectionOrigin = 'account',
   });
 
   final List<OverlaySceneOption> options;
@@ -46,6 +52,7 @@ final class OverlaySceneProjection {
   final String? actualSceneId;
   final bool canChange;
   final String? fallbackReasonKey;
+  final String selectionOrigin;
 
   OverlaySceneOption? optionById(String? id) {
     if (id == null) {
@@ -71,6 +78,7 @@ final class OverlaySceneProjection {
       actualSceneId: actualSceneId ?? this.actualSceneId,
       canChange: canChange ?? this.canChange,
       fallbackReasonKey: fallbackReasonKey,
+      selectionOrigin: selectionOrigin,
     );
   }
 }
@@ -141,7 +149,9 @@ final class ShellChromeProjection {
     return ShellChromeProjection(
       overlay: overlay ?? this.overlay,
       accountLabel: accountLabel ?? this.accountLabel,
-      accountAvatarImageData: clearAccountAvatar ? null : accountAvatarImageData ?? this.accountAvatarImageData,
+      accountAvatarImageData: clearAccountAvatar
+          ? null
+          : accountAvatarImageData ?? this.accountAvatarImageData,
       presenceKey: presenceKey ?? this.presenceKey,
       gamePresence: gamePresence ?? this.gamePresence,
       gameVersion: clearGameVersion ? null : gameVersion ?? this.gameVersion,

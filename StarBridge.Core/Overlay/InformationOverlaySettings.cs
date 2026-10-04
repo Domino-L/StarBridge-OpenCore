@@ -299,12 +299,12 @@ public sealed record OverlayEventNotificationDurationOverrides(
 
     public static double NormalizeOverrideOrInherit(double value)
     {
-        return value <= 0 ? InheritDefaultSeconds : NormalizeOverrideSeconds(value);
+        return !double.IsFinite(value) || value <= 0 ? InheritDefaultSeconds : NormalizeOverrideSeconds(value);
     }
 
     public static double NormalizeOverrideSeconds(double value)
     {
-        return Math.Clamp(value, MinOverrideSeconds, MaxOverrideSeconds);
+        return double.IsFinite(value) ? Math.Clamp(value, MinOverrideSeconds, MaxOverrideSeconds) : MinOverrideSeconds;
     }
 
     private static double Read(string[] parts, int index)
@@ -735,53 +735,53 @@ public sealed record OverlayDisplaySettings(
 
         return new OverlayDisplaySettings(
             false,
-            Enum.TryParse<OverlayMemberNameMode>(parts[1], out var mode) ? mode : OverlayMemberNameMode.CallsignAndGameName,
+            TryParseDefinedEnum<OverlayMemberNameMode>(parts[1], out var mode) ? mode : OverlayMemberNameMode.CallsignAndGameName,
             parts[2] == "1",
             parts[3] == "1",
             parts[4] == "1",
-            parts.Length > 5 && double.TryParse(parts[5], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacity)
+            parts.Length > 5 && TryParseFiniteDouble(parts[5], out var opacity)
                 ? Math.Clamp(opacity, 0.15, 1.0)
                 : Default.Opacity,
             parts.Length <= 6 || parts[6] == "1",
             parts.Length <= 7 || parts[7] == "1",
             false,
             parts.Length <= 9 || parts[9] == "1",
-            parts.Length > 43 && Enum.TryParse<OverlaySkin>(parts[43], out var skin)
+            parts.Length > 43 && TryParseDefinedEnum<OverlaySkin>(parts[43], out var skin)
                 ? skin
                 : Default.Skin,
-            parts.Length > 10 && Enum.TryParse<OverlayVisualTheme>(parts[10], out var theme)
+            parts.Length > 10 && TryParseDefinedEnum<OverlayVisualTheme>(parts[10], out var theme)
                 ? theme
                 : Default.Theme,
             parts.Length > 11 && parts[11] == "1",
             parts.Length > 12 && parts[12] == "1",
-            parts.Length > 13 && Enum.TryParse<OverlayCrosshairMode>(parts[13], out var crosshairMode)
+            parts.Length > 13 && TryParseDefinedEnum<OverlayCrosshairMode>(parts[13], out var crosshairMode)
                 ? NormalizeCrosshairMode(crosshairMode)
                 : Default.CrosshairMode,
             parts.Length <= 14 || parts[14] == "1",
             parts.Length > 15
                 ? NormalizeCrosshairColor(parts[15])
                 : Default.CrosshairColor,
-            parts.Length > 16 && double.TryParse(parts[16], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var crosshairSize)
+            parts.Length > 16 && TryParseFiniteDouble(parts[16], out var crosshairSize)
                 ? NormalizeCrosshairSize(crosshairSize)
                 : Default.CrosshairSize,
-            parts.Length > 17 && double.TryParse(parts[17], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var crosshairThickness)
+            parts.Length > 17 && TryParseFiniteDouble(parts[17], out var crosshairThickness)
                 ? Math.Clamp(crosshairThickness, 1, 8)
                 : Default.CrosshairThickness,
-            parts.Length > 18 && double.TryParse(parts[18], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var crosshairOpacity)
+            parts.Length > 18 && TryParseFiniteDouble(parts[18], out var crosshairOpacity)
                 ? Math.Clamp(crosshairOpacity, 0.2, 1.0)
                 : Default.CrosshairOpacity,
             parts.Length <= 39 || parts[39] == "1",
-            parts.Length > 40 && double.TryParse(parts[40], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var crosshairCenterMarkSize)
+            parts.Length > 40 && TryParseFiniteDouble(parts[40], out var crosshairCenterMarkSize)
                 ? NormalizeCrosshairCenterMarkSize(crosshairCenterMarkSize)
                 : Default.CrosshairCenterMarkSize,
-            parts.Length > 41 && double.TryParse(parts[41], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var crosshairGap)
+            parts.Length > 41 && TryParseFiniteDouble(parts[41], out var crosshairGap)
                 ? NormalizeCrosshairGap(crosshairGap)
                 : Default.CrosshairGap,
-            parts.Length > 42 && double.TryParse(parts[42], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var crosshairOutlineOpacity)
+            parts.Length > 42 && TryParseFiniteDouble(parts[42], out var crosshairOutlineOpacity)
                 ? NormalizeCrosshairOutlineOpacity(crosshairOutlineOpacity)
                 : Default.CrosshairOutlineOpacity,
             parts.Length <= 19 || parts[19] == "1",
-            parts.Length > 20 && Enum.TryParse<OverlayStartupTransitionStyle>(parts[20], out var startupTransitionStyle)
+            parts.Length > 20 && TryParseDefinedEnum<OverlayStartupTransitionStyle>(parts[20], out var startupTransitionStyle)
                 ? startupTransitionStyle
                 : Default.StartupTransitionStyle,
             parts.Length > 21 && parts[21] == "1",
@@ -793,27 +793,27 @@ public sealed record OverlayDisplaySettings(
             parts.Length > 46 && parts[46] == "1",
             parts.Length > 47 && parts[47] == "1",
             parts.Length <= 24 || parts[24] == "1",
-            parts.Length > 25 && Enum.TryParse<OverlayEventNotificationSide>(parts[25], out var eventNotificationSide)
+            parts.Length > 25 && TryParseDefinedEnum<OverlayEventNotificationSide>(parts[25], out var eventNotificationSide)
                 ? eventNotificationSide
                 : Default.EventNotificationSide,
-            parts.Length > 26 && double.TryParse(parts[26], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var eventNotificationDuration)
+            parts.Length > 26 && TryParseFiniteDouble(parts[26], out var eventNotificationDuration)
                 ? Math.Clamp(eventNotificationDuration, 1, 12)
                 : Default.EventNotificationDurationSeconds,
-            parts.Length > 27 && double.TryParse(parts[27], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var eventNotificationY)
+            parts.Length > 27 && TryParseFiniteDouble(parts[27], out var eventNotificationY)
                 ? Math.Clamp(eventNotificationY, 0, 1)
                 : Default.EventNotificationY,
             parts.Length > 28 && parts[28] == "1",
-            parts.Length > 29 && Enum.TryParse<OverlaySquadStatusDisplayMode>(parts[29], out var squadStatusDisplayMode)
+            parts.Length > 29 && TryParseDefinedEnum<OverlaySquadStatusDisplayMode>(parts[29], out var squadStatusDisplayMode)
                 ? squadStatusDisplayMode
                 : Default.SquadStatusDisplayMode,
             parts.Length > 30 && parts[30] == "1",
-            parts.Length > 31 && Enum.TryParse<OverlayMemberPriorityMode>(parts[31], out var memberPriorityMode)
+            parts.Length > 31 && TryParseDefinedEnum<OverlayMemberPriorityMode>(parts[31], out var memberPriorityMode)
                 ? memberPriorityMode
                 : Default.MemberPriorityMode,
-            parts.Length > 32 && Enum.TryParse<OverlayMemberScopeMode>(parts[32], out var memberScopeMode)
+            parts.Length > 32 && TryParseDefinedEnum<OverlayMemberScopeMode>(parts[32], out var memberScopeMode)
                 ? memberScopeMode
                 : Default.MemberScopeMode,
-            parts.Length > 33 && double.TryParse(parts[33], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var memberNameColumnRatio)
+            parts.Length > 33 && TryParseFiniteDouble(parts[33], out var memberNameColumnRatio)
                 ? NormalizeMemberNameColumnRatio(memberNameColumnRatio)
                 : Default.MemberNameColumnRatio,
             ParseEventNotificationTypes(parts),
@@ -823,74 +823,74 @@ public sealed record OverlayDisplaySettings(
             parts.Length > 36
                 ? parts[36] == "1"
                 : Default.EventNotificationPinImportant,
-            parts.Length > 37 && Enum.TryParse<OverlayEventNotificationAnimationSpeed>(parts[37], out var eventNotificationAnimationSpeed)
+            parts.Length > 37 && TryParseDefinedEnum<OverlayEventNotificationAnimationSpeed>(parts[37], out var eventNotificationAnimationSpeed)
                 ? eventNotificationAnimationSpeed
                 : Default.EventNotificationAnimationSpeed,
             parts.Length > 38
                 ? OverlayEventNotificationDurationOverrides.Parse(parts[38])
                 : Default.EventNotificationDurations,
-            parts.Length > 44 && Enum.TryParse<OverlayNightShadowBloom>(parts[44], out var nightShadowBloom)
+            parts.Length > 44 && TryParseDefinedEnum<OverlayNightShadowBloom>(parts[44], out var nightShadowBloom)
                 ? nightShadowBloom
                 : Default.NightShadowBloom,
             parts.Length > 48 && TryParseAnimationFrameRate(parts[48], out var animationFrameRate)
                 ? animationFrameRate
                 : Default.AnimationFrameRate,
-            parts.Length > 50 && Enum.TryParse<OverlayScenePreference>(parts[50], out var scenePreference)
+            parts.Length > 50 && TryParseDefinedEnum<OverlayScenePreference>(parts[50], out var scenePreference)
                 ? scenePreference
                 : Default.ScenePreference,
             parts.Length > 51 ? parts[51] == "1" : Default.ShowChat,
-            parts.Length > 52 && Enum.TryParse<OverlayChatDisplayMode>(parts[52], out var chatDisplayMode)
+            parts.Length > 52 && TryParseDefinedEnum<OverlayChatDisplayMode>(parts[52], out var chatDisplayMode)
                 ? NormalizeChatDisplayMode(chatDisplayMode)
                 : Default.ChatDisplayMode,
-            parts.Length > 53 && Enum.TryParse<OverlayChatSide>(parts[53], out var chatSide)
+            parts.Length > 53 && TryParseDefinedEnum<OverlayChatSide>(parts[53], out var chatSide)
                 ? chatSide
                 : Default.ChatSide,
             parts.Length > 54 && int.TryParse(parts[54], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var chatMaxVisibleCount)
                 ? NormalizeChatVisibleCount(chatMaxVisibleCount)
                 : Default.ChatMaxVisibleCount,
-            parts.Length > 55 && double.TryParse(parts[55], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chatDurationSeconds)
+            parts.Length > 55 && TryParseFiniteDouble(parts[55], out var chatDurationSeconds)
                 ? NormalizeChatDuration(chatDurationSeconds)
                 : Default.ChatDurationSeconds,
             parts.Length > 56 ? parts[56] == "1" : Default.ChatShowSender,
             parts.Length > 57 ? parts[57] == "1" : Default.ChatShowTimestamp,
             parts.Length > 58 ? parts[58] == "1" : Default.ChatShowSystemMessages,
             parts.Length > 59 ? parts[59] == "1" : Default.ChatHideSelfMessages,
-            parts.Length > 60 && double.TryParse(parts[60], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chatBarrageFontSize)
+            parts.Length > 60 && TryParseFiniteDouble(parts[60], out var chatBarrageFontSize)
                 ? NormalizeChatBarrageFontSize(chatBarrageFontSize)
                 : Default.ChatBarrageFontSize,
-            parts.Length > 61 && Enum.TryParse<OverlayChatBarrageRegion>(parts[61], out var chatBarrageRegion)
+            parts.Length > 61 && TryParseDefinedEnum<OverlayChatBarrageRegion>(parts[61], out var chatBarrageRegion)
                 ? NormalizeChatBarrageRegion(chatBarrageRegion)
                 : Default.ChatBarrageRegion,
-            parts.Length > 62 && Enum.TryParse<OverlayChatBarrageDensity>(parts[62], out var chatBarrageDensity)
+            parts.Length > 62 && TryParseDefinedEnum<OverlayChatBarrageDensity>(parts[62], out var chatBarrageDensity)
                 ? NormalizeChatBarrageDensity(chatBarrageDensity)
                 : Default.ChatBarrageDensity,
             parts.Length > 63 ? parts[63] == "1" : Default.ChatBarrageAvoidCenter,
-            parts.Length > 64 && Enum.TryParse<OverlayChatTextEdgeStrength>(parts[64], out var chatTextEdgeStrength)
+            parts.Length > 64 && TryParseDefinedEnum<OverlayChatTextEdgeStrength>(parts[64], out var chatTextEdgeStrength)
                 ? NormalizeChatTextEdgeStrength(chatTextEdgeStrength)
                 : Default.ChatTextEdgeStrength,
             parts.Length > 65 ? parts[65] == "1" : Default.CommunicationFriendEvents,
             parts.Length > 66 ? parts[66] == "1" : Default.CommunicationMessagePreview,
-            parts.Length > 67 && double.TryParse(parts[67], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var communicationEventDurationSeconds)
+            parts.Length > 67 && TryParseFiniteDouble(parts[67], out var communicationEventDurationSeconds)
                 ? NormalizeCommunicationEventDuration(communicationEventDurationSeconds)
                 : Default.CommunicationEventDurationSeconds,
-            parts.Length > 68 && Enum.TryParse<OverlayFleetChatScope>(parts[68], out var fleetChatScope)
+            parts.Length > 68 && TryParseDefinedEnum<OverlayFleetChatScope>(parts[68], out var fleetChatScope)
                 ? NormalizeFleetChatScope(fleetChatScope)
                 : Default.FleetChatScope,
-            parts.Length > 69 && double.TryParse(parts[69], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var eventNotificationTextOpacity)
+            parts.Length > 69 && TryParseFiniteDouble(parts[69], out var eventNotificationTextOpacity)
                 ? NormalizeTextOpacity(eventNotificationTextOpacity)
                 : Default.EventNotificationTextOpacity,
-            parts.Length > 70 && double.TryParse(parts[70], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var eventNotificationBackgroundOpacity)
+            parts.Length > 70 && TryParseFiniteDouble(parts[70], out var eventNotificationBackgroundOpacity)
                 ? NormalizeBackgroundOpacity(eventNotificationBackgroundOpacity)
                 : Default.EventNotificationBackgroundOpacity,
             parts.Length > 71
                 ? parts[71] == "1"
                 : Default.SkipStartupTransitionWhenGameForeground,
-            parts.Length > 72 && Enum.TryParse<OverlaySkin>(parts[72], out var requestedSkin)
+            parts.Length > 72 && TryParseDefinedEnum<OverlaySkin>(parts[72], out var requestedSkin)
                 ? requestedSkin
-                : parts.Length > 43 && Enum.TryParse<OverlaySkin>(parts[43], out var legacyRequestedSkin)
+                : parts.Length > 43 && TryParseDefinedEnum<OverlaySkin>(parts[43], out var legacyRequestedSkin)
                     ? legacyRequestedSkin
                     : Default.RequestedSkin,
-            parts.Length > 73 && double.TryParse(parts[73], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var eventNotificationDecorationOpacity)
+            parts.Length > 73 && TryParseFiniteDouble(parts[73], out var eventNotificationDecorationOpacity)
                 ? NormalizeDecorationOpacity(eventNotificationDecorationOpacity)
                 : Default.EventNotificationDecorationOpacity);
     }
@@ -1003,8 +1003,15 @@ public sealed record OverlayDisplaySettings(
 
     public static double NormalizeMemberNameColumnRatio(double value)
     {
-        return Math.Clamp(value, 0.18, 0.82);
+        return double.IsFinite(value) ? Math.Clamp(value, 0.18, 0.82) : Default.MemberNameColumnRatio;
     }
+
+    private static bool TryParseFiniteDouble(string value, out double parsed) =>
+        double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) &&
+        double.IsFinite(parsed);
+
+    private static bool TryParseDefinedEnum<T>(string value, out T parsed) where T : struct, Enum =>
+        Enum.TryParse(value, out parsed) && Enum.IsDefined(parsed);
 
     public static OverlayEventNotificationTypes NormalizeEventNotificationTypes(OverlayEventNotificationTypes value)
     {

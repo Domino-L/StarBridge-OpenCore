@@ -46,9 +46,11 @@ class _DirectMessageComposerState extends State<DirectMessageComposer> {
               liveRegion: true,
               child: Text(t('send.${module.sendStatus}')),
             ),
-          if (!module.canSend && !module.busy)
+          if (!module.canSend && !module.busy && module.error == null)
             Text(
-              t('send.notAllowed'),
+              t(module.state == 'request_outgoing'
+                  ? 'send.request_pending'
+                  : 'send.notAllowed'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           const SizedBox(height: 6),
@@ -61,14 +63,17 @@ class _DirectMessageComposerState extends State<DirectMessageComposer> {
               key: ValueKey('${module.selected?.ref}:${module.draftRevision}'),
               controller: _controller,
               enabled: !module.sending && !module.awaitingConfirmation,
-              minLines: 2,
+              minLines: 3,
               maxLines: 4,
               maxLength: 1000,
               // Count UTF-16 code units, matching the existing .NET contract.
               maxLengthEnforcement: MaxLengthEnforcement.none,
               onChanged: module.editDraft,
               decoration: InputDecoration(
-                labelText: t('send.input'),
+                hintText: t('send.input'),
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
                 counterText: '${module.draft.length}/1000',
                 errorText: module.draft.trim().length > 1000
                     ? t('send.tooLong')

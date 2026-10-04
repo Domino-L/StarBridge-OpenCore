@@ -33,6 +33,34 @@ class Receipts implements DirectMessagesPort, DirectReadReceiptPort {
 }
 
 void main() {
+  testWidgets('transient read failure retries visible cursor after backoff without navigation', (tester) async {
+    final port = Receipts()..fail = true;
+    final module = DirectMessagesModule(port);
+    await module.refresh();
+    await module.open(module.rows.first);
+    await module.markVisibleRead(59);
+    await module.markVisibleRead(59);
+    expect(port.calls, [59]);
+    port.fail = false;
+    await tester.pump(const Duration(seconds: 2));
+    await module.markVisibleRead(59);
+    expect(port.calls, [59, 59]);
+    expect(module.rows.first.unread, 0);
+    module.dispose();
+    await tester.pump();
+  });
+  test('reopening unread conversation revalidates previous read cursor', () async {
+    final port = Receipts();
+    final module = DirectMessagesModule(port);
+    addTearDown(module.dispose);
+    await module.refresh();
+    await module.open(module.rows.first);
+    await module.markVisibleRead(59);
+    module.back();
+    await module.open(module.rows.first);
+    await module.markVisibleRead(59);
+    expect(port.calls, [59, 59]);
+  });
   test(
     'loading alone does not mark read; visible cursor preserves newer unread',
     () async {

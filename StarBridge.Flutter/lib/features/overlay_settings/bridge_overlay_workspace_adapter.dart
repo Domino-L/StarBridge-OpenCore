@@ -91,6 +91,9 @@ final class BridgeOverlayWorkspaceAdapter implements OverlayWorkspacePort {
     final storageState = body['storageState'];
     final activePresetId = body['activePresetId'];
     final renderMode = body['renderMode'];
+    final sourcePresetsEnabled = body['sourcePresetsEnabled'] ?? false;
+    final removedOrganizationBindings =
+        body['removedOrganizationBindings'] ?? false;
     if (body['schemaVersion'] != 1 ||
         revision is! int ||
         revision < 0 ||
@@ -98,7 +101,9 @@ final class BridgeOverlayWorkspaceAdapter implements OverlayWorkspacePort {
         activePresetId is! String ||
         activePresetId.isEmpty ||
         renderMode is! String ||
-        renderMode.isEmpty) {
+        renderMode.isEmpty ||
+        sourcePresetsEnabled is! bool ||
+        removedOrganizationBindings is! bool) {
       throw const FormatException('Invalid overlay workspace response.');
     }
     final settings = OverlayWorkspaceSettings.fromMap(
@@ -131,6 +136,10 @@ final class BridgeOverlayWorkspaceAdapter implements OverlayWorkspacePort {
         active.single.id != activePresetId) {
       throw const FormatException('Invalid overlay workspace state.');
     }
+    if (sourcePresetsEnabled &&
+        presets.any((p) => p.sources == null && p.storageState != 'corrupt')) {
+      throw const FormatException('Missing enabled source policy.');
+    }
     return OverlayWorkspaceSnapshot.available(
       revision: revision,
       storageState: storageState,
@@ -141,6 +150,8 @@ final class BridgeOverlayWorkspaceAdapter implements OverlayWorkspacePort {
       settings: settings,
       layout: layout,
       presets: presets,
+      sourcePresetsEnabled: sourcePresetsEnabled,
+      removedOrganizationBindings: removedOrganizationBindings,
     );
   }
 

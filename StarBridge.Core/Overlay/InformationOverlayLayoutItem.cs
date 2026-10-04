@@ -106,17 +106,17 @@ public class InformationOverlayLayoutItem
             }
 
             var key = parts[0];
-            if (IsRetiredModuleKey(key))
+            if (string.IsNullOrWhiteSpace(key) || IsRetiredModuleKey(key))
             {
                 continue;
             }
 
             var horizontalAnchor = parts.Length > 5 &&
-                Enum.TryParse<OverlayHorizontalAnchor>(parts[5], ignoreCase: true, out var parsedHorizontalAnchor)
+                Enum.TryParse<OverlayHorizontalAnchor>(parts[5], ignoreCase: true, out var parsedHorizontalAnchor) && Enum.IsDefined(parsedHorizontalAnchor)
                     ? parsedHorizontalAnchor
                     : InferHorizontalAnchor(x, width);
             var verticalAnchor = parts.Length > 6 &&
-                Enum.TryParse<OverlayVerticalAnchor>(parts[6], ignoreCase: true, out var parsedVerticalAnchor)
+                Enum.TryParse<OverlayVerticalAnchor>(parts[6], ignoreCase: true, out var parsedVerticalAnchor) && Enum.IsDefined(parsedVerticalAnchor)
                     ? parsedVerticalAnchor
                     : InferVerticalAnchor(y, height);
             var isLocked = parts.Length > 7 && ParseLayoutBool(parts[7]);
@@ -157,8 +157,8 @@ public class InformationOverlayLayoutItem
         RetiredMissionKey.Equals(key?.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private static bool TryParseLayoutNumber(string value, out double number) =>
-        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out number) ||
-        double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out number);
+        (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out number) ||
+         double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out number)) && double.IsFinite(number);
 
     private static bool ParseLayoutBool(string value) =>
         value.Equals("1", StringComparison.OrdinalIgnoreCase) ||

@@ -16,6 +16,7 @@ internal static class ImmediateVehicleExitCatalog
         "AEGSSabrePeregrine",
         "AEGSSabrePeregrineCollectorCompetition",
         "AEGSSabreRaven",
+        "AEGSSabreRavenEX",
 
         // Anvil
         "ANVLArrow",

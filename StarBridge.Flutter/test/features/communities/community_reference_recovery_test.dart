@@ -1,3 +1,4 @@
+import 'package:starbridge_flutter/design_system/icons/standard_icon.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -82,7 +83,7 @@ void main() {
           of: fromShips
               ? find.byType(CommunityShipsPanel)
               : find.byType(CommunityWorkspaceHeader),
-          matching: find.byIcon(Icons.refresh),
+          matching: find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.refresh),
         );
         await tester.tap(headerRefresh);
         await tester.pumpAndSettle();

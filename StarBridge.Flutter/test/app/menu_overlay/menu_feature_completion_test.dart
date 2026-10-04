@@ -11,6 +11,7 @@ import 'package:starbridge_flutter/app/menu_overlay/menu_local_tools.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_bridge_preview.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_workspace_controller.dart';
 import 'package:starbridge_flutter/features/party_rooms/example_party_rooms_adapter.dart';
+import 'package:starbridge_flutter/features/party_rooms/room_commands.dart';
 import 'package:starbridge_flutter/platform/window/menu_window_preferences.dart';
 
 import '../../features/friends/social_layout_test.dart'
@@ -102,17 +103,22 @@ void main() {
     expect(view.state, 'ready');
     expect((await port.read()).directory!.currentRoomId, isNull);
     expect(jsonEncode(views.last), isNot(contains('example-cargo')));
-    session.act(view.rows.first.buttons.single.key, '');
-    await tester.pump();
-    view = MenuFeatureView.parse(views.last);
-    final join = view.buttons.singleWhere((a) => a.label == '加入房间');
-    expect(join.confirm, isNotEmpty);
+    final lobby = view.lobby!;
     session.act('example-cargo', '');
     expect((await port.read()).directory!.currentRoomId, isNull);
-    session.act(join.key, '');
+    session.act(
+      lobby.actions[RoomOperation.join]!,
+      jsonEncode({
+        'request': 'q1',
+        'data': {'roomId': lobby.directory.rooms.first.id, 'password': ''},
+      }),
+    );
     await tester.pump();
     expect((await port.read()).directory!.currentRoomId, isNull);
-    expect(MenuFeatureView.parse(views.last).notice, contains('申请已提交'));
+    expect(
+      MenuFeatureView.parse(views.last).lobby!.reply!['status'],
+      'pending',
+    );
     session.dispose();
   });
   test(

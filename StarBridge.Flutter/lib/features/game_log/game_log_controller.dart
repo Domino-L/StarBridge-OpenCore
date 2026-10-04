@@ -13,6 +13,7 @@ class GameLogView {
     this.state = 'notSelected',
     this.path,
     this.handle,
+    this.recentHandle,
     this.expectedHandle,
     this.match = 'unknown',
     this.enabled = false,
@@ -42,7 +43,12 @@ class GameLogView {
   final String serverState, locationState, shipState;
   final List<String> channels;
   final List<String> verifiedChannels;
-  final String? path, handle, expectedHandle, serverRegion, serverShard;
+  final String? path,
+      handle,
+      recentHandle,
+      expectedHandle,
+      serverRegion,
+      serverShard;
   final String? locationEnglishName, locationNameZhHans, locationNameZhHant;
   final String? shipKey, shipEnglishName, shipNameZhHans, shipNameZhHant, error;
 
@@ -208,6 +214,7 @@ class GameLogController extends ValueNotifier<GameLogView> {
     state: value.state,
     path: value.path,
     handle: value.handle,
+    recentHandle: value.recentHandle,
     expectedHandle: value.expectedHandle,
     match: value.match,
     enabled: value.enabled,
@@ -344,6 +351,7 @@ class GameLogController extends ValueNotifier<GameLogView> {
           [
             'path',
             'handle',
+            'recentHandle',
             'expectedHandle',
           ].any((key) => body[key] != null && body[key] is! String) ||
           [
@@ -369,7 +377,13 @@ class GameLogController extends ValueNotifier<GameLogView> {
               location['englishName'] is! String ||
           ship['state'] != 'unknown' &&
               (ship['key'] is! String || ship['englishName'] is! String) ||
-          body['handle'] != null && body['state'] != 'identified') {
+          body['handle'] != null && body['state'] != 'identified' ||
+          body['recentHandle'] != null &&
+              (body['enabled'] != true ||
+                  !const {
+                    'identified',
+                    'notRunning',
+                  }.contains(body['state']))) {
         throw const FormatException();
       }
       final retainedError = command == 'read' && value.error != 'unavailable'
@@ -406,10 +420,11 @@ class GameLogController extends ValueNotifier<GameLogView> {
         shipNameZhHant: shipNames['zhHant'] as String?,
         path: body['path'] as String?,
         handle: body['handle'] as String?,
+        recentHandle: body['recentHandle'] as String?,
         expectedHandle: body['expectedHandle'] as String?,
         match: body['match'] as String,
       );
-      final identity = value.handle;
+      final identity = value.handle ?? value.recentHandle;
       if (_identity != identity) {
         _identity = identity;
         onIdentityChanged?.call();

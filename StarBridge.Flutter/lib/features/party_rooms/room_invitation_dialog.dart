@@ -8,21 +8,30 @@ import 'room_commands.dart';
 import 'room_invitations.dart';
 import 'room_feedback.dart';
 import 'room_invitation_card.dart';
+import '../common/chat_room_invitation.dart';
 
 Future<void> showRoomInvitations(
   BuildContext context,
   PartyRoomsModule module, {
   bool host = false,
+  String? invitationId,
 }) => showDialog<void>(
   context: context,
+  useRootNavigator: false,
   barrierDismissible: false,
-  builder: (_) => _InvitationDialog(module: module, host: host),
+  builder: (_) =>
+      _InvitationDialog(module: module, host: host, invitationId: invitationId),
 );
 
 class _InvitationDialog extends StatefulWidget {
-  const _InvitationDialog({required this.module, required this.host});
+  const _InvitationDialog({
+    required this.module,
+    required this.host,
+    this.invitationId,
+  });
   final PartyRoomsModule module;
   final bool host;
+  final String? invitationId;
   @override
   State<_InvitationDialog> createState() => _InvitationDialogState();
 }
@@ -43,7 +52,7 @@ class _InvitationDialogState extends State<_InvitationDialog> {
   @override
   void initState() {
     super.initState();
-    if (widget.host) {
+    if (widget.host && widget.invitationId == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _load());
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadPreviews());
@@ -52,8 +61,14 @@ class _InvitationDialogState extends State<_InvitationDialog> {
 
   Future<void> _loadPreviews() async {
     final invitations =
-        widget.module.directory?.receivedInvitations ?? const [];
+        (widget.host
+            ? widget.module.directory?.sentInvitations
+            : widget.module.directory?.receivedInvitations) ??
+        const [];
     for (final item in invitations) {
+      if (widget.invitationId != null && widget.invitationId != item.id) {
+        continue;
+      }
       if (!mounted || !_valid) return;
       if (widget.module.directory?.rooms.any((r) => r.id == item.roomId) ==
           true) {
@@ -111,6 +126,7 @@ class _InvitationDialogState extends State<_InvitationDialog> {
   Future<void> _accept(RoomInvitation item) async {
     final confirmed = await showDialog<bool>(
       context: context,
+      useRootNavigator: false,
       builder: (context) => AlertDialog(
         title: Text(item.title),
         content: Text(roomActionText(context, 'acceptInvitation')),
@@ -140,11 +156,17 @@ class _InvitationDialogState extends State<_InvitationDialog> {
     builder: (context, _) {
       final module = widget.module;
       String t(String key) => roomActionText(context, key);
-      final items = !_valid
+      final source = !_valid
           ? <RoomInvitation>[]
           : widget.host
           ? module.directory?.sentInvitations ?? const []
           : module.directory?.receivedInvitations ?? const [];
+      final items = source
+          .where(
+            (item) =>
+                widget.invitationId == null || item.id == widget.invitationId,
+          )
+          .toList();
       return PopScope(
         canPop: !module.busy && !_loading,
         child: AlertDialog(
@@ -159,9 +181,10 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                   Text(t('inviteHint')),
                   const SizedBox(height: 12),
                   if (!_valid) Text(t('contextChanged')),
-                  if (_valid && widget.host) ...[
+                  if (_valid && widget.host && widget.invitationId == null) ...[
                     if (_loading) const LinearProgressIndicator(),
-                    if (!_loading && _targets.isEmpty) Text(t('noTargets')),
+                    if (!_loading && _error == null && _targets.isEmpty)
+                      Text(t('noTargets')),
                     for (final target in _targets)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -185,7 +208,12 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                     const Divider(),
                     Text(t('sent')),
                   ],
-                  if (_valid && items.isEmpty) Text(t('noInvitations')),
+                  if (_valid && items.isEmpty)
+                    Text(
+                      widget.invitationId == null
+                          ? t('noInvitations')
+                          : roomInvitationText(context, 'unavailable'),
+                    ),
                   for (final item in items)
                     RoomInvitationCard(
                       invitation: item,
@@ -199,6 +227,18 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                       actions: Wrap(
                         spacing: 8,
                         children: [
+                          if (!widget.host &&
+                              module.directory?.currentRoomId != null)
+                            Text(
+                              roomInvitationText(
+                                context,
+                                module.directory?.currentRoomId == item.roomId
+                                    ? 'alreadyJoined'
+                                    : 'inAnotherRoom',
+                              ),
+                            ),
+                          if (!item.expiresAt.isAfter(DateTime.now()))
+                            Text(roomInvitationText(context, 'expired')),
                           TextButton(
                             style: widget.host
                                 ? semanticActionStyle(
@@ -223,6 +263,7 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                             FilledButton(
                               onPressed:
                                   module.canCommand &&
+                                      item.expiresAt.isAfter(DateTime.now()) &&
                                       module.directory?.currentRoomId == null
                                   ? () => _accept(item)
                                   : null,

@@ -17,6 +17,7 @@ public sealed class GameLogRuntime : IDisposable
     private readonly GameLogSessionTracker _session;
     private readonly Support.GameLogJournalBatch? _journal;
     private readonly GameLogIdentityReader _reader;
+    private readonly GameLogIdentityReader _recentReader = new();
     private readonly GameLogLocator _locator;
     private GameLogLocation _location = new("notFound");
     private DateTimeOffset? _lastDiscovery;
@@ -40,8 +41,22 @@ public sealed class GameLogRuntime : IDisposable
         GameLogSessionSnapshot Snapshot,
         DateTimeOffset At);
     private Published? _published;
+    private Published? _recentPublished;
     private PublishedIdentityCheck? _publishedIdentityCheck;
     private PublishedSession? _publishedSession;
+    internal event Action? PublicationChanged;
+    private sealed record PublicationState(Published? Identity, PublishedSession? Session, PublishedIdentityCheck? Check);
+    private PublicationState _lastPublication = new(null, null, null);
+    private void NotifyPublicationChanged()
+    {
+        var state = new PublicationState(_published is { } identity ? identity with { At = default } : null,
+            _publishedSession is { } session ? session with { At = default } : null, _publishedIdentityCheck);
+        if (state == _lastPublication) return;
+        _lastPublication = state;
+        // Consumers only schedule work; sampling never awaits remote publication.
+        foreach (var handler in PublicationChanged?.GetInvocationList() ?? [])
+            try { ((Action)handler)(); } catch { /* A wake must not invalidate log evidence. */ }
+    }
 
     public GameLogRuntime(GameLogSettingsStore store,
         Func<(BridgeAccountContext? Context, long Generation)> current, Func<string?> verifiedHandle,
@@ -54,7 +69,7 @@ public sealed class GameLogRuntime : IDisposable
         _journal = journal is null ? null : new(journal);
         _session = new(_journal);
         _reader = new(_session, _journal);
-        if (startTimer) _timer = _time.CreateTimer(_ => Sample(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        if (startTimer) _timer = _time.CreateTimer(_ => Sample(), null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
     }
     public string? DetectedHandle
     {
@@ -65,6 +80,16 @@ public sealed class GameLogRuntime : IDisposable
             var now = _time.GetUtcNow();
             return published is not null && _current() == published.Owner &&
                 now >= published.At && now - published.At < TimeSpan.FromSeconds(10) ? published.Handle : null;
+        }
+    }
+    // Identity-only observation is separate from live process/session evidence.
+    public string? RecentDetectedHandle
+    {
+        get {
+            var value = Volatile.Read(ref _recentPublished);
+            var now = _time.GetUtcNow();
+            return value is not null && value.Owner == _current() && now >= value.At &&
+                now - value.At < TimeSpan.FromSeconds(10) ? value.Handle : null;
         }
     }
     public string? ConfirmedVersion
@@ -104,6 +129,7 @@ public sealed class GameLogRuntime : IDisposable
     }
     public void Suspend()
     {
+        Volatile.Write(ref _recentPublished, null);
         Volatile.Write(ref _published, null);
         Volatile.Write(ref _publishedIdentityCheck, null);
         Volatile.Write(ref _publishedSession, null);
@@ -111,8 +137,9 @@ public sealed class GameLogRuntime : IDisposable
         {
             _lease?.Dispose(); _lease = null; _settings = null; _owner = default;
             _observation = new("notSelected"); _error = null; _stopped = false;
-            _reader.Reset();
+            _reader.Reset(); _recentReader.Reset();
             _location = new("notFound"); _lastDiscovery = null; _processKey = null; _searchHint = null;
+            NotifyPublicationChanged();
         }
     }
     // Diagnostics borrows the existing owner/selection, never a second store lease.
@@ -158,17 +185,20 @@ public sealed class GameLogRuntime : IDisposable
             _journal?.Reset();
             _error = "storage";
             _observation = new("unknown");
+            Volatile.Write(ref _recentPublished, null);
             Volatile.Write(ref _published, null);
             Volatile.Write(ref _publishedSession, null);
+            NotifyPublicationChanged();
         }
         finally { Monitor.Exit(_sync); }
     }
     private void Observe(CancellationToken token = default, bool rediscover = false)
     {
         var settings = _settings!;
+        GameLogIdentityObservation? recent = null;
         if (!settings.Enabled || _stopped)
         {
-            _reader.Reset(); _observation = new("stopped");
+            _reader.Reset(); _recentReader.Reset(); _observation = new("stopped");
         }
         else
         {
@@ -192,12 +222,21 @@ public sealed class GameLogRuntime : IDisposable
                 running != settings.Channel;
             if (otherVersion || path is null)
             {
-                _reader.Reset();
+                _reader.Reset(); _recentReader.Reset();
                 _observation = new(otherVersion ? "otherVersion" : _location.State);
             }
-            else _observation = _reader.ReadCurrent(path, process, now);
+            else {
+                _observation = _reader.ReadCurrent(path, process, now);
+                if (process.State == "notRunning") recent = _recentReader.ReadRecent(path, now);
+                else {
+                    _recentReader.Reset();
+                    recent = _observation;
+                }
+            }
         }
         _observedAt = _time.GetUtcNow();
+        Volatile.Write(ref _recentPublished, _error is null && recent is { State: "identified", Handle: not null } &&
+            _current() == _owner ? new(_owner, recent.Handle, settings.Channel, _observedAt) : null);
         var expected = _verifiedHandle();
         if (_error is null && _observation.State == "identified" && _observation.Handle is not null &&
             expected is not null)
@@ -237,6 +276,7 @@ public sealed class GameLogRuntime : IDisposable
         Volatile.Write(ref _published, _error is null && _observation.State == "identified" &&
             _observation.Handle is not null && _current() == _owner
             ? new(_owner, _observation.Handle, _settings!.Channel, _observedAt) : null);
+        NotifyPublicationChanged();
     }
     private void PublishIdentityCheck()
     {
@@ -291,6 +331,7 @@ public sealed class GameLogRuntime : IDisposable
                 if (!Resolve()) return Error(request, "accountChanged");
                 if (request.Name == "gameLog.stop") {
                     _stopped = true; _observation = new("stopped"); _reader.Reset();
+                    _recentReader.Reset(); Volatile.Write(ref _recentPublished, null);
                     Volatile.Write(ref _published, null);
                     Volatile.Write(ref _publishedSession, null);
                 }
@@ -341,6 +382,7 @@ public sealed class GameLogRuntime : IDisposable
                 if (next != _settings)
                 {
                     var hint = _settings?.Path;
+                    Volatile.Write(ref _recentPublished, null); _recentReader.Reset();
                     Volatile.Write(ref _published, null);
                     Volatile.Write(ref _publishedSession, null);
                     _settings = _lease!.Save(_settings!, next, Current);
@@ -366,7 +408,8 @@ public sealed class GameLogRuntime : IDisposable
                     schemaVersion = 1, state = _observation.State,
                     observedAtUtc = _observedAt,
                     path = _settings!.Selection == "automatic" && _settings.Enabled && !_stopped ? _location.Path : _settings.Path,
-                    enabled = _settings.Enabled && !_stopped, handle, expectedHandle = expected, match,
+                    enabled = _settings.Enabled && !_stopped, handle, recentHandle = RecentDetectedHandle,
+                    expectedHandle = expected, match,
                     channel = _settings.Channel, selection = _settings.Selection,
                     channels = GameLogLocator.Channels(_settings.Channels),
                     verifiedChannels = GameLogLocator.Channels(_settings.VerifiedChannels),
@@ -405,6 +448,7 @@ public sealed class GameLogRuntime : IDisposable
             {
                 _error = "storage";
                 _observation = new("unknown");
+                Volatile.Write(ref _recentPublished, null);
                 Volatile.Write(ref _published, null);
                 Volatile.Write(ref _publishedSession, null);
                 return Error(request, "storage");

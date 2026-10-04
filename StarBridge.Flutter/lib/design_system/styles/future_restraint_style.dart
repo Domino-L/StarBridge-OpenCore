@@ -87,7 +87,7 @@ abstract final class FutureRestraintStyle {
   );
 
   static const icons = IconTokens(
-    setId: 'starbridge-outline-v1',
+    setId: 'starbridge-avionics-v2',
     small: 16,
     medium: 20,
     large: 24,

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../shell/widgets/attention_badge.dart';
+
 import '../../design_system/icons/menu_bridge_glyph.dart';
 import '../../design_system/styles/menu_bridge_palette.dart';
 export '../../design_system/icons/menu_bridge_glyph.dart';
@@ -18,11 +20,17 @@ class BridgePlate extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: framed ? BridgeInk.panel : Colors.transparent,
+      color: framed ? MenuBridgeColors.of(context).panel : Colors.transparent,
       border: framed
-          ? const Border(
-              top: BorderSide(color: BridgeInk.blue, width: .8),
-              bottom: BorderSide(color: BridgeInk.line, width: .6),
+          ? Border(
+              top: BorderSide(
+                color: MenuBridgeColors.of(context).blue,
+                width: .8,
+              ),
+              bottom: BorderSide(
+                color: MenuBridgeColors.of(context).line,
+                width: .6,
+              ),
             )
           : null,
     ),
@@ -53,6 +61,7 @@ class _BridgeMenuActionState extends State<BridgeMenuAction> {
   bool hovered = false, focused = false;
   @override
   Widget build(BuildContext context) {
+    final ink = MenuBridgeColors.of(context);
     final highlighted = hovered || focused || widget.selected;
     return Semantics(
       button: true,
@@ -83,14 +92,14 @@ class _BridgeMenuActionState extends State<BridgeMenuAction> {
               padding: widget.padding,
               decoration: BoxDecoration(
                 color: hovered || focused
-                    ? BridgeInk.selected.withValues(alpha: .22)
+                    ? ink.selected.withValues(alpha: .22)
                     : Colors.transparent,
                 border: Border(
                   top: BorderSide(
-                    color: highlighted ? BridgeInk.blue : Colors.transparent,
+                    color: highlighted ? ink.blue : Colors.transparent,
                   ),
                   bottom: BorderSide(
-                    color: focused ? BridgeInk.blue : Colors.transparent,
+                    color: focused ? ink.blue : Colors.transparent,
                   ),
                 ),
               ),
@@ -104,33 +113,26 @@ class _BridgeMenuActionState extends State<BridgeMenuAction> {
 }
 
 class BridgeCaption extends StatelessWidget {
-  const BridgeCaption(this.text, {super.key, this.color = BridgeInk.muted});
+  const BridgeCaption(this.text, {super.key, this.color});
   final String text;
-  final Color color;
+  final Color? color;
   @override
-  Widget build(BuildContext context) =>
-      Text(text, style: TextStyle(fontSize: 13, color: color, height: 1.5));
+  Widget build(BuildContext context) => Text(
+    text,
+    style: TextStyle(
+      fontSize: 13,
+      color: color ?? MenuBridgeColors.of(context).muted,
+      height: 1.5,
+    ),
+  );
 }
 
 class BridgeBadge extends StatelessWidget {
   const BridgeBadge(this.value, {super.key});
   final String value;
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-    decoration: BoxDecoration(
-      color: BridgeInk.selected,
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(
-      value,
-      style: const TextStyle(
-        color: BridgeInk.blue,
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-      ),
-    ),
-  );
+  Widget build(BuildContext context) =>
+      AttentionCount(count: int.tryParse(value) ?? 0);
 }
 
 class BridgeLabel extends StatelessWidget {

@@ -17,6 +17,9 @@ class MenuLocalTools {
   ~MenuLocalTools();
   void Handle(const flutter::EncodableMap& args, Result result);
   void Hide();
+  // Session detachment retires local pages/images without deleting the browser
+  // profile. Ordinary menu hiding only suspends them.
+  void Reset();
  private:
   class Impl;
   std::unique_ptr<Impl> impl_;

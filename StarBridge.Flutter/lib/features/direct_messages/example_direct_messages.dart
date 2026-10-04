@@ -59,16 +59,18 @@ final class ExampleDirectMessages
   Future<List<Conversation>> directory() async => [
     Conversation(
       _friend,
-      '示例好友 (Example)',
+      '示例好友',
       '这是会话历史示例',
       _time,
       _unread(_friend),
       'friend',
       conversationKey: '1'.padLeft(64, '0'),
+      presence: 'online',
+      gameId: 'Example',
     ),
     Conversation(
       _request,
-      '示例用户 (Example_Request)',
+      '示例用户',
       '这是一条消息请求',
       _time,
       _unread(_request),

@@ -9,8 +9,31 @@ internal sealed partial class ScmAccountBridgeHost
     private readonly SemaphoreSlim _roomSessionGate = new(1, 1);
     private readonly RoomOverlaySession _roomOverlay = new();
 
+    internal event Action RoomOverlayContentChanged
+    {
+        add => _roomOverlay.ContentChanged += value;
+        remove => _roomOverlay.ContentChanged -= value;
+    }
+    internal event Action<BridgeAccountContext, long, string?> RoomOverlayMembershipConfirmed
+    {
+        add => _roomOverlay.MembershipConfirmed += value;
+        remove => _roomOverlay.MembershipConfirmed -= value;
+    }
+
     public StarBridge.HostRuntime.Overlay.InformationOverlayRoomContent? CurrentRoomOverlay =>
         _roomOverlay.Read(_disposed ? null : GameplayTimeContext, Generation);
+
+    internal (bool Known, string? Room) ReadOverlayPresetTrigger() =>
+        _roomOverlay.ReadPresetTrigger(_disposed ? null : GameplayTimeContext, Generation);
+
+    internal StarBridge.HostRuntime.Overlay.InformationOverlaySourceSnapshot? CurrentRoomOverlaySource =>
+        _roomOverlay.ReadSource(_disposed ? null : GameplayTimeContext, Generation);
+
+    internal (StarBridge.Core.Overlay.OverlaySourceLease Lease, object Stamp)? PeekRoomOverlayAuthority(BridgeAccountContext owner, long generation) =>
+        _disposed || owner != GameplayTimeContext || generation != Generation ? null : _roomOverlay.PeekAuthority(owner, generation);
+
+    internal bool IsRoomOverlaySourceCurrent(StarBridge.HostRuntime.Overlay.InformationOverlaySourceSnapshot snapshot) =>
+        _roomOverlay.IsSourceCurrent(_disposed ? null : GameplayTimeContext, Generation, snapshot);
 
     public async Task<RoomCommandView> ExecutePartyRoomAsync(BridgeAccountContext context,
         System.Text.Json.JsonElement payload, CancellationToken token)
@@ -31,7 +54,7 @@ internal sealed partial class ScmAccountBridgeHost
                 result = result with { Directory = ProjectRoomAvatars(avatarDirectory, context, generation) };
             var directory = result.AuthorizedOverlayDirectory ?? result.Directory;
             if (directory is not null)
-                _roomOverlay.ApplyDirectory(context, generation, directory, OverlayLocalHandle());
+                _roomOverlay.ApplyDirectory(context, generation, ProjectRoomOverlayIdentity(directory, context), OverlayLocalHandle());
             else if (result.Status is not ("targets" or "resolved"))
                 _roomOverlay.Clear();
             if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("roomId", out var room))
@@ -39,6 +62,10 @@ internal sealed partial class ScmAccountBridgeHost
                     data.TryGetProperty("before", out var before) && before.GetInt64() > 0);
             return result;
         }
+        catch (AccountBridgeHostException error) when (
+            IsRoomChatRead(payload) &&
+            CanRetainRoomOverlayAfterRead(error, context, generation)) { throw; }
+        catch (OperationCanceledException) when (IsRoomChatRead(payload) && HasValidRoomOverlay(context, generation)) { throw; }
         catch { _roomOverlay.Clear(); throw; }
         finally { _roomSessionGate.Release(); }
     }
@@ -90,11 +117,40 @@ internal sealed partial class ScmAccountBridgeHost
         {
             var result = await GetPartyRoomsCoreAsync(context, token);
             if (generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
-            _roomOverlay.ApplyDirectory(context, generation, result, OverlayLocalHandle());
+            _roomOverlay.ApplyDirectory(context, generation, ProjectRoomOverlayIdentity(result, context), OverlayLocalHandle());
             return ProjectRoomAvatars(result, context, generation);
         }
+        catch (AccountBridgeHostException error) when (CanRetainRoomOverlayAfterRead(error, context, generation)) { throw; }
+        catch (OperationCanceledException) when (HasValidRoomOverlay(context, generation)) { throw; }
         catch { _roomOverlay.Clear(); throw; }
         finally { _roomSessionGate.Release(); }
+    }
+
+    private bool CanRetainRoomOverlayAfterRead(AccountBridgeHostException error, BridgeAccountContext context, long generation) =>
+        error.Code == "party_rooms.read_unavailable" && error.Retryable &&
+        HasValidRoomOverlay(context, generation);
+
+    private static bool IsRoomChatRead(System.Text.Json.JsonElement payload) =>
+        payload.ValueKind == System.Text.Json.JsonValueKind.Object && payload.TryGetProperty("operation", out var operation) &&
+        operation.ValueKind == System.Text.Json.JsonValueKind.String && operation.GetString() == "chatRead";
+
+    private bool HasValidRoomOverlay(BridgeAccountContext context, long generation) =>
+        !_disposed && generation == Generation && Equals(context, GameplayTimeContext) &&
+        // A failed GET grants no new authority or time: keep only the original,
+        // still-valid account/room lease. Read also revokes an expired lease.
+        _roomOverlay.Read(context, generation) is not null;
+
+    private RoomDirectoryView ProjectRoomOverlayIdentity(RoomDirectoryView directory, BridgeAccountContext context)
+    {
+        // Overlay reads (including chat preflight) may precede avatar/UI projection.
+        // Bind self to the authenticated account, never a callsign or display handle.
+        var viewer = RequireRelaySession(context).Legacy?.AccountId;
+        return directory with { Rooms = directory.Rooms.Select(room => room with {
+            Members = room.Members.Select(member => member with {
+                IsSelf = !string.IsNullOrWhiteSpace(viewer) && !string.IsNullOrWhiteSpace(member.AccountId) &&
+                    string.Equals(member.AccountId, viewer, StringComparison.Ordinal)
+            }).ToArray()
+        }).ToArray() };
     }
 
     private async Task<RoomDirectoryView> GetPartyRoomsCoreAsync(BridgeAccountContext context, CancellationToken token)

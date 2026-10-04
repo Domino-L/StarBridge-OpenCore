@@ -247,7 +247,15 @@ RegexOptions.CultureInvariant
 
 `ShipOwner` 当前主要是为未来扩展和诊断保留，`FleetState` 暂未使用它参与状态计算。
 
+2026-09-30 Native/Host 补充：舰船频道的 `ship : player` 分隔符前允许名称内的撇号（例如 `Fixture's Mk II`），仍要求 SHUD 加入/离开频道通知，仍先匹配具体规则，不改变拥有者规则或实例后缀处理。Host 在应用事件前用 `GameShipNames` 将无歧义名称归一为已有 runtime ID；Core 比较通过完整公共名称包及已有官方别名处理频道名称和驾驶位运行标识的差异。日志正文与运行快照、共享接收呈现和 Native 舰船文案使用同一只读词汇。
+
+可选完整显示目录补足显示名、中文名及制造商前缀；目录中没有运行 ID 的型号只增加显示转译，不编造运行 ID。有歧义的运行别名不用于身份合并；已检测但尚无转译的有效名称保留原文，不降成未知。多乘员舰船离开驾驶位仍不等于离船，单座立即离船目录、旧船迟到事件和实例校验保持原行为。2026-09-30 后续观察确认独立 `AEGS_Sabre_Raven_EX`，名称包与生成器按确切证据补入渡鸦 EX（共325 runtime），不合并基础渡鸦或由显示目录猜其他运行 ID。
+
+2026-10-01 离座规则补充：按用户确认，基础渡鸦 `AEGS_Sabre_Raven` 和渡鸦 EX `AEGS_Sabre_Raven_EX` 均为离座即下船。基础版已在目录，EX 本次补入 `ImmediateVehicleExitCatalog`；匹配当前型号与实例后清空舰船及重连回填，保留两个型号之间的独立身份和多乘员舰船原有规则。
+
 ## 8. 当前支持的日志事件类型
+
+2026-10-01 导航显示补充：23 种已列导航目标通过共享的 `navigation-station-display-map.json` 显示为对应实际站点名称，覆盖外部 / 内部目标、LOC 前缀及调用方既有实例后缀规范。映射只参与名称呈现；`NavigationTarget`、`ArrivalTargetCode`、`ConfirmedLocationCode` 和到达待确认状态保持原有事件语义，不能因已知站点名称就产生位置确认。
 
 ### 8.1 身份和在线状态
 
@@ -863,3 +871,39 @@ NavigationTarget = None
 5. 网络层复用同一事件模型，让本地和远端成员状态可以在同一个推理系统里合并。
 
 这套算法适合 Star Citizen 日志这种信号稀疏、格式多变、很多状态只能侧面推断的场景。
+
+## Native Host 兼容期最近身份读取（2026-09-26）
+
+`GameLogIdentityReader.ReadCurrent` 保持当前游戏进程、启动时间与安装路径约束。
+独立的 `ReadRecent` 仅解析身份，不连接会话推断或事件 journal；游戏确认未运行时，
+`GameLogRuntime.RecentDetectedHandle` 可从所选已有日志取得最近有效 Handle，供兼容期用户确认改名。
+
+- 仍要求时间戳、完整 `nickname` / 非零 `playerGEID`、合法 Handle；沿用身份规则，不改变 FleetEvent 首匹配顺序。
+- 按最大时间戳选择；同时间戳冲突拒绝。历史退出不会清空最近身份，但不能生成在线状态、当前服务器或位置。
+- 沿用本地固定磁盘、最终文件句柄路径、严格 UTF-8、16 MiB 分段扫描、64 KiB 行限制；扫描未完成不公布结果。
+- 身份格式损坏、未来时间、超长行或未完成尾行不能借旧值放行；文件轮换、截断、同长重写使缓存失效。
+- 无需游戏再次启动。每次观察仍有十秒新鲜度约束；停用、账号变化、读取失败或进程状态未知均不复用历史值。
+- 此输入只用于兼容期账号确认流程，不覆盖 SCM 身份，不迁移账号或机库，也不直接执行远端更新。
+
+## Native 信息浮层的当前会话投影（2026-09-29）
+
+- 继续复用 `RegexLogEventParser` 首匹配规则和 `FleetState`，不新增或调整日志匹配顺序。舰船频道加入日志的格式仍为 `You joined channel '船名 : 本机 Handle'`；同一次读取应同时生成进入舰船事件和当前舰船快照。
+- `Player Selected Quantum Target - Local` 仅记录导航目的地；`Quantum Drive Arrived - Arrived at Final Destination` 使现有 Core 状态进入等待当前位置确认。Host 快照保留 `ArrivalPendingConfirmation` / `ArrivalTargetCode`，随后位置证据负责清除等待；目的地不能当已确认当前位置。
+- 本机快照的两个到达字段标记 `JsonIgnore`，不会由快照直接扩大网络共享。接收端另沿主任务的房间／组织授权合同取得可选到达字段，保留现有地点共享权限；事件本身仍无历史地点正文。即使可选地点目录缺失，等待阶段也不能丢失；退出服务器仍清空会话。
+- 房间和组织只在已授权集合中恰好有一个明确自身份时合入本机快照；房间目录须在进入 Native 前用认证账号标记自己。成员名不能作为该身份凭据。
+- 本机地点变化走 Native 现有快照事件和显示开关，不依赖上传后回传；只有本机显示副本启用此门禁。同伴事件仍依赖其授权共享，初始化、重复刷新及来源切换仍使用现有基线规则。
+- 回归入口：Host `--room-overlay-identity-only`、`--overlay-arrival-only`；Windows renderer `--local-self-only`。这些源码回归不能替代当前候选的游戏内验证。
+
+## 本机信息浮层实时事件接线（2026-09-30）
+
+- `GameLogRuntime → GameLogJournalBatch → LocalGameEventJournal` 的现有身份、完整读取和清空修订门禁保持。解析器顺序和日志规则不变；LocalGameOverlayEventSource 只订阅新接受的条目，不额外读取 Game.log 或重放历史。
+- 本机游戏进程、服务器进出、舰船进出／驾驶位、生命事件直达 Native；同伴事件仍走授权 SharedActivityReceiver。本机地点继续沿唯一授权自身份快照变化与到达／确认合并，不由新端口再发一遍。
+- LifeContext 与已呈现舰船名称／固定服务器区域仅作为活跃事件元数据传递，使用 JsonIgnore 保持原磁盘及网络格式。生命上下文来自 FleetEvent，不从标题字符串推断；区域不带 shard，舰船不带实例 ID。
+- 本机通知按当前 generation、journal 清空修订、源生命周期和新鲜度检查；显示前仍检查浮层可见与类别开关。自己的网络回声须有稳定键及明确自身份才抑制；不同发布者相同事件 ID 不合并。
+- 入口：Host `--local-game-overlay-only`，Native `--event-queue-audit-only`；补水计时到卡片为 `--continuous-play-only`。详细审计与下一候选现场要求见 [事件通路检查](information-overlay-issues/EVENT-AUDIT-2026-09-30.md)。
+
+## 本次量子目标与历史地点分离（2026-09-30）
+
+- FleetState 从尚未消费且一小时内的 NAV 取本次到达目标；到达后消费导航上下文。15秒内重复到达可保留原目标，但重复信号不延长窗口；后续无新目标到达不能沿用上一旅程。
+- Native 当前地点行和到达事件使用本次目标＋待确认，缺目标仅显示待确认；本机快照保留最后确认地点作为历史，绝不把目标写成已确认位置。相同目标名称从待确认变为确认也需合并原卡。
+- 接收端当前目标仅由同一授权成员集合提供，沿字段权限和稳定身份匹配；地点撤回／成员撤销清除卡片补充。默认回归包含 Core QuantumArrivalJourneyTests 与 Native OverlayArrivalSourceTests。

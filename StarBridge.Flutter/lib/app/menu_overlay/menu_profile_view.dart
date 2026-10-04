@@ -273,7 +273,8 @@ final class MenuProfileView {
                 moduleId: _text(m, 'id'),
                 size: _enum(PersonalProfileModuleSize.values, m['size']),
                 isVisible: _bool(m, 'visible'),
-                position: _int(m, 'position'),
+                // Hidden/unplaced modules use -1 in the shared profile model.
+                position: _int(m, 'position', min: -1),
                 favoriteShipIds: _strings(m['favorites']),
               ),
           ],
@@ -293,9 +294,9 @@ String _text(Map d, String key, {int max = 512}) {
 }
 
 String? _optional(Map d, String key) => d[key] == null ? null : _text(d, key);
-int _int(Map d, String key) {
+int _int(Map d, String key, {int min = 0}) {
   final v = d[key];
-  if (v is! int || v < 0 || v > 1000000000) throw const FormatException();
+  if (v is! int || v < min || v > 1000000000) throw const FormatException();
   return v;
 }
 

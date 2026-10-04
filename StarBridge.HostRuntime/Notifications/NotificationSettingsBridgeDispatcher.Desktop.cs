@@ -21,23 +21,29 @@ public sealed partial class NotificationSettingsBridgeDispatcher
             test || activationEvent == null ? null : () => Activate(id, current));
     }
 
-    private (string Id, Func<bool> Current, long Started, string Destination)? _activation;
+    private (string Id, Func<bool> Current, long Started, string Destination,
+        Func<CancellationToken, Task<bool>>? Revalidate)? _activation;
     private Guid? _activatedDesktop;
-    private void Activate(Guid id, Func<bool> current, string destination = "roomReminders") {
+    private void Activate(Guid id, Func<bool> current, string destination = "roomReminders",
+        Func<CancellationToken, Task<bool>>? revalidate = null) {
         lock (_gate) {
             if (_disposed || !current() || activationEvent == null) return;
             var key = id.ToString("N");
             if (_activatedDesktop == id) return;
             _activatedDesktop = id;
-            _activation = (key, current, System.Diagnostics.Stopwatch.GetTimestamp(), destination);
+            _activation = (key, current, System.Diagnostics.Stopwatch.GetTimestamp(), destination, revalidate);
             EventReady?.Invoke(activationEvent(generation(), new { schemaVersion = 1, activationId = key }));
         }
     }
 
-    private BridgeDispatchBatch ConsumeActivation(BridgeEnvelope request) {
-        lock (_gate) {
-            try {
+    private async ValueTask<BridgeDispatchBatch> ConsumeActivationAsync(BridgeEnvelope request, CancellationToken token) {
+        try {
+            string? destination = null;
+            Func<bool>? current = null;
+            Func<CancellationToken, Task<bool>>? revalidate = null;
+            lock (_gate) {
                 ObjectDisposedException.ThrowIf(_disposed, this);
+                token.ThrowIfCancellationRequested();
                 BridgeEnvelopeValidator.ValidateWireShape(request); BridgeEnvelopeValidator.RequireCurrentVersion(request);
                 if (request.SessionGeneration != generation()) throw new BridgeStaleGenerationException(request.SessionGeneration, generation());
                 if (request.MessageType != BridgeMessageTypes.Request || request.AccountContext != null) throw new ArgumentException();
@@ -46,12 +52,25 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                 var id = request.Payload.GetProperty("activationId").GetString();
                 var valid = _activation is { } active && active.Id == id && active.Current() &&
                     System.Diagnostics.Stopwatch.GetElapsedTime(active.Started) < TimeSpan.FromSeconds(30);
-                var destination = valid ? _activation?.Destination : null;
-                if (valid) _activation = null;
-                return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, destination }, preserveRequestAccountContext: false), []);
-            } catch (BridgeProtocolException e) { return new(BridgeEnvelope.ErrorResponse(request, new(e.Code, "Activation rejected.")), []); }
-            catch { return new(BridgeEnvelope.ErrorResponse(request, new("notificationSettings.activation_unavailable", "Activation unavailable.")), []); }
+                if (valid && _activation is { } accepted) {
+                    destination = accepted.Destination;
+                    current = accepted.Current;
+                    revalidate = accepted.Revalidate;
+                    // Consume before awaiting the authoritative policy. Concurrent
+                    // clicks cannot race into duplicate navigation/confirmation.
+                    _activation = null;
+                }
+            }
+            if (revalidate != null && !await revalidate(token).ConfigureAwait(false)) destination = null;
+            lock (_gate) {
+                if (destination != null && (_disposed || request.SessionGeneration != generation() || current?.Invoke() != true))
+                    destination = null;
+            }
+            return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, destination }, preserveRequestAccountContext: false), []);
         }
+        catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
+        catch (BridgeProtocolException e) { return new(BridgeEnvelope.ErrorResponse(request, new(e.Code, "Activation rejected.")), []); }
+        catch { return new(BridgeEnvelope.ErrorResponse(request, new("notificationSettings.activation_unavailable", "Activation unavailable.")), []); }
     }
 
     private async ValueTask<BridgeDispatchBatch> DispatchDesktopAsync(BridgeEnvelope request, CancellationToken token)

@@ -11,6 +11,7 @@ import '../../features/overlay_settings/overlay_settings_port.dart';
 import '../../features/overlay_settings/overlay_workspace_port.dart';
 import '../../features/overlay_settings/overlay_scene_controller.dart';
 import '../../features/overlay_settings/bridge_overlay_scenes.dart';
+import '../../features/overlay_settings/overlay_roster_editor.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/window/method_channel_overlay_editor_window.dart';
 import '../../platform/window/method_channel_menu_preview_window.dart';
@@ -26,6 +27,8 @@ import '../../features/common/bridge_user_interaction.dart';
 import '../menu_overlay/menu_profiles_session.dart';
 import '../presence/manual_presence.dart';
 import '../../features/communities/bridge_communities.dart';
+import '../../features/communities/communities_module.dart';
+import '../../features/communities/community_overview_reader.dart';
 import '../../features/party_rooms/bridge_party_rooms_adapter.dart';
 import '../menu_overlay/menu_rooms_session.dart';
 import '../menu_overlay/menu_organizations_session.dart';
@@ -40,6 +43,7 @@ OverlaySettingsModule composeOverlaySettings(
   required AccountModule account,
   required PersonalProfileModule profile,
   required PartyRoomsModule rooms,
+  CommunitiesModule Function()? menuCommunities,
   ManualPresenceController? Function()? menuPresence,
   GameLogView Function()? menuGame,
 }) {
@@ -108,6 +112,9 @@ OverlaySettingsModule composeOverlaySettings(
                     'organizations': (publish) => MenuOrganizationsSession(
                       BridgeCommunities(session, ownAvatar: ownAvatar),
                       publish,
+                      overview: menuCommunities == null
+                          ? null
+                          : CommunityOverviewReader(menuCommunities()),
                     ),
                     'rooms': (publish) => MenuRoomsSession(
                       BridgePartyRoomsAdapter(session),
@@ -182,6 +189,7 @@ OverlaySettingsModule composeOverlaySettings(
     scenes: session == null
         ? null
         : OverlaySceneController(BridgeOverlayScenes(session)),
+    roster: session == null ? null : BridgeOverlayRoster(session),
   );
   if (session != null) {
     rooms.chat?.onPresetImported = () async {

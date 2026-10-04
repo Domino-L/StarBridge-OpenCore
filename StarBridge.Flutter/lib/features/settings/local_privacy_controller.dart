@@ -22,9 +22,12 @@ final class LocalPrivacyController extends ChangeNotifier {
       _snapshot = null;
       draft = null;
       saving = false;
+      _saveToken = null;
+      _finishBackgroundReads();
       errorKey = null;
       publicationView = const PrivacyPublicationView('inactive');
       publicationObserved = false;
+      publicationReadFailures = 0;
       publicationBusy = false;
       status = LocalPrivacyStatus.initial;
       communityTargets = null;
@@ -64,6 +67,18 @@ final class LocalPrivacyController extends ChangeNotifier {
       CommunityTargetsFailure.none;
   bool _targetsReading = false;
   bool _settingsReading = false;
+  Completer<void>? _settingsReadDone;
+  bool _publicationReading = false;
+  Completer<void>? _publicationReadDone;
+  Object? _saveToken;
+  void _finishBackgroundReads() {
+    _settingsReadDone?.complete();
+    _settingsReadDone = null;
+    _publicationReadDone?.complete();
+    _publicationReadDone = null;
+    _publicationReading = false;
+  }
+
   int _memberReads = 0;
   bool get communitySharingSupported =>
       _port is CommunitySharingPort &&
@@ -73,9 +88,27 @@ final class LocalPrivacyController extends ChangeNotifier {
   Timer? _targetsTimer;
   bool publicationBusy = false;
   bool publicationObserved = false;
+  int publicationReadFailures = 0;
   int _publicationMonitors = 0;
   bool get savedPublicationEnabled =>
       _snapshot?.settings?.publicationEnabled == true;
+
+  /// A receipt confirms the saved publication, not every joined audience.
+  /// Unsaved choices must not turn a pending organization into an active grant.
+  bool get savedCommunityChoicesPending {
+    final saved = _snapshot?.settings;
+    final targets = communityTargets?.communities;
+    if (!communitySharingSupported ||
+        saved == null ||
+        targets == null ||
+        communityTargetsFailed) {
+      return false;
+    }
+    return targets.any(
+      (target) => !(saved.communities?.any(target.matches) ?? false),
+    );
+  }
+
   PrivacyPublicationView publicationView = const PrivacyPublicationView(
     'inactive',
   );
@@ -156,7 +189,6 @@ final class LocalPrivacyController extends ChangeNotifier {
   bool get canEdit =>
       status == LocalPrivacyStatus.ready &&
       !saving &&
-      !_settingsReading &&
       !needsReload &&
       !publicationBusy;
   bool get dirty =>
@@ -167,6 +199,7 @@ final class LocalPrivacyController extends ChangeNotifier {
                 .toJson(),
           );
   bool get canSave =>
+      _saveToken == null &&
       canEdit &&
       (dirty ||
           !hasSaved ||
@@ -238,7 +271,13 @@ final class LocalPrivacyController extends ChangeNotifier {
   }
 
   Future<void> refresh({bool silently = false}) async {
-    if (_disposed || saving || publicationBusy || _settingsReading) return;
+    if (_disposed ||
+        saving ||
+        publicationBusy ||
+        _publicationReading ||
+        _settingsReading) {
+      return;
+    }
     if (silently &&
         (status != LocalPrivacyStatus.ready ||
             dirty ||
@@ -247,17 +286,24 @@ final class LocalPrivacyController extends ChangeNotifier {
       return;
     }
     var epoch = silently ? _epoch : ++_epoch;
+    final originalDraft = draft;
+    final originalRevision = _snapshot?.revision;
+    final completed = Completer<void>();
+    _settingsReadDone = completed;
     _settingsReading = true;
     _targetsReading = false;
     if (!silently) {
       publicationObserved = false;
+      publicationReadFailures = 0;
       status = LocalPrivacyStatus.loading;
       draft = null;
       _snapshot = null;
     }
-    errorKey = null;
-    needsReload = false;
-    notifyListeners();
+    if (!silently) {
+      errorKey = null;
+      needsReload = false;
+      notifyListeners();
+    }
     try {
       final result = await _port.read();
       if (!_current(epoch)) return;
@@ -265,8 +311,19 @@ final class LocalPrivacyController extends ChangeNotifier {
       if (silently && result.revision != _snapshot?.revision) {
         epoch = ++_epoch;
       }
-      _snapshot = result;
-      draft = result.settings ?? LocalPrivacySettings.editorDefaults;
+      errorKey = null;
+      needsReload = false;
+      // Reading renews save authority, not authority to replace a new draft.
+      final preserveDraft = silently && (draft != originalDraft || saving);
+      if (preserveDraft && result.revision != originalRevision) {
+        needsReload = true;
+        errorKey = 'privacy.local.conflict';
+      } else {
+        _snapshot = result;
+        if (!preserveDraft) {
+          draft = result.settings ?? LocalPrivacySettings.editorDefaults;
+        }
+      }
       status = LocalPrivacyStatus.ready;
     } catch (error) {
       if (!_current(epoch)) return;
@@ -284,6 +341,10 @@ final class LocalPrivacyController extends ChangeNotifier {
       errorKey = 'privacy.local.readFailed';
     } finally {
       if (_current(epoch)) _settingsReading = false;
+      if (identical(_settingsReadDone, completed)) {
+        _settingsReadDone = null;
+      }
+      if (!completed.isCompleted) completed.complete();
     }
     notifyListeners();
     if (status == LocalPrivacyStatus.ready) {
@@ -401,12 +462,25 @@ final class LocalPrivacyController extends ChangeNotifier {
             .toList();
 
   Future<void> refreshPublication() => _publication('status');
+  bool get canRetryPublication =>
+      publicationSupported &&
+      canEdit &&
+      hasSaved &&
+      !dirty &&
+      savedPublicationEnabled &&
+      const {
+        'inactive',
+        'withdrawn',
+        'failed',
+        'reconnecting',
+      }.contains(publicationView.state);
   Future<void> applyPublication() => _publication('apply');
   Future<void> stopPublication() => _publication('stop');
   Future<void> _publication(String action) async {
     if (_disposed ||
         !publicationSupported ||
         publicationBusy ||
+        (action == 'status' && _publicationReading) ||
         _settingsReading ||
         saving ||
         status != LocalPrivacyStatus.ready ||
@@ -414,9 +488,21 @@ final class LocalPrivacyController extends ChangeNotifier {
       return;
     }
     final epoch = _epoch;
-    publicationBusy = true;
-    if (action != 'status') notifyListeners();
+    final reading = action == 'status';
+    final priorRead = _publicationReadDone;
+    final completed = reading ? Completer<void>() : null;
+    if (reading) {
+      _publicationReading = true;
+      _publicationReadDone = completed;
+    } else {
+      publicationBusy = true;
+      notifyListeners();
+    }
     try {
+      if (!reading && priorRead != null) {
+        await priorRead.future;
+        if (!_current(epoch) || needsReload) return;
+      }
       final result = await (_port as PrivacyPublicationPort).publication(
         action,
         revision: revision,
@@ -424,19 +510,43 @@ final class LocalPrivacyController extends ChangeNotifier {
       if (_current(epoch)) {
         publicationView = result;
         publicationObserved = true;
+        publicationReadFailures = 0;
       }
     } catch (error) {
       if (_current(epoch)) {
-        publicationObserved = true;
-        publicationView = PrivacyPublicationView(
-          'failed',
-          errorCode: error is BridgeClientException ? error.code : null,
-        );
+        if (_accountError(error)) {
+          status = LocalPrivacyStatus.signedOut;
+          draft = null;
+          _snapshot = null;
+          publicationView = const PrivacyPublicationView('inactive');
+          publicationObserved = false;
+          publicationReadFailures = 0;
+        } else if (reading) {
+          // Losing the local status read is not evidence of a failed remote
+          // publication. Keep its receipt separate from read freshness.
+          publicationReadFailures++;
+        } else {
+          publicationObserved = true;
+          publicationView = PrivacyPublicationView(
+            'failed',
+            errorCode: error is BridgeClientException ? error.code : null,
+          );
+        }
       }
     } finally {
       if (_current(epoch)) {
-        publicationBusy = false;
+        if (reading) {
+          _publicationReading = false;
+        } else {
+          publicationBusy = false;
+        }
         notifyListeners();
+      }
+      if (completed != null) {
+        if (identical(_publicationReadDone, completed)) {
+          _publicationReadDone = null;
+        }
+        if (!completed.isCompleted) completed.complete();
       }
     }
   }
@@ -449,7 +559,7 @@ final class LocalPrivacyController extends ChangeNotifier {
   }
 
   void discard() {
-    if (_disposed || saving || _settingsReading) return;
+    if (_disposed || saving || publicationBusy) return;
     draft = _snapshot == null
         ? null
         : _snapshot!.settings ?? LocalPrivacySettings.editorDefaults;
@@ -461,10 +571,23 @@ final class LocalPrivacyController extends ChangeNotifier {
     if (!canSave || draft == null) return false;
     final epoch = _epoch;
     final submitted = draft!;
+    final saveToken = Object();
+    _saveToken = saveToken;
     saving = true;
     errorKey = null;
     notifyListeners();
     try {
+      // The Bridge retires its old revision grant when a read starts. Keep
+      // editing live, but serialize this explicit write after that read.
+      final settingsRead = _settingsReadDone;
+      final publicationRead = _publicationReadDone;
+      if (settingsRead != null) await settingsRead.future;
+      if (publicationRead != null) await publicationRead.future;
+      if (!_current(epoch) ||
+          needsReload ||
+          status != LocalPrivacyStatus.ready) {
+        return false;
+      }
       final result = await _port.save(submitted);
       if (!_current(epoch)) return false;
       _snapshot = result;
@@ -502,6 +625,12 @@ final class LocalPrivacyController extends ChangeNotifier {
       }
       notifyListeners();
       return false;
+    } finally {
+      if (identical(_saveToken, saveToken)) {
+        _saveToken = null;
+        saving = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -510,6 +639,7 @@ final class LocalPrivacyController extends ChangeNotifier {
       error is BridgeClientException &&
       const {
         'privacy_local.account_changed',
+        'privacy_publication.account_changed',
         'bridge.stale_generation',
       }.contains(error.code);
 
@@ -517,6 +647,8 @@ final class LocalPrivacyController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _epoch++;
+    _saveToken = null;
+    _finishBackgroundReads();
     _publicationTimer?.cancel();
     _targetsTimer?.cancel();
     unawaited(_subscription.cancel());

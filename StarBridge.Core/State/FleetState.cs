@@ -12,6 +12,7 @@ public sealed class FleetState
     private const int MaxLocationInferenceScore = 100;
     private const double LocationScoreDecayPerMinute = 4;
     private static readonly TimeSpan PostQuantumArrivalShipRetentionWindow = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan MaximumNavigationContextAge = TimeSpan.FromHours(1);
     private readonly Dictionary<string, FleetPlayer> _players = new(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyCollection<FleetPlayer> Players => _players.Values
         .OrderByDescending(player => player.Online)
@@ -112,16 +113,21 @@ public sealed class FleetState
                 var isLocationInventoryContext = IsLocationInventoryContext(locationEvidence);
                 var retainShipForQuantumArrival = isLocationInventoryContext &&
                                                   IsWithinPostQuantumArrivalWindow(player, timestamp);
-                var quantumArrivalTarget = HasKnownNavigationTarget(fleetEvent.NavigationTarget)
-                    ? fleetEvent.NavigationTarget
-                    : player.NavigationTarget;
                 if (isQuantumArrival)
                 {
+                    var duplicateArrival = player.ArrivalPendingConfirmation &&
+                                           IsWithinPostQuantumArrivalWindow(player, timestamp) &&
+                                           player.NavigationTargetSelectedAt is null &&
+                                           !HasKnownNavigationTarget(fleetEvent.NavigationTarget);
+                    var quantumArrivalTarget = ResolveArrivalTarget(player, fleetEvent, timestamp, duplicateArrival);
                     player.ArrivalPendingConfirmation = true;
                     player.ArrivalTargetCode = HasKnownNavigationTarget(quantumArrivalTarget)
                         ? quantumArrivalTarget!.Trim()
                         : null;
-                    player.LastQuantumArrivalAt = timestamp;
+                    // Duplicate arrival signals belong to the original short window;
+                    // they must not indefinitely extend a consumed journey.
+                    if (!duplicateArrival) player.LastQuantumArrivalAt = timestamp;
+                    ClearNavigationJourney(player);
                 }
                 else
                 {
@@ -244,6 +250,17 @@ public sealed class FleetState
         return !string.IsNullOrWhiteSpace(navigationTarget) &&
                !navigationTarget.Equals("None", StringComparison.OrdinalIgnoreCase) &&
                !navigationTarget.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveArrivalTarget(FleetPlayer player, FleetEvent fleetEvent,
+        DateTimeOffset timestamp, bool duplicateArrival)
+    {
+        if (HasKnownNavigationTarget(fleetEvent.NavigationTarget)) return fleetEvent.NavigationTarget;
+        if (player.NavigationTargetSelectedAt is { } selectedAt &&
+            timestamp - selectedAt >= TimeSpan.FromSeconds(-5) &&
+            timestamp - selectedAt <= MaximumNavigationContextAge &&
+            HasKnownNavigationTarget(player.NavigationTarget)) return player.NavigationTarget;
+        return duplicateArrival ? player.ArrivalTargetCode : null;
     }
 
     private static void ObserveNavigationJourney(

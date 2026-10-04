@@ -25,6 +25,7 @@ internal sealed class EventSharingRuntime : IDisposable
     private bool _withdrawPending;
     private PrivacyPublicationInput? _shutdownOwner;
     private volatile bool _disposed;
+    private int _liveWakeRequested, _liveWakeRunning;
     internal string State { get; private set; } = "inactive";
 
     internal EventSharingRuntime(IEventSharingRemote settings, IEventFeedRemote remote, LocalGameEventJournal journal,
@@ -32,6 +33,7 @@ internal sealed class EventSharingRuntime : IDisposable
     {
         _settings = settings; _remote = remote; _current = current; _allowed = allowed;
         _source = new(journal);
+        if (startTimer) _source.PendingChanged += WakeLiveEvents;
         if (startTimer) _timer = TimeProvider.System.CreateTimer(_ => _ = TickAsync(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
     internal void Pause() { Interlocked.Increment(ref _paused); _source.Activate(null); }
@@ -97,10 +99,16 @@ internal sealed class EventSharingRuntime : IDisposable
         State = "inactive";
     }
     internal async Task TickAsync()
+        => await TickAsync(waitForGate: false).ConfigureAwait(false);
+
+    private async Task TickAsync(bool waitForGate)
     {
-        if (_disposed || !await _gate.WaitAsync(0)) return;
+        if (_disposed) return;
+        if (waitForGate) await _gate.WaitAsync().ConfigureAwait(false);
+        else if (!await _gate.WaitAsync(0).ConfigureAwait(false)) return;
         try
         {
+            if (_disposed) return;
             var input = _current();
             if (_owner is not null && !Same(_owner))
             { _source.Activate(null); _session = null; _lease = null; _saved = null; _owner = null; _lastRead = default; }
@@ -150,9 +158,32 @@ internal sealed class EventSharingRuntime : IDisposable
         }
         finally { _gate.Release(); }
     }
+
+    private void WakeLiveEvents()
+    {
+        if (_disposed) return;
+        Interlocked.Exchange(ref _liveWakeRequested, 1);
+        if (Interlocked.CompareExchange(ref _liveWakeRunning, 1, 0) == 0) _ = Task.Run(DrainLiveEventsAsync);
+    }
+
+    private async Task DrainLiveEventsAsync()
+    {
+        try
+        {
+            while (!_disposed && Interlocked.Exchange(ref _liveWakeRequested, 0) != 0)
+                await TickAsync(waitForGate: true).ConfigureAwait(false);
+        }
+        catch { /* Tick retains the existing failure/withdrawal policy. */ }
+        finally
+        {
+            Interlocked.Exchange(ref _liveWakeRunning, 0);
+            if (!_disposed && Volatile.Read(ref _liveWakeRequested) != 0) WakeLiveEvents();
+        }
+    }
     public void Dispose()
     {
         _disposed = true; _timer?.Dispose(); _lifetime.Cancel();
+        _source.PendingChanged -= WakeLiveEvents;
         _ = DisposeSourceAsync();
     }
     private async Task DisposeSourceAsync()

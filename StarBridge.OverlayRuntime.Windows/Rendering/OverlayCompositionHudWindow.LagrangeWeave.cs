@@ -71,9 +71,9 @@ internal sealed partial class OverlayCompositionHudWindow
                 state with { CrosshairOpacity = state.CrosshairOpacity * crosshairReveal });
         }
 
-        if (state.ShowEvents && state.EventRows.Count > 0 && !startupActive)
+        if (state.ShowEvents && !startupActive)
         {
-            DrawLagrangeEventNotifications(target, state);
+            DrawEventNotifications(target, state);
         }
     }
 

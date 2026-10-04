@@ -119,6 +119,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
     private OverlayStartupTransitionContext _startupTransitionContext;
     private double _dpiScaleX;
     private double _dpiScaleY;
+    private double? _targetDpiScale;
     private Thread? _thread;
     private Dispatcher? _renderDispatcher;
     private Exception? _startupException;
@@ -197,13 +198,16 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         string localShard,
         WpfRect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,
-        OverlaySceneContext sceneContext)
+        OverlaySceneContext sceneContext,
+        double? targetDpiScale = null,
+        OverlayModulePresentation? modules = null)
     {
         _ownerDispatcher = Dispatcher.CurrentDispatcher;
         _layout = layout;
         _settings = settings;
         _language = language;
         _surfaceBounds = NormalizeSurfaceBounds(surfaceBounds);
+        _targetDpiScale = targetDpiScale;
         _startupTransitionContext = startupTransitionContext;
         ResolveDpiScale();
         _viewModel = new OverlayViewModel(
@@ -216,7 +220,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             localPresence,
             localShard,
             sceneContext,
-            chatMessages);
+            chatMessages,
+            modules);
         _viewModel.PropertyChanged += OverlayViewModel_PropertyChanged;
         if (settings.ShowEventNotifications)
         {
@@ -373,14 +378,16 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         string detail,
         bool important,
         bool positive,
-        Func<bool>? isCurrent)
+        Func<bool>? isCurrent,
+        Func<IReadOnlyList<PlayerRow>, string>? currentDetail = null,
+        bool isDeviceLocal = false)
     {
         if (_disposed || !_settings.ShowEventNotifications)
         {
             return;
         }
 
-        _viewModel.QueueGameEventNotification(eventType, title, detail, important, positive, isCurrent);
+        _viewModel.QueueGameEventNotification(eventType, title, detail, important, positive, isCurrent, currentDetail, isDeviceLocal);
         PublishStateToRenderer(forceEventPulse: true);
     }
 
@@ -425,6 +432,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         }
 
         _viewModel.PropertyChanged -= OverlayViewModel_PropertyChanged;
+        _viewModel.ClearAuthorizedContent();
         _initialRevealTimer?.Stop();
         _initialRevealTimer = null;
         _delayedEventRevealTimer?.Stop();
@@ -459,6 +467,18 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         IEnumerable<OverlayLayoutItem> layout,
         OverlayDisplaySettings settings,
         OverlayRosterSelectionSettings rosterSelectionSettings,
+        string language, bool hasFleet, OverlayCommandState commandState,
+        PlayerPresenceKind localPresence, string localShard, WpfRect surfaceBounds,
+        OverlayStartupTransitionContext startupTransitionContext, OverlaySceneContext sceneContext) =>
+        RefreshWithDpi(roster, chatMessages, layout, settings, rosterSelectionSettings, language,
+            hasFleet, commandState, localPresence, localShard, surfaceBounds, startupTransitionContext, sceneContext);
+
+    public void RefreshWithDpi(
+        OverlayAuthorizedRoster roster,
+        IEnumerable<OverlayChatMessage> chatMessages,
+        IEnumerable<OverlayLayoutItem> layout,
+        OverlayDisplaySettings settings,
+        OverlayRosterSelectionSettings rosterSelectionSettings,
         string language,
         bool hasFleet,
         OverlayCommandState commandState,
@@ -466,7 +486,9 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         string localShard,
         WpfRect surfaceBounds,
         OverlayStartupTransitionContext startupTransitionContext,
-        OverlaySceneContext sceneContext)
+        OverlaySceneContext sceneContext,
+        double? targetDpiScale = null,
+        OverlayModulePresentation? modules = null)
     {
         if (_disposed)
         {
@@ -477,6 +499,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         _settings = settings;
         _language = language;
         _surfaceBounds = NormalizeSurfaceBounds(surfaceBounds);
+        _targetDpiScale = targetDpiScale;
         _startupTransitionContext = startupTransitionContext;
         ResolveDpiScale();
         _viewModel.Refresh(
@@ -489,7 +512,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             localPresence,
             localShard,
             sceneContext,
-            chatMessages);
+            chatMessages,
+            modules);
         ApplyLayoutDependentViewModelState();
         PublishStateToRenderer(forceEventPulse: false);
     }
@@ -508,7 +532,16 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         }, DispatcherPriority.Render);
     }
 
-    internal void ClearAuthorizedContent() => _viewModel.ClearAuthorizedContent();
+    internal void ClearAuthorizedContent(bool preserveDeviceLocalEvents = false, bool preserveAnnouncementReceipt = false) =>
+        _viewModel.ClearAuthorizedContent(preserveDeviceLocalEvents, preserveAnnouncementReceipt);
+
+    internal OverlayModuleWindowObservation ObserveModules() => new(_viewModel.FleetNotice,
+        _viewModel.SquadsTitle, _viewModel.MembersTitle, _viewModel.Members.Select(row => row.DisplayName).ToArray(),
+        _viewModel.ChatMessages.Select(row => row.Detail).ToArray(), _viewModel.ChatPulse, _viewModel.SquadStatusPrimaryName)
+        { SourceLabels = _viewModel.ModuleSourceLabels, EmptyStates = _viewModel.ModuleEmptyStates,
+          Visibility = InformationOverlayRuntimeProjection.ResolveVisibility(_settings, new(
+              _viewModel.NotificationVisibility == WpfVisibility.Visible, _viewModel.ChatVisibility == WpfVisibility.Visible,
+              _viewModel.EventNotificationVisibility == WpfVisibility.Visible)) };
 
     private void StartRenderThread()
     {
@@ -995,6 +1028,7 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
                 _viewModel.ChatVisibility == WpfVisibility.Visible,
                 _viewModel.EventNotificationVisibility == WpfVisibility.Visible));
 
+        var sourceLabels = _viewModel.ModuleSourceLabels;
         return new OverlayCompositionFrameState(
             width,
             height,
@@ -1042,7 +1076,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             OverlayDisplaySettings.NormalizeChatBarrageDensity(_settings.ChatBarrageDensity),
             _settings.ChatBarrageAvoidCenter,
             OverlayDisplaySettings.NormalizeChatTextEdgeStrength(_settings.ChatTextEdgeStrength),
-            SnapshotEvents(_viewModel.ChatMessages),
+            SnapshotEvents(_viewModel.ChatMessages, _viewModel.ChatDisplayMode == OverlayChatDisplayMode.FullScreenBarrage
+                ? sourceLabels.Chat : null),
             _viewModel.ChatPulse,
             _settings.AnimationFrameRate != OverlayAnimationFrameRate.Off,
             _settings.EffectiveHideMemberOnlineStatus,
@@ -1057,10 +1092,13 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             OverlayDisplaySettings.NormalizeCrosshairGap(_settings.CrosshairGap),
             OverlayDisplaySettings.NormalizeCrosshairOutlineOpacity(_settings.CrosshairOutlineOpacity),
             OverlayDisplaySettings.ResolveEventNotificationAnimationScale(_settings.EventNotificationAnimationSpeed),
-            SnapshotEvents(_viewModel.EventNotifications),
+            SnapshotEvents(_viewModel.EventNotifications, sourceLabels.Events),
             _viewModel.EventNotificationPulse,
             _settings.StartupTransitionFrameRate,
-            _settings.AnimationFrameRate);
+            _settings.AnimationFrameRate)
+        { SourceLabels = sourceLabels, EmptyStates = _viewModel.ModuleEmptyStates,
+          EmptyNoticeTitle = _language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "公告" : "NOTICE",
+          EmptyEventsTitle = _language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "事件通知" : "EVENTS" };
     }
 
     private static bool IsNightShadowStyle(OverlayDisplaySettings settings)
@@ -1740,6 +1778,10 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
         OverlayStartupTransitionFrameRate StartupTransitionFrameRate,
         OverlayAnimationFrameRate AnimationFrameRate)
     {
+        public OverlayModuleSourceLabels SourceLabels { get; init; } = OverlayModuleSourceLabels.Empty;
+        public OverlayModuleEmptyStates EmptyStates { get; init; } = OverlayModuleEmptyStates.Empty;
+        public string EmptyNoticeTitle { get; init; } = "NOTICE";
+        public string EmptyEventsTitle { get; init; } = "EVENTS";
         public bool NightShadowStyle => RenderKind == OverlaySkinRenderKind.NightShadow;
 
         public bool LagrangeWeaveStyle => RenderKind == OverlaySkinRenderKind.LagrangeWeave;

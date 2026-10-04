@@ -17,36 +17,102 @@ import 'community_workspace_view_test.dart' show host, openMemberActions;
 import 'community_member_role_test.dart' show MemberRoleFake;
 import '../friends/social_layout_test.dart' show loadFonts;
 
+import 'package:starbridge_flutter/features/communities/community_activity_port.dart';
+
+class ActivityWorkspace extends WorkspaceTestPort
+    implements CommunityActivityPort {
+  final activity = StreamController<void>.broadcast();
+  @override
+  Stream<void> get workspaceChanges => activity.stream;
+  @override
+  bool get activityHealthy => true;
+}
+
 void main() {
   setUpAll(loadFonts);
-  testWidgets('visible workspace recovers offline reads without manual refresh', (
-    tester,
-  ) async {
+  test('events during an in-flight read reconcile once without losing the final state', () async {
     final port = WorkspaceTestPort();
+    final model = CommunityWorkspaceController(port, 'a' * 32);
+    addTearDown(model.dispose);
     addTearDown(port.changes.close);
-    await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
-    await tester.pumpAndSettle();
-    final state = tester.state<CommunityWorkspaceViewState>(
-      find.byType(CommunityWorkspaceView),
-    );
-    final previous = state.model.workspace;
-    final header = tester.element(find.byType(CommunityWorkspaceHeader));
-    port.reader = (_, _, _) async =>
-        throw const CommunityFailure('unavailable');
-    await tester.pump(const Duration(seconds: 15));
-    await tester.pump();
-    expect(state.model.workspace, same(previous));
-    expect(state.model.error, 'unavailable');
-    expect(tester.element(find.byType(CommunityWorkspaceHeader)), same(header));
-    port.reader = (_, _, _) async =>
-        CommunityWorkspace.parse(workspacePayload());
-    await tester.pump(const Duration(seconds: 15));
-    await tester.pump();
-    expect(state.model.error, isNull);
-    expect(state.model.workspace, isNotNull);
-    expect(tester.element(find.byType(CommunityWorkspaceHeader)), same(header));
-    await tester.pumpWidget(const SizedBox());
+    await model.load();
+    final pending = Completer<CommunityWorkspace>();
+    var reads = 0;
+    port.reader = (_, _, _) async {
+      reads++;
+      return reads == 1
+          ? pending.future
+          : CommunityWorkspace.parse(workspacePayload());
+    };
+    final first = model.refreshFromActivity();
+    await model.refreshFromActivity();
+    await model.refreshFromActivity();
+    expect(reads, 1);
+    pending.complete(CommunityWorkspace.parse(workspacePayload()));
+    await first;
+    await Future<void>.delayed(Duration.zero);
+    expect(reads, 2);
+    expect(model.busy, isFalse);
   });
+  testWidgets(
+    'workspace updates from activity without waiting for periodic refresh',
+    (tester) async {
+      final port = ActivityWorkspace();
+      addTearDown(port.changes.close);
+      addTearDown(port.activity.close);
+      await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
+      await tester.pumpAndSettle();
+      var reads = 0;
+      port.reader = (_, _, _) async {
+        reads++;
+        return CommunityWorkspace.parse(workspacePayload());
+      };
+      port.activity.add(null);
+      port.activity.add(null);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpAndSettle();
+      expect(reads, 1);
+      await tester.pump(const Duration(seconds: 15));
+      expect(reads, 1); // A healthy event stream must not periodically reload.
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'visible workspace recovers offline reads without manual refresh',
+    (tester) async {
+      final port = WorkspaceTestPort();
+      addTearDown(port.changes.close);
+      await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
+      await tester.pumpAndSettle();
+      final state = tester.state<CommunityWorkspaceViewState>(
+        find.byType(CommunityWorkspaceView),
+      );
+      final previous = state.model.workspace;
+      final header = tester.element(find.byType(CommunityWorkspaceHeader));
+      port.reader = (_, _, _) async =>
+          throw const CommunityFailure('unavailable');
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pump();
+      expect(state.model.workspace, same(previous));
+      expect(state.model.error, 'unavailable');
+      expect(
+        tester.element(find.byType(CommunityWorkspaceHeader)),
+        same(header),
+      );
+      port.reader = (_, _, _) async =>
+          CommunityWorkspace.parse(workspacePayload());
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pump();
+      expect(state.model.error, isNull);
+      expect(state.model.workspace, isNotNull);
+      expect(
+        tester.element(find.byType(CommunityWorkspaceHeader)),
+        same(header),
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   test(
     'transport failure preserves the workspace and retry recovers',

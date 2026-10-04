@@ -1,5 +1,9 @@
 import 'dart:async';
 
+import '../common/chat_room_invitation.dart';
+
+import '../../app/composition/social_activity.dart';
+
 import '../communities/community_invitation_attachment.dart';
 
 import '../../platform/bridge/bridge_client_session.dart';
@@ -10,6 +14,8 @@ import 'direct_messages_module.dart';
 final class BridgeDirectMessages
     implements
         DirectMessagesPort,
+        DirectMessageActivityPort,
+        DirectMessageActivityHealthPort,
         DirectViewerAvatarPort,
         DirectMessageSender,
         DirectReadReceiptPort {
@@ -29,6 +35,10 @@ final class BridgeDirectMessages
     );
   }
   final BridgeClientSession session;
+  @override
+  Stream<void> get changes => socialActivityChanges(session);
+  @override
+  bool get activityHealthy => socialActivityHealthy(session);
   final String? Function()? _ownAvatar;
   @override
   String? get viewerAvatar => _closed ? null : _ownAvatar?.call();
@@ -122,6 +132,7 @@ final class BridgeDirectMessages
     if (_ref(data) != ref || _number(data, 'readThroughSequence') < through) {
       throw const DirectReadFailure('data_invalid');
     }
+    notifySocialReadChanged(session);
     return DirectReadReceipt(
       _number(data, 'readThroughSequence'),
       _number(data, 'unreadCount'),
@@ -273,11 +284,7 @@ List<Conversation> parseConversations(Map<String, Object?> data) {
     final game = _string(row, 'gameId', 512);
     return Conversation(
       ref,
-      call.isEmpty
-          ? game
-          : game.isEmpty
-          ? call
-          : '$call ($game)',
+      call.isEmpty ? game : call,
       _string(row, 'preview'),
       DateTime.parse(_string(row, 'lastMessageAt', 64)),
       _number(row, 'unreadCount'),
@@ -285,6 +292,7 @@ List<Conversation> parseConversations(Map<String, Object?> data) {
       avatar: inlineAvatar(row['avatarImageData']),
       gameId: game,
       conversationKey: readConversationKey(row['conversationKey']),
+      presence: conversationPresence(_state(row), row['presence']),
     );
   }).toList();
   if (_number(data, 'totalUnread') != result.fold(0, (n, r) => n + r.unread)) {
@@ -303,7 +311,7 @@ String? readConversationKey(Object? value) {
 
 String? inlineAvatar(Object? value) =>
     value is String &&
-        value.length <= 128 * 1024 &&
+        value.length <= ((512 * 1024 + 2) ~/ 3 * 4) + 24 &&
         (value.startsWith('data:image/png;base64,') ||
             value.startsWith('data:image/jpeg;base64,'))
     ? value
@@ -335,6 +343,11 @@ DirectPage parseDirectPage(Map<String, Object?> data) {
       throw const DirectReadFailure('data_invalid');
     }
     final invitation = row['communityInvitation'];
+    final roomInvitation = row['roomInvitation'];
+    if (roomInvitation != null &&
+        (attachment != 'party_room_invitation' || roomInvitation is! Map)) {
+      throw const DirectReadFailure('data_invalid');
+    }
     if (invitation != null &&
         (attachment != 'fleet_invitation' || invitation is! Map)) {
       throw const DirectReadFailure('data_invalid');
@@ -357,6 +370,9 @@ DirectPage parseDirectPage(Map<String, Object?> data) {
       communityInvitation: invitation == null
           ? null
           : CommunityInvitationAttachment.parse(invitation as Map),
+      roomInvitation: roomInvitation == null
+          ? null
+          : ChatRoomInvitation.parse(roomInvitation as Map),
     );
   }).toList();
   final oldest = _number(data, 'oldestSequence');

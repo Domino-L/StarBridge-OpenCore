@@ -34,6 +34,9 @@ class MenuFriendsControls extends StatefulWidget {
 }
 
 class _MenuFriendsControlsState extends State<MenuFriendsControls> {
+  MenuBridgeColors get ink => MenuBridgeColors.of(context);
+  Color _statusColor(String value) => menuPresenceColor(value, context: context);
+
   late final _query = TextEditingController(text: widget.view.query);
   final _confirmationAnchor = GlobalKey(), _feedbackAnchor = GlobalKey();
   @override
@@ -82,7 +85,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
       key: ValueKey('friends-$command-${key.isEmpty ? value : key}'),
       label: label,
       onPressed: view.busy ? null : () => widget.onAction(command, key, value),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       child: Text(label),
     );
     return Column(
@@ -95,7 +98,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                 source: view.identity?.avatar,
                 name: view.identity?.name,
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -104,7 +107,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                       view.identity?.name.isNotEmpty == true
                           ? view.identity!.name
                           : '我的状态',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                       ),
@@ -112,19 +115,19 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                     if (view.identity?.handle.isNotEmpty == true)
                       Text(
                         view.identity!.handle,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: BridgeInk.muted,
+                          color: ink.muted,
                         ),
                       ),
                     MenuAnchor(
-                      style: const MenuStyle(
+                      style: MenuStyle(
                         backgroundColor: WidgetStatePropertyAll(
-                          BridgeInk.ground,
+                          ink.ground,
                         ),
                       ),
                       menuChildren: [
-                        for (final mode in const ['online', 'invisible'])
+                        for (final mode in ['online', 'invisible'])
                           MenuItemButton(
                             onPressed: own.change && !own.busy
                                 ? () =>
@@ -132,13 +135,13 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                                 : null,
                             child: Text(
                               mode == 'online' ? '在线' : '隐身',
-                              style: TextStyle(color: menuPresenceColor(mode)),
+                              style: TextStyle(color: _statusColor(mode)),
                             ),
                           ),
                       ],
                       builder: (context, controller, child) => BridgeMenuAction(
                         label: '更改我的在线状态',
-                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        padding: EdgeInsets.symmetric(vertical: 6),
                         onPressed: own.change && !own.busy
                             ? () => controller.isOpen
                                   ? controller.close()
@@ -152,28 +155,28 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                               height: 7,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: menuPresenceColor(
+                                color: _statusColor(
                                   own.status.replaceFirst('presence.', ''),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 6),
+                            SizedBox(width: 6),
                             Flexible(
                               child: Text(
                                 manualPresenceText(context, own.status),
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: menuPresenceColor(
+                                  color: _statusColor(
                                     own.status.replaceFirst('presence.', ''),
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 4),
-                            const MenuGlyphView(
+                            SizedBox(width: 4),
+                            MenuGlyphView(
                               MenuGlyph.down,
                               size: 16,
-                              color: BridgeInk.muted,
+                              color: ink.muted,
                             ),
                           ],
                         ),
@@ -184,21 +187,21 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
               ),
             ],
           ),
-          if (own.busy) const BridgeCaption('正在切换状态…'),
-          if (own.failed) const BridgeCaption('状态未更新，请核对后重试。'),
-          const SizedBox(height: 12),
+          if (own.busy) BridgeCaption('正在切换状态…'),
+          if (own.failed) BridgeCaption('状态未更新，请核对后重试。'),
+          SizedBox(height: 12),
         ],
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: TextField(
-                key: const ValueKey('friends-account-search'),
+                key: ValueKey('friends-account-search'),
                 controller: _query,
                 readOnly: view.busy,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
-                  color: BridgeInk.text,
+                  color: ink.text,
                   fontFamily: 'Source Sans 3',
                   fontFamilyFallback: ['Source Han Sans CN'],
                 ),
@@ -213,10 +216,10 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                         newValue.text.length <= 128 ? newValue : oldValue,
                   ),
                 ],
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: '搜索好友 / 添加好友',
                   hintStyle: TextStyle(
-                    color: BridgeInk.muted,
+                    color: ink.muted,
                     fontSize: 13,
                     fontFamily: 'Source Sans 3',
                     fontFamilyFallback: ['Source Han Sans CN'],
@@ -227,12 +230,12 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                     vertical: 10,
                   ),
                   filled: true,
-                  fillColor: BridgeInk.ground,
+                  fillColor: ink.ground,
                   enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: BridgeInk.line),
+                    borderSide: BorderSide(color: ink.line),
                   ),
                   focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: BridgeInk.blue),
+                    borderSide: BorderSide(color: ink.blue),
                   ),
                 ),
               ),
@@ -240,65 +243,65 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
             Tooltip(
               message: '搜索账号（Enter）',
               child: BridgeMenuAction(
-                key: const ValueKey('friends-search'),
+                key: ValueKey('friends-search'),
                 label: '搜索账号',
                 onPressed: view.busy
                     ? null
                     : () => widget.onAction('search', '', _query.text),
-                padding: const EdgeInsets.all(8),
-                child: const MenuGlyphView(
+                padding: EdgeInsets.all(8),
+                child: MenuGlyphView(
                   MenuGlyph.search,
                   size: 18,
-                  color: BridgeInk.blue,
+                  color: ink.blue,
                 ),
               ),
             ),
             Tooltip(
               message: '刷新列表',
               child: BridgeMenuAction(
-                key: const ValueKey('friends-refresh-'),
+                key: ValueKey('friends-refresh-'),
                 label: '刷新列表',
                 onPressed: view.busy
                     ? null
                     : () => widget.onAction('refresh', '', ''),
-                padding: const EdgeInsets.all(8),
-                child: const MenuGlyphView(
+                padding: EdgeInsets.all(8),
+                child: MenuGlyphView(
                   MenuGlyph.refresh,
                   size: 18,
-                  color: BridgeInk.muted,
+                  color: ink.muted,
                 ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         Row(
           children: [
             Expanded(
               child: view.section == 'friends'
-                  ? const Text(
+                  ? Text(
                       '查看状态 · 点选好友开始聊天',
-                      style: TextStyle(fontSize: 12, color: BridgeInk.muted),
+                      style: TextStyle(fontSize: 12, color: ink.muted),
                     )
                   : BridgeMenuAction(
-                      key: const ValueKey('friends-section-friends'),
+                      key: ValueKey('friends-section-friends'),
                       label: '返回好友列表',
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      padding: EdgeInsets.symmetric(vertical: 8),
                       onPressed: view.busy
                           ? null
                           : () => widget.onAction('section', '', 'friends'),
-                      child: const Text(
+                      child: Text(
                         '‹ 返回好友列表',
-                        style: TextStyle(color: BridgeInk.blue, fontSize: 13),
+                        style: TextStyle(color: ink.blue, fontSize: 13),
                       ),
                     ),
             ),
             MenuAnchor(
-              style: const MenuStyle(
-                backgroundColor: WidgetStatePropertyAll(BridgeInk.ground),
+              style: MenuStyle(
+                backgroundColor: WidgetStatePropertyAll(ink.ground),
               ),
               menuChildren: [
-                for (final section in const {
+                for (final section in {
                   'incoming': '收到的申请',
                   'outgoing': '已发出的申请',
                   'blocked': '屏蔽名单',
@@ -312,20 +315,20 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                   ),
               ],
               builder: (context, controller, child) => BridgeMenuAction(
-                key: const ValueKey('friends-manage'),
+                key: ValueKey('friends-manage'),
                 label: '好友管理',
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
                 onPressed: () =>
                     controller.isOpen ? controller.close() : controller.open(),
-                child: const Text(
+                child: Text(
                   '管理 ▾',
-                  style: TextStyle(fontSize: 13, color: BridgeInk.blue),
+                  style: TextStyle(fontSize: 13, color: ink.blue),
                 ),
               ),
             ),
           ],
         ),
-        if (view.busy) const BridgeCaption('正在处理，请勿重复操作…'),
+        if (view.busy) BridgeCaption('正在处理，请勿重复操作…'),
         if (view.feedback.isNotEmpty)
           BridgeCaption(key: _feedbackAnchor, switch (view.feedback) {
             'invalidSearch' => '请输入 2–128 个字符的账号或呼号。',
@@ -336,14 +339,14 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
             _ =>
               '${menuFriendActionLabel(view.feedback.replaceFirst('success.', ''))}已完成。',
           }),
-        if (view.requiresRefresh) const BridgeCaption('核对列表前暂不可继续好友操作。'),
+        if (view.requiresRefresh) BridgeCaption('核对列表前暂不可继续好友操作。'),
         if (pending != null)
           Container(
-            key: const ValueKey('friends-confirmation'),
-            margin: const EdgeInsets.symmetric(vertical: 10),
-            padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(
-              border: Border(left: BorderSide(color: BridgeInk.blue)),
+            key: ValueKey('friends-confirmation'),
+            margin: EdgeInsets.symmetric(vertical: 10),
+            padding: EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: ink.blue)),
             ),
             child: Column(
               key: _confirmationAnchor,
@@ -353,9 +356,9 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                   '${menuFriendActionLabel(pending.action)}：${pending.name}？',
                 ),
                 if (pending.action == 'remove')
-                  const BridgeCaption('移除后需要重新发送好友申请才能恢复好友关系。'),
+                  BridgeCaption('移除后需要重新发送好友申请才能恢复好友关系。'),
                 if (pending.action == 'block')
-                  const BridgeCaption('现有好友或申请关系会被移除，对方无法再向你发送好友申请。可在屏蔽名单中解除。'),
+                  BridgeCaption('现有好友或申请关系会被移除，对方无法再向你发送好友申请。可在屏蔽名单中解除。'),
                 Wrap(
                   children: [
                     action(
@@ -369,7 +372,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
               ],
             ),
           ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
       ],
     );
   }

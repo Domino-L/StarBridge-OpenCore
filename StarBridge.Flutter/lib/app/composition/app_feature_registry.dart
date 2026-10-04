@@ -106,6 +106,7 @@ FeatureRegistry createAppFeatureRegistry(
   DirectMessagesPort Function() directMessagesPortFactory,
   ApplicationSupportModule applicationSupport,
   ValueNotifier<int> directMessageRequests,
+  [ValueListenable<int>? directMessageUnread]
 ) => FeatureRegistry([
   createHomeFeature(partyRooms, shellChrome),
   createPartyRoomsFeature(
@@ -308,8 +309,11 @@ FeatureRegistry createAppFeatureRegistry(
     confirmNotificationsLeave: (_) =>
         confirmNotificationLeave(notificationSettings),
   ),
-  createFriendsFeature(
-    inboxRequests: directMessageRequests,
+  for (final messagesOnly in [true, false]) createFriendsFeature(
+    messagesOnly: messagesOnly,
+    separateMessages: true,
+    attentionCount: messagesOnly ? directMessageUnread : friends.incomingAttention,
+    inboxRequests: messagesOnly ? directMessageRequests : null,
     module: friends,
     createChatPort: directMessagesPortFactory,
     sendCommunityInvite:

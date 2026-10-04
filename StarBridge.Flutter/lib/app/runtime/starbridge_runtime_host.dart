@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../../features/account/in_memory_account_adapter.dart';
 import '../../features/account/account_module.dart';
+import '../../features/communities/community_hangar_sharing_port.dart';
 import '../../features/overlay_settings/overlay_settings_feature.dart';
 import '../../features/personal_profile/in_memory_personal_profile_adapter.dart';
 import '../../features/official_fleet/in_memory_official_fleet_adapter.dart';
@@ -98,7 +99,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       !_exampleScene &&
       _hasConnectedHost;
 
-  void _bindPrivacyFlow() {
+  void _bindPrivacyFlow({BridgeClientSession? session}) {
     _navigationRequests.value = null;
     _privacyFlow?.dispose();
     final privacy = _composition.localPrivacy;
@@ -106,6 +107,12 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         ? null
         : FirstUsePrivacyFlow(
             account: _composition.account,
+            eventSession: session,
+            membershipChanges: _composition.communities,
+            hangarSharing:
+                _composition.communities.port is CommunityHangarSharingPort
+                ? _composition.communities.port as CommunityHangarSharingPort
+                : null,
             privacy: privacy,
             queue: _prompts,
             ready: () => _promptReady && !(_noticeFlow?.blocksPrompts ?? false),
@@ -391,6 +398,9 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         key: ObjectKey(_composition),
         navigatorKey: _navigatorKey,
         navigatorObservers: [_prompts],
+        promptQueue: _prompts,
+        canPresentIdentityPrompt: () =>
+            _promptReady && !(_noticeFlow?.blocksPrompts ?? false),
         navigationRequests: _navigationRequests,
         composition: _composition,
         onRetryConnection: _retryHostConnection,
@@ -618,7 +628,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       setState(() {
         _composition = nextComposition;
       });
-      _bindPrivacyFlow();
+      _bindPrivacyFlow(session: lease.session);
       _noticeFlow?.dispose();
       _noticeFlow =
           lease.session.hostCapabilities.contains('legal.testBuildNotice')

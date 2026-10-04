@@ -74,7 +74,7 @@ public sealed class ShipPresentationCatalog
             Add(_byCatalogId, "catalog-" + Key(en).ToLowerInvariant(), row);
             // The original name catalog joins the full catalog through an unambiguous Chinese alias.
             var name = _names.Find(zh) ?? _names.Find(en);
-            if (name is not null) Add(_byCode, name.RuntimeId, row);
+            if (name?.RuntimeId is { } runtimeId) Add(_byCode, runtimeId, row);
         }
     }
 
@@ -84,8 +84,8 @@ public sealed class ShipPresentationCatalog
         var key = Key(original);
         Row? row;
         if (!_byCatalogId.TryGetValue(original, out row) &&
-            !_rows.TryGetValue(key, out row) && name is not null)
-            _byCode.TryGetValue(name.RuntimeId, out row);
+            !_rows.TryGetValue(key, out row) && name?.RuntimeId is { } runtimeId)
+            _byCode.TryGetValue(runtimeId, out row);
         // Published hangars use the stable display-catalog identity, not a game
         // runtime alias. Join the same exact row for names and artwork as locally.
         if (name is null && row is not null) name = _names.Find(row.English);

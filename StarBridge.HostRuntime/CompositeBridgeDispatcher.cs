@@ -117,11 +117,14 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
             return _support.DispatchAsync(request, cancellationToken);
         if (request.Name == Account.AccountBridgeRequestNames.GetPartyRooms && (_audio != null || _notifications != null))
             return ObserveRoomReadAsync(request, cancellationToken);
-        if (request.Name == "directMessages.read" && _notifications != null)
+        if (request.Name == "directMessages.read" && (_audio != null || _notifications != null))
+            return ObserveRoomReadAsync(request, cancellationToken);
+        if (request.Name == "notificationInbox.read" && (_audio != null || _notifications != null))
             return ObserveRoomReadAsync(request, cancellationToken);
         if (_notificationPolicies != null && request.Name.StartsWith("notificationPolicies.", StringComparison.Ordinal))
             return _notificationPolicies.DispatchAsync(request, cancellationToken);
-        if (_notifications != null && request.Name.StartsWith("notificationSettings.", StringComparison.Ordinal))
+        if (_notifications != null && (request.Name == "gameIdentity.notifyMismatch" ||
+            request.Name.StartsWith("notificationSettings.", StringComparison.Ordinal)))
             return _notifications.DispatchAsync(request, cancellationToken);
         if (_audio != null && request.Name.StartsWith("notificationAudio.", StringComparison.Ordinal))
             return _audio.DispatchAsync(request, cancellationToken);
@@ -135,9 +138,11 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         }
 
         if (request.Name.StartsWith("account.", StringComparison.Ordinal) ||
+            request.Name is "social.wait" or "communities.wait" or "bridge.cancel" ||
             request.Name is "accountSafety.read" or "accountSafety.appeal" ||
             request.Name is "notificationInbox.read" or "notificationInbox.markRead" ||
             request.Name.StartsWith("overlayScenes.", StringComparison.Ordinal) ||
+            request.Name is "overlayRoster.read" or "overlayRoster.update" ||
             request.Name.StartsWith("profile.", StringComparison.Ordinal) ||
             request.Name.StartsWith("personalProfile.", StringComparison.Ordinal) ||
             request.Name is "users.profile" or "users.social" ||
@@ -147,7 +152,7 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
                 "gameIdVisibility.read" or "gameIdVisibility.save" or
                 "friendRequests.privacyRead" or "friendRequests.privacyWrite" or
                 "recentlyPlayed.privacyRead" or "recentlyPlayed.privacyWrite" ||
-            request.Name is "presence.read" or "presence.set" ||
+            request.Name is "presence.read" or "presence.set" or "presence.activity" ||
             request.Name.StartsWith("gameIdentity.", StringComparison.Ordinal) ||
             request.Name.StartsWith("gameplayTime.", StringComparison.Ordinal) ||
             request.Name.StartsWith("gameLog.", StringComparison.Ordinal) ||

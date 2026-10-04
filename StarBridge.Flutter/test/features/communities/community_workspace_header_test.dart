@@ -64,7 +64,10 @@ void main() {
         findsWidgets,
       );
       expect(find.textContaining('outdated verbose'), findsNothing);
-      expect(find.textContaining('Central America Standard Time'), findsNothing);
+      expect(
+        find.textContaining('Central America Standard Time'),
+        findsNothing,
+      );
       expect(find.textContaining('UTC−06:00'), findsWidgets);
       final context = tester.element(
         find.byKey(const Key('community-header-information')),
@@ -111,6 +114,16 @@ void main() {
       await tester.pumpAndSettle();
       final header = find.byKey(const Key('community-header-information'));
       expect(tester.getSize(header).height, lessThanOrEqualTo(64));
+      if (size.width > 650) {
+        expect(
+          tester
+              .widget<Text>(
+                find.byKey(const ValueKey('community-presence-label-online')),
+              )
+              .data,
+          '在线总人数',
+        );
+      }
       final name = tester.getRect(
         find.byKey(const Key('community-compact-name')),
       );
@@ -297,7 +310,7 @@ void main() {
         );
         expect(
           find.byTooltip(
-            '${workspaceText(context, 'online')} 1\n${workspaceText(context, 'presencePageScope')}',
+            '${workspaceText(context, 'onlinePage')} 1\n${workspaceText(context, 'presencePageScope')}',
           ),
           findsOneWidget,
         );

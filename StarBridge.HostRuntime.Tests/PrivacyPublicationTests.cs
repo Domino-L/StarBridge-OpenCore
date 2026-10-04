@@ -30,6 +30,14 @@ internal static class PrivacyPublicationTests
                     "Absent policy stays high-only; explicit off permits inferred locations only.");
                 Require(projected.GetProperty("locationConfidence").GetString() == (!allowed ? "None" :
                     state == "confirmed" ? "High" : state == "likely" ? "Medium" : "Low"), "Preserve evidence confidence.");
+                string? HiddenReason(JsonElement body) => body.TryGetProperty("locationHiddenReason", out var reason)
+                    && reason.ValueKind == JsonValueKind.String ? reason.GetString() : null;
+                var hiddenByConfidence = hide != false && state is "likely" or "possible";
+                Require(HiddenReason(projected) == (hiddenByConfidence ? "lowConfidence" : null),
+                    "An otherwise-shareable inferred location hidden by the confidence choice must carry only its reason, not its name.");
+                Require(HiddenReason(PrivacyPublicationPayload.Build(input, choices, true)) is null &&
+                    HiddenReason(PrivacyPublicationPayload.Build(input, choices, false, PlayerPresenceVisibilityMode.Invisible)) is null,
+                    "Withdrawal and invisible cannot reveal even the hidden-location reason.");
                 Require(PrivacyPublicationPayload.Build(input, choices, true).GetProperty("location").GetString() == "Unknown",
                     "Withdrawal overrides confidence preference.");
                 Require(PrivacyPublicationPayload.Build(input, choices, false, PlayerPresenceVisibilityMode.Invisible)
@@ -37,15 +45,24 @@ internal static class PrivacyPublicationTests
                 var transient = input with { Game = input.Game with { Location = input.Game.Location with { CanSynchronize = false } } };
                 Require(PrivacyPublicationPayload.Build(transient, choices, false).GetProperty("location").GetString() == "Unknown",
                     "Display-only locations cannot be synchronized.");
+                Require(HiddenReason(PrivacyPublicationPayload.Build(transient, choices, false)) is null,
+                    "Display-only evidence is not a location hidden solely by the confidence preference.");
                 var noLocationAudience = choices with {
                     Room = choices.Room with { AllMembersCanView = false },
                     Fleet = choices.Fleet with { AllMembersCanView = false, AdministratorsCanView = false }
                 };
                 Require(PrivacyPublicationPayload.Build(input, noLocationAudience, false).GetProperty("location").GetString() == "Unknown",
                     "Disabling the confidence filter cannot grant an audience.");
+                Require(HiddenReason(PrivacyPublicationPayload.Build(input, noLocationAudience, false)) is null,
+                    "The hidden-location reason does not grant a location audience.");
                 var disconnected = input with { Game = input.Game with { Server = new("unknown") } };
                 Require(PrivacyPublicationPayload.Build(disconnected, choices, false).GetProperty("location").GetString() == "Unknown",
                     "Inferred evidence cannot survive loss of the connected session.");
+                Require(HiddenReason(PrivacyPublicationPayload.Build(disconnected, choices, false)) is null,
+                    "Disconnected sessions cannot retain a hidden-location reason.");
+                var arriving = input with { Game = input.Game with { Location = input.Game.Location with { ArrivalPendingConfirmation = true } } };
+                Require(HiddenReason(PrivacyPublicationPayload.Build(arriving, choices, false)) is null,
+                    "Arrival awaiting confirmation is not the confidence-filtered receiver status.");
             }
         }
         Require(!JsonSerializer.SerializeToElement(Settings, LocalPrivacyStore.Json).TryGetProperty("hideLowConfidenceLocation", out _),
@@ -59,6 +76,18 @@ internal static class PrivacyPublicationTests
                 "Explicit inferred-location choice survives account-scoped storage reload.");
         }
         var payload = PrivacyPublicationPayload.Build(Input, Settings, false);
+        Require(payload.GetProperty("gameVersion").GetString() == "EPTU",
+            "Only the current identity-matched game session publishes its version.");
+        Require(PrivacyPublicationPayload.Build(Input with { GameVersion = null }, Settings, false)
+            .GetProperty("gameVersion").ValueKind == JsonValueKind.Null,
+            "Exiting or switching away from the current game session clears its version.");
+        Require(PrivacyPublicationPayload.Build(Input, Settings, false, PlayerPresenceVisibilityMode.Invisible)
+            .GetProperty("gameVersion").ValueKind == JsonValueKind.Null,
+            "Invisible mode cannot publish a game version.");
+        Require(PrivacyPublicationPayload.Build(Input with { GameVersion = null, AppAway = true }, Settings, false)
+            .GetProperty("liveStatus").GetString() == "Away", "Non-playing local inactivity stays visible as Away.");
+        Require(PrivacyPublicationPayload.Build(Input with { AppAway = true }, Settings, false)
+            .GetProperty("liveStatus").GetString() == "InGame", "Running game overrides local app inactivity.");
         Require(payload.GetProperty("name").GetString() == "Handle_Mixed", "Preserve Handle case.");
         Require(payload.GetProperty("fleetSharedStateFields").GetInt32() == 1 &&
             payload.GetProperty("roomSharedStateFields").GetInt32() == 14, "Independent axes.");
@@ -78,6 +107,8 @@ internal static class PrivacyPublicationTests
         var noAudience = Settings with { Fleet = Settings.Fleet with { AllMembersCanView = false }, Room = Settings.Room with { AllMembersCanView = false } };
         Require(!PrivacyPublicationPayload.Build(Input, noAudience, false).GetProperty("online").GetBoolean(), "No audience means no live content.");
         var clear = PrivacyPublicationPayload.Build(Input, Settings, true);
+        Require(clear.GetProperty("gameVersion").ValueKind == JsonValueKind.Null,
+            "Withdrawing sharing clears the game version.");
         Require(!clear.TryGetProperty("personalHangarSharedWithFleet", out _) &&
             !clear.TryGetProperty("sharedEvents", out _), "Withdrawal also leaves other publication domains untouched.");
         Require(clear.GetProperty("roomSharedStateFields").GetInt32() == 0 && clear.GetProperty("fleetSharedStateFields").GetInt32() == 0 &&

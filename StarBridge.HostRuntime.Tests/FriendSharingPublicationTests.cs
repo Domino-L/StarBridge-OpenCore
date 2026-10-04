@@ -23,12 +23,17 @@ internal static class FriendSharingPublicationTests
         }
         var stopped = FriendSharingPublicationSource.Build(state with { Input = input with { GameVersion = null } });
         Check(stopped is { Presence: "AppOnline", Ship: null, Location: null, ServerId: null }, "game exit clears stale fields");
+        var away = FriendSharingPublicationSource.Build(state with { Input = input with { GameVersion = null, AppAway = true } });
+        Check(away is { Presence: "Away", Ship: null, Location: null, ServerId: null }, "app inactivity stays online but publishes Away");
+        Check(FriendSharingPublicationSource.Build(state with { Input = input with { AppAway = true } }).Presence == "InGame",
+            "an active game overrides app inactivity");
         var unknown = FriendSharingPublicationSource.Build(state with { Input = input with { Game = GameLogSessionSnapshot.Empty } });
         Check(unknown.Ship is null && unknown.Location is null && unknown.ServerId is null, "unconfirmed evidence omitted");
 
         FriendSharingPublicationSnapshot? current = state with { Consent = false };
         var starts = 0; var sends = 0; var withdrawals = 0;
         var failSend = false; var failWithdraw = false;
+        var queueTimeout = false;
         var sequences = new List<long>();
         var owners = new List<long>();
         var publisher = new FriendSharingPublication(() => current,
@@ -36,6 +41,7 @@ internal static class FriendSharingPublicationTests
             (snapshot, _, sequence, _, _) =>
             {
                 sends++; sequences.Add(sequence); owners.Add(snapshot.Input.Generation);
+                if (queueTimeout) throw new OperationCanceledException();
                 return failSend ? Task.FromException(new HttpRequestException()) : Task.CompletedTask;
             },
             (_, _, _) =>
@@ -62,13 +68,25 @@ internal static class FriendSharingPublicationTests
         await Fails(() => publisher.TickAsync());
         failSend = false;
         await publisher.TickAsync();
-        Check(starts == 3 && sequences[^1] == 1, "uncertain send retires old session instead of replay");
+        Check(starts == 2 && sequences[^1] == 3, "transport recovery builds fresh source with a newer sequence, not a replay or offline transition");
+        var beforeQueueTimeout = withdrawals;
+        queueTimeout = true;
+        try { await publisher.TickAsync(); throw new Exception("Expected queue cancellation."); }
+        catch (OperationCanceledException) { }
+        queueTimeout = false;
+        await publisher.TickAsync();
+        Check(starts == 2 && withdrawals == beforeQueueTimeout && sequences[^1] == 5,
+            "internal queue cancellation must retain the existing friend session without an Offline transition");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Check(!FriendSharingPublication.IsTransient(new OperationCanceledException(), cancelled.Token),
+            "explicit cancellation never authorizes automatic publication resumption");
         current = state with { Revision = 2, Fields = FriendSharedFields.Presence };
         await publisher.TickAsync();
-        Check(starts == 4, "policy change creates fresh session");
+        Check(starts == 3, "policy change creates fresh session");
         current = state with { Input = input with { Generation = 2 } };
         await publisher.TickAsync();
-        Check(starts == 5 && owners[^1] == 2, "new account generation never inherits session");
+        Check(starts == 4 && owners[^1] == 2, "new account generation never inherits session");
         current = null;
         await publisher.TickAsync();
         var sent = sends;

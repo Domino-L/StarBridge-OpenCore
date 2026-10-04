@@ -7,22 +7,46 @@ using StarBridge.Core.Parsing;
 using StarBridge.Core.Presence;
 using StarBridge.Core.State;
 
+if (args is ["--overlay-input-audit-only"])
+{
+    StarBridge.Core.Tests.OverlayLayoutInputAuditTests.RunAll();
+    Console.WriteLine("PASS overlay layout and settings input audit");
+    return;
+}
+
+if (args is ["--arrival-journey-only"])
+{
+    StarBridge.Core.Tests.QuantumArrivalJourneyTests.RunAll();
+    Console.WriteLine("PASS quantum arrivals cannot reuse consumed or expired targets");
+    return;
+}
+
 var tests = new (string Name, Action Test)[]
 {
+    ("Realtime activity presence capability is explicit and backward compatible", StarBridge.Core.Tests.RealtimeActivityContractTests.RunAll),
+    ("Room removal requires current host and non-self membership", StarBridge.Core.Tests.PartyRoomMemberRemovalTests.RunAll),
+    ("Quantum arrivals retain only the current unconsumed target", StarBridge.Core.Tests.QuantumArrivalJourneyTests.RunAll),
+    ("Hidden location reasons are bounded and never become place or arrival facts", StarBridge.Core.Tests.SharedLocationVisibilityTests.RunAll),
+    ("Room profile preview gates password and admission without widening individual privacy", StarBridge.Core.Tests.PartyRoomProfilePreviewPolicyTests.RunAll),
     ("Migration hangar preview retains duplicates and unknown sources without merging", StarBridge.Core.Tests.HangarMigrationPreviewTests.RunAll),
     ("Friend sharing six fields remain independent and fail closed", StarBridge.Core.Tests.FriendSharingPolicyTests.RunAll),
     ("Event choices remain independent, membership bound and fail closed", StarBridge.Core.Tests.SharedEventPreferencesTests.RunAll),
     ("Community member exceptions override defaults within the organization field ceiling", StarBridge.Core.Tests.CommunityMemberFieldOverrideTests.RunAll),
     ("Information overlay source priority and explicit target isolation", StarBridge.Core.Tests.InformationOverlaySourcePolicyTests.RunAll),
+    ("Module overlay sources resolve once with bounded authorized scope and safe migration", StarBridge.Core.Tests.OverlayModuleSourcesTests.RunAll),
     ("Community realtime scopes bind membership and exclude inventory/events", StarBridge.Core.Tests.CommunityRealtimeScopeTests.RunAll),
     ("Community profile explicit edit limits and independent tag quotas", StarBridge.Core.Tests.CommunityProfileEditingRulesTests.RunAll),
     ("Chat attachment malformed JSON fields fail without throwing", StarBridge.Core.Tests.ChatAttachmentPolicyTests.RunAll),
     ("Event stack animates new lower rows, old upper exits and survivor reflow", StarBridge.Core.Tests.OverlayEventStackLayoutTests.RunAll),
+    ("Information overlay layout input excludes non-finite numbers and invalid anchors", StarBridge.Core.Tests.OverlayLayoutInputAuditTests.RunAll),
     ("Information overlay layout geometry matches the shared cross-client samples", StarBridge.Core.Tests.InformationOverlayLayoutGeometryTests.RunAll),
     ("Gameplay history import eligibility preserves migrated and unknown evidence", StarBridge.Core.Tests.GameplayHistoryImportPolicyTests.RunAll),
     ("Ship presentation uses exact catalog names and explicit combat size only", StarBridge.Core.Tests.ShipPresentationCatalogTests.RunAll),
     ("Ship names localize only unambiguous catalog matches and preserve model variants", StarBridge.Core.Tests.ShipNameIndexTests.RunAll),
+    ("Ship channel names and runtime exits share catalog identity", StarBridge.Core.Tests.ShipNameIndexTests.CatalogIdentityRelease),
+    ("All bundled ship names translate and release without variant guessing", StarBridge.Core.Tests.ShipCatalogCoverageTests.RunAll),
     ("SCM profile contracts separate public, private, patch, and offline cache fields", StarBridge.Core.Tests.ScmProfileContractTests.RunAll),
+    ("Profile hangar contracts distinguish display placeholders without changing legacy inventory", StarBridge.Core.Tests.PersonalProfileHangarContractTests.RunAll),
     ("SCM profile time zones preserve IANA and map safely on Windows", StarBridge.Core.Tests.ProfileTimeZoneContractTests.RunAll),
     ("SCM RSI identity policy fails closed for identity-sensitive writes", StarBridge.Core.Tests.RsiIdentityPolicyTests.RunAll),
     ("Hangar identity matches only an unambiguous verified account Handle", StarBridge.Core.Tests.RsiHangarIdentityPolicyTests.RunAll),
@@ -1014,6 +1038,14 @@ static void ConfirmedMismatchedGameIdentityBlocksSynchronization()
 
     AssertEqual(IdentityVerificationState.Mismatch, assessment.State, "binding state");
     AssertEqual(false, assessment.CanSynchronize, "sync permission");
+
+    var previous = new ScmGameIdentitySnapshot(ScmGameIdentityStatus.Verified, "pilot_alpha", "pilot_alpha");
+    var renamedObservation = IdentityBindingPolicy.Evaluate(previous, "pilot-alpha");
+    AssertEqual(IdentityVerificationState.Mismatch, renamedObservation.State, "punctuation change is not case folding");
+    AssertEqual(false, renamedObservation.CanSynchronize, "observing a rename does not authorize sync");
+    var confirmed = new ScmGameIdentitySnapshot(ScmGameIdentityStatus.Verified, "pilot-alpha", "pilot-alpha");
+    AssertEqual(true, IdentityBindingPolicy.Evaluate(confirmed, "PILOT-ALPHA").CanSynchronize,
+        "sync resumes only with authoritative matching identity");
 }
 
 static void SpecifiedMemberVisibilityIsPublisherOwnedClosedList()

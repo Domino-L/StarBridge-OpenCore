@@ -9,6 +9,7 @@ class MenuPanelSpec {
   MenuPanelSpec({
     required this.id,
     required this.initialBounds,
+    this.viewportBounds,
     this.minimumSize = const Size(240, 160),
   }) {
     if (id.trim().isEmpty ||
@@ -20,6 +21,9 @@ class MenuPanelSpec {
   }
   final String id;
   final Rect initialBounds;
+
+  /// Responsive defaults are evaluated with the live viewport, never persisted.
+  final Rect Function(Size viewport)? viewportBounds;
   final Size minimumSize;
 }
 
@@ -124,7 +128,7 @@ class MenuWorkspaceController extends ChangeNotifier {
     final spec = _specs[id];
     if (spec == null) return Rect.zero;
     return MenuPanelGeometry.fit(
-      _bounds[id] ?? spec.initialBounds,
+      _bounds[id] ?? spec.viewportBounds?.call(viewport) ?? spec.initialBounds,
       viewport,
       spec.minimumSize,
     );
@@ -202,10 +206,11 @@ class MenuWorkspaceController extends ChangeNotifier {
     'version': 1,
     'panels': [
       for (final spec in _specs.values)
-        {
-          'id': spec.id,
-          'bounds': _encodeRect(_bounds[spec.id] ?? spec.initialBounds),
-        },
+        if (spec.viewportBounds == null || _bounds.containsKey(spec.id))
+          {
+            'id': spec.id,
+            'bounds': _encodeRect(_bounds[spec.id] ?? spec.initialBounds),
+          },
     ],
     'open': _open.keys.toList(),
   };

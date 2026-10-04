@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
 
 import '../../features/common/user_interaction.dart';
 import '../../features/direct_messages/direct_messages_page.dart';
@@ -24,6 +25,8 @@ import '../localization/app_strings.dart';
 import '../preferences/app_preferences.dart';
 import '../preferences/app_preferences_projection.dart';
 import '../runtime/example_scene_control.dart';
+import '../runtime/handle_mismatch_flow.dart';
+import '../runtime/startup_prompt_queue.dart';
 import '../shell/starbridge_shell.dart';
 import '../routing/open_destination_intent.dart';
 import '../startup/startup_loading_page.dart';
@@ -35,6 +38,8 @@ class StarBridgeApp extends StatefulWidget {
     this.exampleSceneControl = const ExampleSceneControl.hidden(),
     this.navigatorKey,
     this.navigatorObservers = const [],
+    this.promptQueue,
+    this.canPresentIdentityPrompt,
     this.navigationRequests,
     this.onRetryConnection,
     this.startupSession,
@@ -46,6 +51,8 @@ class StarBridgeApp extends StatefulWidget {
   final ExampleSceneControl exampleSceneControl;
   final GlobalKey<NavigatorState>? navigatorKey;
   final List<NavigatorObserver> navigatorObservers;
+  final StartupPromptQueue? promptQueue;
+  final bool Function()? canPresentIdentityPrompt;
   final ValueListenable<OpenDestinationIntent?>? navigationRequests;
   final Future<void> Function()? onRetryConnection;
   final StartupSession? startupSession;
@@ -58,6 +65,27 @@ class StarBridgeApp extends StatefulWidget {
 class _StarBridgeAppState extends State<StarBridgeApp> {
   final _userNavigation = UserPageNavigation();
   final _inlineImages = InlineImageCache();
+  final _navigationRequests = ValueNotifier<OpenDestinationIntent?>(null);
+  late final StartupPromptQueue _prompts;
+  late HandleMismatchFlow _handleMismatch;
+  void _forwardDestination() =>
+      _navigationRequests.value = widget.navigationRequests?.value;
+  bool _identityReady() =>
+      mounted &&
+      !widget.exampleSceneControl.active &&
+      (widget.startupSession?.complete ?? true) &&
+      (widget.canPresentIdentityPrompt?.call() ?? true);
+  void _bindIdentity() {
+    _handleMismatch = HandleMismatchFlow(
+      module: widget.composition.handleMismatch,
+      queue: _prompts,
+      ready: _identityReady,
+      onOpenAccount: () => _navigationRequests.value = OpenDestinationIntent(
+        '/settings/account',
+      ),
+    );
+  }
+
   Object? _mediaOwner;
   void _resetMediaOwner() {
     final account = widget.composition.account.projection.value;
@@ -74,6 +102,11 @@ class _StarBridgeAppState extends State<StarBridgeApp> {
   @override
   void initState() {
     super.initState();
+    _prompts = widget.promptQueue ?? StartupPromptQueue();
+    _bindIdentity();
+    widget.navigationRequests?.addListener(_forwardDestination);
+    widget.startupSession?.addListener(_handleMismatch.wake);
+    _forwardDestination();
     widget.composition.account.projection.addListener(_resetMediaOwner);
     _resetMediaOwner();
   }
@@ -81,16 +114,36 @@ class _StarBridgeAppState extends State<StarBridgeApp> {
   @override
   void didUpdateWidget(covariant StarBridgeApp oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.navigationRequests != widget.navigationRequests) {
+      oldWidget.navigationRequests?.removeListener(_forwardDestination);
+      widget.navigationRequests?.addListener(_forwardDestination);
+      _forwardDestination();
+    }
     if (oldWidget.composition != widget.composition) {
+      oldWidget.startupSession?.removeListener(_handleMismatch.wake);
+      _handleMismatch.dispose();
+      _bindIdentity();
+      widget.startupSession?.addListener(_handleMismatch.wake);
       oldWidget.composition.account.projection.removeListener(_resetMediaOwner);
       widget.composition.account.projection.addListener(_resetMediaOwner);
       _inlineImages.clear();
       _resetMediaOwner();
     }
+    if (oldWidget.composition == widget.composition &&
+        oldWidget.startupSession != widget.startupSession) {
+      oldWidget.startupSession?.removeListener(_handleMismatch.wake);
+      widget.startupSession?.addListener(_handleMismatch.wake);
+    }
+    _handleMismatch.wake();
   }
 
   @override
   void dispose() {
+    widget.navigationRequests?.removeListener(_forwardDestination);
+    widget.startupSession?.removeListener(_handleMismatch.wake);
+    _handleMismatch.dispose();
+    if (widget.promptQueue == null) _prompts.dispose();
+    _navigationRequests.dispose();
     widget.composition.account.projection.removeListener(_resetMediaOwner);
     _inlineImages.clear();
     widget.composition.dispose();
@@ -110,8 +163,12 @@ class _StarBridgeAppState extends State<StarBridgeApp> {
           account: widget.composition.account.projection,
           connection: widget.composition.manualPresence,
           child: MaterialApp(
+            scrollBehavior: const StarBridgeScrollBehavior(),
             navigatorKey: widget.navigatorKey,
-            navigatorObservers: widget.navigatorObservers,
+            navigatorObservers: [
+              ...widget.navigatorObservers,
+              if (!widget.navigatorObservers.contains(_prompts)) _prompts,
+            ],
             debugShowCheckedModeBanner: false,
             title: 'StarBridge',
             locale: preferences.locale,
@@ -200,9 +257,11 @@ class _StarBridgeAppState extends State<StarBridgeApp> {
         events: widget.composition.notificationReminders,
         settings: widget.composition.notificationSettings,
         desktop: widget.composition.desktopNotifications,
+        visibleConversationKey: () => widget.composition.friends.visibleConversationKey,
         child: StarBridgeShell(
           userNavigation: _userNavigation,
-          navigationRequests: widget.navigationRequests,
+          navigationRequests: _navigationRequests,
+          onHandleMismatch: _handleMismatch.open,
           composition: widget.composition,
           exampleSceneControl: widget.exampleSceneControl,
           onRetryConnection: widget.onRetryConnection,

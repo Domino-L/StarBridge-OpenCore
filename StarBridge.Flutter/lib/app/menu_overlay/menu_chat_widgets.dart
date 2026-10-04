@@ -81,8 +81,10 @@ class MenuChatSendBar extends StatelessWidget {
     required this.sendKey,
     required this.onSend,
     this.leading,
+    this.maxLength = 1000,
   });
   final int length;
+  final int maxLength;
   final Key sendKey;
   final VoidCallback? onSend;
   final Widget? leading;
@@ -101,7 +103,7 @@ class MenuChatSendBar extends StatelessWidget {
             children: [
               ?leading,
               Text(
-                '$length/1000',
+                '$length/$maxLength',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               Text(

@@ -357,7 +357,7 @@ class _PrivacyFieldTile extends StatelessWidget {
                 Switch(
                   key: Key('privacy-scope-$scopeKey-switch-${field.id}'),
                   value: selected,
-                  activeTrackColor: colors.foreground,
+                  activeTrackColor: enabled ? colors.foreground : null,
                   onChanged: enabled ? field.onChanged : null,
                 ),
               ],

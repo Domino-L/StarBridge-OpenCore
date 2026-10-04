@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'community_workspace_session.dart';
 import 'community_workspace_port.dart';
+import 'community_chat_attention.dart';
 
 final class CommunityCard {
   const CommunityCard({
@@ -24,6 +25,7 @@ final class CommunityCard {
     this.joinMode = 'unavailable',
     this.actions = const [],
     this.logo,
+    this.logoDeferred = false,
   });
   final String targetRef,
       name,
@@ -40,6 +42,7 @@ final class CommunityCard {
   final int? memberCount;
   final List<String> actions;
   final String? logo;
+  final bool logoDeferred;
 
   CommunityCard _named(String value) => CommunityCard(
     targetRef: targetRef,
@@ -59,6 +62,7 @@ final class CommunityCard {
     joinMode: joinMode,
     actions: actions,
     logo: logo,
+    logoDeferred: logoDeferred,
   );
 }
 
@@ -115,8 +119,7 @@ final class CommunitiesModule extends ChangeNotifier {
     DateTime Function()? now,
     this.onOrganizationRenamed,
     this.onWorkspaceFocused,
-  }) : _now = now ?? DateTime.now,
-       workspaceSession = CommunityWorkspaceSession(now: now) {
+  }) : _now = now ?? DateTime.now {
     _subscription = port.invalidations.listen((_) {
       _epoch++;
       _joinedEpoch++;
@@ -195,7 +198,9 @@ final class CommunitiesModule extends ChangeNotifier {
     onOrganizationRenamed?.call(code, name);
   }
 
-  final CommunityWorkspaceSession workspaceSession;
+  late final chatAttention = CommunityChatAttention(port);
+  late final workspaceSession = CommunityWorkspaceSession(now: _now, attention: chatAttention);
+  bool get overviewAvailable => !_closed && !writing;
   final DateTime Function() _now;
   DateTime? _directoryReadAt;
   List<CommunityCard> joined = const [];
@@ -250,6 +255,7 @@ final class CommunitiesModule extends ChangeNotifier {
       );
       joinedNext = result.next;
       joinedLoaded = true;
+      chatAttention.bind(joined.map((row) => row.targetRef));
       if (_recoverDirectory && selected != null) _recoverDirectory = false;
       if (_recoverDirectory && !busy) {
         _recoverDirectory = false;
@@ -257,6 +263,7 @@ final class CommunitiesModule extends ChangeNotifier {
       }
     } catch (failure) {
       if (!_closed && revision == accountRevision && request == _joinedEpoch) {
+        chatAttention.clear();
         joined = const [];
         joinedNext = null;
         joinedLoaded = false;
@@ -616,6 +623,7 @@ final class CommunitiesModule extends ChangeNotifier {
   void dispose() {
     _closed = true;
     workspaceSession.clear();
+    chatAttention.dispose();
     confirmWorkspaceLeave = null;
     primaryNavigationSelected.dispose();
     _epoch++;

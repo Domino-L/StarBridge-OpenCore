@@ -72,6 +72,8 @@ internal static class AccountBridgeRequestNames
     internal const string ReadCommunityInvitationOutbox = "communities.invitationOutbox";
     internal const string ExecuteFriend = "friends.execute";
     internal const string ReadDirectMessages = "directMessages.read";
+    internal const string WaitSocialActivity = "social.wait";
+    internal const string WaitCommunityActivity = "communities.wait";
     internal const string SendDirectMessage = "directMessages.send";
     internal const string MarkDirectMessagesRead = "directMessages.markRead";
     internal const string ReadDirectMessagePrivacy = "directMessages.privacyRead";
@@ -91,6 +93,9 @@ internal static class AccountBridgeRequestNames
     internal const string PatchPreferences = "profile.patchPreferences";
     internal const string ClearProfileCache = "profile.clearLocalCache";
     internal const string GetGameIdentityPolicy = "gameIdentity.getPolicy";
+    internal const string PrepareHandleChange = "gameIdentity.prepareHandleChange";
+    internal const string ConfirmHandleChange = "gameIdentity.confirmHandleChange";
+    internal const string CancelHandleChange = "gameIdentity.cancelHandleChange";
 }
 
 internal static class AccountBridgeStableErrors
@@ -164,7 +169,9 @@ internal sealed record AccountBridgePreferencePatch(
 internal sealed record AccountBridgeIdentityProjection(
     string State,
     string? AuthoritativeHandle,
-    bool SensitiveWritesAllowed);
+    bool SensitiveWritesAllowed,
+    string? DetectedHandle = null,
+    string ScmBindingState = "unknown");
 
 internal sealed record AccountBridgeCompatibilityProjection(
     string IdentityState,
@@ -226,6 +233,7 @@ internal interface IAccountBridgeHost
     // Opt-in only after the active session transport is audited for overlapping
     // reads. Authentication/restoration and all writes remain exclusive.
     bool SupportsConcurrentReads => false;
+    bool IsLegacyCompatibilitySession => false;
 
     IReadOnlyList<string> CurrentOverlayEntitlements => [];
 
@@ -253,6 +261,9 @@ internal interface IAccountBridgeHost
 
     Task<object> ProfileVisibilityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload,
         bool save, CancellationToken token) => throw new AccountBridgeHostException("profile.visibility_unavailable");
+
+    Task<object> ProfileBackgroundAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload,
+        bool save, CancellationToken token) => throw new AccountBridgeHostException("profile.background_unavailable");
 
     Task<PersonalProfileDocumentContract> ReadMemberPersonalProfileAsync(BridgeAccountContext context,
         System.Text.Json.JsonElement payload, CancellationToken token) =>
@@ -282,6 +293,10 @@ internal interface IAccountBridgeHost
         BridgeAccountContext context,
         CancellationToken cancellationToken);
 
+    Task<object> WaitSocialActivityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new NotSupportedException();
+    Task<object> WaitCommunityActivityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new NotSupportedException();
     Task<object> ReadDirectMessagesAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new AccountBridgeHostException("directMessages.unavailable");
 
@@ -459,13 +474,26 @@ internal interface IAccountBridgeHost
     Task<AccountBridgeIdentityProjection> GetGameIdentityPolicyAsync(
         BridgeAccountContext context,
         CancellationToken cancellationToken);
+
+    // Optional, non-blocking local snapshot for native notification validity.
+    // Implementations must not restore credentials, read files or perform HTTP.
+    AccountBridgeIdentityProjection? ReadCurrentGameIdentityPolicy(BridgeAccountContext context) => null;
+
+    Task<object> PrepareHandleChangeAsync(BridgeAccountContext context, CancellationToken token) =>
+        throw new AccountBridgeHostException("identity.unavailable");
+    Task<object> ConfirmHandleChangeAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("identity.unavailable");
+    Task<object> CancelHandleChangeAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("identity.unavailable");
 }
 
 internal sealed class AccountBridgeHostException(
     string code,
-    bool retryable = false) : Exception(code)
+    bool retryable = false,
+    System.Net.HttpStatusCode? httpStatus = null) : Exception(code)
 {
     internal string Code { get; } = code;
 
     internal bool Retryable { get; } = retryable;
+    internal System.Net.HttpStatusCode? HttpStatus { get; } = httpStatus;
 }

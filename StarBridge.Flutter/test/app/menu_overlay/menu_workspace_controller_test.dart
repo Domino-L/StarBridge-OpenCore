@@ -20,6 +20,55 @@ void main() {
   });
   tearDown(() => controller.dispose());
 
+  test(
+    'responsive defaults use live viewport and persist only manual placements',
+    () {
+      controller.reconcile(
+        scope: 'owner-a',
+        panels: [
+          MenuPanelSpec(
+            id: 'organization',
+            initialBounds: const Rect.fromLTWH(168, 132, 900, 620),
+            viewportBounds: (size) =>
+                Rect.fromLTWH(24, 64, size.width - 48, size.height - 180),
+          ),
+        ],
+      );
+      controller.open('organization');
+      expect(controller.exportLayout()['panels'], isEmpty);
+      expect(
+        controller.boundsFor('organization', const Size(1000, 700)).size,
+        const Size(952, 520),
+      );
+      expect(
+        controller.boundsFor('organization', const Size(1200, 800)).size,
+        const Size(1152, 620),
+      );
+      expect(controller.exportLayout()['panels'], isEmpty);
+      controller.moveTo(
+        controller.openPanels.single,
+        const Offset(60, 70),
+        const Size(1200, 800),
+      );
+      final saved = controller.exportLayout();
+      expect(saved['panels'], hasLength(1));
+      final manual = controller.boundsFor(
+        'organization',
+        const Size(1200, 800),
+      );
+      controller.resetPlacements();
+      expect(controller.exportLayout()['panels'], isEmpty);
+      expect(
+        controller.restoreLayout(saved, lease: controller.captureLayoutLease()),
+        isTrue,
+      );
+      expect(
+        controller.boundsFor('organization', const Size(1200, 800)),
+        manual,
+      );
+    },
+  );
+
   test('open is unique; activation retains lease and close restores previous active', () {
     expect(controller.open('unsupported'), isFalse);
     controller.open('friends');

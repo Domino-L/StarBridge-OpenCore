@@ -26,7 +26,8 @@ internal static class PlayerActivityPolicyTests
             void Save(params NotificationPolicyRule[] rules) => policies.Save(owner, policies.Read(owner).Revision,
                 Guid.NewGuid().ToString("N"), rules, () => true);
             var sink = new Sink();
-            using var runtime = new PlayerActivityRuntime(root, () => 1, sink, () => new(true, true, false, false));
+            PlayerActivityEnvironment environment = new(true, true, false, false);
+            using var runtime = new PlayerActivityRuntime(root, () => 1, sink, () => environment);
             runtime.ConfigurePolicyOwner(() => owner);
             long sequence = 0;
             Task Observe(string source, string presence, string[]? paths = null, bool permits = true) => runtime.ObserveAsync(
@@ -67,6 +68,18 @@ internal static class PlayerActivityPolicyTests
             Check(sink.Seen.Count == 0, "Storage recovery quietly establishes a fresh baseline");
             await Observe("friends", "online");
             Check(sink.Seen.Count == 1, "New transitions resume after storage recovery");
+            foreach (var reduce in new[] { false, true })
+            foreach (var overlay in new[] { false, true }) {
+                sink.Seen.Clear(); runtime.Reset();
+                prefs.Save(new(Enabled: true, Scope: 7, Offline: true, StoppedGame: true,
+                    BackgroundOnly: false, ReduceInGame: reduce), prefs.Read().Revision);
+                environment = new(true, true, true, overlay);
+                await Observe("friends", "offline");
+                await Observe("friends", "online");
+                Check(sink.Seen.Count == (reduce && overlay ? 0 : 1),
+                    "Game-time activity honors the saved reduce/overlay combination instead of process existence");
+                if (sink.Seen.Count > 0) Check(sink.Seen[0].IsCurrent(), "Eligible game activity remains current at native delivery");
+            }
         } finally { Directory.Delete(root, true); }
     }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }

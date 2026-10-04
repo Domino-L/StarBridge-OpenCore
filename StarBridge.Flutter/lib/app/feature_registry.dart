@@ -2,7 +2,10 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 
 import '../design_system/icons/icon_semantic.dart';
+import 'routing/coming_soon_destination.dart';
 export '../design_system/icons/icon_semantic.dart';
+
+enum FeatureAvailability { available, comingSoon }
 
 enum NavigationRegion {
   brand,
@@ -32,7 +35,8 @@ final class FeatureDescriptor {
     required this.icon,
     required this.navigationRegion,
     required this.order,
-    required this.buildDestination,
+    DestinationBuilder? buildDestination,
+    this.availability = FeatureAvailability.available,
     this.navigationParentId,
     this.confirmLeave,
     this.attentionCount,
@@ -40,7 +44,11 @@ final class FeatureDescriptor {
     this.onPrimaryNavigation,
     this.primaryNavigationSelected,
     this.prefetch,
-  });
+  }) : assert(
+         availability == FeatureAvailability.comingSoon ||
+             buildDestination != null,
+       ),
+       _buildDestination = buildDestination;
 
   final String id;
   final String route;
@@ -49,7 +57,16 @@ final class FeatureDescriptor {
   final StarBridgeIconSemantic icon;
   final NavigationRegion navigationRegion;
   final int order;
-  final DestinationBuilder buildDestination;
+  final FeatureAvailability availability;
+  final DestinationBuilder? _buildDestination;
+  DestinationBuilder get buildDestination =>
+      availability == FeatureAvailability.comingSoon
+      ? (_) => ComingSoonDestination(
+          destinationKey: id,
+          icon: icon,
+          featureKey: labelKey,
+        )
+      : _buildDestination!;
   final String? navigationParentId;
   final DestinationLeaveGuard? confirmLeave;
   final ValueListenable<int>? attentionCount;

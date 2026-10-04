@@ -2,7 +2,9 @@
 
 ## 1. 安装应用
 
-请从 [星海舰桥官网](https://scstarbridge.com/) 查看当前版本和更新说明，下载完整安装包。当前公开测试版为 0.7.0.3。
+本文介绍 0.7.0.4 的安装与使用。
+请从 [星海舰桥官网](https://scstarbridge.com/) 查看实际可用版本和更新说明。
+下载 0.7.0.4 [官方安装器](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.4-20261003-03-win-x64-setup.exe)后，先按 [下载帮助](DOWNLOADS.md) 校验再安装。
 
 当前测试版安装包可能触发 Windows SmartScreen 提示。请确认文件来自 `Domino-L/StarBridge-OpenCore` 的 Releases 或星海舰桥官网，再继续安装。
 

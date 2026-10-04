@@ -51,7 +51,7 @@ internal static class HangarShipNames
     {
         var name = Lookup(ship.Code);
         if (name.CatalogId is null) name = Lookup(ship.DisplayName);
-        return new { ship.Code, ship.DisplayName, ship.ImportedAt, ship.SyncedAt,
+        return new { ship.Code, ship.DisplayName, ship.ImportedAt, ship.SyncedAt, ship.IsInventoryEntry,
             roleCategory = name.Category ?? ship.RoleCategory,
             presentation = new { title = name.EnglishName ?? ship.DisplayName, display = name.Display,
                 catalogId = name.CatalogId,

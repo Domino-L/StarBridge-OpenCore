@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "application_lifecycle_bridge.cpp"
   "tray_surface_bridge.cpp"
+  "friends_window_bridge.cpp"
   "flutter_window.cpp"
   "hangar_browser_bridge.cpp"
   "main.cpp"

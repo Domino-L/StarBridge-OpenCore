@@ -21,6 +21,8 @@ class _Port implements CommunityHangarSharingPort {
   bool get hangarSharingAvailable => true;
   int reads = 0, writes = 0;
   List<String> selected = ['a' * 32];
+  List<String> organizations = ['a', 'b'];
+  bool explicitTargets = true;
   String result = 'accepted';
   String? readError;
   @override
@@ -31,9 +33,9 @@ class _Port implements CommunityHangarSharingPort {
       'schemaVersion': 1,
       'maximumTargets': 64,
       'editRef': 'c' * 32,
-      'usesExplicitTargets': true,
+      'usesExplicitTargets': explicitTargets,
       'options': [
-        for (final id in ['a', 'b'])
+        for (final id in organizations)
           {
             'targetRef': id * 32,
             'name': 'Org $id',
@@ -80,6 +82,26 @@ Widget _host(_Port port, Locale locale) => MaterialApp(
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets('empty confirmed audience does not offer a fictitious revoke', (
+    tester,
+  ) async {
+    final port = _Port()
+      ..organizations = []
+      ..selected = [];
+    addTearDown(port.changes.close);
+    await tester.pumpWidget(_host(port, const Locale('zh', 'CN')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('还没有可共享的组织。'), findsOneWidget);
+    expect(find.text('停止组织共享'), findsNothing);
+    expect(find.text('当前未向任何组织共享机库。'), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+      isNull,
+    );
+    expect(port.writes, 0);
+  });
   testWidgets(
     'missing server capability explains availability without retry loop',
     (tester) async {
@@ -94,6 +116,52 @@ void main() {
       expect(port.writes, 0);
     },
   );
+  testWidgets('legacy empty audience is not presented as confirmed unshared', (
+    tester,
+  ) async {
+    final port = _Port()
+      ..organizations = []
+      ..selected = []
+      ..explicitTargets = false;
+    addTearDown(port.changes.close);
+    await tester.pumpWidget(_host(port, const Locale('zh', 'CN')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('当前未向任何组织共享机库。'), findsNothing);
+    expect(find.text('当前沿用旧版共享规则，尚未设置明确的组织范围。'), findsOneWidget);
+    expect(find.text('设为不向组织共享'), findsOneWidget);
+    expect(port.writes, 0);
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    expect(port.writes, 1);
+    expect(port.selected, isEmpty);
+  });
+  testWidgets('draft selection is separate from saved sharing status', (
+    tester,
+  ) async {
+    final port = _Port()..selected = [];
+    addTearDown(port.changes.close);
+    await tester.pumpWidget(_host(port, const Locale('zh', 'CN')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('Org a'));
+    await tester.pump();
+    expect(find.text('当前未向任何组织共享机库。'), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+      isNotNull,
+    );
+    expect(port.writes, 0);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(port.writes, 0);
+  });
   for (final locale in const [
     Locale('zh', 'CN'),
     Locale('zh', 'TW'),

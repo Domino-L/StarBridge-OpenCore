@@ -103,7 +103,7 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
                 HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or
                 HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout => "privacy_publication.temporarily_unavailable",
             _ => "privacy_publication.unavailable"
-        });
+        }, httpStatus: response.StatusCode);
     }
     private static async Task<JsonDocument> ReadAsync(HttpResponseMessage response, CancellationToken token)
     {

@@ -15,6 +15,7 @@ String roomActionText(BuildContext context, String key) =>
 Future<void> createRoomDialog(BuildContext context, PartyRoomsModule module) =>
     showDialog<void>(
       context: context,
+      useRootNavigator: false,
       barrierDismissible: false,
       builder: (_) => _CreateRoomDialog(module: module),
     );
@@ -26,6 +27,7 @@ Future<void> editRoomDialog(
   if (!module.canManage) return;
   await showDialog<void>(
     context: context,
+    useRootNavigator: false,
     barrierDismissible: false,
     builder: (_) =>
         _CreateRoomDialog(module: module, initialRoom: module.selectedRoom),
@@ -38,6 +40,7 @@ Future<void> joinRoomDialog(
   PartyRoom? room,
 }) => showDialog<void>(
   context: context,
+  useRootNavigator: false,
   barrierDismissible: false,
   builder: (_) => _JoinRoomDialog(module: module, initialRoom: room),
 );

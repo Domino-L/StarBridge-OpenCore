@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
+import 'package:starbridge_flutter/app/shell/chrome/overlay_source_labels.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_scene_picker.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_scene_controller.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_scene_projection.dart';
@@ -14,6 +15,83 @@ const initial = OverlaySceneState(
   targets: [OverlaySceneTarget('A', '组织'), OverlaySceneTarget('B', '组织')],
 );
 void main() {
+  test('bound picker uses session choice, restore and shared result label, never an account write', () async {
+    final port = _Port();
+    OverlaySceneState state(String? temporary) => OverlaySceneState(
+      available: true, status: 'ready', sourceOwnerKey: 'A' * 64,
+      presetBindingId: 'room', temporarySourceId: temporary,
+      actualId: temporary == 'auto' ? 'org:A' : 'room', targets: initial.targets,
+    );
+    port.state = state(null);
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    final temporaryWrites = <String>[];
+    controller.selectTemporary = (id) async {
+      temporaryWrites.add(id);
+      port.state = state(id == 'resumeBinding' ? null : id);
+      return true;
+    };
+    await controller.refresh();
+    final strings = AppStrings.resolve(const Locale('zh', 'CN'));
+    expect(overlaySourceLabel(projectOverlayScene(controller.projection.value), strings), '由预设绑定：当前房间');
+    expect(await controller.select('auto'), isTrue);
+    expect(port.writes, 0);
+    expect(overlaySourceLabel(projectOverlayScene(controller.projection.value), strings), '临时：自动 · 组织');
+    expect(await controller.select('resumeBinding'), isTrue);
+    expect(port.writes, 0);
+    expect(temporaryWrites, ['auto', 'resumeBinding']);
+    expect(controller.projection.value.temporarySourceId, isNull);
+    expect(controller.projection.value.accountPreferredId, 'auto');
+  });
+
+  test('late temporary selection cannot publish after account invalidation', () async {
+    final port = _Port()..state = const OverlaySceneState(available: true, presetBindingId: 'room');
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    final pending = Completer<bool>();
+    controller.selectTemporary = (_) => pending.future;
+    final selecting = controller.select('auto');
+    port.state = const OverlaySceneState(status: 'signedOut');
+    port.events.add(null);
+    await Future<void>.delayed(Duration.zero);
+    pending.complete(true);
+    expect(await selecting, isFalse);
+    expect(controller.projection.value.status, 'signedOut');
+    expect(controller.projection.value.presetBindingId, isNull);
+    expect(port.writes, 0);
+  });
+
+  test('temporary failure reads back once without replay or account fallback', () async {
+    final port = _Port()..state = const OverlaySceneState(available: true, presetBindingId: 'room');
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    var attempts = 0;
+    controller.selectTemporary = (_) async { attempts++; return false; };
+    expect(await controller.select('auto'), isFalse);
+    await Future<void>.delayed(Duration.zero);
+    expect(attempts, 1);
+    expect(port.writes, 0);
+    expect(controller.projection.value.preferredId, 'room');
+  });
+  test('manual selection supersedes a pending background read', () async {
+    final port = _Port();
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    final late = Completer<OverlaySceneState>();
+    port.readResult = () => late.future;
+    final reading = controller.refresh();
+    try {
+      expect(await controller.select('room'), true);
+      expect(port.writes, 1);
+    } finally {
+      late.complete(initial);
+      await reading;
+    }
+    expect(controller.projection.value.mode, 'room');
+  });
   test(
     'page focus is coalesced, account scoped and never a manual selection',
     () async {

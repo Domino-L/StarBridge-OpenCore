@@ -112,6 +112,7 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
     final language = Localizations.localeOf(context).toLanguageTag();
     switch (projection.runtime.windowState) {
       case 'open':
+      case 'opening':
         await widget.module.closeRuntime(language);
         return;
       case 'failed':
@@ -254,6 +255,7 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
               label: Text(
                 _copy(context, switch (projection.runtime.windowState) {
                   'open' => 'overlay.runtime.closeAction',
+                  'opening' => 'overlay.runtime.cancelOpenAction',
                   'failed' => 'overlay.runtime.retryAction',
                   'unavailable' => 'overlay.runtime.checkAction',
                   _ => 'overlay.runtime.openAction',
@@ -355,6 +357,8 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
                         appearances: projection.snapshot!.appearances,
                         controller: widget.editor,
                         previewIdentity: widget.module.previewIdentity,
+                        sources: projection.sources,
+                        sourceScenes: widget.module.sourceScenes,
                         fullScreen: true,
                         editorActions: _toolbar(context, projection),
                         presetId: projection.snapshot!.activePresetId!,

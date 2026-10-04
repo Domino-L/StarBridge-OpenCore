@@ -127,9 +127,11 @@ public sealed class OverlayAuthorizedRoster
 {
     internal OverlayAuthorizedRoster(IEnumerable<PlayerRow> members)
     {
+        var observations = (members ?? []).Where(member => member is not null).ToArray();
+        EventMembers = Array.AsReadOnly(observations);
         var seenStableIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var closedSet = new List<PlayerRow>();
-        foreach (var member in members ?? [])
+        foreach (var member in observations)
         {
             if (member is null)
             {
@@ -151,6 +153,9 @@ public sealed class OverlayAuthorizedRoster
     }
 
     internal IReadOnlyList<PlayerRow> Members { get; }
+    // Preserve ambiguity at the event enrichment boundary. Deduplicating display
+    // rows must not turn conflicting identities into authorization for details.
+    internal IReadOnlyList<PlayerRow> EventMembers { get; }
 
     internal IReadOnlyList<PlayerRow> Resolve(OverlayRosterProjection projection) =>
         projection.VisibleSourceIndices.Select(index => Members[index]).ToArray();
@@ -338,6 +343,7 @@ internal static class OverlayRosterPlanner
                              // outbound offline/hidden status must not remove
                              // the authorized local user's own row.
                              member.Player.IsSelf ||
+                             member.Player.RealtimeStateUnknown ||
                              member.Online ||
                              member.PinnedIndex < int.MaxValue)
             .OrderBy(member => member.PinnedIndex < int.MaxValue ? 0 : 1)

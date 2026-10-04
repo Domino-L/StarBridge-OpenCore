@@ -19,17 +19,31 @@ final class RoomMember {
     required this.shard,
     this.avatarData,
     this.userRef,
+    this.removalToken,
     this.isSelf = false,
     this.serverRegion = '',
     this.presenceKey = 'presence.unknown',
+    this.locationLabels = const {},
+    this.shipLabels = const {},
+    this.locationHiddenReason,
+    this.arrivalPendingConfirmation = false,
+    this.arrivalTargetCode,
+    this.arrivalTargetLabels = const {},
   });
   final String callsign, gameId, presence, location, ship, shard;
   final bool isHost;
   final String? avatarData;
   final String? userRef;
+  final String? removalToken;
   final bool isSelf;
   final String serverRegion;
   final String presenceKey;
+  final Map<String, String> locationLabels;
+  final Map<String, String> shipLabels;
+  final String? locationHiddenReason;
+  final bool arrivalPendingConfirmation;
+  final String? arrivalTargetCode;
+  final Map<String, String> arrivalTargetLabels;
   String get displayName => callsign.isEmpty
       ? gameId
       : gameId.isEmpty
@@ -67,6 +81,7 @@ final class PartyRoom {
     this.leaderServerRegion = '',
     this.leaderGameVersion = '',
     this.roomCode = '',
+    this.canPreviewMemberProfiles = false,
     List<RoomApplication> pendingApplications = const [],
   }) : members = List.unmodifiable(members),
        pendingApplications = List.unmodifiable(pendingApplications),
@@ -75,6 +90,7 @@ final class PartyRoom {
   final String leaderServerRegion;
   final String leaderGameVersion;
   final String roomCode;
+  final bool canPreviewMemberProfiles;
   final List<RoomApplication> pendingApplications;
   final String id, title, goal, eligibility, admissionMode, voice, language;
   final int capacity;
@@ -90,9 +106,12 @@ final class RoomApplication {
     required this.callsign,
     required this.gameId,
     required this.createdAt,
+    this.avatarData,
+    this.userRef,
   });
   final String id, callsign, gameId;
   final DateTime createdAt;
+  final String? avatarData, userRef;
   String get displayName => callsign.isEmpty
       ? gameId
       : gameId.isEmpty
@@ -104,11 +123,16 @@ final class RoomDirectory {
   RoomDirectory({
     required List<PartyRoom> rooms,
     this.currentRoomId,
+    this.supportsHostTransfer = false,
     required this.serverTime,
     List<RoomTag> tagOptions = const [],
     List<RoomInvitation> receivedInvitations = const [],
     List<RoomInvitation> sentInvitations = const [],
+    List<String>? viewerPendingRoomIds,
   }) : tagOptions = List.unmodifiable(tagOptions),
+       viewerPendingRoomIds = viewerPendingRoomIds == null
+           ? null
+           : List.unmodifiable(viewerPendingRoomIds),
        receivedInvitations = List.unmodifiable(receivedInvitations),
        sentInvitations = List.unmodifiable(sentInvitations),
        rooms = List.unmodifiable(rooms) {
@@ -120,9 +144,11 @@ final class RoomDirectory {
   }
   final List<PartyRoom> rooms;
   final String? currentRoomId;
+  final bool supportsHostTransfer;
   final DateTime serverTime;
   final List<RoomTag> tagOptions;
   final List<RoomInvitation> receivedInvitations, sentInvitations;
+  final List<String>? viewerPendingRoomIds;
 }
 
 final class RoomReadResult {
@@ -175,7 +201,9 @@ final class PartyRoomsModule extends ChangeNotifier {
       selectedRoomId = null;
       busy = false;
       writing = false;
+      _commandFeedbackTimer?.cancel();
       commandMessage = null;
+      _pendingApplicationRoomId = null;
       commandNeedsRefresh = false;
       state = RoomReadState.loading;
       _updateActivity();
@@ -244,6 +272,9 @@ final class PartyRoomsModule extends ChangeNotifier {
 
   void stopSession() {
     if (_disposed) return;
+    _commandFeedbackTimer?.cancel();
+    commandMessage = null;
+    _pendingApplicationRoomId = null;
     _sessionStarted = false;
     _active = false;
     _refreshTimer?.cancel();
@@ -293,14 +324,31 @@ final class PartyRoomsModule extends ChangeNotifier {
   String? selectedRoomId;
   String failure = 'unavailable';
   String? commandMessage;
+  Timer? _commandFeedbackTimer;
+  String? _pendingApplicationRoomId;
+
+  void _reconcileApplicationFeedback() {
+    if (commandMessage != 'pending' || directory == null) return;
+    final pending = directory!.viewerPendingRoomIds;
+    if (directory!.currentRoomId != null ||
+        (_pendingApplicationRoomId != null &&
+            pending != null &&
+            !pending.contains(_pendingApplicationRoomId))) {
+      commandMessage = null;
+      _pendingApplicationRoomId = null;
+    }
+  }
+
   bool commandNeedsRefresh = false;
+  bool get canTransferHost =>
+      canManage && directory?.supportsHostTransfer == true;
   int contextRevision = 0;
   bool get supportsCommands =>
       _port is RoomCommandsPort && (_port as RoomCommandsPort).supportsCommands;
   bool get canCommand =>
       !_disposed &&
       supportsCommands &&
-      !busy &&
+      !writing &&
       !commandNeedsRefresh &&
       state == RoomReadState.ready;
   bool get supportsManagement =>
@@ -373,13 +421,52 @@ final class PartyRoomsModule extends ChangeNotifier {
           RoomOperation.update,
           RoomOperation.close,
           RoomOperation.decide,
+          RoomOperation.remove,
+          RoomOperation.transferHost,
         ].contains(command.operation) &&
         (!canManage || command.data['roomId'] != directory?.currentRoomId)) {
       return const RoomCommandResult('rejected', error: 'notHost');
     }
+    if (command.operation == RoomOperation.remove &&
+        !selectedRoom!.members.any(
+          (m) =>
+              !m.isHost &&
+              !m.isSelf &&
+              m.removalToken != null &&
+              m.removalToken == command.data['removalToken'],
+        )) {
+      return const RoomCommandResult('rejected', error: 'memberGone');
+    }
+    if (command.operation == RoomOperation.transferHost &&
+        (!canTransferHost ||
+            !selectedRoom!.members.any(
+              (member) =>
+                  !member.isHost &&
+                  !member.isSelf &&
+                  member.removalToken != null &&
+                  member.removalToken == command.data['memberToken'],
+            ))) {
+      return const RoomCommandResult('rejected', error: 'memberGone');
+    }
+    if (command.operation == RoomOperation.inviteTargets) {
+      // Target enumeration is a read. Its failure belongs to the invitation
+      // dialog and must not invalidate or write feedback onto the room page.
+      final epoch = _epoch;
+      final revision = contextRevision;
+      RoomCommandResult result;
+      try {
+        result = await (_port as RoomCommandsPort).execute(command);
+      } on Object {
+        result = const RoomCommandResult('rejected', error: 'unavailable');
+      }
+      return _disposed || epoch != _epoch || revision != contextRevision
+          ? const RoomCommandResult('stale', error: 'contextChanged')
+          : result;
+    }
     final epoch = ++_epoch;
     busy = true;
     writing = true;
+    _commandFeedbackTimer?.cancel();
     commandMessage = null;
     notifyListeners();
     RoomCommandResult result;
@@ -392,6 +479,9 @@ final class PartyRoomsModule extends ChangeNotifier {
     busy = false;
     writing = false;
     commandMessage = result.error ?? result.status;
+    _pendingApplicationRoomId = commandMessage == 'pending'
+        ? command.data['roomId'] as String?
+        : null;
     if (result.status == 'targets') commandMessage = result.error;
     if (command.operation == RoomOperation.inviteDecline && result.accepted) {
       commandMessage = 'invitationDeclined';
@@ -406,6 +496,7 @@ final class PartyRoomsModule extends ChangeNotifier {
     } else if (result.directory != null) {
       directory = result.directory;
       state = RoomReadState.ready;
+      _reconcileApplicationFeedback();
       final rooms = directory!.rooms;
       selectedRoomId =
           directory!.currentRoomId ??
@@ -414,7 +505,32 @@ final class PartyRoomsModule extends ChangeNotifier {
               : rooms.firstOrNull?.id);
     }
     _syncChat(verified: result.directory != null);
+    if (result.error == null &&
+        const {
+          'joined',
+          'left',
+          'closed',
+          'updated',
+          'approved',
+          'declined',
+          'invited',
+          'revoked',
+          'removed',
+          'hostTransferred',
+          'resolved',
+        }.contains(result.status)) {
+      final feedback = commandMessage;
+      _commandFeedbackTimer = Timer(const Duration(seconds: 5), () {
+        _commandFeedbackTimer = null;
+        if (_disposed || commandMessage != feedback) return;
+        commandMessage = null;
+        notifyListeners();
+      });
+    }
     notifyListeners();
+    // A foreground command may retire an in-flight background read. Its
+    // completion must restart the existing scheduler, not strand refreshes.
+    _scheduleRefresh();
     return result;
   }
 
@@ -502,7 +618,10 @@ final class PartyRoomsModule extends ChangeNotifier {
 
   /// Navigation alone may reuse recent data; commands and explicit refreshes
   /// still read authoritative state. Account invalidation clears ready state.
-  Future<void> refresh({bool reuseFresh = false, bool foreground = false}) async {
+  Future<void> refresh({
+    bool reuseFresh = false,
+    bool foreground = false,
+  }) async {
     if (_disposed || busy) return;
     final age = _lastSuccessfulRead == null
         ? null
@@ -529,12 +648,25 @@ final class PartyRoomsModule extends ChangeNotifier {
     if (_disposed || epoch != _epoch) return;
     busy = false;
     state = result.state;
-    if (state == RoomReadState.ready) commandNeedsRefresh = false;
     failure = result.failure;
     directory = result.state == RoomReadState.ready ? result.directory : null;
     if (state == RoomReadState.ready && directory == null) {
       state = RoomReadState.unavailable;
       failure = 'invalidResponse';
+    }
+    if (state == RoomReadState.ready) {
+      // Only a valid authoritative directory resolves the readback warning.
+      // Failed/invalid reads cannot unlock an uncertain write or erase its
+      // feedback; this recovery never replays the original command.
+      if (commandNeedsRefresh &&
+          const {
+            'refreshRequired',
+            'outcomeUnknown',
+          }.contains(commandMessage)) {
+        commandMessage = null;
+      }
+      commandNeedsRefresh = false;
+      _reconcileApplicationFeedback();
     }
     final rooms = directory?.rooms ?? <PartyRoom>[];
     _lastSuccessfulRead = state == RoomReadState.ready ? _now() : null;
@@ -553,6 +685,7 @@ final class PartyRoomsModule extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _commandFeedbackTimer?.cancel();
     chat?.removeListener(_updateActivity);
     chat?.dispose();
     activityCount.dispose();

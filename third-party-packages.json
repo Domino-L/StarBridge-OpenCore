@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "packages": [
     {
+      "id": "Microsoft.Windows.CsWinRT",
+      "version": "2.1.6",
+      "licenseFile": "licenses/Microsoft.Windows.CsWinRT-2.1.6.txt",
+      "noticeFiles": ["licenses/Microsoft.Windows.CsWinRT-2.1.6-NOTICE.txt"]
+    },
+    {
       "id": "SharpGen.Runtime",
       "version": "2.4.2-beta",
       "licenseFile": "licenses/SharpGen.Runtime-2.4.2-beta.txt"
@@ -10,6 +16,23 @@
       "id": "SharpGen.Runtime.COM",
       "version": "2.4.2-beta",
       "licenseFile": "licenses/SharpGen.Runtime.COM-2.4.2-beta.txt"
+    },
+    {
+      "id": "SkiaSharp",
+      "version": "3.119.4",
+      "licenseFile": "licenses/SkiaSharp-3.119.4.txt"
+    },
+    {
+      "id": "SkiaSharp.NativeAssets.macOS",
+      "version": "3.119.4",
+      "licenseFile": "licenses/SkiaSharp-3.119.4.txt",
+      "noticeFiles": ["licenses/SkiaSharp.NativeAssets.macOS-3.119.4-NOTICE.txt"]
+    },
+    {
+      "id": "SkiaSharp.NativeAssets.Win32",
+      "version": "3.119.4",
+      "licenseFile": "licenses/SkiaSharp-3.119.4.txt",
+      "noticeFiles": ["licenses/SkiaSharp.NativeAssets.Win32-3.119.4-NOTICE.txt"]
     },
     {
       "id": "System.IO.Pipelines",

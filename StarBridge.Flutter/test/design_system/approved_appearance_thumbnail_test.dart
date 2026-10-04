@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/design_system/styles/approved_appearance_thumbnail.dart';
+import 'package:starbridge_flutter/design_system/icons/standard_icon.dart';
 
 class PendingArtwork extends ImageProvider<PendingArtwork> {
   final result = Completer<ImageInfo>();
@@ -50,7 +51,7 @@ void main() {
     provider.result.completeError(StateError('fixture failure'));
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.byIcon(Icons.layers_outlined), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.layers), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

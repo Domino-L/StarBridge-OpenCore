@@ -46,6 +46,13 @@ class TraySurfaceBridge::Impl {
         configured_ = false; snapshot_.clear(); Hide(); result->Success();
       } else { result->NotImplemented(); }
     });
+    // FlutterWindow creates this bridge during native startup, before exposing
+    // the main window. Keep both engines on their shared platform thread, but
+    // pay the auxiliary engine's cold-start cost here, not on the first click
+    // (or in an idle timer that would stall an already interactive main view).
+    // No snapshot, refresh, account bootstrap or focus change is needed to
+    // prepare the hidden view. Failure is retried by Show's normal fallback.
+    Create();
   }
   ~Impl() {
     *alive_ = false;
@@ -58,7 +65,7 @@ class TraySurfaceBridge::Impl {
   }
   bool Show(POINT anchor, bool keyboard) {
     if (!configured_) return false;
-    if (window_ && IsWindowVisible(window_)) { Hide(); return true; }
+    if (wanted_) { Hide(); return true; }
     // Recheck facts on opening as well as the shared background watch. This is
     // a state check: it does not activate the main window or replay open/close.
     primary_.InvokeMethod("refresh", nullptr);
@@ -72,7 +79,11 @@ class TraySurfaceBridge::Impl {
   }
   void Hide() {
     wanted_ = false;
-    if (window_) { KillTimer(window_, kReadyTimeout); ShowWindow(window_, SW_HIDE); }
+    if (window_) {
+      KillTimer(window_, kReadyTimeout);
+      ShowWindow(window_, SW_HIDE);
+      EnableWindow(window_, FALSE);
+    }
   }
  private:
   bool Create() {
@@ -83,7 +94,9 @@ class TraySurfaceBridge::Impl {
     window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, kClass, L"星海舰桥",
         // Like the WPF quick panel, this is an independent tool window. An
         // owned popup can raise its owner when activated from the shell tray.
-        WS_POPUP, 0, 0, 336, 552, nullptr, nullptr, wc.hInstance, this);
+        // Flutter can request focus while MaterialApp is being initialized.
+        // A disabled hidden parent prevents that request from activating it.
+        WS_POPUP | WS_DISABLED, 0, 0, 336, 552, nullptr, nullptr, wc.hInstance, this);
     if (!window_) return false;
     const DWORD rounded = 2;
     DwmSetWindowAttribute(window_, 33, &rounded, sizeof(rounded));
@@ -101,12 +114,16 @@ class TraySurfaceBridge::Impl {
     RECT client{};
     GetClientRect(window_, &client);
     MoveWindow(child, 0, 0, client.right, client.bottom, TRUE);
-    ShowWindow(child, SW_SHOW);
+    ShowWindow(child, SW_SHOWNOACTIVATE);
     secondary_ = std::make_unique<Channel>(controller_->engine()->messenger(),
         "starbridge/tray-surface", &flutter::StandardMethodCodec::GetInstance());
     secondary_->SetMethodCallHandler([this](const auto& call, auto result) {
       if (call.method_name() == "ready") {
-        dart_ready_ = true; result->Success(Value(Snapshot()));
+        dart_ready_ = true;
+        // The main Dart binding may not exist during native startup yet. Do
+        // not invent account/state defaults; configure will send real facts.
+        if (configured_) result->Success(Value(Snapshot()));
+        else result->Success();
       } else if (call.method_name() == "layout") {
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto* opening = args && Field(*args, "opening")
@@ -116,9 +133,9 @@ class TraySurfaceBridge::Impl {
         if (!opening || !height || *height <= 0 || *height > 4096) {
           result->Error("tray.invalid_layout", "Invalid tray layout."); return;
         }
-        if (*opening == opening_ && wanted_ && content_height_ != *height) {
+        if (configured_ && *opening == opening_ && content_height_ != *height) {
           content_height_ = *height;
-          Position();
+          if (wanted_) Position();
         }
         result->Success();
       } else if (call.method_name() == "painted") {
@@ -180,6 +197,7 @@ class TraySurfaceBridge::Impl {
   void Reveal() {
     if (!wanted_ || !configured_) return;
     KillTimer(window_, kReadyTimeout);
+    EnableWindow(window_, TRUE);
     ShowWindow(window_, SW_SHOW); SetForegroundWindow(window_);
     if (controller_) SetFocus(controller_->view()->GetNativeWindow());
   }
@@ -209,9 +227,17 @@ class TraySurfaceBridge::Impl {
       return 0;
     }
     if (message == WM_TIMER && wparam == kReadyTimeout) {
-      self->Hide(); self->fallback_(); return 0;
+      // A killed timer message can already be queued. A dismissed/detached
+      // surface must never resurrect itself through the system-menu fallback.
+      if (self->wanted_ && self->configured_) {
+        self->Hide(); self->fallback_();
+      }
+      return 0;
     }
-    if (message == WM_DPICHANGED) { self->Position(); return 0; }
+    if (message == WM_DPICHANGED) {
+      if (self->wanted_) self->Position();
+      return 0;
+    }
     if (message == WM_SIZE && self->controller_) {
       RECT rect{}; GetClientRect(window,&rect);
       MoveWindow(self->controller_->view()->GetNativeWindow(),0,0,rect.right,rect.bottom,TRUE);

@@ -1,6 +1,6 @@
 {
     "schemaVersion":  1,
-    "revision":  "2026-07-26.3",
+    "revision":  "2026-09-30.1",
     "entries":  [
                     {
                         "runtimeId":  "AEGS_Avenger_Dead",
@@ -250,6 +250,12 @@
                         "aliases":  [
                                         "圣盾 军刀 渡鸦"
                                     ]
+                    },
+                    {
+                        "runtimeId":  "AEGS_Sabre_Raven_EX",
+                        "englishName":  "Sabre Raven EX",
+                        "chineseName":  "渡鸦EX",
+                        "aliases":  ["圣盾 渡鸦EX"]
                     },
                     {
                         "runtimeId":  "AEGS_Tiburon",

@@ -29,6 +29,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
     private readonly ScmProfileCacheStore _profileCache;
     private readonly string _environment;
     private readonly Func<string?> _detectedGameIdentity;
+    private readonly Func<string?>? _recentGameIdentity;
     private readonly Func<LocalIdentityCheckState> _lastGameIdentityCheck;
     private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private readonly object _loginGate = new();
@@ -62,7 +63,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         S2CompatibilityReader? compatibilityReader = null,
         LegacyPasswordRecoveryClient? passwordRecovery = null,
         LegacyPasswordLoginClient? legacyPasswordLogin = null,
-        AccountSafetyClient? accountSafety = null)
+        AccountSafetyClient? accountSafety = null,
+        Func<string?>? recentGameIdentity = null)
     {
         _oauth = oauth ?? throw new ArgumentNullException(nameof(oauth));
         _compatibilityReader = compatibilityReader;
@@ -79,6 +81,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             : environment.Trim();
         _detectedGameIdentity = detectedGameIdentity ??
             throw new ArgumentNullException(nameof(detectedGameIdentity));
+        _recentGameIdentity = recentGameIdentity;
         _lastGameIdentityCheck = lastGameIdentityCheck ??
             (() => LocalIdentityCheckState.NotObserved);
         _session = initialSession;
@@ -96,6 +99,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
     public bool SupportsConcurrentReads => !_disposed && _restoreAttempted &&
         _session is null && _legacySession is not null &&
         !_reauthorizationRequired && !_credentialTemporarilyUnavailable && !_legacyRestoreUnavailable;
+    public bool IsLegacyCompatibilitySession => SupportsConcurrentReads;
 
     public StarBridge.HostRuntime.Hangar.HangarAccountIdentity? HangarIdentity {
         get {
@@ -569,10 +573,22 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(ReadCurrentGameIdentityPolicy(context));
+    }
+
+    public AccountBridgeIdentityProjection ReadCurrentGameIdentityPolicy(BridgeAccountContext context)
+    {
         var relaySession = RequireRelaySession(context);
         var identity = relaySession.Scm?.AuthoritativeGameIdentity ??
             _legacyIdentity ?? new(ScmGameIdentityStatus.Unknown, null, null);
-        var detected = _detectedGameIdentity();
+        // Compatibility login authenticates the old account, not an SCM
+        // verification ceremony. Keep the comparison below: mismatch still blocks.
+        if (relaySession.Scm is null && relaySession.Legacy is not null &&
+            IdentityBindingPolicy.IsValidGameName(identity.Handle))
+            identity = identity with { Status = ScmGameIdentityStatus.Verified };
+        // Compatibility identity comparison may use the selected existing log.
+        // SCM and live presence keep their current-session contract unchanged.
+        var detected = _detectedGameIdentity() ?? (relaySession.Legacy is not null ? _recentGameIdentity?.Invoke() : null);
         var assessment = detected is null
             ? IdentityBindingPolicy.Evaluate(
                 identity,
@@ -580,10 +596,6 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             : IdentityBindingPolicy.Evaluate(
                 identity,
                 detected);
-        if (relaySession.Legacy is not null && detected is null &&
-            _lastGameIdentityCheck() == LocalIdentityCheckState.NotObserved &&
-            assessment.State == IdentityVerificationState.Verified)
-            assessment = assessment with { State = IdentityVerificationState.AwaitingGameIdentity };
         var state = assessment.State switch
         {
             IdentityVerificationState.Verified => "match",
@@ -593,11 +605,12 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             IdentityVerificationState.Revoked => "revoked",
             _ => "unknown"
         };
-        return Task.FromResult(
-            new AccountBridgeIdentityProjection(
+        return new AccountBridgeIdentityProjection(
                 state,
                 assessment.BoundGameName,
-                assessment.CanUseIdentitySensitiveNetworkWrites));
+                assessment.CanUseIdentitySensitiveNetworkWrites,
+                IdentityBindingPolicy.IsValidGameName(detected) ? detected?.Trim() : null,
+                "unknown");
     }
 
     private async Task EnsureRestoredAsync(CancellationToken cancellationToken)
@@ -961,6 +974,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             _legacyLoginCancellation?.Cancel();
         }
         _compatibilityReader?.Dispose();
+        _activityLifetime.Cancel();
         _passwordRecovery?.Dispose();
         _legacyPasswordLogin?.Dispose();
         _partyRooms?.Dispose();

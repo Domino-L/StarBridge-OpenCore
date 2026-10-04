@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -78,7 +79,50 @@ class _CommunityAnnouncementDetailsState
     super.dispose();
   }
 
+  @override
+  Widget build(BuildContext context) => CommunityAnnouncementDetailsBody(
+    entry: widget.entry,
+    author: author,
+    editor: editor,
+    loading: loading,
+    onRetry: failed ? _load : null,
+    avatarBuilder: (person, bytes, child) => UserAvatarMenu(
+      avatarBytes: bytes,
+      target: person.memberRef == null
+          ? null
+          : UserTarget.community(
+              widget.model.targetRef,
+              person.memberRef!,
+              query: person.gameId,
+            ),
+      name: person.gameId.isEmpty
+          ? person.callsign
+          : '${person.callsign} (${person.gameId})',
+      child: child,
+    ),
+  );
+}
+
+/// Shared display only. Callers retain ownership of reads and avatar actions.
+class CommunityAnnouncementDetailsBody extends StatelessWidget {
+  const CommunityAnnouncementDetailsBody({
+    super.key,
+    required this.entry,
+    this.author,
+    this.editor,
+    this.loading = false,
+    this.onRetry,
+    this.avatarBuilder,
+  });
+  final CommunityAnnouncement entry;
+  final Uint8List? author, editor;
+  final bool loading;
+  final VoidCallback? onRetry;
+  final Widget Function(CommunityAnnouncementAuthor, Uint8List?, Widget)?
+  avatarBuilder;
+
   Widget _person(
+    BuildContext context,
     String label,
     CommunityAnnouncementAuthor person,
     Uint8List? bytes,
@@ -86,19 +130,10 @@ class _CommunityAnnouncementDetailsState
     padding: const EdgeInsets.symmetric(vertical: 10),
     child: Row(
       children: [
-        UserAvatarMenu(
-          avatarBytes: bytes,
-          target: person.memberRef == null
-              ? null
-              : UserTarget.community(
-                  widget.model.targetRef,
-                  person.memberRef!,
-                  query: person.gameId,
-                ),
-          name: person.gameId.isEmpty
-              ? person.callsign
-              : '${person.callsign} (${person.gameId})',
-          child: SizedBox(
+        _avatar(
+          person,
+          bytes,
+          SizedBox(
             width: 40,
             height: 40,
             child: CommunityWorkspaceImage(
@@ -140,9 +175,14 @@ class _CommunityAnnouncementDetailsState
       ],
     ),
   );
+  Widget _avatar(
+    CommunityAnnouncementAuthor person,
+    Uint8List? bytes,
+    Widget child,
+  ) => avatarBuilder?.call(person, bytes, child) ?? child;
   @override
   Widget build(BuildContext context) {
-    final item = widget.entry;
+    final item = entry;
     String t(String key) => communityAnnouncementText(context, key);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -163,10 +203,11 @@ class _CommunityAnnouncementDetailsState
         const SizedBox(height: 16),
         SelectableText(item.content.isEmpty ? t('emptyBody') : item.content),
         const Divider(height: 30),
-        _person(t('author'), item.author, author),
-        _person(t('editor'), item.editor, editor),
+        _person(context, t('author'), item.author, author),
+        _person(context, t('editor'), item.editor, editor),
         if (loading) const LinearProgressIndicator(),
-        if (failed) TextButton(onPressed: _load, child: Text(t('imageFailed'))),
+        if (onRetry != null)
+          TextButton(onPressed: onRetry, child: Text(t('imageFailed'))),
         for (final (label, time) in [
           ('publishedAt', item.publishedAt),
           ('updatedAt', item.updatedAt),

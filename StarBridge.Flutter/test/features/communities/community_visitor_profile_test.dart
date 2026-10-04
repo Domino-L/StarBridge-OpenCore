@@ -76,8 +76,85 @@ class VisitorPort extends WorkspaceTestPort
   }
 }
 
+class DelayedAvatarVisitorPort extends VisitorPort {
+  final avatarRead = Completer<FriendRow?>();
+  int socialReads = 0;
+  @override
+  Future<FriendRow?> social(UserTarget target) {
+    socialReads++;
+    return avatarRead.future;
+  }
+}
+
 void main() {
   setUpAll(loadFonts);
+  testWidgets(
+    'visitor without an entry photo loads its authorized avatar without blocking profile content',
+    (tester) async {
+      final p = DelayedAvatarVisitorPort();
+      addTearDown(p.changes.close);
+      await tester.pumpWidget(
+        app(
+          UserProfilePage(
+            port: p,
+            target: UserTarget.community('a' * 32, 'b' * 32),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Visitor Pilot'), findsWidgets);
+      expect(p.socialReads, 1);
+      p.avatarRead.complete(
+        FriendRow(
+          'Visitor Pilot',
+          'Visitor_Handle',
+          'friend',
+          DateTime.utc(2026),
+          avatar: 'authorized-avatar-fixture',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<PersonalProfileAvatar>(find.byType(PersonalProfileAvatar))
+            .imageData,
+        'authorized-avatar-fixture',
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('late visitor avatar cannot return after account invalidation', (
+    tester,
+  ) async {
+    final p = DelayedAvatarVisitorPort();
+    addTearDown(p.changes.close);
+    await tester.pumpWidget(
+      app(
+        UserProfilePage(
+          port: p,
+          target: UserTarget.community('a' * 32, 'b' * 32),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(p.socialReads, 1);
+    p.changes.add(null);
+    await tester.pumpAndSettle();
+    p.avatarRead.complete(
+      FriendRow(
+        'Visitor Pilot',
+        'Visitor_Handle',
+        'friend',
+        DateTime.utc(2026),
+        avatar: 'retired-avatar-fixture',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(PersonalProfileAvatar), findsNothing);
+    expect(find.text('Visitor Pilot'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
   test(
     'visitor bridge rejects an unexpectedly editable owner response',
     () async {

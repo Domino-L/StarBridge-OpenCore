@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.RegularExpressions;
 using StarBridge.Core.Events;
 using StarBridge.Core.Parsing;
@@ -23,7 +22,13 @@ public sealed record GameLogLocationSnapshot(
     string State,
     string? EnglishName = null,
     string? ChineseName = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] bool CanSynchronize = true);
+    [property: System.Text.Json.Serialization.JsonIgnore] bool CanSynchronize = true)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ArrivalPendingConfirmation { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ArrivalTargetCode { get; init; }
+}
 
 public sealed record GameLogSessionSnapshot(
     GameLogServerSnapshot Server,
@@ -63,11 +68,11 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
         @"<Change Server End>.*?IsPersistedInGameMode\[0\]",
         Options,
         TimeSpan.FromMilliseconds(100));
-    private static readonly Lazy<ShipNameIndex> ShipNames = new(LoadShipNames);
     private static readonly Lazy<GameLogLocationNameIndex> LocationNames = new(GameLogLocationNameIndex.Load);
 
     private RegexLogEventParser _parser = new();
     private FleetState _fleet = new();
+    private readonly QuantumTravelContextTracker _quantumTravelContext = new();
     private string? _localHandle;
     private string? _serverShard;
     private string _serverState = "unknown";
@@ -95,6 +100,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
     {
         _parser = new();
         _fleet = new();
+        _quantumTravelContext.Reset();
         _localHandle = null;
         _serverShard = null;
         _serverState = "unknown";
@@ -113,6 +119,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
             _serverRegion = null;
             _publishedServerShard = null;
             _fleet.Clear();
+            _quantumTravelContext.Reset();
             if (wasConnected) journal?.Add(new(Support.LocalGameEventCategories.Server,
                 "ServerLeft", "已离开游戏服务器", "服务器标识已清空"));
             return;
@@ -126,6 +133,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
                 !_serverShard.Equals(shard, StringComparison.OrdinalIgnoreCase))
             {
                 _fleet.Clear();
+                _quantumTravelContext.Reset();
             }
             _serverShard = shard;
             _serverState = "connected";
@@ -133,7 +141,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
             _publishedServerShard = ResolvePublishedShard(shard);
             if (changed) journal?.Add(new(Support.LocalGameEventCategories.Server,
                 "ServerJoined", "已连接游戏服务器",
-                _publishedServerShard is null ? "服务器已连接" : $"{_serverRegion} / {_publishedServerShard}"));
+                _publishedServerShard is null ? "服务器已连接" : $"{_serverRegion} / {_publishedServerShard}", DisplayValue: _serverRegion));
         }
 
         var gameEvent = _parser.TryParse(line);
@@ -148,10 +156,24 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
                 !_localHandle.Equals(gameEvent.Player, StringComparison.OrdinalIgnoreCase))
             {
                 _fleet.Clear();
+                _quantumTravelContext.Reset();
             }
             _localHandle = gameEvent.Player;
             Record(gameEvent);
             return;
+        }
+
+        // MainWindow resolves this same bounded navigation context before both
+        // journaling and FleetState.Apply. Keep it local to the accepted owner;
+        // unrelated players/ship owners cannot replace the pending route.
+        if (_localHandle is not null &&
+            (gameEvent.Player.Equals("LocalPlayer", StringComparison.OrdinalIgnoreCase) ||
+             gameEvent.Player.Equals(_localHandle, StringComparison.OrdinalIgnoreCase)) &&
+            (gameEvent.ShipOwner is null || gameEvent.ShipOwner.Equals(_localHandle, StringComparison.OrdinalIgnoreCase)))
+        {
+            var name = GameShipNames.FindRuntimeIdentity(gameEvent.Ship);
+            gameEvent = _quantumTravelContext.Resolve(gameEvent with
+                { Ship = name?.RuntimeId ?? name?.EnglishName ?? gameEvent.Ship });
         }
 
         // Local history uses the same parsed event, including one-shot life evidence.
@@ -186,7 +208,9 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
             return;
         }
 
-        _fleet.Apply(gameEvent with { Player = "LocalPlayer" });
+        var shipName = GameShipNames.FindRuntimeIdentity(gameEvent.Ship);
+        _fleet.Apply(gameEvent with { Player = "LocalPlayer",
+            Ship = shipName?.RuntimeId ?? shipName?.EnglishName ?? gameEvent.Ship });
     }
 
 
@@ -199,14 +223,17 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
         // is the arrival target here; do not reuse a stale prior arrival target.
         var title = Support.LocalGameEventPresentation.Title(local, ShipLabel, LocationLabel,
             player?.NavigationTarget is { } target && target != "None" ? target : null);
+        var shipDisplay = local.Type is FleetEventType.PlayerEnteredShip or FleetEventType.PlayerExitedShip or
+            FleetEventType.PlayerControllingShip or FleetEventType.PlayerStoppedDrivingShip ? ShipLabel(local.Ship) : null;
         if (title.Length != 0) journal.Add(new(Support.LocalGameEventJournal.Classify(local.Type),
-            local.Type.ToString(), title, Support.LocalGameEventPresentation.Detail(local)));
+            local.Type.ToString(), title, Support.LocalGameEventPresentation.Detail(local), local.LifeContext, shipDisplay,
+            DisplayPlayer: _localHandle));
     }
 
     private static string ShipLabel(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw) || raw is "Unknown" or "None") return "未知飞船";
-        var name = ShipNames.Value.Find(raw);
+        var name = GameShipNames.Find(raw);
         return name?.ChineseName ?? name?.EnglishName ?? raw;
     }
     private static string LocationLabel(string? raw)
@@ -233,7 +260,8 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
             : PresentLocation(player.Location, player.LocationConfidence);
         return new(
             new(_serverState, _serverRegion, _publishedServerShard),
-            location,
+            location with { ArrivalPendingConfirmation = player?.ArrivalPendingConfirmation == true,
+                ArrivalTargetCode = player?.ArrivalTargetCode },
             ship);
     }
 
@@ -327,7 +355,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
 
     private static GameLogShipSnapshot PresentShip(string raw, string confidence)
     {
-        var name = ShipNames.Value.Find(raw);
+        var name = GameShipNames.Find(raw);
         var state = confidence switch
         {
             "High" => "confirmed",
@@ -366,15 +394,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
         return new(state, name.EnglishName, name.ChineseName, name.CanSynchronize);
     }
 
-    private static ShipNameIndex LoadShipNames()
-    {
-        using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("StarBridge.ShipNamePack.json");
-        if (stream is null)
-        {
-            return ShipNameIndex.Empty;
-        }
-        using var reader = new StreamReader(stream);
-        return ShipNameIndex.Parse(reader.ReadToEnd());
-    }
+    internal static ShipDisplayName? FindSharedShipName(string raw) => GameShipNames.Find(raw);
+    internal static GameLogLocationName? FindSharedLocationName(string raw) => LocationNames.Value.FindDisplay(raw);
+
 }

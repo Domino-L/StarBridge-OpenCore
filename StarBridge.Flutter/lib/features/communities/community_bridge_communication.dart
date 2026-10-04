@@ -11,19 +11,26 @@ import 'community_announcements_port.dart';
 import 'community_announcement_write_port.dart';
 
 import 'community_bridge_transport.dart';
+import '../overlay_settings/overlay_preset_inspection_port.dart';
+import '../overlay_settings/overlay_preset_transfer.dart';
 
 mixin CommunityBridgeCommunication on CommunityBridgeTransport
     implements
+        OverlayPresetInspectionPort,
         CommunityPresetPort,
         CommunityInvitePort,
         CommunityInvitationSendPort,
         CommunityAnnouncementsPort,
         CommunityAnnouncementWritePort,
         CommunityChatPort,
+        CommunityChatPreviewPort,
         CommunityChatSendPort {
   @override
   bool get communityPresetsAvailable =>
       !isClosed && session.hostCapabilities.contains('overlay.presetSharing');
+  @override
+  Future<OverlayPresetTransfer> inspectPreset(String package, int revision) =>
+      inspectSharedOverlayPreset(session, package, revision);
 
   Future<T> _presetOperation<T>(
     Future<T> Function() run, {
@@ -337,6 +344,17 @@ mixin CommunityBridgeCommunication on CommunityBridgeTransport
     String targetRef, {
     int after = 0,
     int before = 0,
+  }) => _readChat(targetRef, after: after, before: before);
+
+  @override
+  Future<CommunityChatPage> readChatPreview(String targetRef) =>
+      _readChat(targetRef, timeout: const Duration(seconds: 2));
+
+  Future<CommunityChatPage> _readChat(
+    String targetRef, {
+    int after = 0,
+    int before = 0,
+    Duration? timeout,
   }) => workspaceRead(() async {
     if (after < 0 || before < 0 || after > 0 && before > 0) {
       throw const FormatException();
@@ -346,7 +364,7 @@ mixin CommunityBridgeCommunication on CommunityBridgeTransport
         'targetRef': targetRef,
         'after': after,
         'before': before,
-      }),
+      }, timeout: timeout),
     );
     if (result.targetRef != targetRef ||
         result.messages.any(

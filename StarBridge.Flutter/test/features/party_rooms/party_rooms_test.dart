@@ -15,8 +15,93 @@ import 'package:starbridge_flutter/features/party_rooms/example_party_rooms_adap
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
 import 'package:starbridge_flutter/app/localization/party_rooms_strings.dart';
 import 'package:starbridge_flutter/features/party_rooms/room_display.dart';
+import 'package:starbridge_flutter/features/party_rooms/room_directory_card.dart';
 
 void main() {
+  testWidgets(
+    'filtered inferred location shows its reason instead of recognition pending',
+    (tester) async {
+      final data = room('a');
+      final member = (data['members'] as List).first as Map;
+      member['locationText'] = 'Unknown';
+      member['locationHiddenReason'] = 'lowConfidence';
+      member['presenceKey'] = 'presence.inGame';
+      final port = TestRoomsPort()
+        ..result = ready(wire(current: 'a', rooms: [data]));
+      await pumpRooms(tester, port, const Size(1280, 800));
+      expect(find.text('低可信度位置'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'joined room uses the shared callsign and at-prefixed game identity',
+    (tester) async {
+      final port = TestRoomsPort()
+        ..result = ready(wire(current: 'a', rooms: [room('a')]));
+      await pumpRooms(tester, port, const Size(1280, 800));
+      expect(
+        find.text('测试呼号  @Citizen_CN', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('测试呼号 (Citizen_CN)'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'room card does not claim a live host server or version while host is out of game',
+    (tester) async {
+      final offlineHostRoom = room('a');
+      ((offlineHostRoom['members'] as List).first as Map)['presenceKey'] =
+          'presence.online';
+      final port = TestRoomsPort()
+        ..result = ready(wire(rooms: [offlineHostRoom]));
+      await pumpRooms(tester, port, const Size(1280, 720));
+      final card = find.byType(RoomDirectoryCard);
+      expect(card, findsOneWidget);
+      expect(
+        find.descendant(of: card, matching: find.textContaining('Citizen_CN')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.byType(RoomAvatar)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('队长当前服务器')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('队长游戏版本')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('房主未在游戏中')),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'room discovery labels a privacy-hidden host without falling back to game id',
+    (tester) async {
+      final hiddenHostRoom = room('a');
+      final host = (hiddenHostRoom['members'] as List).first as Map;
+      host['callsign'] = '';
+      final port = TestRoomsPort()
+        ..result = ready(wire(rooms: [hiddenHostRoom]));
+      await pumpRooms(tester, port, const Size(1280, 720));
+      final card = find.byType(RoomDirectoryCard);
+      expect(
+        find.descendant(of: card, matching: find.text('房主 · 房主信息受隐私保护')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.textContaining('Citizen_CN')),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'wide directory keeps filters visible and preserves them when resized',
     (tester) async {
@@ -211,6 +296,31 @@ void main() {
     expect(result.rooms.single.leaderGameVersion, isEmpty);
     expect(result.rooms.single.members.single.avatarData, isNull);
   });
+  test('joined-room avatar payload uses the account avatar size budget', () {
+    final joined = room('a');
+    final member = (joined['members'] as List).first as Map;
+    final permitted = 'data:image/png;base64,${'A' * 180000}';
+    member['avatarImageData'] = permitted;
+    expect(
+      parseRoomDirectory(wire(current: 'a', rooms: [joined]))
+          .rooms
+          .single
+          .members
+          .single
+          .avatarData,
+      permitted,
+    );
+    member['avatarImageData'] = 'data:image/png;base64,${'A' * 720000}';
+    expect(
+      parseRoomDirectory(wire(current: 'a', rooms: [joined]))
+          .rooms
+          .single
+          .members
+          .single
+          .avatarData,
+      isNull,
+    );
+  });
   test(
     'malformed, duplicate, oversized and contradictory projections fail closed',
     () {
@@ -347,7 +457,12 @@ void main() {
     testWidgets('room directory and real details fit at width $width', (
       tester,
     ) async {
-      final port = TestRoomsPort();
+      final a = room('a'), b = room('b');
+      for (final value in [a, b]) {
+        ((value['members'] as List).first as Map)['presenceKey'] =
+            'presence.inGame';
+      }
+      final port = TestRoomsPort()..result = ready(wire(rooms: [a, b]));
       final composition = await pumpRooms(
         tester,
         port,
@@ -355,13 +470,7 @@ void main() {
       );
       expect(find.byKey(const Key('rooms-directory')), findsOneWidget);
       final firstCard = find.byKey(const Key('room-a'));
-      for (final value in [
-        '房主 · 测试呼号 (Citizen_CN)',
-        '队长当前服务器',
-        '美服',
-        '队长游戏版本',
-        'LIVE',
-      ]) {
+      for (final value in ['房主 · 测试呼号', '队长当前服务器', '美服', '队长游戏版本', 'LIVE']) {
         expect(
           find.descendant(of: firstCard, matching: find.text(value)),
           findsOneWidget,
@@ -464,6 +573,34 @@ void main() {
     await pumpRooms(tester, port, const Size(1280, 800));
     expect(find.textContaining('没有读取房间的权限'), findsOneWidget);
     expect(find.byKey(const Key('rooms-empty')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('joined room localizes a known authorized member location', (
+    tester,
+  ) async {
+    final data = room('a');
+    final host = (data['members'] as List).single as Map<String, Object?>;
+    host['locationText'] = 'New Babbage';
+    host['locationLabels'] = {'en': 'New Babbage', 'zhHans': '新巴贝奇'};
+    final port = TestRoomsPort()
+      ..result = ready(wire(current: 'a', rooms: [data]));
+    await pumpRooms(tester, port, const Size(1280, 800));
+    expect(find.text('新巴贝奇'), findsOneWidget);
+    expect(find.text('New Babbage'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('joined room renders unknown ship and location in Chinese', (
+    tester,
+  ) async {
+    final data = room('a');
+    final host = (data['members'] as List).single as Map<String, Object?>;
+    host['shipText'] = 'Unknown';
+    host['locationText'] = 'Unknown';
+    final port = TestRoomsPort()
+      ..result = ready(wire(current: 'a', rooms: [data]));
+    await pumpRooms(tester, port, const Size(1280, 800));
+    expect(find.text('Unknown'), findsNothing);
+    expect(find.text('尚未识别'), findsNWidgets(2));
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets(

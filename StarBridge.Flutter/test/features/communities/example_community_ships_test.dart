@@ -1,3 +1,4 @@
+import 'package:starbridge_flutter/design_system/icons/standard_icon.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -249,7 +250,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('community-section-ships')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.share_outlined));
+      await tester.tap(find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.share));
       await tester.pumpAndSettle();
       expect(find.byType(CheckboxListTile), findsNWidgets(2));
       await tester.tap(find.byType(CheckboxListTile).first);

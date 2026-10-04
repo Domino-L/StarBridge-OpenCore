@@ -22,6 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Keep projection runtime in the transitive Host publish graph, not the
+         older Windows SDK fallback copied alongside an incompatible renderer. -->
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.1.6" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
     <PackageReference Include="System.Text.Json" Version="9.0.1" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />

@@ -7,6 +7,8 @@ import '../../features/account/account_module.dart';
 import '../../features/settings/first_use_privacy_dialog.dart';
 import '../../features/settings/local_privacy_controller.dart';
 import '../../features/settings/local_privacy_settings.dart';
+import '../../features/communities/community_hangar_sharing_port.dart';
+import '../../platform/bridge/bridge_client_session.dart';
 import 'startup_prompt_queue.dart';
 import 'community_sharing_flow.dart';
 
@@ -19,12 +21,18 @@ final class FirstUsePrivacyFlow {
     required this.queue,
     required this.ready,
     required this.onAdjust,
+    Listenable? membershipChanges,
+    CommunityHangarSharingPort? hangarSharing,
+    BridgeClientSession? eventSession,
   }) {
     account.projection.addListener(wake);
     privacy.addListener(_privacyChanged);
     _communities = CommunitySharingFlow(
       privacy: privacy,
       queue: queue,
+      membershipChanges: membershipChanges,
+      hangarSharing: hangarSharing,
+      eventSession: eventSession,
       ready: () =>
           !_disposed &&
           ready() &&

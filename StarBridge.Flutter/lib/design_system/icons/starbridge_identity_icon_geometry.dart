@@ -39,6 +39,11 @@ abstract final class StarBridgeIdentityIconGeometry {
       case StarBridgeIconSemantic.friends:
         _paintFriends(g);
         return true;
+      case StarBridgeIconSemantic.messages:
+        g.polyline(const [Offset(4, 4), Offset(20, 4), Offset(20, 16), Offset(10, 16), Offset(4, 21), Offset(4, 4)]);
+        g.line(const Offset(8, 8), const Offset(16, 8));
+        g.line(const Offset(8, 12), const Offset(14, 12));
+        return true;
       case StarBridgeIconSemantic.notifications:
         _paintNotifications(g);
         return true;

@@ -22,6 +22,8 @@ const _copy = <String, (String, String, String)>{
   'overlay': ('游戏浮层', '遊戲浮層', 'Game overlay'),
   'overlay.enabled': ('已开启', '已開啟', 'Enabled'),
   'overlay.disabled': ('未开启', '未開啟', 'Disabled'),
+  'overlay.opening': ('正在打开…', '正在開啟…', 'Opening…'),
+  'cancelOpening': ('取消打开', '取消開啟', 'Cancel opening'),
   'overlay.unavailable': ('暂不可用', '暫不可用', 'Unavailable'),
   'scene': ('当前场景', '目前場景', 'Current scene'),
   'unknown': ('暂不可用', '暫不可用', 'Unavailable'),

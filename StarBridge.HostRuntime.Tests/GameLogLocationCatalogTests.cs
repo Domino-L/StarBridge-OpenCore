@@ -15,6 +15,16 @@ internal static class GameLogLocationCatalogTests
             """;
         using var input = new MemoryStream(Encoding.UTF8.GetBytes(json));
         var index = GameLogLocationNameIndex.Load(input);
+        if (index.FindDisplay("Test Port") is not { ChineseName: "测试港" } || index.Find("Test Port") is not null)
+            throw new Exception("Shared display names localize without broadening log identity parsing.");
+        using var ambiguous = new MemoryStream(Encoding.UTF8.GetBytes("""
+            {"schemaVersion":1,"entries":[
+              {"canonicalCode":"A","nameEn":"Same Port","nameZh":"甲"},
+              {"canonicalCode":"B","nameEn":"Same Port","nameZh":"乙"}
+            ]}
+            """));
+        if (GameLogLocationNameIndex.Load(ambiguous).FindDisplay("Same Port") is not null)
+            throw new Exception("Ambiguous display names must retain the original label.");
         if (index.Find("LOC_Synthetic_Test_Port [42]") is not { EnglishName: "Test Port", ChineseName: "测试港" })
             throw new Exception("Synthetic catalog must exercise real normalization and localization.");
         if (index.Find("Unmapped_Test_Port") is not null ||

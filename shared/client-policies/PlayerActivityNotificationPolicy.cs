@@ -143,7 +143,25 @@ internal sealed class PlayerActivityNotificationTracker
         var wasOnline = PlayerPresence.IsOnline(previous);
         var isOnline = PlayerPresence.IsOnline(current);
 
-        if (current == PlayerPresenceKind.InGame && previous != PlayerPresenceKind.InGame)
+        // Away is an attention state, not proof of a game starting/stopping.
+        // Keep real online/offline edges, but never manufacture activity from
+        // moving between away and another visible online state.
+        if (wasOnline && isOnline &&
+            (previous == PlayerPresenceKind.Away || current == PlayerPresenceKind.Away))
+        {
+            kind = default;
+            return false;
+        }
+
+        // Becoming visible/online is the only fact established by an offline
+        // baseline. Do not claim a new game launch when it may have been running
+        // throughout an invisible session.
+        if (!wasOnline && isOnline && settings.NotifyPlayerOnline)
+        {
+            kind = PlayerActivityNotificationKind.Online;
+            return true;
+        }
+        if (wasOnline && current == PlayerPresenceKind.InGame && previous != PlayerPresenceKind.InGame)
         {
             if (settings.NotifyPlayerStartedGame)
             {

@@ -58,7 +58,8 @@ class Fixture {
           if (r.payload.containsKey('overlayEnabled'))
             'overlayEnabled': r.payload['overlayEnabled'],
           if (r.payload.containsKey('directMessageWindowsEnabled'))
-            'directMessageWindowsEnabled': r.payload['directMessageWindowsEnabled'],
+            'directMessageWindowsEnabled':
+                r.payload['directMessageWindowsEnabled'],
           'position': r.payload['position'],
           'preview': r.payload['preview'],
         };
@@ -128,20 +129,180 @@ class Fixture {
 }
 
 void main() {
+  testWidgets(
+    'same visible conversation suppresses toast but other conversations still notify',
+    (tester) async {
+      final f = Fixture();
+      await f.start();
+      addTearDown(f.close);
+      final active = 'a' * 64;
+      await tester.pumpWidget(
+        app(
+          LocalNotificationListener(
+            events: f.adapter.reminders,
+            settings: f.module,
+            visibleConversationKey: () => active,
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      var sequence = 0;
+      Future<void> notify(List<String> keys) async {
+        await f.pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'event',
+            name: 'notificationSettings.social',
+            sessionGeneration: 3,
+            sequence: ++sequence,
+            payload: {
+              'schemaVersion': 1,
+              'revision': 0,
+              'kind': 'direct',
+              'count': keys.length,
+              'conversationKeys': keys,
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await notify([active]);
+      expect(
+        find.byKey(const Key('starbridge-notification-toast')),
+        findsNothing,
+      );
+      await notify([active, 'b' * 64]);
+      expect(
+        find.byKey(const Key('starbridge-notification-toast')),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'authenticated social events show friend and private-message in-app notices',
+    (tester) async {
+      final f = Fixture();
+      await f.start();
+      addTearDown(f.close);
+      await tester.pumpWidget(
+        app(
+          LocalNotificationListener(
+            events: f.adapter.reminders,
+            settings: f.module,
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      var sequence = 0;
+      for (final kind in ['friend', 'direct']) {
+        await f.pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'event',
+            name: 'notificationSettings.social',
+            sessionGeneration: 3,
+            sequence: ++sequence,
+            payload: {
+              'schemaVersion': 1,
+              'revision': 0,
+              'kind': kind,
+              'count': 1,
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text(kind == 'friend' ? '新的好友申请' : '收到新私信'),
+          findsOneWidget,
+        );
+      }
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  for (final mode in NotificationPreviewMode.values) {
+    testWidgets('private-message in-app notice respects $mode', (tester) async {
+      final f = Fixture()..value['preview'] = mode.name;
+      await f.start();
+      addTearDown(f.close);
+      await tester.pumpWidget(
+        app(
+          LocalNotificationListener(
+            events: f.adapter.reminders,
+            settings: f.module,
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await f.pair.host.send(
+        BridgeEnvelope(
+          protocolVersion: 1,
+          messageType: 'event',
+          name: 'notificationSettings.social',
+          sessionGeneration: 3,
+          sequence: 1,
+          payload: {
+            'schemaVersion': 1,
+            'revision': 0,
+            'kind': 'direct',
+            'count': 1,
+            'senderName': 'Fixture Sender',
+            'messagePreview': 'Private fixture text',
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('starbridge-notification-toast')),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Fixture Sender'),
+        mode == NotificationPreviewMode.hiddenDetails
+            ? findsNothing
+            : findsOneWidget,
+      );
+      expect(
+        find.text('Private fixture text'),
+        mode == NotificationPreviewMode.fullContent
+            ? findsOneWidget
+            : findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
   setUpAll(loadFonts);
-  test('private desktop preference is optional and persists only after save', () async {
-    final f = Fixture()..value['directMessageWindowsEnabled'] = false;
-    await f.start();
-    addTearDown(f.close);
-    final current = f.module.projection.value.settings!;
-    expect(current.directMessageDeliveryAvailable, isTrue);
-    final edited = current.copyWith(channels: current.channels.copyWith(directMessageWindowsEnabled: true));
-    expect(f.requests.where((r) => r.name.endsWith('.save')), isEmpty);
-    expect(await f.module.save(edited), isTrue);
-    expect(f.value['directMessageWindowsEnabled'], isTrue);
-    await f.module.refresh();
-    expect(f.module.projection.value.settings!.channels.directMessageWindowsEnabled, isTrue);
-  });
+  test(
+    'private desktop preference is optional and persists only after save',
+    () async {
+      final f = Fixture()..value['directMessageWindowsEnabled'] = false;
+      await f.start();
+      addTearDown(f.close);
+      final current = f.module.projection.value.settings!;
+      expect(current.directMessageDeliveryAvailable, isTrue);
+      final edited = current.copyWith(
+        channels: current.channels.copyWith(directMessageWindowsEnabled: true),
+      );
+      expect(f.requests.where((r) => r.name.endsWith('.save')), isEmpty);
+      expect(await f.module.save(edited), isTrue);
+      expect(f.value['directMessageWindowsEnabled'], isTrue);
+      await f.module.refresh();
+      expect(
+        f
+            .module
+            .projection
+            .value
+            .settings!
+            .channels
+            .directMessageWindowsEnabled,
+        isTrue,
+      );
+    },
+  );
   test(
     'normal settings bridge confirms local values and keeps failed saves',
     () async {

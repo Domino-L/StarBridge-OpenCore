@@ -1,7 +1,11 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
+import '../../app/routing/open_destination_intent.dart';
+
 import '../common/user_avatar_menu.dart';
+import '../common/social_identity_text.dart';
 import '../direct_messages/chat_avatar.dart';
 
 import 'package:flutter/material.dart';
@@ -21,6 +25,8 @@ import '../direct_messages/direct_messages_page.dart';
 class FriendsPage extends StatefulWidget {
   const FriendsPage({
     required this.createPort,
+    this.messagesOnly = false,
+    this.separateMessages = false,
     this.module,
     this.createChatPort,
     this.inboxRequests,
@@ -29,6 +35,7 @@ class FriendsPage extends StatefulWidget {
     super.key,
   });
   final FriendsPort Function() createPort;
+  final bool messagesOnly, separateMessages;
   final FriendsModule? module;
   final DirectMessagesPort Function()? createChatPort;
   final ValueNotifier<int>? inboxRequests;
@@ -49,6 +56,8 @@ class _FriendsPageState extends State<FriendsPage> {
   Conversation? _initialConversation;
   DirectMessagesModule? _messages;
   Timer? _attentionRefresh;
+  StreamSubscription<void>? _activity;
+  bool _activityPending = false;
   Timer? _sharingRefresh;
   int unread(FriendRow row) => row.conversationKey == null
       ? 0
@@ -68,30 +77,74 @@ class _FriendsPageState extends State<FriendsPage> {
     _example =
         port is ExampleFriendsAdapter || widget.module?.isExample == true;
     _module = widget.module ?? FriendsModule(port!);
+    if (widget.messagesOnly) {
+      _chat = true;
+      _notificationInbox = false;
+      _initialConversation = _module.requestedConversation;
+      _module.requestedConversation = null;
+    }
+    _activity = _module.changes.listen((_) {
+      _activityPending = true;
+      _drainActivity();
+    });
     _module.addListener(_syncAccount);
     _accountRevision = _module.accountRevision;
     _search.text = _module.query;
-    unawaited(_module.enter());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !widget.messagesOnly) unawaited(_module.enter());
+    });
     _sharingRefresh = Timer.periodic(const Duration(seconds: 10), (_) {
       if (_visible && !_chat && !_module.busy && !_module.searching) {
         unawaited(_module.refresh(silent: true));
       }
     });
     if (widget.createChatPort != null) {
-      _messages = DirectMessagesModule(widget.createChatPort!());
-      unawaited(_messages!.refresh());
+      _messages = _module.chat(widget.createChatPort!);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || widget.messagesOnly) return;
+        if (!_messages!.loaded) {
+          unawaited(_messages!.refresh());
+        } else {
+          // A retained conversation must not hide unread in other conversations.
+          // Read the directory without clearing that conversation or its draft.
+          unawaited(_messages!.receive(directoryOnly: true));
+        }
+      });
       _attentionRefresh = Timer.periodic(const Duration(seconds: 15), (_) {
         if (_visible && !_chat && !(_messages?.busy ?? true)) {
-          unawaited(_messages!.refresh(retainDirectory: true));
+          unawaited(_messages!.receive(directoryOnly: true));
         }
       });
     }
   }
 
   void _syncAccount() {
+    if (_accountRevision != _module.accountRevision) {
+      setState(() => _initialConversation = null);
+    }
+    if (widget.messagesOnly && _module.requestedConversation != null) {
+      final requested = _module.requestedConversation;
+      _module.requestedConversation = null;
+      setState(() => _initialConversation = requested);
+    }
     if (_accountRevision != _module.accountRevision || !_module.searching) {
       _accountRevision = _module.accountRevision;
       _search.clear();
+    }
+    _drainActivity();
+  }
+
+  void _drainActivity() {
+    // Never replace action references while chatting or discard a wake during a read.
+    if (_activityPending &&
+        _visible &&
+        !_chat &&
+        !_module.busy &&
+        !_module.reading &&
+        !_module.searching) {
+      _activityPending = false;
+      unawaited(_module.refresh(silent: true));
+      unawaited(_messages?.receive(directoryOnly: true));
     }
   }
 
@@ -119,8 +172,8 @@ class _FriendsPageState extends State<FriendsPage> {
   void dispose() {
     widget.inboxRequests?.removeListener(_openInbox);
     _attentionRefresh?.cancel();
+    unawaited(_activity?.cancel());
     _sharingRefresh?.cancel();
-    _messages?.dispose();
     _module.removeListener(_syncAccount);
     if (widget.module == null) _module.dispose();
     _search.dispose();
@@ -132,16 +185,15 @@ class _FriendsPageState extends State<FriendsPage> {
     final s = row.shared, strings = AppStrings.of(context);
     final parts = <String>[];
     final presence = s['presence'];
-    if (presence != null) {
-      parts.add(
-        strings.text(switch (presence) {
-          'InGame' => 'presence.inGame',
-          'AppOnline' => 'presence.online',
-          'Away' => 'presence.away',
-          _ => 'presence.offline',
-        }),
-      );
-    }
+    parts.add(
+      strings.text(switch (presence) {
+        'InGame' => 'presence.inGame',
+        'AppOnline' => 'presence.online',
+        'Away' => 'presence.away',
+        'Offline' => 'presence.offline',
+        _ => 'officialFleet.members.presence.unknown',
+      }),
+    );
     if (s['sameServer'] is bool) {
       parts.add(
         strings.text(
@@ -153,7 +205,27 @@ class _FriendsPageState extends State<FriendsPage> {
     }
     for (final key in const ['serverId', 'serverRegion', 'ship', 'location']) {
       if (s[key] is String && (s[key] as String).isNotEmpty) {
-        parts.add(s[key] as String);
+        final original = s[key] as String;
+        final names = row.sharedLabels[key] ?? const <String, String>{};
+        final locale = strings.locale;
+        final chinese = locale.languageCode == 'zh';
+        final traditional =
+            locale.countryCode == 'TW' ||
+            locale.scriptCode == 'Hant' ||
+            locale.countryCode == 'HK';
+        final value = chinese
+            ? (names[traditional ? 'zhHant' : 'zhHans'] ??
+                  names['zhHans'] ??
+                  names['en'] ??
+                  original)
+            : (names['en'] ?? original);
+        final region = value.toUpperCase();
+        parts.add(
+          key == 'serverRegion' &&
+                  const {'US', 'EU', 'AU', 'ASIA'}.contains(region)
+              ? strings.text('gameLog.region$region')
+              : value,
+        );
       }
     }
     if (s['lastOnlineAt'] is String) {
@@ -167,10 +239,16 @@ class _FriendsPageState extends State<FriendsPage> {
     return parts.join(' · ');
   }
 
-  void _openRecent() => setState(() {
-    _initialConversation = null;
-    _chat = true;
-  });
+  void _openRecent() {
+    if (widget.separateMessages) {
+      Actions.invoke(context, const OpenDestinationIntent('/messages'));
+      return;
+    }
+    setState(() {
+      _initialConversation = null;
+      _chat = true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) => _chat
@@ -181,6 +259,10 @@ class _FriendsPageState extends State<FriendsPage> {
           openCommunityInvite: widget.openCommunityInvite,
           sendCommunityInvite: widget.sendCommunityInvite,
           onBack: () {
+            if (widget.messagesOnly) {
+              Actions.invoke(context, const OpenDestinationIntent('/friends'));
+              return;
+            }
             setState(() {
               _chat = false;
               _notificationInbox = false;
@@ -438,18 +520,25 @@ class _FriendsPageState extends State<FriendsPage> {
         widget.createChatPort == null) {
       return;
     }
+    final conversation = Conversation(
+      row.chatTargetRef!,
+      row.callsign.isEmpty ? row.gameId : row.callsign,
+      '',
+      row.updatedAt,
+      0,
+      'friend',
+      avatar: row.avatar,
+      gameId: row.gameId,
+      conversationKey: row.conversationKey,
+      presence: friendSharedConversationPresence(row),
+    );
+    if (widget.separateMessages) {
+      _module.requestedConversation = conversation;
+      Actions.invoke(context, const OpenDestinationIntent('/messages'));
+      return;
+    }
     setState(() {
-      _initialConversation = Conversation(
-        row.chatTargetRef!,
-        row.name,
-        '',
-        row.updatedAt,
-        0,
-        'friend',
-        avatar: row.avatar,
-        gameId: row.gameId,
-        conversationKey: row.conversationKey,
-      );
+      _initialConversation = conversation;
       _chat = true;
     });
   }
@@ -548,7 +637,20 @@ class _FriendsPageState extends State<FriendsPage> {
                     source: row.avatar,
                     size: 44,
                     actions: _avatarActions(row),
-                    target: row.targetRef == null ? null : UserTarget('friend', row.targetRef!, query: row.gameId),
+                    // Profile reads outlive refreshed one-use command targets.
+                    target: row.chatTargetRef?.isNotEmpty == true
+                        ? UserTarget(
+                            'conversation',
+                            row.chatTargetRef!,
+                            query: row.gameId,
+                          )
+                        : row.targetRef == null
+                        ? null
+                        : UserTarget(
+                            'friend',
+                            row.targetRef!,
+                            query: row.gameId,
+                          ),
                     includeSocialActions: false,
                   ),
                   const SizedBox(width: 14),
@@ -556,18 +658,25 @@ class _FriendsPageState extends State<FriendsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          row.name.isEmpty ? t('unnamed') : row.name,
+                        SocialIdentityText(
+                          callsign: row.callsign.isEmpty
+                              ? (row.gameId.isEmpty ? t('unnamed') : row.gameId)
+                              : row.callsign,
+                          gameId: row.relationship == 'friend'
+                              ? row.gameId
+                              : '',
+                          callsignStyle: Theme.of(context)
+                              .textTheme
+                              .titleMedium,
+                          gameIdColor: context.tokens.colors.textSecondary,
                           maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 4),
                         Text(
                           t('relation.${row.relationship}'),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
-                        if (row.shared.values.any((value) => value != null))
+                        if (row.relationship == 'friend')
                           Text(
                             _sharedText(row),
                             style: Theme.of(context).textTheme.bodySmall,

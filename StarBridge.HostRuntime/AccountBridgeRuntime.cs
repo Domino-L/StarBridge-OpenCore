@@ -11,35 +11,78 @@ using StarBridge.NativeBridge;
 public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
 {
     private Overlay.OverlayCommunitySource? _overlayCommunities;
+    private bool _moduleCommunityDriverEnabled;
     private Privacy.SharedActivityReceiver? _activityReceiver;
     public void ConfigureSharedActivity(Privacy.ISharedActivitySink sink)
     {
         if (_activityReceiver is not null) throw new InvalidOperationException("Activity receiver already configured.");
         if (_host is not Privacy.ISharedActivityReader reader) return;
-        _activityReceiver = new(reader, sink, () =>
-        {
-            var owner = GameplayOwner();
-            if (_disposed) return (null, owner.Generation, null, null);
-            if (CurrentOverlaySceneMode is "room" or "auto" && CurrentRoomOverlay is { } room)
-                return (owner.Context, owner.Generation, "room", room.RoomId);
-            if (CurrentOverlaySceneMode == "room") return (owner.Context, owner.Generation, null, null);
-            if (CurrentCommunityOverlay is { } community) return (owner.Context, owner.Generation, "organization", community.Code);
-            return (owner.Context, owner.Generation, null, null);
-        });
+        _activityReceiver = new(reader, sink, CaptureSharedActivityContext);
         _activityReceiver.Start();
     }
-    public void ConfigureOverlayCommunitySource(string dataRoot)
+    internal Privacy.SharedActivitySubscription CaptureSharedActivityContext()
+    {
+        var owner = GameplayOwner();
+        if (_disposed) return new(null, owner.Generation, null, null);
+        if (_liveOverlaySink?.IsVisible == false)
+        {
+            _overlayCommunities?.SuspendDisplayDemand();
+            return new(null, owner.Generation, null, null);
+        }
+        if (_liveOverlaySink?.ModuleDemand is { } demand)
+            return CaptureModuleActivityContext(demand, owner.Context, owner.Generation);
+        if (CurrentOverlaySceneMode is "room" or "auto" && CurrentRoomOverlay is { } room)
+            return new(owner.Context, owner.Generation, "room", room.RoomId, room.ContinuityId);
+        if (CurrentOverlaySceneMode == "room") return new(owner.Context, owner.Generation, null, null);
+        if (_overlayCommunities?.Read() is { } community)
+            return new(owner.Context, owner.Generation, "organization", community.Code, community.ContinuityId);
+        return new(owner.Context, owner.Generation, null, null);
+    }
+    public void ConfigureOverlayCommunitySource(string dataRoot) => ConfigureOverlayCommunitySource(dataRoot, true);
+    internal void ConfigureOverlayCommunitySource(string dataRoot, bool startDriver)
     {
         if (_overlayCommunities is not null) throw new InvalidOperationException("Overlay sources already configured.");
+        _moduleCommunityDriverEnabled = startDriver;
         if (_host is Overlay.IOverlayCommunityReader reader)
-            _overlayCommunities = new(() => _disposed ? (null, Generation) : GameplayOwner(), reader,
-                choiceStore: new Overlay.OverlaySceneChoiceStore(dataRoot), room: () => CurrentRoomOverlay);
+        {
+            _overlayCommunities = new(() => _disposed ? (null, Generation) : GameplayOwner(), reader, startDriver,
+                choiceStore: new Overlay.OverlaySceneChoiceStore(dataRoot), room: () => CurrentRoomOverlay, prepareWhenIdle: true,
+                presetRoomTrigger: () => (_host as ScmAccountBridgeHost)?.ReadOverlayPresetTrigger() ?? (false, null),
+                moduleDemand: () => _liveOverlaySink?.ModuleDemand,
+                moduleRoomLease: () => (_host as ScmAccountBridgeHost)?.CurrentRoomOverlaySource?.Lease);
+            _overlayCommunities.DirectoryMembershipConfirmed += (owner, generation, codes) =>
+                _moduleSourceBudget.ConfirmCommunities(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, codes);
+            _overlayCommunities.MembershipRevoked += (owner, generation, code) =>
+                _moduleSourceBudget.RevokeCommunity(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, code);
+        }
         if (_host is ScmAccountBridgeHost source)
+        {
             source.CommunityNameChanged = (owner, generation, code, name) =>
                 _overlayCommunities?.Rename(owner, generation, code, name);
+            source.CommunityRosterObserved = (owner, generation, sequence, startedAt, roster) =>
+                _overlayCommunities?.ObserveWorkspace(owner, generation, sequence, startedAt, roster);
+            source.CommunityDirectoryObserved = (owner, generation, sequence, startedAt, rosters) =>
+                _overlayCommunities?.ObserveDirectory(owner, generation, sequence, startedAt, rosters);
+            source.CommunityRosterRevoked = (owner, generation, sequence, code) =>
+                _overlayCommunities?.RevokeWorkspace(owner, generation, sequence, code);
+        }
     }
     public Overlay.InformationOverlayCommunityContent? CurrentCommunityOverlay => _overlayCommunities?.ReadForDisplay();
+    public Task PrepareCommunityOverlayAsync(CancellationToken cancellation) =>
+        _overlayCommunities?.PrepareForDisplayAsync(cancellation) ?? Task.CompletedTask;
     public string? CurrentOverlaySceneMode => _overlayCommunities?.Mode;
+    public Overlay.OverlayPresetTrigger? CurrentOverlayPresetTrigger =>
+        _disposed ? null : _overlayCommunities?.CurrentPresetTrigger();
+    public (string? OwnerKey, long Generation) CurrentOverlaySourceScope
+    {
+        get
+        {
+            var owner = GameplayOwner();
+            return (_disposed || owner.Context is null ? null : Overlay.OverlaySceneChoiceStore.Hash(owner.Context), owner.Generation);
+        }
+    }
+    public Overlay.InformationOverlayRosterPreferences CurrentOverlayRosterPreferences =>
+        _overlayCommunities?.RosterPreferences ?? Overlay.InformationOverlayRosterPreferences.Empty;
     private Notifications.PlayerActivityRuntime? _playerActivity;
     public bool ConfigurePlayerActivity(Notifications.PlayerActivityRuntime runtime)
     {
@@ -74,6 +117,34 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
     // cause the Flutter session to discard events from one of the producers.
     public BridgeEnvelope NotificationActivation(long generation, object payload) =>
         _dispatcher.DomainInvalidation("notificationSettings.activated", generation) with { Payload = BridgePayload.From(payload) };
+    public BridgeEnvelope SocialNotification(long generation, object payload) =>
+        _dispatcher.DomainInvalidation("notificationSettings.social", generation) with { Payload = BridgePayload.From(payload) };
+    public async Task<Notifications.GameIdentityNotificationPolicy> ReadGameIdentityNotificationPolicyAsync(
+        BridgeAccountContext context, CancellationToken token)
+    {
+        var generation = _host.Generation;
+        if (_disposed || context != _host.CurrentContext)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.GameIdentityReadUnavailable);
+        var policy = await _host.GetGameIdentityPolicyAsync(context, token);
+        token.ThrowIfCancellationRequested();
+        if (_disposed || generation != _host.Generation || context != _host.CurrentContext)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.GameIdentityReadUnavailable);
+        return new(policy.State, policy.AuthoritativeHandle, policy.DetectedHandle);
+    }
+    public bool IsGameIdentityNotificationCurrent(BridgeAccountContext context, Notifications.GameIdentityNotificationPolicy expected)
+    {
+        try
+        {
+            var generation = _host.Generation;
+            if (_disposed || context != _host.CurrentContext) return false;
+            var policy = _host.ReadCurrentGameIdentityPolicy(context);
+            return !_disposed && generation == _host.Generation && context == _host.CurrentContext &&
+                policy is { State: "mismatch" } &&
+                string.Equals(policy.AuthoritativeHandle?.Trim(), expected.AuthoritativeHandle?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(policy.DetectedHandle?.Trim(), expected.DetectedHandle?.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
     public BridgeEnvelope UpdateProgress(long generation, object payload) =>
         _dispatcher.DomainInvalidation(Updates.FlutterUpdateBridgeDispatcher.ProgressEventName, generation)
             with { Payload = BridgePayload.From(payload) };
@@ -96,6 +167,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         AccountBridgeRequestNames.GetPersonalProfile,
         "personalProfile.readVisibility",
         "personalProfile.saveVisibility",
+        "personalProfile.readBackground",
+        "personalProfile.saveBackground",
         "communities.memberPersonalProfile",
         "users.profile",
         "users.social",
@@ -153,6 +226,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         AccountBridgeRequestNames.ReadCommunityInvitationOutbox,
         AccountBridgeRequestNames.ExecuteFriend,
         AccountBridgeRequestNames.ReadDirectMessages,
+        AccountBridgeRequestNames.WaitSocialActivity,
+        AccountBridgeRequestNames.WaitCommunityActivity,
         AccountBridgeRequestNames.SendDirectMessage,
         AccountBridgeRequestNames.MarkDirectMessagesRead,
         AccountBridgeRequestNames.ReadDirectMessagePrivacy,
@@ -162,7 +237,10 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         AccountBridgeRequestNames.ReadRecentlyPlayedPrivacy,
         AccountBridgeRequestNames.SaveRecentlyPlayedPrivacy,
         AccountBridgeRequestNames.ExecutePartyRoom,
-        AccountBridgeRequestNames.GetGameIdentityPolicy
+        AccountBridgeRequestNames.GetGameIdentityPolicy,
+        AccountBridgeRequestNames.PrepareHandleChange,
+        AccountBridgeRequestNames.ConfirmHandleChange,
+        AccountBridgeRequestNames.CancelHandleChange
     };
 
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } =
@@ -170,7 +248,12 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "overlayScenes.read",
             "overlayScenes.select",
             "overlayScenes.focusCommunity",
+            "overlayRoster.read",
+            "overlayRoster.update",
             "account.read",
+            "gameIdentity.prepareHandleChange",
+            "gameIdentity.confirmHandleChange",
+            "gameIdentity.cancelHandleChange",
             "account.avatar",
             "account.compatibility.read",
             "account.passwordRecovery",
@@ -230,6 +313,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "communities.manageAdmissions",
             "friends.commands",
             "directMessages.read",
+            "social.wait",
+            "communities.wait",
             "directMessages.send",
             "directMessages.markRead",
             "directMessages.privacyRead",
@@ -255,6 +340,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         "privacy.locationConfidence",
         "privacy.communityMemberScopes",
             "presence.visibility",
+            "presence.activity",
             "gameplayTime.local",
             "gameplayTime.history",
             "gameplayTime.reset",
@@ -278,6 +364,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
     private readonly Privacy.GameIdSettingsDispatcher? _gameIdSettings;
     private readonly Presence.GameplayTimeRuntime? _gameplayTime;
     private readonly Presence.GameLogRuntime? _gameLog;
+    private AppActivityObservation? _appActivity;
 
     internal AccountBridgeRuntime(IAccountBridgeHost host, Hangar.LocalHangarStore? localHangar = null,
         Profiles.LocalPersonalProfileStore? localProfile = null, Presence.GameplayTimeStore? gameplayTime = null,
@@ -345,6 +432,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         if (gameLog is not null)
         {
             _gameLog = new(gameLog, GameplayOwner, GameplayHandle, journal: eventJournal);
+            _gameLog.PublicationChanged += WakeGamePublication;
             _host.AccountChanged += SuspendGameLog;
         }
         if (localHangar is not null && localProfile is not null)
@@ -361,6 +449,17 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
 
     private void SuspendGameplayTime(long _) => _gameplayTime?.Suspend();
     private void SuspendGameLog(long _) => _gameLog?.Suspend();
+    private void WakeGamePublication()
+    {
+        _liveOverlaySink?.RequestContentRefresh();
+        // Leave the Game.log sampling lock before consulting account/transport
+        // state. Existing publishers recheck ownership, consent and visibility.
+        _ = Task.Run(async () => {
+            if (_disposed) return;
+            await Task.WhenAll(_friendSharing?.TickAsync() ?? Task.CompletedTask,
+                _privacyPublication?.TickAsync() ?? Task.CompletedTask);
+        });
+    }
     private void InvalidatePrivacyPublication(long _) => _privacyPublication?.Invalidate();
 
     private Privacy.PrivacyPublicationInput? PublicationInput()
@@ -372,7 +471,11 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         var check = _gameLog?.IdentityPolicyState ?? StarBridge.Core.Identity.LocalIdentityCheckState.NotObserved;
         var confirmed = check == StarBridge.Core.Identity.LocalIdentityCheckState.Match &&
             StarBridge.Core.Identity.IdentityBindingPolicy.Evaluate(identity.Identity, check).CanUseIdentitySensitiveNetworkWrites;
-        return new(owner.Context, owner.Generation, handle, confirmed, ConfirmedGameVersion, CurrentGameSession);
+        if (_host.IsLegacyCompatibilitySession)
+            confirmed = _host.ReadCurrentGameIdentityPolicy(owner.Context)?.SensitiveWritesAllowed == true;
+        var activity = Volatile.Read(ref _appActivity);
+        return new(owner.Context, owner.Generation, handle, confirmed, ConfirmedGameVersion, CurrentGameSession,
+            activity is not null && activity.Owner == owner.Context && activity.Generation == owner.Generation && activity.Away);
     }
 
     public async Task<bool> StopPrivacyPublicationAsync(CancellationToken token = default)
@@ -475,6 +578,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                 new ScmProfileCacheStore(),
                 configuration.EnvironmentId,
                 detectedGameIdentity ?? (() => runtime?._gameLog?.DetectedHandle),
+                recentGameIdentity: detectedGameIdentity is null ? () => runtime?._gameLog?.RecentDetectedHandle : null,
                 lastGameIdentityCheck: detectedGameIdentity is null
                     ? () => runtime?._gameLog?.IdentityPolicyState ??
                             StarBridge.Core.Identity.LocalIdentityCheckState.NotObserved
@@ -499,6 +603,10 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             new Settings.PresenceVisibilityStore(HostDataRoot.CurrentRoot));
         if (runtime._host is ScmAccountBridgeHost scm)
             scm.ConfigurePrivacyWriter(new Privacy.PrivacyRelayWriter(configuration.LegacyRelayBaseUri));
+        if (runtime._friendSharing is { } sharing)
+            sharing.Diagnostic = new Privacy.FriendSharingJournal(HostDataRoot.CurrentRoot).Record;
+        if (runtime._privacyPublication is { } realtime)
+            realtime.Diagnostic = new Privacy.PrivacyPublicationJournal(HostDataRoot.CurrentRoot).Record;
         runtime.DiagnosticsRelayUri = configuration.LegacyRelayBaseUri;
         return runtime;
     }
@@ -513,6 +621,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             return await _friendSharingBridge.DispatchAsync(request, cancellationToken);
         if (_gameIdSettings is not null && request.Name is "gameIdVisibility.read" or "gameIdVisibility.save")
             return await _gameIdSettings.DispatchAsync(request, cancellationToken);
+        if (_overlayCommunities is not null && request.Name is "overlayRoster.read" or "overlayRoster.update")
+            return await _overlayCommunities.DispatchRosterAsync(request, cancellationToken);
         if (_overlayCommunities is not null && request.Name is "overlayScenes.read" or "overlayScenes.select" or "overlayScenes.focusCommunity")
             return await _overlayCommunities.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
         if (_communityLogo is not null && Communities.CommunityLogoBridge.Requests.Contains(request.Name))
@@ -520,7 +630,18 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         if (_communitySharing is not null && request.Name is "privacy.communityTargets" or "privacy.communityMembers")
             return await _communitySharing.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
         if (_presenceVisibility is not null && request.Name is "presence.read" or "presence.set")
-            return await _presenceVisibility.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
+        {
+            var batch = await _presenceVisibility.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
+            if (request.Name == "presence.set" && batch.Response.Status == BridgeResponseStatuses.Ok &&
+                batch.Response.Payload.TryGetProperty("state", out var state) && state.GetString() == "ready")
+                // The confirmed mode is already durable and publication pause
+                // released. Wake the existing serialized publisher; do not hold
+                // the settings response behind another network acknowledgement.
+                _ = _friendSharing?.TickAsync();
+            return batch;
+        }
+        if (request.Name == "presence.activity")
+            return DispatchAppActivity(request);
         if (_privacyPublication is not null && request.Name is "privacy.publicationStatus" or "privacy.applyPublication" or "privacy.stopPublication")
         {
             try
@@ -608,7 +729,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                 : request.Name.StartsWith("gameplayTime.history", StringComparison.Ordinal)
                 ? await _gameplayTime.DispatchHistoryAsync(request, cancellationToken).ConfigureAwait(false)
                 : _gameplayTime.Dispatch(request, cancellationToken);
-        if (!EnabledRequests.Contains(request.Name))
+        if (request.Name != "bridge.cancel" && !EnabledRequests.Contains(request.Name))
         {
             return new BridgeDispatchBatch(
                 BridgeEnvelope.ErrorResponse(
@@ -654,8 +775,10 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         _eventSharing?.Dispose();
         _friendSharing?.Dispose();
         _activityReceiver?.Dispose();
+        DisposeLiveOverlayUpdates();
         _host.AccountChanged -= SuspendGameplayTime;
         _host.AccountChanged -= SuspendGameLog;
+        if (_gameLog is not null) _gameLog.PublicationChanged -= WakeGamePublication;
         _gameLog?.Dispose();
         _gameplayTime?.Dispose();
         _dispatcher.Dispose();

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/styles/future_restraint_style.dart';
 import '../../design_system/tokens/color_tokens.dart';
+import '../../design_system/tokens/starbridge_tokens.dart';
 import '../shell/chrome/presence_color.dart';
 
 import 'menu_bridge_style.dart';
@@ -11,6 +12,9 @@ import 'menu_comms_panel.dart' show MenuInlineAvatar;
 import 'menu_loading.dart';
 import 'menu_avatar_actions.dart';
 import 'menu_friends_controls.dart';
+import 'menu_friend_details.dart';
+import '../localization/app_strings.dart';
+import '../../features/common/social_identity_text.dart';
 
 typedef MenuFriend = ({
   String name,
@@ -23,14 +27,20 @@ typedef MenuFriend = ({
 // dark status tokens and mapping, never the menu's decorative cyan palette.
 final _presenceColors = FutureRestraintStyle.resolve(AppearanceMode.dark)
     .colors;
-Color menuPresenceColor(String presence) => switch (presence) {
-  'inGame' ||
-  'online' ||
-  'away' ||
-  'offline' => presenceColor(_presenceColors, 'presence.$presence'),
-  'invisible' => _presenceColors.offline,
-  _ => BridgeInk.muted,
-};
+Color menuPresenceColor(String presence, {BuildContext? context}) {
+  final colors = context == null
+      ? _presenceColors
+      : Theme.of(context).extension<StarBridgeTokens>()?.colors ??
+            _presenceColors;
+  return switch (presence) {
+    'inGame' ||
+    'online' ||
+    'away' ||
+    'offline' => presenceColor(colors, 'presence.$presence'),
+    'invisible' => colors.offline,
+    _ => context == null ? BridgeInk.muted : MenuBridgeColors.of(context).muted,
+  };
+}
 
 /// Display capabilities only; the primary engine revalidates every command.
 final class MenuFriendsView {
@@ -52,12 +62,16 @@ final class MenuFriendsView {
     this.chatKeys = const {},
     this.self,
     this.confirmation,
+    this.details = const {},
+    this.gameIds = const {},
   });
   final String state;
   final String scope;
   final int incoming;
   final List<MenuFriend> rows;
   final List<MenuFriend> requests;
+  final Map<String, MenuFriendDetails> details;
+  final Map<String, String> gameIds;
   final ({String name, String handle, String? avatar})? identity;
   final bool interactive, busy, requiresRefresh;
   final bool refreshing;
@@ -173,6 +187,32 @@ final class MenuFriendsView {
         throw const FormatException();
       }
       final parsed = [for (final row in rows) _row(row)];
+      final details = <String, MenuFriendDetails>{};
+      final gameIds = <String, String>{};
+      for (var i = 0; i < parsed.length; i++) {
+        final row = parsed[i];
+        final raw = rows[i] as Map;
+        if (section == 'friends' && row.key != null) {
+          final gameId = raw['gameId'];
+          if (gameId != null) {
+            if (gameId is! String ||
+                gameId.length > 128 ||
+                gameId.runes.any((code) => code < 32 || code == 127)) {
+              throw const FormatException();
+            }
+            gameIds[row.key!] = gameId;
+          }
+        }
+        if (row.presence == 'inGame' &&
+            row.key != null &&
+            section == 'friends') {
+          final detail = MenuFriendDetails.parse(
+            raw['details'],
+            raw['detailLabels'],
+          );
+          if (detail != null) details[row.key!] = detail;
+        }
+      }
       final requests = ready ? data['requests'] ?? const [] : const [];
       if (requests is! List || requests.length + rows.length > 5000) {
         throw const FormatException();
@@ -224,6 +264,8 @@ final class MenuFriendsView {
         incoming: incoming,
         scope: scope,
         rows: List.unmodifiable(parsed),
+        details: Map.unmodifiable(details),
+        gameIds: Map.unmodifiable(gameIds),
         requests: List.unmodifiable(parsedRequests),
         identity: identityRow == null
             ? null
@@ -309,6 +351,10 @@ class MenuFriendsPanel extends StatefulWidget {
 }
 
 class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
+  MenuBridgeColors get ink => MenuBridgeColors.of(context);
+  Color _statusColor(String value) =>
+      menuPresenceColor(value, context: context);
+
   String query = '';
   bool offline = true;
   @override
@@ -324,7 +370,7 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
   Widget build(BuildContext context) {
     final view = widget.view;
     final onlineCount = view.rows
-        .where((r) => const ['online', 'inGame', 'away'].contains(r.presence))
+        .where((r) => ['online', 'inGame', 'away'].contains(r.presence))
         .length;
     final rows = view.rows.where(
       (r) => r.name.toLowerCase().contains(query.toLowerCase()),
@@ -333,7 +379,7 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
       if (!widget.embedded)
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
                 '好友',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
@@ -341,17 +387,17 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
             ),
             if (view.state == 'ready') BridgeCaption('$onlineCount 在线'),
             BridgeMenuAction(
-              key: const ValueKey('menu-panel-close'),
+              key: ValueKey('menu-panel-close'),
               label: '关闭好友面板',
               onPressed: widget.onClose,
-              padding: const EdgeInsets.all(10),
-              child: const MenuGlyphView(MenuGlyph.close, size: 16),
+              padding: EdgeInsets.all(10),
+              child: MenuGlyphView(MenuGlyph.close, size: 16),
             ),
           ],
         ),
-      if (!widget.embedded) const SizedBox(height: 20),
+      if (!widget.embedded) SizedBox(height: 20),
       if (view.state == 'idle' || view.state == 'loading' || view.refreshing)
-        const MenuLoading(),
+        MenuLoading(),
       if (view.interactive && widget.onAction != null)
         MenuFriendsControls(
           key: ValueKey(view.scope),
@@ -369,33 +415,33 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
       else ...[
         if (!view.interactive)
           TextField(
-            key: const ValueKey('menu-friends-filter'),
+            key: ValueKey('menu-friends-filter'),
             style: DefaultTextStyle.of(context).style,
-            cursorColor: BridgeInk.blue,
+            cursorColor: ink.blue,
             onChanged: (value) => setState(() => query = value),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: '筛选已有好友',
-              hintStyle: TextStyle(color: BridgeInk.muted, fontSize: 14),
+              hintStyle: TextStyle(color: ink.muted, fontSize: 14),
               filled: true,
-              fillColor: BridgeInk.ground,
+              fillColor: ink.ground,
               contentPadding: EdgeInsets.all(10),
               border: UnderlineInputBorder(
-                borderSide: BorderSide(color: BridgeInk.line),
+                borderSide: BorderSide(color: ink.line),
               ),
               enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: BridgeInk.line),
+                borderSide: BorderSide(color: ink.line),
               ),
               focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: BridgeInk.blue),
+                borderSide: BorderSide(color: ink.blue),
               ),
               isDense: true,
             ),
           ),
         if (view.section == 'friends') ...[
           BridgeMenuAction(
-            key: const ValueKey('friends-requests'),
+            key: ValueKey('friends-requests'),
             label: '好友申请 · ${view.incoming}',
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+            padding: EdgeInsets.symmetric(vertical: 10, horizontal: 6),
             onPressed: widget.onAction == null || view.busy
                 ? null
                 : () => widget.onAction!('section', '', 'incoming'),
@@ -404,34 +450,26 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
                 MenuGlyphView(
                   MenuGlyph.addFriend,
                   size: 18,
-                  color: view.incoming > 0 ? BridgeInk.amber : BridgeInk.muted,
+                  color: view.incoming > 0 ? ink.amber : ink.muted,
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     '好友申请',
                     style: TextStyle(
                       fontSize: 13,
-                      color: view.incoming > 0
-                          ? BridgeInk.amber
-                          : BridgeInk.text,
+                      color: view.incoming > 0 ? ink.amber : ink.text,
                     ),
                   ),
                 ),
                 Text(
                   '${view.incoming}',
                   style: TextStyle(
-                    color: view.incoming > 0
-                        ? BridgeInk.amber
-                        : BridgeInk.muted,
+                    color: view.incoming > 0 ? ink.amber : ink.muted,
                   ),
                 ),
-                const SizedBox(width: 8),
-                const MenuGlyphView(
-                  MenuGlyph.next,
-                  size: 16,
-                  color: BridgeInk.muted,
-                ),
+                SizedBox(width: 8),
+                MenuGlyphView(MenuGlyph.next, size: 16, color: ink.muted),
               ],
             ),
           ),
@@ -445,49 +483,47 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
               _ => '搜索结果',
             },
             view.rows.length,
-            view.section == 'incoming' ? BridgeInk.amber : BridgeInk.blue,
+            view.section == 'incoming' ? ink.amber : ink.blue,
           ),
         if (view.rows.isEmpty)
           BridgeCaption(view.section == 'friends' ? '暂无好友' : '暂无记录'),
-        if (view.rows.isNotEmpty && rows.isEmpty)
-          const BridgeCaption('没有匹配的好友'),
+        if (view.rows.isNotEmpty && rows.isEmpty) BridgeCaption('没有匹配的好友'),
         if (view.section != 'friends')
           for (final row in rows)
             _person(row, request: view.section == 'incoming'),
         if (view.section == 'friends') ...[
-          _section('在线', onlineCount, menuPresenceColor('online')),
+          _section('在线', onlineCount, _statusColor('online')),
           for (final row in rows.where(
-            (r) => const ['online', 'inGame', 'away'].contains(r.presence),
+            (r) => ['online', 'inGame', 'away'].contains(r.presence),
           ))
             _person(row),
-          if (rows.any((r) => r.presence == 'unknown')) ...[
-            _section(
-              '状态未共享',
-              rows.where((r) => r.presence == 'unknown').length,
-              BridgeInk.muted,
-            ),
-            for (final row in rows.where((r) => r.presence == 'unknown'))
-              _person(row),
-          ],
         ],
         if (view.section == 'friends' &&
-            rows.any((r) => r.presence == 'offline')) ...[
+            rows.any(
+              (r) => r.presence == 'offline' || r.presence == 'unknown',
+            )) ...[
           BridgeMenuAction(
             label: '展开或收起离线好友',
             onPressed: () => setState(() => offline = !offline),
             padding: EdgeInsets.zero,
             child: _section(
               '${offline ? '▾' : '▸'} 离线',
-              rows.where((r) => r.presence == 'offline').length,
-              BridgeInk.muted,
+              rows
+                  .where(
+                    (r) => r.presence == 'offline' || r.presence == 'unknown',
+                  )
+                  .length,
+              ink.muted,
             ),
           ),
           if (offline)
-            for (final row in rows.where((r) => r.presence == 'offline'))
+            for (final row in rows.where(
+              (r) => r.presence == 'offline' || r.presence == 'unknown',
+            ))
               _person(row),
         ],
-        const SizedBox(height: 12),
-        if (!view.interactive) const BridgeCaption('只读试用 · 好友操作请在客户端进行'),
+        SizedBox(height: 12),
+        if (!view.interactive) BridgeCaption('只读试用 · 好友操作请在客户端进行'),
       ],
     ];
     Widget column(List<Widget> children) => Column(
@@ -496,7 +532,7 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
     );
     Widget plate(Widget child) => BridgePlate(
       framed: !widget.embedded,
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(12),
       child: child,
     );
     return LayoutBuilder(
@@ -519,7 +555,7 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
               ...content.take(controls + 1),
               Expanded(
                 child: SingleChildScrollView(
-                  key: const ValueKey('menu-scroll-friends'),
+                  key: ValueKey('menu-scroll-friends'),
                   child: column(content.skip(controls + 1).toList()),
                 ),
               ),
@@ -527,7 +563,7 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
           );
         }
         return SingleChildScrollView(
-          key: const ValueKey('menu-scroll-friends'),
+          key: ValueKey('menu-scroll-friends'),
           child: plate(column(content)),
         );
       },
@@ -535,8 +571,8 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
   }
 
   Widget _section(String label, int count, Color color) => Container(
-    margin: const EdgeInsets.only(top: 10, bottom: 4),
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+    margin: EdgeInsets.only(top: 10, bottom: 4),
+    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 7),
     width: double.infinity,
     color: color.withValues(alpha: .08),
     child: Text(
@@ -546,21 +582,24 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
   );
 
   Widget _person(MenuFriend row, {bool request = false}) {
-    final color = request ? BridgeInk.amber : menuPresenceColor(row.presence);
+    // Presentation only: retain unknown in the source for privacy/event gates.
+    final color = request
+        ? ink.amber
+        : _statusColor(row.presence == 'unknown' ? 'offline' : row.presence);
     final canChat =
         row.key != null &&
         widget.view.chatKeys.contains(row.key) &&
         widget.onChat != null &&
         !widget.view.busy &&
         !widget.view.requiresRefresh;
-    final allowed = widget.view.actions[row.key] ?? const <String>[];
+    final allowed = widget.view.actions[row.key] ?? <String>[];
     return Container(
       key: ValueKey('friend-row-${row.key ?? row.name}'),
-      margin: const EdgeInsets.symmetric(vertical: 3),
+      margin: EdgeInsets.symmetric(vertical: 3),
       decoration: BoxDecoration(
         border: Border(left: BorderSide(color: color, width: 2)),
       ),
-      padding: const EdgeInsets.only(left: 8, top: 4, bottom: 4),
+      padding: EdgeInsets.only(left: 8, top: 4, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -576,14 +615,14 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
                     MenuItemButton(
                       key: ValueKey('friend-chat-${row.key}'),
                       onPressed: () => widget.onChat!(row.key!),
-                      child: const Text('发消息'),
+                      child: Text('发消息'),
                     ),
                   if (row.key != null &&
                       widget.onAction != null &&
                       !widget.view.busy &&
                       !widget.view.requiresRefresh)
                     for (final action
-                        in widget.view.actions[row.key] ?? const <String>[])
+                        in widget.view.actions[row.key] ?? <String>[])
                       MenuItemButton(
                         key: ValueKey('friend-$action-${row.key}'),
                         onPressed: () =>
@@ -591,9 +630,9 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
                         child: Text(
                           menuFriendActionLabel(action),
                           style: TextStyle(
-                            color: const {'remove', 'block'}.contains(action)
-                                ? BridgeInk.danger
-                                : BridgeInk.text,
+                            color: {'remove', 'block'}.contains(action)
+                                ? ink.danger
+                                : ink.text,
                           ),
                         ),
                       ),
@@ -603,49 +642,72 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
                     : () => widget.onProfile!(row.key!),
                 child: MenuInlineAvatar(source: row.avatar, name: row.name),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: 12),
               Expanded(
                 child: BridgeMenuAction(
                   key: ValueKey('friend-open-${row.key}'),
                   label: canChat ? '${row.name} · 打开聊天' : row.name,
                   onPressed: canChat ? () => widget.onChat!(row.key!) : null,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 6,
-                    horizontal: 4,
-                  ),
+                  padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                   child: Row(
                     children: [
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              row.name,
-                              style: const TextStyle(
+                            SocialIdentityText(
+                              callsign: row.name,
+                              gameId: widget.view.gameIds[row.key] ?? '',
+                              callsignStyle: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
                               ),
+                              gameIdColor: ink.muted,
                             ),
-                            Text(
-                              request
-                                  ? '请求添加你为好友'
-                                  : switch (row.presence) {
-                                      'inGame' => '游戏中',
-                                      'online' => '应用在线',
-                                      'away' => '离开',
-                                      'offline' => '离线',
-                                      _ => '状态未共享',
-                                    },
-                              style: TextStyle(fontSize: 12, color: color),
+                            Wrap(
+                              key: ValueKey('friend-shared-details-${row.key}'),
+                              spacing: 8,
+                              runSpacing: 2,
+                              children: [
+                                Text(
+                                  request
+                                      ? '请求添加你为好友'
+                                      : switch (row.presence) {
+                                          'inGame' => '游戏中',
+                                          'online' => '应用在线',
+                                          'away' => '暂离',
+                                          'offline' => '离线',
+                                          _ => '离线',
+                                        },
+                                  style: TextStyle(fontSize: 12, color: color),
+                                ),
+                                if (!request && row.presence == 'inGame') ...[
+                                  for (final detail
+                                      in widget.view.details[row.key]
+                                              ?.localized(
+                                                AppStrings.of(context),
+                                              ) ??
+                                          <String>[])
+                                    Text(
+                                      detail,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: color,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
+                              ],
                             ),
                           ],
                         ),
                       ),
                       if (canChat)
-                        const MenuGlyphView(
+                        MenuGlyphView(
                           MenuGlyph.next,
                           size: 16,
-                          color: BridgeInk.muted,
+                          color: ink.muted,
                         ),
                     ],
                   ),
@@ -656,12 +718,12 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
           if (widget.onAction != null &&
               (request || widget.view.section != 'friends'))
             Padding(
-              padding: const EdgeInsets.only(left: 48, top: 4),
+              padding: EdgeInsets.only(left: 48, top: 4),
               child: Wrap(
                 spacing: 8,
                 children: [
                   for (final action in allowed.where(
-                    (a) => const {
+                    (a) => {
                       'accept',
                       'reject',
                       'send',
@@ -678,7 +740,7 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
                               row.key == null
                           ? null
                           : () => widget.onAction!('prepare', row.key!, action),
-                      padding: const EdgeInsets.symmetric(
+                      padding: EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 6,
                       ),
@@ -687,10 +749,10 @@ class _MenuFriendsPanelState extends State<MenuFriendsPanel> {
                         style: TextStyle(
                           fontSize: 12,
                           color: action == 'accept'
-                              ? BridgeInk.green
+                              ? ink.green
                               : action == 'send'
-                              ? BridgeInk.blue
-                              : BridgeInk.muted,
+                              ? ink.blue
+                              : ink.muted,
                         ),
                       ),
                     ),

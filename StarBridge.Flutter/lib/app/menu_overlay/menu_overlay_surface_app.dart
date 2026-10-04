@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -378,6 +379,7 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    scrollBehavior: const StarBridgeScrollBehavior(),
     debugShowCheckedModeBanner: false,
     locale: const Locale('zh', 'CN'),
     supportedLocales: AppStrings.supportedLocales,

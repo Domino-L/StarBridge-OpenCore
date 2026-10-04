@@ -12,20 +12,34 @@ internal sealed class NotificationSettingsConflictException : Exception;
 // Device-local visual channels. No account/source policy or sound duplication.
 public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot, Func<long> generation, Func<bool>? canNotifyDesktop = null,
     IInformationOverlayReminderSink? overlay = null, IDesktopNotificationSink? desktop = null,
-    Func<long, object, BridgeEnvelope>? activationEvent = null) : IBridgeRequestDispatcher
+    Func<long, object, BridgeEnvelope>? activationEvent = null,
+    Func<long, object, BridgeEnvelope>? socialEvent = null,
+    Func<BridgeAccountContext, CancellationToken, Task<GameIdentityNotificationPolicy>>? gameIdentityPolicy = null,
+    Func<bool>? canNotifyGameIdentity = null,
+    Func<BridgeAccountContext, GameIdentityNotificationPolicy, bool>? isGameIdentityCurrent = null,
+    Func<string>? desktopSuppressionReason = null) : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } = ["notificationSettings.read", "notificationSettings.save",
-        "notificationSettings.presentDesktop", "notificationSettings.testDesktop", "notificationSettings.clearDesktop", "notificationSettings.consumeActivation"];
+        "notificationSettings.presentDesktop", "notificationSettings.testDesktop", "notificationSettings.clearDesktop", "notificationSettings.consumeActivation",
+        "gameIdentity.notifyMismatch"];
     private readonly string _path = Path.Combine(Path.GetFullPath(dataRoot), "notification-settings.v1.json");
     private readonly object _gate = new();
+    private readonly NotificationDeliveryJournal _delivery = new(dataRoot);
+    private void RecordDesktop(NotificationDeliveryStage stage) => _delivery.Record(NotificationDeliveryChannel.Desktop, stage);
+    private string DesktopSuppressionReason()
+    {
+        try { return desktopSuppressionReason?.Invoke() ?? (canNotifyDesktop?.Invoke() == true ? "" : "unavailable"); }
+        catch { return "unavailable"; }
+    }
     private readonly RoomAudioObserver _rooms = new();
     private readonly DirectMessageNotificationObserver _direct = new();
+    private readonly FriendRequestNotificationObserver _friends = new();
     internal IReadOnlyList<string> DirectMessageCandidates { get { lock (_gate) return _direct.FreshKeys.ToArray(); } }
     private bool _disposed;
     private long _reminderEpoch;
     private string[] _activeIds = [];
     public event Action<BridgeEnvelope>? EventReady;
-    internal void Reset() { lock (_gate) { Interlocked.Increment(ref _directEpoch); _rooms.Reset(); _direct.Reset(); InvalidateReminder(); } }
+    internal void Reset() { lock (_gate) { Interlocked.Increment(ref _directEpoch); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetIdentityNotifications(); InvalidateReminder(); } }
     private void InvalidateReminder() {
         Interlocked.Increment(ref _reminderEpoch);
         _activeIds = [];
@@ -68,7 +82,8 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
         } finally { if (File.Exists(temp)) File.Delete(temp); }
     }
     public ValueTask<BridgeDispatchBatch> DispatchAsync(BridgeEnvelope request, CancellationToken cancellationToken = default) {
-        if (request.Name == "notificationSettings.consumeActivation") return ValueTask.FromResult(ConsumeActivation(request));
+        if (request.Name == "notificationSettings.consumeActivation") return ConsumeActivationAsync(request, cancellationToken);
+        if (request.Name == "gameIdentity.notifyMismatch") return DispatchIdentityMismatchAsync(request, cancellationToken);
         if (request.Name is "notificationSettings.presentDesktop" or "notificationSettings.testDesktop" or "notificationSettings.clearDesktop")
             return DispatchDesktopAsync(request, cancellationToken);
         lock (_gate) {
@@ -113,6 +128,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
     }
     internal async ValueTask<BridgeEnvelope> ObserveAsync(BridgeEnvelope request, BridgeEnvelope response, CancellationToken token) {
         if (request.Name == "directMessages.read") return await ObserveDirectAsync(request, response, token).ConfigureAwait(false);
+        if (request.Name == "notificationInbox.read") return await ObserveFriendsAsync(request, response, token).ConfigureAwait(false);
         LocalNotificationSettings settings;
         InformationOverlayReminder? reminder;
         int invitations, applications;
@@ -171,5 +187,5 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
             return response with { Payload = BridgePayload.From(payload) };
         }
     }
-    public void Dispose() { lock (_gate) { _disposed = true; _rooms.Reset(); _direct.Reset(); InvalidateReminder(); } desktop?.Dispose(); }
+    public void Dispose() { lock (_gate) { _disposed = true; _rooms.Reset(); _direct.Reset(); _friends.Reset(); InvalidateReminder(); } desktop?.Dispose(); }
 }

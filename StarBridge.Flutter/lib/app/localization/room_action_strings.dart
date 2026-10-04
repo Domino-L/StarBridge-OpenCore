@@ -16,6 +16,9 @@ const simplifiedRoomActionStrings = <String, String>{
   'rooms.action.keepPasswordHint': '密码留空将保留原密码；输入新密码会替换原密码。',
   'rooms.action.resetDurationHint': '保存后，招募时长和自动解散时间将从现在重新计时。',
   'rooms.action.notHost': '你已不是这个房间的房主，请刷新房间。',
+  'rooms.action.removed': '已将成员移出房间。',
+  'rooms.action.hostTransferred': '房主已转移，你仍在房间中。',
+  'rooms.action.memberGone': '该成员已离开或不能被移出，请刷新房间。',
   'rooms.action.applicationGone': '这条申请已处理或失效，请刷新房间。',
   'rooms.action.applicantMoved': '该玩家已加入其他房间，请刷新申请列表。',
   'rooms.action.capacityTooSmall': '人数上限不能低于当前成员数。',
@@ -85,6 +88,9 @@ const traditionalRoomActionStrings = <String, String>{
   'rooms.action.keepPasswordHint': '密碼留空將保留原密碼；輸入新密碼會替換原密碼。',
   'rooms.action.resetDurationHint': '儲存後，招募時長和自動解散時間將從現在重新計時。',
   'rooms.action.notHost': '你已不是這個房間的房主，請重新整理房間。',
+  'rooms.action.removed': '已將成員移出房間。',
+  'rooms.action.hostTransferred': '房主已轉移，你仍在房間中。',
+  'rooms.action.memberGone': '該成員已離開或不能被移出，請重新整理房間。',
   'rooms.action.applicationGone': '這條申請已處理或失效，請重新整理房間。',
   'rooms.action.applicantMoved': '該玩家已加入其他房間，請重新整理申請清單。',
   'rooms.action.capacityTooSmall': '人數上限不能低於目前成員數。',
@@ -155,7 +161,11 @@ const englishRoomActionStrings = <String, String>{
   'rooms.action.resetDurationHint':
       'Saving restarts the recruitment and auto-disband timers from now.',
   'rooms.action.notHost':
-      'You are no longer the host of this room. Refresh rooms.',
+      'You are no longer the host of this room. Refresh the room.',
+  'rooms.action.removed': 'Member removed from the room.',
+  'rooms.action.hostTransferred': 'Host transferred. You are still in the room.',
+  'rooms.action.memberGone':
+      'This member has left or cannot be removed. Refresh the room.',
   'rooms.action.applicationGone':
       'This request was handled or expired. Refresh rooms.',
   'rooms.action.applicantMoved':

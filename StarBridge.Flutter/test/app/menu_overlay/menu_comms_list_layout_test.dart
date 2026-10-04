@@ -135,7 +135,7 @@ void main() {
     },
   );
   testWidgets(
-    'opening communications loads its two sources but never room chat',
+    'opening communications does not load organization or room chat',
     (tester) async {
       size(tester, const Size(1400, 900));
       final leases = <String>[];
@@ -157,7 +157,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('menu-tool-chat')));
       await tester.pumpAndSettle();
-      expect(leases, ['organizationChat']);
+      expect(leases, isEmpty);
       expect(find.text('房间聊天'), findsNothing);
       expect(
         find.byKey(const ValueKey('menu-comms-tab-private')),

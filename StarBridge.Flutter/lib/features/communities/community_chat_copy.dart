@@ -3,6 +3,32 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityChatCopy = <String, (String, String, String)>{
+  'self': ('我', '我', 'Me'),
+  'restoreLocalDraft': ('放回输入框编辑', '放回輸入框編輯', 'Move back to composer'),
+  'restoreLocalBlocked': (
+    '输入框有未发送内容，清空后可放回。',
+    '輸入框有未傳送內容，清空後可放回。',
+    'The composer has a draft. Clear it before moving this message back.',
+  ),
+  'localSending': ('发送中', '傳送中', 'Sending'),
+  'localSent': ('已发送', '已傳送', 'Sent'),
+  'localUnknown': (
+    '尚未确认，可能已发送',
+    '尚未確認，可能已傳送',
+    'Unconfirmed; may have been sent',
+  ),
+  'localFailed': ('未能发送，内容已保留', '未能傳送，內容已保留', 'Not sent; message kept'),
+  'localRateLimited': (
+    '发送过于频繁，请稍后重试',
+    '傳送過於頻繁，請稍後重試',
+    'Sending too quickly. Try again shortly',
+  ),
+  'checkSend': ('核对发送结果', '核對傳送結果', 'Check send status'),
+  'localLimit': (
+    '有较多消息尚未核对，请先刷新消息。新草稿会保留。',
+    '有較多訊息尚未核對，請先重新整理訊息。新草稿會保留。',
+    'Several messages still need checking. Refresh messages first; your new draft is kept.',
+  ),
   'sharePreset': ('分享浮层预设', '分享浮層預設', 'Share overlay preset'),
   'importPreset': ('导入为新预设', '匯入為新預設', 'Import as new preset'),
   'shareHint': (
@@ -47,6 +73,11 @@ const communityChatCopy = <String, (String, String, String)>{
   'refresh': ('刷新消息', '重新整理訊息', 'Refresh messages'),
   'older': ('查看更早消息', '查看更早訊息', 'Older messages'),
   'latest': ('回到最新', '回到最新', 'Back to latest'),
+  'newMessages': (
+    '有新消息 · 回到最新',
+    '有新訊息 · 回到最新',
+    'New messages · Back to latest',
+  ),
   'empty': (
     '还没有消息，可以在这里开始交流。',
     '還沒有訊息，可以在這裡開始交流。',

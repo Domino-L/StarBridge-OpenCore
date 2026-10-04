@@ -102,15 +102,15 @@ void main() {
       await tester.pumpWidget(scene(loading: false, failed: true));
       await tester.pumpAndSettle();
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.brokenImage), findsOneWidget);
       await tester.pumpWidget(scene(reduced: true));
       await tester.pumpAndSettle();
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.byIcon(Icons.hourglass_top), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.hourglassTop), findsOneWidget);
       expect(find.byTooltip('正在加载图片…'), findsOneWidget);
       await tester.pumpWidget(scene(loading: false));
       await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.groups_outlined), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.groups), findsOneWidget);
       expect(find.byType(CommunityImageLoading), findsNothing);
       expect(tester.takeException(), isNull);
     },

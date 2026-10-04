@@ -24,6 +24,19 @@ internal static class FriendsReaderTests
         Check(FriendsReader.Parse(Directory(User(relation: "future-state"))).Friends.Single().Relationship == "unknown", "Unknown relation is not permission.");
         var search = FriendsReader.Parse(JsonSerializer.SerializeToUtf8Bytes(new { results = new[] { User(relation: "none") } }), "测试");
         Check(search.Query == "测试" && search.Results.Length == 1 && search.Friends.Length == 0 && search.RefreshedAt is null, "Search cannot masquerade as directory.");
+        foreach (var relation in new[] { "none", "incoming", "outgoing", "blocked", "unknown" })
+        {
+            var excessive = new {
+                accountId = "synthetic-nonfriend", callsign = "Search", gameId = "", relationshipState = relation,
+                presence = "InGame", lastUpdated = Now,
+                shared = new { presence = "InGame", serverId = "private-server", serverRegion = "private-region",
+                    sameServer = true, ship = "private-ship", location = "private-location", lastOnlineAt = Now }
+            };
+            var bounded = FriendsReader.Parse(JsonSerializer.SerializeToUtf8Bytes(new { results = new[] { excessive } }),
+                "Search", observePresence: true, sharing: true).Results.Single();
+            Check(bounded.Shared is null && bounded.SharedLabels is null && bounded.ObservedPresence is null,
+                "Even overbroad search responses cannot cross the Host bridge as friend sharing.");
+        }
         foreach (var json in new[] {
             "{}", "{\"friends\":[],\"friends\":[]}",
             JsonSerializer.Serialize(new { friends = new[] { new { user = User(), relationshipUpdatedAt = Now }, new { user = User(), relationshipUpdatedAt = Now } }, incomingRequests = Array.Empty<object>(), outgoingRequests = Array.Empty<object>(), blockedUsers = Array.Empty<object>(), refreshedAt = Now })
@@ -35,6 +48,11 @@ internal static class FriendsReaderTests
     }
     internal static async Task HttpAndRequest()
     {
+        using (var combined = new FriendsReader(new Uri("https://relay.example.test/"), new Handler((request, _) => {
+            Check(request.RequestUri!.Query.Contains("includePresence=true") && request.RequestUri.Query.Contains("includeSharing=true"),
+                "Activity observation must not remove the shared status fields requested by the friend page.");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Directory()) });
+        }))) await combined.ReadAsync("synthetic-token", null, default, observePresence: true, sharing: true);
         var calls = 0;
         using var reader = new FriendsReader(new Uri("https://relay.example.test/base"), new Handler((request, _) => {
             calls++;

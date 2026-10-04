@@ -10,5 +10,10 @@
   <ItemGroup>
     <ProjectReference Include="../StarBridge.OverlayRuntime.Windows/StarBridge.OverlayRuntime.Windows.csproj" />
     <Using Include="StarBridge.Core.Overlay" />
+    <Compile Include="../StarBridge.NativeHost/WindowsNotificationActivity.cs" Link="NativeHost/WindowsNotificationActivity.cs" />
+    <!-- Only the regression harness links the old pure producer seam. The
+         standalone renderer must still exclude MainWindow and its application. -->
+    <Compile Include="../StarBridge.Desktop/FleetEventShipNormalizer.cs" Link="Legacy/FleetEventShipNormalizer.cs"
+             Condition="Exists('../StarBridge.Desktop/FleetEventShipNormalizer.cs')" />
   </ItemGroup>
 </Project>

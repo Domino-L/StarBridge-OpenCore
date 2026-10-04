@@ -148,88 +148,71 @@ bool overlayWorkspaceFieldVisible(
 bool overlayWorkspaceFieldEnabled(
   String field,
   OverlayWorkspaceSettings settings,
+) => overlayWorkspaceFieldDisabledReason(field, settings) == null;
+
+/// One policy drives both availability and its explanation.
+String? overlayWorkspaceFieldDisabledReason(
+  String field,
+  OverlayWorkspaceSettings settings,
 ) {
-  final appearance = overlayWorkspaceAppearanceRule(settings);
-  if (appearance.locksTheme &&
-      (field == 'theme' || field == 'autoThemeByShip')) {
-    return false;
+  const prefix = 'overlay.workspace.disabled.';
+  if (overlayWorkspaceAppearanceRule(settings).locksTheme &&
+      const {'theme', 'autoThemeByShip'}.contains(field)) {
+    return '${prefix}fixedPalette';
+  }
+  if (field.startsWith('crosshair') && settings['showCrosshair'] != true) {
+    return '${prefix}crosshair';
   }
   if (field == 'crosshairColor' && settings['crosshairUseThemeColor'] == true) {
-    return false;
+    return '${prefix}themeColor';
   }
-  if (const {
-        'crosshairMode',
-        'crosshairUseThemeColor',
-        'crosshairSize',
-        'crosshairThickness',
-        'crosshairOpacity',
-        'crosshairShowCenterMark',
-        'crosshairCenterMarkSize',
-        'crosshairGap',
-        'crosshairOutlineOpacity',
-      }.contains(field) &&
-      settings['showCrosshair'] != true) {
-    return false;
-  }
-  final crosshairMode = settings['crosshairMode'];
-  if (crosshairMode == 'Dot' &&
-      const {
-        'crosshairSize',
-        'crosshairThickness',
-        'crosshairGap',
-        'crosshairShowCenterMark',
-      }.contains(field)) {
-    return false;
-  }
-  if (crosshairMode == 'Circle' && field == 'crosshairGap') {
-    return false;
+  final mode = settings['crosshairMode'];
+  if ((mode == 'Dot' &&
+          const {
+            'crosshairSize',
+            'crosshairThickness',
+            'crosshairGap',
+            'crosshairShowCenterMark',
+          }.contains(field)) ||
+      (mode == 'Circle' && field == 'crosshairGap')) {
+    return '${prefix}crosshairStyle';
   }
   if (field == 'crosshairCenterMarkSize' &&
-      crosshairMode != 'Dot' &&
+      mode != 'Dot' &&
       settings['crosshairShowCenterMark'] != true) {
-    return false;
+    return '${prefix}centerMark';
   }
-  if (const {
-        'eventNotificationSide',
-        'eventNotificationDurationSeconds',
-        'eventNotificationTypes',
-        'eventNotificationMaxVisibleCount',
-        'eventNotificationPinImportant',
-        'eventNotificationAnimationSpeed',
-        'eventNotificationDurations',
-        'eventNotificationTextOpacity',
-        'eventNotificationBackgroundOpacity',
-      }.contains(field) &&
+  if (field.startsWith('eventNotification') &&
       settings['showEventNotifications'] != true) {
-    return false;
+    return '${prefix}events';
   }
   if (field.startsWith('chat') &&
       field != 'chatDisplayMode' &&
       settings['showChat'] != true) {
-    return false;
+    return '${prefix}chat';
   }
   if (field == 'hideMemberOnlineStatus' &&
       settings['hideOfflineMembers'] != true) {
-    return false;
+    return '${prefix}offlineMembers';
   }
   if (const {
         'communicationFriendEvents',
         'communicationEventDurationSeconds',
+        'communicationMessagePreview',
       }.contains(field) &&
       settings['showNotice'] != true) {
-    return false;
+    return '${prefix}notice';
   }
   if (field == 'communicationMessagePreview' &&
-      (settings['showNotice'] != true ||
-          settings['communicationFriendEvents'] != true)) {
-    return false;
+      settings['communicationFriendEvents'] != true) {
+    return '${prefix}friendEvents';
   }
   if (const {
         'skipStartupTransitionWhenGameForeground',
         'startupTransitionFrameRate',
       }.contains(field) &&
       settings['enableStartupTransition'] != true) {
-    return false;
+    return '${prefix}startup';
   }
-  return true;
+  return null;
 }

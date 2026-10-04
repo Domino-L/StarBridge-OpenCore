@@ -6,6 +6,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using SkiaSharp;
 using Button = System.Windows.Controls.Button;
 using Image = System.Windows.Controls.Image;
 using Brush = System.Windows.Media.Brush;
@@ -37,6 +38,10 @@ internal sealed class DesktopNotificationCard : Border
             : hidden ? Local("打开应用查看。", "開啟應用程式查看。", "Open the app to view it.")
             : notice.Preview == "fullContent" ? Local($"新邀请 {notice.Invitations} · 新加入申请 {notice.Applications}", $"新邀請 {notice.Invitations} · 新加入申請 {notice.Applications}", $"Invitations: {notice.Invitations} · Join requests: {notice.Applications}")
             : Local("有新的房间邀请或加入申请。", "有新的房間邀請或加入申請。", "New room invitations or join requests.");
+        if (notice.FriendRequests > 0 && !hidden) {
+            title = Local("新的好友申请", "新的好友申請", "New friend request");
+            body = Local($"收到 {notice.FriendRequests} 条好友申请，请打开应用查看。", $"收到 {notice.FriendRequests} 則好友申請，請開啟應用程式查看。", $"You have {notice.FriendRequests} new friend requests. Open the app to review.");
+        }
         if (notice.DirectMessage is { } direct && !hidden) {
             title = string.IsNullOrWhiteSpace(direct.Callsign)
                 ? Local("收到新私信", "收到新私訊", "New direct message") : direct.Callsign;
@@ -50,6 +55,10 @@ internal sealed class DesktopNotificationCard : Border
             body = community.Management ? Local("有新的加入申请待处理。", "有新的加入申請待處理。", "New join requests need your review.")
                 : notice.Preview == "fullContent" ? (string.IsNullOrWhiteSpace(community.Callsign) ? "" : community.Callsign + ": ") + community.Text
                 : Local("有新的组织聊天消息。", "有新的組織聊天訊息。", "New organization chat message.");
+        }
+        if (notice.GameIdentityMismatch && !hidden) {
+            title = Local("游戏身份需要核对", "遊戲身分需要核對", "Review your game identity");
+            body = Local("游戏身份与应用记录不一致，请打开应用核对。", "遊戲身分與應用程式記錄不一致，請開啟應用程式核對。", "Your game identity differs from the app record. Open the app to review.");
         }
         if (notice.Activity is { } activity) {
             tone = Paint(activity.Kind switch {
@@ -94,7 +103,7 @@ internal sealed class DesktopNotificationCard : Border
         brand.Source = new BitmapImage(new Uri($"pack://application:,,,/{assemblyName};component/Assets/Brand/notification_mark_{(light ? "light" : "dark")}.png"));
         header.Children.Add(brand);
         header.Children.Add(Text("StarBridge", primary, 13, true));
-        header.Children.Add(Text("  ·  " + (notice.Activity != null ? Local("玩家动态", "玩家動態", "Player activity") : notice.Test ? Local("当前设备", "目前裝置", "This device") : hidden ? Local("通知", "通知", "Notification") : notice.DirectMessage != null ? Local("私信", "私訊", "Direct messages") : notice.Community is {} group ? (group.Management ? Local("管理待办", "管理待辦", "Management tasks") : Local("组织聊天", "組織聊天", "Organization chat")) : Local("房间", "房間", "Rooms")), secondary, 12));
+        header.Children.Add(Text("  ·  " + (notice.Activity != null ? Local("玩家动态", "玩家動態", "Player activity") : notice.Test ? Local("当前设备", "目前裝置", "This device") : hidden ? Local("通知", "通知", "Notification") : notice.GameIdentityMismatch ? Local("游戏身份", "遊戲身分", "Game identity") : notice.FriendRequests > 0 ? Local("好友申请", "好友申請", "Friend requests") : notice.DirectMessage != null ? Local("私信", "私訊", "Direct messages") : notice.Community is {} group ? (group.Management ? Local("管理待办", "管理待辦", "Management tasks") : Local("组织聊天", "組織聊天", "Organization chat")) : Local("房间", "房間", "Rooms")), secondary, 12));
         content.Children.Add(header);
         var text = new StackPanel { Margin = new(0,9,0,0) };
         text.Children.Add(Text(title, primary, 15, true));
@@ -102,11 +111,14 @@ internal sealed class DesktopNotificationCard : Border
         detail.LineStackingStrategy = LineStackingStrategy.BlockLineHeight; detail.MaxHeight = 38; detail.Margin = new(0,5,0,0);
         text.Children.Add(detail);
         var identity = new DockPanel { LastChildFill = true };
-        if (notice.Activity is { } player) {
-            var avatar = new Border { Width = 42, Height = 42, Margin = new(0,9,11,0),
+        if (!hidden && (notice.Activity is not null || notice.DirectMessage is { Conversations: 1 })) {
+            var avatar = new Border { Name = "SenderAvatar", Width = 42, Height = 42, Margin = new(0,9,11,0),
                 Background = Paint(light ? "#E0EAF0" : "#233743"), CornerRadius = new(6),
                 VerticalAlignment = VerticalAlignment.Top, ClipToBounds = true };
-            var bitmap = PlayerAvatar(player.AvatarImageData);
+            var avatarData = notice.Activity?.AvatarImageData ?? notice.DirectMessage?.AvatarImageData;
+            var bitmap = PlayerAvatar(avatarData);
+            notice.ReportDiagnostic(avatarData is null ? "avatarMissing" :
+                bitmap is null ? "avatarDecodeFailed" : "avatarDecoded");
             avatar.Child = bitmap is null
                 ? new TextBlock { Text = title.Length == 0 ? "?" : System.Globalization.StringInfo.GetNextTextElement(title),
                     Foreground = primary, FontSize = 18, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
@@ -116,6 +128,8 @@ internal sealed class DesktopNotificationCard : Border
         identity.Children.Add(text); Grid.SetRow(identity,1); content.Children.Add(identity);
         var footer = new DockPanel();
         var action = MakeButton(notice.Activated == null || hidden ? Local("打开应用 →", "開啟應用程式 →", "Open app →")
+            : notice.GameIdentityMismatch ? Local("打开应用核对 →", "開啟應用程式核對 →", "Open app to review →")
+            : notice.FriendRequests > 0 ? Local("查看好友申请 →", "查看好友申請 →", "View friend requests →")
             : notice.DirectMessage != null ? Local("查看私信 →", "查看私訊 →", "View direct messages →")
             : notice.Community != null ? Local("查看组织 →", "查看組織 →", "View organizations →")
             : Local("查看房间提醒 →", "查看房間提醒 →", "View room reminders →"), accent, open, light);
@@ -140,14 +154,37 @@ internal sealed class DesktopNotificationCard : Border
 
     internal static BitmapSource? PlayerAvatar(string? data)
     {
-        if (data is null || data.Length > 350000) return null;
+        // Match the authenticated directory's 512 KiB inline image contract.
+        // Decoding remains thumbnail-sized below, independent of source size.
+        if (data is null || data.Length > ((512 * 1024 + 2) / 3 * 4) + 24) return null;
         var comma = data.IndexOf(',');
         if (comma < 0 || data[..comma] is not ("data:image/png;base64" or "data:image/jpeg;base64" or "data:image/webp;base64")) return null;
         try {
-            using var bytes = new System.IO.MemoryStream(Convert.FromBase64String(data[(comma + 1)..]));
+            var raw = Convert.FromBase64String(data[(comma + 1)..]);
+            if (raw.Length > 512 * 1024) return null;
+            // WPF delegates WebP to optional Windows Imaging Component codecs.
+            // Decode it with the already-bundled Skia runtime so a friend's
+            // avatar does not become a letter on machines without that codec.
+            var pixels = data[..comma] == "data:image/webp;base64" ? WebpThumbnail(raw) : raw;
+            if (pixels is null) return null;
+            using var bytes = new System.IO.MemoryStream(pixels);
             var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
             image.DecodePixelWidth = 84; image.StreamSource = bytes; image.EndInit(); image.Freeze(); return image;
         } catch { return null; }
+    }
+
+    private static byte[]? WebpThumbnail(byte[] bytes)
+    {
+        using var data = SKData.CreateCopy(bytes);
+        using var codec = SKCodec.Create(data);
+        if (codec is null || codec.Info.Width <= 0 || codec.Info.Height <= 0 ||
+            codec.Info.Width > 8192 || codec.Info.Height > 8192 ||
+            (long)codec.Info.Width * codec.Info.Height > 16_000_000) return null;
+        using var bitmap = SKBitmap.Decode(data);
+        if (bitmap is null) return null;
+        using var image = SKImage.FromBitmap(bitmap);
+        using var png = image.Encode(SKEncodedImageFormat.Png, 100);
+        return png?.ToArray();
     }
 
     private static Brush Paint(string value) => new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(value));

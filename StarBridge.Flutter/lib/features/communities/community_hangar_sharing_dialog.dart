@@ -82,6 +82,7 @@ class _SharingState extends State<CommunityHangarSharingDialog> {
   Future<void> _save() async {
     final draft = _draft;
     if (_busy || draft == null || _invalidated) return;
+    if (_alreadyUnshared(draft)) return;
     final generation = _generation;
     setState(() {
       _busy = true;
@@ -116,6 +117,11 @@ class _SharingState extends State<CommunityHangarSharingDialog> {
     });
   }
 
+  bool _alreadyUnshared(CommunityHangarSharing draft) =>
+      draft.usesExplicitTargets &&
+      !draft.options.any((row) => row.selected) &&
+      _selected.isEmpty;
+
   @override
   Widget build(BuildContext context) {
     final draft = _draft;
@@ -129,13 +135,24 @@ class _SharingState extends State<CommunityHangarSharingDialog> {
             MediaQuery.sizeOf(context).height * .5,
             MediaQuery.sizeOf(context).width < 600
                 ? 420.0
-                : 128.0 + math.min(draft?.options.length ?? 2, 6) * 64,
+                : 176.0 + math.min(draft?.options.length ?? 2, 6) * 64,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(t('sharingScope')),
               const SizedBox(height: 12),
+              if (draft != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    !draft.usesExplicitTargets
+                        ? t('sharingCurrentLegacy')
+                        : !draft.options.any((row) => row.selected)
+                        ? t('sharingCurrentNone')
+                        : '${t('sharingCurrentSelected')} ${draft.options.where((row) => row.selected).length}',
+                  ),
+                ),
               if (_busy) const LinearProgressIndicator(),
               if (_error != null)
                 Padding(
@@ -216,9 +233,15 @@ class _SharingState extends State<CommunityHangarSharingDialog> {
             ),
           if (draft != null)
             FilledButton(
-              onPressed: _busy ? null : _save,
+              onPressed: _busy || _alreadyUnshared(draft) ? null : _save,
               child: Text(
-                t(_selected.isEmpty ? 'sharingRevoke' : 'sharingSave'),
+                t(
+                  _selected.isNotEmpty || _alreadyUnshared(draft)
+                      ? 'sharingSave'
+                      : draft.usesExplicitTargets
+                      ? 'sharingRevoke'
+                      : 'sharingSetNone',
+                ),
               ),
             ),
         ],

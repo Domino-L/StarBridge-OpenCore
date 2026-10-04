@@ -14,6 +14,9 @@ internal static class AccountDispatchConcurrencyTests
         await CancelWriterAndActiveReader();
         await UnauditedHostStaysExclusive();
         await EventsAndGeneration();
+        await ActivityDoesNotHoldWriteBarrier();
+        await ActivityCrossesCompositionAndCancels();
+        await CommunityActivityCrossesComposition();
         Console.WriteLine("PASS bounded independent reads, exclusive account operations, cancellation, event batching and stale generation");
     }
 
@@ -21,6 +24,62 @@ internal static class AccountDispatchConcurrencyTests
     {
         var host = DispatchProxy.Create<IAccountBridgeHost, Probe>();
         return (host, (Probe)(object)host);
+    }
+    private static async Task CommunityActivityCrossesComposition()
+    {
+        var (host, probe) = Create();
+        using var runtime = new StarBridge.HostRuntime.AccountBridgeRuntime(host);
+        using var composite = new StarBridge.HostRuntime.CompositeBridgeDispatcher(runtime, runtime, runtime);
+        var socialRequest = Request(AccountBridgeRequestNames.WaitSocialActivity);
+        var communityRequest = Request(AccountBridgeRequestNames.WaitCommunityActivity);
+        var social = composite.DispatchAsync(socialRequest).AsTask();
+        var community = composite.DispatchAsync(communityRequest).AsTask();
+        try
+        {
+            await Until(() => probe.ActivityWaits == 2);
+            var duplicate = await composite.DispatchAsync(Request(AccountBridgeRequestNames.WaitCommunityActivity));
+            Check(duplicate.Response.Error?.Code == "bridge.backpressure", "Community wait has its own bounded slot.");
+            await composite.DispatchAsync(BridgeEnvelope.Request("bridge.cancel", Guid.NewGuid().ToString("N"), 1,
+                new { targetCorrelationId = communityRequest.CorrelationId }));
+            Check(await Task.WhenAny(community, Task.Delay(1000)) == community &&
+                (await community).Response.Status == "cancelled" && !social.IsCompleted,
+                "Cancelling organization wait must not cancel social activity.");
+        }
+        finally { probe.ActivityRelease.TrySetResult(new { schemaVersion = 1 }); await Task.WhenAll(social, community); }
+    }
+    private static async Task ActivityCrossesCompositionAndCancels()
+    {
+        var (host, probe) = Create();
+        using var runtime = new StarBridge.HostRuntime.AccountBridgeRuntime(host);
+        using var composite = new StarBridge.HostRuntime.CompositeBridgeDispatcher(runtime, runtime, runtime);
+        var request = Request(AccountBridgeRequestNames.WaitSocialActivity);
+        var wait = composite.DispatchAsync(request).AsTask();
+        try {
+            await Task.WhenAny(wait, Task.Delay(100));
+            Check(probe.ActivityWaits == 1 && !wait.IsCompleted, "Social wait must cross the real composite and runtime routing.");
+            var cancel = BridgeEnvelope.Request("bridge.cancel", Guid.NewGuid().ToString("N"), 1,
+                new { targetCorrelationId = request.CorrelationId });
+            await composite.DispatchAsync(cancel);
+            Check(await Task.WhenAny(wait, Task.Delay(1000)) == wait && (await wait).Response.Status == "cancelled",
+                "Cancellation must release the actual Host wait, not only the Flutter future.");
+        } finally { probe.ActivityRelease.TrySetResult(new { schemaVersion = 1 }); await wait; }
+    }
+    private static async Task ActivityDoesNotHoldWriteBarrier()
+    {
+        var (host, probe) = Create();
+        using var dispatcher = new AccountBridgeDispatcher(host);
+        var wait = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.WaitSocialActivity));
+        await Until(() => probe.ActivityWaits == 1);
+        var duplicate = await dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.WaitSocialActivity));
+        Check(duplicate.Response.Error?.Code == "bridge.backpressure", "Only one activity wait may occupy a worker.");
+        var write = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.Login));
+        try {
+            await Until(() => probe.Writes == 1);
+            probe.WriteRelease.SetResult(new("signedIn", 1, Probe.Owner, "Fixture", null));
+            Check((await write).Response.Status == "ok" && !wait.IsCompleted, "Long poll cannot block an account write.");
+            probe.Advance();
+        } finally { probe.ActivityRelease.TrySetResult(new { schemaVersion = 1 }); }
+        Check((await wait).Response.Status is "error" or "cancelled", "A wait from the previous generation cannot escape.");
     }
     private static BridgeEnvelope Request(string name, long generation = 1) =>
         BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), generation, new { schemaVersion = 1 },
@@ -153,6 +212,8 @@ internal static class AccountDispatchConcurrencyTests
     {
         internal static readonly BridgeAccountContext Owner = new("test", "fixture", "owner");
         internal readonly TaskCompletionSource<object> ReadRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource<object> ActivityRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int ActivityWaits;
         internal readonly TaskCompletionSource<AccountBridgeSessionProjection> WriteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int Reads, Friends, Writes;
         internal bool ConcurrentReads = true;
@@ -169,6 +230,8 @@ internal static class AccountDispatchConcurrencyTests
                 case "add_AccountChanged": _changed += (Action<long>)args![0]!; return null;
                 case "remove_AccountChanged": _changed -= (Action<long>)args![0]!; return null;
                 case "ReadCommunitiesAsync": Interlocked.Increment(ref Reads); return ReadRelease.Task.WaitAsync((CancellationToken)args![^1]!);
+                case "WaitSocialActivityAsync":
+                case "WaitCommunityActivityAsync": Interlocked.Increment(ref ActivityWaits); return ActivityRelease.Task.WaitAsync((CancellationToken)args![^1]!);
                 case "ReadFriendsAsync": Interlocked.Increment(ref Friends); return Task.FromResult(new FriendsView(null, DateTimeOffset.UtcNow, [], [], [], [], []));
                 case "LoginAsync": Interlocked.Increment(ref Writes); return WriteRelease.Task;
                 default: throw new NotSupportedException(method.Name);

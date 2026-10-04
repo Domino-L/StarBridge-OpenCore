@@ -7,6 +7,7 @@ import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'local_privacy_controller.dart';
+import 'sharing_status_presentation.dart';
 
 class PrivacyLiveSharingPanel extends StatelessWidget {
   const PrivacyLiveSharingPanel({required this.controller, super.key});
@@ -18,11 +19,20 @@ class PrivacyLiveSharingPanel extends StatelessWidget {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     final draft = controller.draft!;
+    final readUnavailable = controller.publicationReadFailures >= 2;
+    final detail = readUnavailable
+        ? 'statusRead'
+        : sharingStatusIssue(controller.publicationView, controller.revision);
     final canRecover =
         controller.publicationSupported &&
         controller.hasSaved &&
         draft.publicationEnabled &&
-        const {'inactive', 'failed'}.contains(controller.publicationView.state);
+        const {
+          'inactive',
+          'withdrawn',
+          'failed',
+          'reconnecting',
+        }.contains(controller.publicationView.state);
     final liveState = !controller.publicationSupported
         ? 'unsupported'
         : canRecover && controller.publicationView.state == 'inactive'
@@ -34,8 +44,17 @@ class PrivacyLiveSharingPanel extends StatelessWidget {
               controller.communityTargetsFailure ==
                   CommunityTargetsFailure.serviceUnavailable
         ? 'legacyApplied'
+        : controller.publicationView.state == 'applied' &&
+              controller.savedCommunityChoicesPending
+        ? 'organizationPending'
         : controller.publicationView.state;
-    final active = const {'applied', 'legacyApplied'}.contains(liveState);
+    final active =
+        !readUnavailable &&
+        const {
+          'applied',
+          'legacyApplied',
+          'organizationPending',
+        }.contains(liveState);
     final attention = canRecover || liveState == 'withdrawalPending';
     final failure = switch (controller.publicationView.errorCode) {
       'privacy_publication.identity_required' ||
@@ -113,29 +132,44 @@ class PrivacyLiveSharingPanel extends StatelessWidget {
           ),
           SizedBox(height: tokens.space.md),
           Text(
-            strings.text('privacy.scope.live.$liveState'),
+            strings.text(
+              readUnavailable
+                  ? 'privacy.notice.statusRead.title'
+                  : 'privacy.scope.live.$liveState',
+            ),
             key: const Key('privacy-publication-status'),
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          if (controller.publicationView.state == 'failed' ||
-              controller.publicationView.state == 'withdrawalPending') ...[
+          if (detail != null && detail != 'waiting' && detail != 'paused') ...[
             SizedBox(height: tokens.space.xs),
             Text(
-              strings.text('privacy.scope.failure.$failure'),
+              strings.text(
+                detail == 'failed'
+                    ? 'privacy.scope.failure.$failure'
+                    : 'privacy.notice.$detail.body',
+              ),
               key: const Key('privacy-publication-reason'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
-          if (canRecover) ...[
+          if (canRecover || readUnavailable) ...[
             SizedBox(height: tokens.space.sm),
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
                 key: const Key('privacy-reapply'),
-                onPressed: controller.canEdit && !controller.dirty
+                onPressed: readUnavailable
+                    ? controller.refreshPublication
+                    : controller.canRetryPublication
                     ? controller.applyPublication
                     : null,
-                child: Text(strings.text('privacy.scope.live.reapply')),
+                child: Text(
+                  strings.text(
+                    controller.publicationView.state == 'reconnecting'
+                        ? 'privacy.notice.retry'
+                        : 'privacy.scope.live.reapply',
+                  ),
+                ),
               ),
             ),
             if (controller.dirty)

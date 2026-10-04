@@ -12,9 +12,9 @@ public sealed record PartyLobbyMemberPreview(
     public string PresenceBrush { get; init; } = "#42CF7C";
 
     public string LocationText { get; init; } = "等待位置同步";
+    public string? LocationHiddenReason { get; init; }
 
     public string ShipText { get; init; } = "等待舰船同步";
 
     public string ShardText { get; init; } = "等待服务器同步";
 }
-

@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'communities_module.dart';
 import 'community_chat_copy.dart';
 import 'community_preset_port.dart';
+import '../overlay_settings/overlay_preset_inspection_port.dart';
+import '../overlay_settings/overlay_preset_import_preview.dart';
 
 /// Selecting a share only attaches to the draft; importing requires a separate
 /// explicit action and never retries an uncertain device write.
@@ -75,8 +78,30 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
       _busy = true;
       _error = null;
     });
+    var writeStarted = false;
     try {
       if (_import) {
+        final inspector = widget.port;
+        if (inspector is OverlayPresetInspectionPort) {
+          final preview = await (inspector as OverlayPresetInspectionPort).inspectPreset(
+            widget.attachment!['overlayPresetPackage'] as String,
+            catalog.revision,
+          );
+          if (!mounted || !_current(epoch)) return;
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (_) => OverlayPresetImportPreview(
+              name: preview.name,
+              settings: preview.settings,
+              layout: preview.layout,
+              currentSettings: null,
+              sources: preview.sources,
+              removedOrganizationBindings: preview.removedOrganizationBindings,
+            ),
+          );
+          if (!_current(epoch) || confirmed != true) return;
+        }
+        writeStarted = true;
         final result = await widget.port.importCommunityPreset(
           widget.attachment!,
           catalog.revision,
@@ -94,11 +119,11 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
         setState(() {
           _error = error is CommunityFailure
               ? error.code
-              : _import
+              : _import && writeStarted
               ? 'presetImportUnknown'
               : 'presetReadFailed';
           _uncertain =
-              _import && !{'presetChanged', 'presetInvalid'}.contains(_error);
+              _import && writeStarted && !{'presetChanged', 'presetInvalid'}.contains(_error);
           _catalog = null;
         });
       }
@@ -162,7 +187,9 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: const StandardIcon(StandardIconSemantic.attachFile),
+                      trailing: const StandardIcon(
+                        StandardIconSemantic.attachFile,
+                      ),
                       onTap: () => _apply(choice),
                     ),
                 ],

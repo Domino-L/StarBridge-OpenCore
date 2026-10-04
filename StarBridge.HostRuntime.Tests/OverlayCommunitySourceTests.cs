@@ -44,6 +44,44 @@ internal static class OverlayCommunitySourceTests
         Check(source.Read()?.Code == "A", "Returning to automatic resolves an available joined source.");
     }
 
+    internal static async Task Communication()
+    {
+        var reader = new Reader();
+        InformationOverlayCommunityContent Snapshot(long sequence, string notice) => Content("A") with
+        {
+            AnnouncementText = notice, LatestChatSequence = sequence,
+            Messages = [new(sequence, "Synthetic", "Synthetic", "Live text", Start, false)]
+        };
+        reader.Read = _ => Task.FromResult(Snapshot(10, "First notice"));
+        using var source = new OverlayCommunitySource(() => (Owner, 1), reader, false, () => Start);
+        await source.RefreshAsync();
+        Check(source.Read()!.Messages.Count == 0, "Initial organization chat history must not enter the live overlay.");
+        reader.Read = _ => Task.FromResult(Snapshot(11, "Updated notice"));
+        await source.RefreshAsync();
+        Check(source.Read()!.Messages.Single().Sequence == 11 && source.Read()!.AnnouncementText == "Updated notice",
+            "Authorized new chat and changed announcements must reach the running source.");
+        reader.Read = _ => Task.FromResult(Snapshot(11, ""));
+        await source.RefreshAsync();
+        Check(source.Read()!.AnnouncementText == "" && source.Read()!.Messages.Count == 1,
+            "Withdrawal clears notice and repeated reads do not duplicate live messages.");
+        reader.Read = _ => throw new AccountBridgeHostException("offline", true);
+        var beforeReconnect = source.Read()!.ContinuityId;
+        await source.RefreshAsync();
+        reader.Read = _ => Task.FromResult(Snapshot(25, "Recovered"));
+        await source.RefreshAsync();
+        Check(source.Read()!.Messages.Count == 0, "Reconnect establishes a new baseline without replaying missed messages.");
+        Check(source.Read()!.ContinuityId == beforeReconnect,
+            "Chat rebaselining must not clear the same unexpired organization's complete Native scene.");
+        reader.Read = _ => Task.FromResult(Snapshot(1, "Reset chat sequence"));
+        await source.RefreshAsync();
+        Check(source.Read()!.ContinuityId != beforeReconnect && source.Read()!.Messages.Count == 0,
+            "A genuinely restarted stream still resets Native sequence state without replaying history.");
+        source.Select("B");
+        reader.Read = _ => Task.FromResult(Snapshot(30, "Other") with { Code = "B" });
+        await source.RefreshAsync();
+        Check(source.Read()!.Messages.Count == 0, "Source switches establish a fresh history baseline.");
+    }
+
     internal static async Task Recovery()
     {
         var now = Start;
@@ -107,6 +145,23 @@ internal static class OverlayCommunitySourceTests
         Check(member.GameId == "Case_Handle" && !member.IsSelf, "Preserve authoritative identity/self flag.");
         Check(member.Ship == "" && member.Location == "" && member.ServerRegion == "",
             "Do not fill redacted fields or derive region from a more detailed field.");
+        using var hiddenRow = JsonDocument.Parse("""
+            {"gameName":"Remote_Handle","callsign":"Remote","roleTitle":"Member","liveStatus":"InGame",
+             "ship":"Unknown","location":"Unknown","locationHiddenReason":"lowConfidence","serverRegion":"US","isSelf":false}
+            """);
+        Check(ScmAccountBridgeHost.ProjectOverlayMember(hiddenRow.RootElement).LocationHiddenReason == "lowConfidence",
+            "Authorized organization reason reaches Native without a hidden place name.");
+        var arrivalRow = System.Text.Json.Nodes.JsonNode.Parse(hiddenRow.RootElement.GetRawText())!;
+        arrivalRow["location"] = "Previous Port";
+        arrivalRow["arrivalPendingConfirmation"] = true;
+        arrivalRow["arrivalTargetCode"] = "Current Target";
+        var arrivalMember = ScmAccountBridgeHost.ProjectOverlayMember(JsonSerializer.SerializeToElement(arrivalRow));
+        Check(arrivalMember.ArrivalPendingConfirmation && arrivalMember.ArrivalTargetCode == "Current Target" &&
+            arrivalMember.LocationHiddenReason is null, "Native receives authorized current arrival separately from previous place");
+        arrivalRow["location"] = null;
+        var withheldMember = ScmAccountBridgeHost.ProjectOverlayMember(JsonSerializer.SerializeToElement(arrivalRow));
+        Check(!withheldMember.ArrivalPendingConfirmation && withheldMember.ArrivalTargetCode is null,
+            "Withheld place cannot leak arrival target to Native");
     }
 
     internal static async Task DemandAndDisposal()

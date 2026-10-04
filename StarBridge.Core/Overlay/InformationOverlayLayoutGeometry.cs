@@ -106,7 +106,13 @@ public static class InformationOverlayLayoutGeometry
 
             if (requiredTop > lowerEffective.Top + 0.01)
             {
-                effective[lower.Key] = lowerEffective with { Top = requiredTop };
+                // Minimum heights may leave too little room to eliminate every
+                // collision. Keeping a module on screen takes priority over
+                // moving its content beyond the viewport.
+                effective[lower.Key] = lowerEffective with
+                {
+                    Top = Math.Min(requiredTop, Math.Max(0, surface.Height - lowerEffective.Height))
+                };
             }
         }
 

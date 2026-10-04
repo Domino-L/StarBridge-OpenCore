@@ -222,6 +222,32 @@ internal static partial class LegacyPasswordLoginTests
             "only authenticated own-profile and existing directory GETs are used");
         Check(profile.FleetAffiliation?.Kind == "community" && profile.FleetAffiliation.LogoImageData is not null,
             "S2 affiliation uses matching organization logo");
+        // The own-profile display may legitimately omit hangar modules. Keep
+        // that optional projection distinct from an empty saved inventory.
+        transport.Body = JsonSerializer.Serialize(document with { Hangar = null },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var generation = host.Generation;
+        var profileReads = transport.Calls;
+        using (var dispatcher = new AccountBridgeDispatcher(host))
+        {
+            var optionalHangar = await dispatcher.DispatchAsync(BridgeEnvelope.Request(
+                "personalProfile.getSelf", "optional-legacy-hangar", generation,
+                new { schemaVersion = 1 }, owner));
+            var projectedProfile = optionalHangar.Response.Payload.GetProperty("profile");
+            Check(optionalHangar.Response.Status == BridgeResponseStatuses.Ok &&
+                optionalHangar.Response.Error is null &&
+                (!projectedProfile.TryGetProperty("hangar", out var optionalProjection) ||
+                    optionalProjection.ValueKind == JsonValueKind.Null),
+                "A legitimate missing legacy hangar remains absent or null, not a fabricated empty inventory");
+            Check(optionalHangar.Response.AccountContext == owner &&
+                optionalHangar.Response.SessionGeneration == generation && optionalHangar.Events.Count == 0,
+                "Optional profile content cannot change the owner or invalidate the session");
+        }
+        Check(transport.Calls == profileReads + 1 && transport.Path == "/api/profile/me" && transport.Authorized,
+            "Missing hangar projection only performs the existing authenticated profile read");
+        Check(host.CurrentContext == owner && host.Generation == generation &&
+            (await host.GetCurrentAsync(default)).State == "legacySignedIn",
+            "A profile without hangar content leaves the legacy account signed in");
         transport.Body = JsonSerializer.Serialize(document with { PublicId = "another-owner" }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         try { await host.GetPersonalProfileAsync(owner, default); throw new Exception("Cross-owner profile accepted"); }
         catch (AccountBridgeHostException) { }
@@ -263,7 +289,8 @@ internal static partial class LegacyPasswordLoginTests
         Check((await host.GetCurrentAsync(default)).AvatarImageData == "data:image/png;base64," + avatar,
             "legacy custom avatar bytes survive login projection without a preset substitution");
         var policy = await host.GetGameIdentityPolicyAsync(host.CurrentContext!, default);
-        Check(policy.State == "awaitingGameIdentity", "bound legacy handle without local game observation cannot grant sensitive network writes");
+        Check(policy.State == "match" && policy.SensitiveWritesAllowed,
+            "legacy compatibility uses the account Handle without requiring a game launch or one-time verification");
         await host.LogoutAsync(host.CurrentContext!, default);
         Check((await host.GetCurrentAsync(default)).AvatarImageData is null, "logout clears the prior account photo");
     }
@@ -288,6 +315,83 @@ internal static partial class LegacyPasswordLoginTests
         Check(relay.Calls == 2 && (await host.GetCurrentAsync(default)).State == "legacySignedIn", "no SCM fallback or replay after Relay refusal");
     }
 
+    internal static async Task VerifyBackgroundPlayerActivity()
+    {
+        using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), new Transport());
+        using var relay = new BackgroundActivityTransport();
+        using var friends = new StarBridge.HostRuntime.Friends.FriendsReader(new Uri("https://example.invalid/"), relay);
+        using var host = CreateHost(login, friends: friends);
+        await host.LoginLegacyAsync(BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "short" }), 0, default);
+        var observed = new TaskCompletionSource<StarBridge.HostRuntime.Notifications.PlayerActivityObservation>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.PlayerActivityObserved = value => observed.TrySetResult(value);
+        host.ShouldObservePlayerActivity = () => true;
+        await host.WaitSocialActivityAsync(host.CurrentContext!, BridgePayload.From(new { schemaVersion = 1, instance = "", version = -1 }), default);
+        var activity = await observed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Check(activity.Members.Single().Presence == "inGame" && relay.PresenceReads == 1,
+            "background social wait observes friend activity without opening a page");
+        host.ShouldObservePlayerActivity = () => false;
+        await host.WaitSocialActivityAsync(host.CurrentContext!, BridgePayload.From(new { schemaVersion = 1, instance = new string('a', 32), version = 1 }), default);
+        Check(relay.PresenceReads == 1, "disabled player activity does not collect presence");
+        host.ShouldObservePlayerActivity = () => true;
+        relay.Hold = true;
+        await host.WaitSocialActivityAsync(host.CurrentContext!, BridgePayload.From(new { schemaVersion = 1, instance = new string('a', 32), version = 1 }), default)
+            .WaitAsync(TimeSpan.FromSeconds(2));
+        await relay.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Check(relay.PresenceReads == 2, "pending optional read does not block cursor delivery");
+        await host.WaitSocialActivityAsync(host.CurrentContext!, BridgePayload.From(new { schemaVersion = 1, instance = new string('a', 32), version = 1 }), default);
+        Check(relay.PresenceReads == 2, "overlapping social wakes coalesce the optional presence read");
+        host.Dispose();
+        await relay.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await VerifyTrailingPlayerActivityRead();
+    }
+
+    private static async Task VerifyTrailingPlayerActivityRead()
+    {
+        using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), new Transport());
+        using var relay = new BackgroundActivityTransport { Hold = true };
+        using var friends = new StarBridge.HostRuntime.Friends.FriendsReader(new Uri("https://example.invalid/"), relay);
+        using var host = CreateHost(login, friends: friends);
+        await host.LoginLegacyAsync(BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "short" }), 0, default);
+        var observed = 0;
+        var caughtUp = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.ShouldObservePlayerActivity = () => true;
+        host.PlayerActivityObserved = _ => { if (Interlocked.Increment(ref observed) == 2) caughtUp.TrySetResult(); };
+        var payload = BridgePayload.From(new { schemaVersion = 1, instance = "", version = -1 });
+        await host.WaitSocialActivityAsync(host.CurrentContext!, payload, default);
+        await relay.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // A new cursor arrives while the first GET may already have captured
+        // its response. Coalesce the burst, not the need to read newer state.
+        for (var i = 0; i < 3; i++) await host.WaitSocialActivityAsync(host.CurrentContext!, payload, default);
+        Check(relay.PresenceReads == 1, "activity refresh burst does not create parallel presence requests");
+        relay.Hold = false;
+        relay.Release.TrySetResult();
+        try { await caughtUp.Task.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (TimeoutException) { throw new Exception("a wake during an in-flight presence read must trigger one immediate trailing read, not wait for the next heartbeat"); }
+        Check(relay.PresenceReads == 2, "overlapping activity wakes coalesce into exactly one trailing read");
+    }
+
+    private sealed class BackgroundActivityTransport : HttpMessageHandler
+    {
+        internal int PresenceReads;
+        internal bool Hold;
+        internal readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource Cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/social/activity")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { instanceId = new string('a', 32), version = 1 })) };
+            Check(request.RequestUri.AbsolutePath == "/api/friends" && request.RequestUri.Query.Contains("includePresence=true"), "only authorized friend presence read");
+            PresenceReads++;
+            if (Hold) {
+                Started.TrySetResult();
+                try { await Release.Task.WaitAsync(token); }
+                catch (OperationCanceledException) { Cancelled.TrySetResult(); throw; }
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(FriendsReaderTests.Directory()) };
+        }
+    }
+
     internal static async Task VerifyPlayerActivity()
     {
         using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), new Transport());
@@ -310,13 +414,26 @@ internal static partial class LegacyPasswordLoginTests
         var current = observations.Single();
         Check(current.IsCurrent() && current.IsComplete && current.Members.Single().MemberKey.Length == 64 &&
             !current.Members.Single().MemberKey.Contains("private-account"), "observation exposes only scoped opaque identities");
+        var currentDuringRefresh = false;
+        host.PlayerActivityObserved = value => {
+            // This is the publication boundary before the consumer can replace
+            // its previous source. The native card timer may run here too.
+            currentDuringRefresh = current.IsCurrent();
+            observations.Add(value);
+        };
         await host.ReadFriendsAsync(context, request, default);
-        Check(!current.IsCurrent() && observations.Count == 2 && observations[^1].IsCurrent(),
-            "a newer complete source invalidates queued delivery from the previous membership snapshot");
+        Check(currentDuringRefresh && current.IsCurrent() && observations.Count == 2 && observations[^1].IsCurrent(),
+            "an identical authorized source refresh must not momentarily expire a visible activity card");
+        relay.Revoke = true;
+        await host.ReadFriendsAsync(context, request, default);
+        Check(!currentDuringRefresh && !current.IsCurrent(), "membership revocation expires the prior card before consumer delivery");
+        relay.Revoke = false;
+        await host.ReadFriendsAsync(context, request, default);
+        Check(!current.IsCurrent() && observations[^1].IsCurrent(), "restoring an earlier state never resurrects its revoked card lease");
         current = observations[^1];
         host.ShouldObservePlayerActivity = () => false;
         await host.ReadFriendsAsync(context, request, default);
-        Check(!relay.LastIncludedPresence && observations.Count == 2 && !current.IsCurrent(), "disabled activity stops presence collection and invalidates prior delivery");
+        Check(!relay.LastIncludedPresence && observations.Count == 4 && !current.IsCurrent(), "disabled activity stops presence collection and invalidates prior delivery");
         host.ShouldObservePlayerActivity = () => true;
         await host.LogoutAsync(context, default);
         Check(!current.IsCurrent(), "logout invalidates outstanding activity delivery");
@@ -328,14 +445,19 @@ internal static partial class LegacyPasswordLoginTests
         internal readonly TaskCompletionSource Old = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int Calls;
         internal bool LastIncludedPresence;
+        internal bool Revoke;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             var number = Interlocked.Increment(ref Calls);
-            LastIncludedPresence = request.RequestUri!.Query == "?includePresence=true";
+            LastIncludedPresence = request.RequestUri!.Query.Contains("includePresence=true");
             if (number == 1) { Started.TrySetResult(); await Old.Task; }
             var user = new { accountId = "private-account", callsign = "Pilot", gameId = "", relationshipState = "friend",
                 avatarImageData = (string?)null, presence = number == 1 ? "Offline" : "InGame", lastUpdated = DateTimeOffset.UtcNow };
-            return new(HttpStatusCode.OK) { Content = new ByteArrayContent(FriendsReaderTests.Directory(user)) };
+            var body = Revoke ? JsonSerializer.SerializeToUtf8Bytes(new {
+                friends = Array.Empty<object>(), incomingRequests = Array.Empty<object>(),
+                outgoingRequests = Array.Empty<object>(), blockedUsers = Array.Empty<object>(), refreshedAt = DateTimeOffset.UtcNow
+            }) : FriendsReaderTests.Directory(user);
+            return new(HttpStatusCode.OK) { Content = new ByteArrayContent(body) };
         }
     }
 
@@ -608,9 +730,10 @@ internal static partial class LegacyPasswordLoginTests
 
     private static ScmAccountBridgeHost CreateHost(LegacyPasswordLoginClient client, ScmOAuthSession? session = null,
         StarBridge.HostRuntime.Friends.FriendsReader? friends = null, Vault? vault = null,
-        StarBridge.HostRuntime.Communities.CommunityClient? communities = null) =>
+        StarBridge.HostRuntime.Communities.CommunityClient? communities = null,
+        StarBridge.HostRuntime.PartyRooms.PartyRoomReader? partyRooms = null) =>
         new(new OAuthPkceClient(new ScmHttpClient(), vault ?? new Vault(), ScmOAuthOptions.CreateDefault()), new ScmProfileCacheStore(), "development", () => null,
-            initialSession: session, legacyPasswordLogin: client, friends: friends, communities: communities);
+            initialSession: session, legacyPasswordLogin: client, friends: friends, communities: communities, partyRooms: partyRooms);
     private static string? Outcome(BridgeDispatchBatch result) => result.Response.Payload.TryGetProperty("outcome", out var value) ? value.GetString() : null;
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
     private sealed class Store : ILegacyMigrationCredentialStore
@@ -646,7 +769,7 @@ internal static partial class LegacyPasswordLoginTests
                     await request.Content!.ReadAsStringAsync(token), new JsonSerializerOptions(JsonSerializerDefaults.Web));
                 return new(Status) { Content = new StringContent(Body) };
             }
-            if (request.RequestUri!.AbsolutePath is "/api/profile/me/gameplay-time-reset" or "/api/profile/me/visibility")
+            if (request.RequestUri!.AbsolutePath is "/api/profile/me/gameplay-time-reset" or "/api/profile/me/visibility" or "/api/profile/me/background")
             {
                 Calls++; Authorized = request.Headers.Authorization?.Scheme == "Bearer";
                 Bearer = request.Headers.Authorization?.Parameter;

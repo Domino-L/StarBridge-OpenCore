@@ -3,9 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../features/settings/local_privacy_controller.dart';
+import '../../features/settings/sharing_status_presentation.dart';
 import '../presence/manual_presence.dart';
 
-/// App-level projection: observes saved consent/status, never publishes.
+/// App-level projection; polling never publishes. Retry requires a user action.
 /// Shell chrome consumes only this read model, not settings implementation.
 class SharingStatusMonitor extends ValueNotifier<String?> {
   SharingStatusMonitor({required this.controller, this.presence})
@@ -24,23 +25,32 @@ class SharingStatusMonitor extends ValueNotifier<String?> {
   Timer? _grace;
   bool _overdue = false, _disposed = false;
   int? _epoch;
+  bool _retryAvailable = false;
+  bool get canRetry =>
+      (controller.publicationReadFailures >= 2 ||
+          controller.canRetryPublication) &&
+      !controller.publicationBusy &&
+      controller.status == LocalPrivacyStatus.ready &&
+      presence?.snapshot.confirmedMode != PresenceVisibility.invisible;
+  Future<void> retry() async {
+    if (_disposed || !canRetry) return;
+    if (controller.publicationReadFailures >= 2) {
+      await controller.refreshPublication();
+    } else {
+      await controller.applyPublication();
+    }
+  }
 
   String? _project() {
     if (controller.status != LocalPrivacyStatus.ready ||
-        !controller.savedPublicationEnabled ||
-        !controller.publicationObserved ||
+        (!controller.savedPublicationEnabled &&
+            controller.publicationView.state != 'withdrawalPending') ||
         presence?.snapshot.confirmedMode == PresenceVisibility.invisible) {
       return null;
     }
-    return switch (controller.publicationView.state) {
-      'applied'
-          when controller.publicationView.revision == controller.revision =>
-        null,
-      'failed' || 'withdrawalPending' => 'failed',
-      'identityRequired' => 'identity',
-      'withdrawn' => 'paused',
-      _ => 'waiting',
-    };
+    if (controller.publicationReadFailures >= 2) return 'statusRead';
+    if (!controller.publicationObserved) return null;
+    return sharingStatusIssue(controller.publicationView, controller.revision);
   }
 
   void _clearGrace() {
@@ -56,8 +66,10 @@ class SharingStatusMonitor extends ValueNotifier<String?> {
       _clearGrace();
     }
     final issue = _project();
-    if (issue == 'waiting') {
-      _grace ??= Timer(const Duration(seconds: 15), () {
+    final delayed =
+        issue == 'waiting' || recoveringSharingIssues.contains(issue);
+    if (delayed) {
+      _grace ??= Timer(Duration(seconds: issue == 'waiting' ? 15 : 30), () {
         if (_disposed) return;
         _overdue = true;
         _changed();
@@ -66,7 +78,14 @@ class SharingStatusMonitor extends ValueNotifier<String?> {
       _clearGrace();
     }
     // ValueNotifier emits only real changes: polling does not re-announce a strip.
-    value = issue == 'waiting' && !_overdue ? null : issue;
+    final next = delayed && !_overdue ? null : issue;
+    final actionChanged = _retryAvailable != canRetry;
+    _retryAvailable = canRetry;
+    if (value == next) {
+      if (actionChanged) notifyListeners();
+    } else {
+      value = next;
+    }
   }
 
   @override

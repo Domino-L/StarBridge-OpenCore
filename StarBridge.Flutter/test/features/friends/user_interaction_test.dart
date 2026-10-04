@@ -41,6 +41,29 @@ class MenuPort extends VisitorPort {
 void main() {
   setUpAll(loadFonts);
   const target = UserTarget('friend', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  for (final entry in {
+    'users.targetChanged': 'profile.visitor.refreshSource',
+    'communities.refreshRequired': 'profile.visitor.refreshSource',
+    'profile.visitor_not_visible': 'profile.visitor.notVisible',
+    'account.reauthorization_required': 'profile.visitor.accountRequired',
+    'bridge.timeout': 'profile.visitor.readTimeout',
+  }.entries) {
+    test('visitor read preserves recovery category ${entry.key}', () async {
+      final h = CommunityHarness(
+        legacy: true,
+        capabilities: ['users.interaction'],
+        error: entry.key,
+      );
+      final p = BridgeUserInteraction(h.session);
+      addTearDown(() async {
+        await p.close();
+        await h.close();
+      });
+      expect((await p.profile(target)).failureKey, entry.value);
+      expect(h.requests.where((r) => r.name == 'users.profile').length, 1);
+      expect(h.requests.where((r) => r.name == 'users.social'), isEmpty);
+    });
+  }
   testWidgets(
     'avatar menu never writes until explicitly selected; self has no social actions',
     (tester) async {

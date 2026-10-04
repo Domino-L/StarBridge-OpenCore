@@ -1,11 +1,16 @@
 import 'community_workspace_port.dart';
 
+import 'dart:ui' show Locale;
+
+import '../common/runtime_name_labels.dart';
+
 /// WPF S2 PlayerSessionStatePresentation / GameServerRegionPresentation
 /// semantics, applied only to the privacy-filtered workspace projection.
 ({String server, String ship, String location}) communityMemberRuntime(
   CommunityWorkspaceMember member, {
   required String Function(String) text,
   required String Function(String) regionText,
+  Locale locale = const Locale('en'),
 }) {
   final status = member.liveStatus.toLowerCase();
   if (const {'paused', 'hidden', 'unknown', ''}.contains(status)) {
@@ -29,9 +34,22 @@ import 'community_workspace_port.dart';
     // Null means withheld, not evidence of an unknown location or session.
     if (value == null) return text('hidden');
     if (session == false) return text('notInServer');
-    if (recognizedCommunityRuntime(value)) return value.trim();
     if (location && member.arrivalPendingConfirmation) {
-      return text('locationPending');
+      final target = member.arrivalTargetCode;
+      final pending = text('locationPending');
+      return recognizedCommunityRuntime(target)
+          ? '${runtimeNameLabel(target!, member.arrivalTargetLabels, locale)} · $pending'
+          : pending;
+    }
+    if (recognizedCommunityRuntime(value)) {
+      return location
+          ? runtimeNameLabel(value.trim(), member.locationLabels, locale)
+          : value.trim();
+    }
+    if (location &&
+        member.locationHiddenReason == 'lowConfidence' &&
+        value.trim().toLowerCase() == 'unknown') {
+      return text('lowConfidenceLocation');
     }
     return text(session == true ? 'waitingRecognition' : 'waitingServerSync');
   }
@@ -42,7 +60,11 @@ import 'community_workspace_port.dart';
         : recognizedCommunityRuntime(region) && session != false
         ? regionText(region)
         : '—',
-    ship: runtime(member.ship),
+    ship: runtime(
+      member.ship == null || !recognizedCommunityRuntime(member.ship)
+          ? member.ship
+          : runtimeNameLabel(member.ship!, member.shipLabels, locale),
+    ),
     location: runtime(member.location, location: true),
   );
 }

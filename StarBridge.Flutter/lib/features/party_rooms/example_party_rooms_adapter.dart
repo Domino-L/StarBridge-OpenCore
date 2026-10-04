@@ -199,6 +199,7 @@ final class ExamplePartyRoomsAdapter
       RoomOperation.update,
       RoomOperation.close,
       RoomOperation.decide,
+      RoomOperation.remove,
     ].contains(command.operation)) {
       final room = before.rooms
           .where(
@@ -209,6 +210,27 @@ final class ExamplePartyRoomsAdapter
           .firstOrNull;
       if (room?.viewerIsHost != true) {
         return const RoomCommandResult('rejected', error: 'notHost');
+      }
+      if (command.operation == RoomOperation.remove) {
+        final target = room!.members
+            .where(
+              (member) =>
+                  !member.isHost &&
+                  member.removalToken != null &&
+                  member.removalToken == command.data['removalToken'],
+            )
+            .firstOrNull;
+        if (target == null) {
+          return const RoomCommandResult('rejected', error: 'memberGone');
+        }
+        _created = copyExampleRoom(
+          room,
+          members: room.members.where((member) => member != target).toList(),
+        );
+        return RoomCommandResult(
+          'removed',
+          directory: (await read()).directory,
+        );
       }
       if (command.operation == RoomOperation.close) {
         _sent.clear();

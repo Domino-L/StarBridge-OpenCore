@@ -6,7 +6,7 @@ const directSendZhCn = <String, String>{
   'direct.send.shortcut': 'Enter 发送 · Shift+Enter 换行',
   'direct.send.sent': '已发送',
   'direct.send.request_sent': '消息已发送。对方回复前最多可发送 3 条。',
-  'direct.send.notAllowed': '已发送 3 条消息，请等待对方回复。',
+  'direct.send.notAllowed': '当前无法发送消息，输入已保留。',
   'direct.send.outcome_unknown': '发送结果待确认，输入已保留。请刷新消息核对，暂不重复发送。',
   'direct.send.rejected': '消息未发送，输入已保留，请检查后重试。',
   'direct.send.unavailable': '暂时无法发送，输入已保留，请稍后重试。',
@@ -35,7 +35,7 @@ const directSendZhTw = <String, String>{
   'direct.send.shortcut': 'Enter 傳送 · Shift+Enter 換行',
   'direct.send.sent': '已傳送',
   'direct.send.request_sent': '訊息已傳送。對方回覆前最多可傳送 3 條。',
-  'direct.send.notAllowed': '已傳送 3 條訊息，請等待對方回覆。',
+  'direct.send.notAllowed': '目前無法傳送訊息，輸入已保留。',
   'direct.send.outcome_unknown': '傳送結果待確認，輸入已保留。請重新整理訊息核對，暫不重複傳送。',
   'direct.send.rejected': '訊息未傳送，輸入已保留，請檢查後重試。',
   'direct.send.unavailable': '暫時無法傳送，輸入已保留，請稍後重試。',
@@ -66,7 +66,7 @@ const directSendEn = <String, String>{
   'direct.send.request_sent':
       'Message sent. You can send up to 3 before they reply.',
   'direct.send.notAllowed':
-      'You have sent 3 messages. Wait for a reply to continue.',
+      'Sending is currently unavailable. Your text is kept.',
   'direct.send.outcome_unknown': 'Delivery is unconfirmed. Your text is kept. Refresh messages to check before sending again.',
   'direct.send.rejected':
       'Message not sent. Your text is kept; check and try again.',

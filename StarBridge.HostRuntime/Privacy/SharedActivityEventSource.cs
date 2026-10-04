@@ -16,6 +16,7 @@ internal sealed class SharedActivityEventSource(LocalGameEventJournal journal, T
     private long _epoch;
     private bool _disposed;
     internal const int MaximumPending = 64;
+    internal event Action? PendingChanged;
 
     internal void Activate(EventSourceLease? lease)
     {
@@ -51,6 +52,9 @@ internal sealed class SharedActivityEventSource(LocalGameEventJournal journal, T
             if (_pending.Count == MaximumPending) _pending.Dequeue();
             _pending.Enqueue(item);
         }
+        // Never wait for transport while holding the journal/source lock.
+        foreach (var handler in PendingChanged?.GetInvocationList() ?? [])
+            try { ((Action)handler)(); } catch { }
     }
 
     // Destructive take: failed sends are not replayed after reconnection. The

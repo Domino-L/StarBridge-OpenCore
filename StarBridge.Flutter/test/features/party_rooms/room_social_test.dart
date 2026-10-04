@@ -90,6 +90,7 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, '邀请'));
       await tester.pumpAndSettle();
       expect(module.directory!.sentInvitations, hasLength(1));
+      await tester.ensureVisible(find.widgetWithText(TextButton, '撤回'));
       await tester.tap(find.widgetWithText(TextButton, '撤回'));
       await tester.pumpAndSettle();
       expect(module.directory!.sentInvitations, isEmpty);

@@ -4,6 +4,8 @@ using System.Runtime.InteropServices;
 
 internal interface INotificationAudioOutput : IDisposable
 {
+    string DiagnosticTransport => "unknown";
+    string DefaultEndpointSnapshot => "unavailable";
     bool TryPlay(byte[] wave);
     void Stop();
 }
@@ -11,10 +13,13 @@ internal interface INotificationAudioOutput : IDisposable
 // One retained buffer and one output for the entire Host. Stop before unpinning.
 internal sealed class WindowsWaveAudioOutput : INotificationAudioOutput
 {
+    public string DiagnosticTransport => "winmmPlaySound";
+    public string DefaultEndpointSnapshot { get; private set; } = "unavailable";
     private GCHandle _buffer;
     public bool TryPlay(byte[] wave)
     {
         Stop();
+        DefaultEndpointSnapshot = AudioEndpointSnapshot.Read();
         if (!OperatingSystem.IsWindows()) return false;
         _buffer = GCHandle.Alloc(wave, GCHandleType.Pinned);
         try {

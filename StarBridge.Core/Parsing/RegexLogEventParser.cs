@@ -27,8 +27,8 @@ public sealed class RegexLogEventParser : ILogEventParser
 
     private readonly ParserRule[] _rules =
     [
-        new(FleetEventType.PlayerEnteredShip, new Regex(@"<SHUDEvent_OnNotification>\s+Added notification ""[^""]*(?:joined|加入)[^""]*(?:channel|频道)\s+'(?<ship>[^:']+)\s+:\s+(?<player>[^']+)'", Options), PlayerIsShipOwner: true),
-        new(FleetEventType.PlayerExitedShip, new Regex(@"<SHUDEvent_OnNotification>\s+Added notification ""[^""]*(?:left|退出|离开)[^""]*(?:channel|频道)\s+'(?<ship>[^:']+)\s+:\s+(?<player>[^']+)'", Options), PlayerIsShipOwner: true),
+        new(FleetEventType.PlayerEnteredShip, new Regex(@"<SHUDEvent_OnNotification>\s+Added notification ""[^""]*(?:joined|加入)[^""]*(?:channel|频道)\s+'(?<ship>[^:\r\n]+?)\s+:\s+(?<player>[^'\r\n]+)'", Options), PlayerIsShipOwner: true),
+        new(FleetEventType.PlayerExitedShip, new Regex(@"<SHUDEvent_OnNotification>\s+Added notification ""[^""]*(?:left|退出|离开)[^""]*(?:channel|频道)\s+'(?<ship>[^:\r\n]+?)\s+:\s+(?<player>[^'\r\n]+)'", Options), PlayerIsShipOwner: true),
         new(FleetEventType.PlayerOnline, new Regex(@"nickname=""(?<player>[^""]+)""\s+playerGEID\s*=?\s*""?(?<playerId>\d+)?", Options)),
         new(FleetEventType.PlayerOffline, new Regex(@"PLAYER_OFFLINE\s+player=""?(?<player>[^""\s]+)""?", Options)),
         new(FleetEventType.PlayerLocationChanged, new Regex(@"<RequestLocationInventory>\s+Player\[(?<player>[^\]]+)\]\s+requested inventory for Location\[(?<location>[A-Za-z0-9_-]+)\]", Options), LocationEvidenceScore: 95, LocationEvidence: "Location inventory context"),

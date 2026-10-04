@@ -175,7 +175,7 @@ internal sealed partial class OverlayCompositionHudWindow
             DrawCrosshair(target, state);
         }
 
-        if (state.ShowEvents && state.EventRows.Count > 0)
+        if (state.ShowEvents)
         {
             DrawEventNotifications(target, state);
         }

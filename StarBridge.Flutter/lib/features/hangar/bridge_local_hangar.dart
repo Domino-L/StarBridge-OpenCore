@@ -3,11 +3,18 @@ import '../../platform/bridge/bridge_envelope.dart';
 import '../../platform/bridge/bridge_account_access.dart';
 import 'local_hangar_port.dart';
 import 'legacy_profile_hangar.dart';
+import 'hangar_read_diagnostics.dart';
 import '../../shared/ships/ship_reviewed_display.dart';
 
 final class BridgeLocalHangar implements LocalHangarPort {
-  BridgeLocalHangar(this._session);
+  BridgeLocalHangar(
+    this._session, {
+    this.diagnosticCapture = HangarReadDiagnostics.enabled,
+  });
   final BridgeClientSession _session;
+  final bool diagnosticCapture;
+  Future<T> _diagnose<T>(HangarReadStage stage, Future<T> Function() action) =>
+      HangarReadDiagnostics.capture(stage, action, enabled: diagnosticCapture);
   BridgeAccountContext? _account;
   int? _generation;
   bool _legacy = false;
@@ -65,24 +72,39 @@ final class BridgeLocalHangar implements LocalHangarPort {
 
   @override
   Future<LocalHangarSnapshot> read() async {
-    await _bind();
-    final saved = await _collect(await _request('inventory', const {}));
+    await _diagnose(HangarReadStage.bind, _bind);
+    final first = await _diagnose(
+      HangarReadStage.inventory,
+      () => _request('inventory', const {}),
+    );
+    final saved = await _diagnose(
+      HangarReadStage.inventoryProjection,
+      () => _collect(first),
+    );
     if (!_legacy || saved.revision > 0) return saved;
     // Only an absent new inventory may display the authenticated old profile.
     // A saved empty inventory and SCM-owned reads never take this route.
-    final response = await _session.request(
-      'personalProfile.getSelf',
-      accountContext: _account,
-      payload: const {'schemaVersion': 1},
-      timeout: const Duration(seconds: 60),
+    final response = await _diagnose(
+      HangarReadStage.legacyRead,
+      () => _session.request(
+        'personalProfile.getSelf',
+        accountContext: _account,
+        payload: const {'schemaVersion': 1},
+        timeout: const Duration(seconds: 60),
+      ),
     );
-    if (_generation != _session.activeGeneration ||
-        response.sessionGeneration != _generation ||
-        !_sameAccount(response.accountContext, _account) ||
-        response.payload['schemaVersion'] != 1) {
-      throw const LocalHangarFailure('hangar.account_changed');
-    }
-    return legacyProfileHangar(response.payload);
+    return _diagnose(HangarReadStage.legacyProjection, () async {
+      if (_generation != _session.activeGeneration ||
+          response.sessionGeneration != _generation ||
+          !_sameAccount(response.accountContext, _account) ||
+          response.payload['schemaVersion'] != 1) {
+        throw const LocalHangarFailure('hangar.account_changed');
+      }
+      // An optional profile display is not authoritative local inventory. Keep
+      // the successful local read when that display is absent; do not save,
+      // migrate, or reinterpret a malformed/failed response as an empty hangar.
+      return legacyProfileHangar(response.payload) ?? saved;
+    });
   }
 
   @override

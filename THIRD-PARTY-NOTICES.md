@@ -11,8 +11,12 @@ declared license file.
 
 | Package | Version | License | License file |
 | --- | --- | --- | --- |
+| Microsoft.Windows.CsWinRT | 2.1.6 | MIT | `licenses/Microsoft.Windows.CsWinRT-2.1.6.txt`; upstream notice: `licenses/Microsoft.Windows.CsWinRT-2.1.6-NOTICE.txt` |
 | SharpGen.Runtime | 2.4.2-beta | MIT | `licenses/SharpGen.Runtime-2.4.2-beta.txt` |
 | SharpGen.Runtime.COM | 2.4.2-beta | MIT | `licenses/SharpGen.Runtime.COM-2.4.2-beta.txt` |
+| SkiaSharp | 3.119.4 | MIT | `licenses/SkiaSharp-3.119.4.txt` |
+| SkiaSharp.NativeAssets.macOS | 3.119.4 | MIT with upstream notices | `licenses/SkiaSharp-3.119.4.txt`; `licenses/SkiaSharp.NativeAssets.macOS-3.119.4-NOTICE.txt` |
+| SkiaSharp.NativeAssets.Win32 | 3.119.4 | MIT with upstream notices | `licenses/SkiaSharp-3.119.4.txt`; `licenses/SkiaSharp.NativeAssets.Win32-3.119.4-NOTICE.txt` |
 | System.IO.Pipelines | 9.0.1 | MIT | `licenses/System.IO.Pipelines-9.0.1.txt` |
 | System.Security.Cryptography.ProtectedData | 8.0.0 | MIT | `licenses/System.Security.Cryptography.ProtectedData-8.0.0.txt` |
 | System.Text.Encodings.Web | 9.0.1 | MIT | `licenses/System.Text.Encodings.Web-9.0.1.txt` |
@@ -24,9 +28,11 @@ declared license file.
 | Vortice.DXGI | 3.8.3 | MIT | `licenses/Vortice.DXGI-3.8.3.txt` |
 | Vortice.Mathematics | 2.1.0 | MIT | `licenses/Vortice.Mathematics-2.1.0.txt` |
 
-The current local Host no longer depends on the retired desktop UI's CsWinRT,
-SkiaSharp or managed WebView2 packages. Historical license texts may remain for
-release verification; they are not evidence that those packages are bundled.
+The local Host's Windows notification renderer currently resolves CsWinRT and
+SkiaSharp, including its native-assets packages. The inventory describes
+restored dependencies; it is not proof that every platform-specific native
+binary is included in a particular Windows release package. Managed WebView2
+from the retired desktop UI is not a current Host dependency.
 
 Flutter hosted dependencies are pinned by archive hashes in `pubspec.lock` and
 `flutter-packages.json`; their unmodified license texts are in `licenses/flutter/`.

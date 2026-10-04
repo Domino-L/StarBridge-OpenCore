@@ -7,6 +7,9 @@ TestResults/
 build/
 .dart_tool/
 .flutter-plugins-dependencies
+StarBridge.Flutter/windows/flutter/generated_plugin_registrant.cc
+StarBridge.Flutter/windows/flutter/generated_plugin_registrant.h
+StarBridge.Flutter/windows/flutter/generated_plugins.cmake
 **/ephemeral/
 **/failures/
 *.user

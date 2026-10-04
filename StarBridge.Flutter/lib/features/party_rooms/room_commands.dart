@@ -9,6 +9,8 @@ enum RoomOperation {
   update,
   close,
   decide,
+  remove,
+  transferHost,
   inviteTargets,
   invite,
   inviteJoin,
@@ -49,6 +51,8 @@ final class RoomCommandResult {
     'targets',
     'invited',
     'revoked',
+    'removed',
+    'hostTransferred',
   ].contains(status);
 }
 

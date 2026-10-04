@@ -2,7 +2,9 @@ namespace StarBridge.HostRuntime.Support;
 
 /// <summary>Already-presented local fields only; never retain FleetEvent.SourceLine,
 /// GEID, vehicle instance ID or authentication data in the pending queue.</summary>
-public sealed record LocalGameEventRecord(string Category, string EventType, string Title, string Detail);
+public sealed record LocalGameEventRecord(string Category, string EventType, string Title, string Detail,
+    StarBridge.Core.Events.LifeEventContext LifeContext = StarBridge.Core.Events.LifeEventContext.Unknown,
+    string? DisplayValue = null, string? DisplayPlayer = null);
 
 /// <summary>Called under the existing GameLogRuntime lock. No timer, parser, file reader
 /// or store of its own. Initial/recovery reads establish state but never append history.</summary>
@@ -38,7 +40,9 @@ public sealed class GameLogJournalBatch(LocalGameEventJournal journal)
             Category = LocalGameEventJournal.NormalizeText(entry.Category, 32, "other"),
             EventType = LocalGameEventJournal.NormalizeText(entry.EventType, 80, "Unknown"),
             Title = LocalGameEventJournal.NormalizeText(entry.Title, 180, "未命名事件"),
-            Detail = LocalGameEventJournal.NormalizeText(entry.Detail, 500, "")
+            Detail = LocalGameEventJournal.NormalizeText(entry.Detail, 500, ""),
+            DisplayPlayer = string.IsNullOrWhiteSpace(entry.DisplayPlayer) ? null :
+                LocalGameEventJournal.NormalizeText(entry.DisplayPlayer, 80, "")
         });
     }
 
@@ -59,7 +63,8 @@ public sealed class GameLogJournalBatch(LocalGameEventJournal journal)
             {
                 if (!current()) { Reset(); return; }
                 journal.Append(entry.Category, entry.EventType, entry.Title, entry.Detail,
-                    expectedClearRevision: _clearRevision, canAppend: current);
+                    expectedClearRevision: _clearRevision, canAppend: current, lifeContext: entry.LifeContext,
+                    displayValue: entry.DisplayValue, displayPlayer: entry.DisplayPlayer);
             }
             _following = true;
         }

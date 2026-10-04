@@ -138,6 +138,14 @@ abstract final class AccountPayloadDecoder {
       state: state,
       sensitiveWritesAllowed: sensitiveWritesAllowed,
       authoritativeHandle: _optionalString(payload, 'authoritativeHandle'),
+      detectedHandle: _optionalString(payload, 'detectedHandle'),
+      scmBindingState: switch (payload['scmBindingState']) {
+        'bound' => AccountScmBindingState.bound,
+        null || 'unknown' => AccountScmBindingState.unknown,
+        _ => throw const BridgeFormatException(
+          'Unknown account binding state.',
+        ),
+      },
     );
   }
 }

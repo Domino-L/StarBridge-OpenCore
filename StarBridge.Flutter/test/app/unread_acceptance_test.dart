@@ -115,7 +115,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect((await port.directory()).first.unread, 2);
-      await tester.tap(find.text('示例好友 (Example)'));
+      await tester.tap(find.text('示例好友  @Example'));
       await tester.pumpAndSettle();
       expect(find.text('这是会话历史示例 59'), findsOneWidget);
       expect((await port.directory()).first.unread, 0);

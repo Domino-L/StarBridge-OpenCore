@@ -9,9 +9,11 @@ import 'bridge_manual_presence.dart';
 
 /// Binds to the existing authenticated Host; no independent login or poller.
 class ConnectedManualPresence {
-  ConnectedManualPresence(this.session, this.chrome) {
+  ConnectedManualPresence(this.session, this.chrome, {this.appAway}) {
     source = BridgeManualPresence(session, _account);
     chrome.addListener(_chromeChanged);
+    _account.addListener(_reportActivity);
+    appAway?.addListener(_reportActivity);
     _events = session.events.listen((event) {
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
@@ -29,6 +31,7 @@ class ConnectedManualPresence {
   }
   final BridgeClientSession session;
   final ValueListenable<ShellChromeProjection> chrome;
+  final ValueListenable<bool>? appAway;
   final _account = ValueNotifier(
     const PresenceAccountScope(generation: 0, account: null, available: false),
   );
@@ -36,6 +39,59 @@ class ConnectedManualPresence {
   late final StreamSubscription<BridgeEnvelope> _events;
   bool _disposed = false;
   int _epoch = 0;
+  bool _reportingActivity = false, _activityDirty = false;
+  (Object, bool)? _reportedActivity;
+
+  void _reportActivity() {
+    if (_disposed ||
+        appAway == null ||
+        !session.hostCapabilities.contains('presence.activity')) {
+      return;
+    }
+    final scope = _account.value;
+    if (!scope.available ||
+        scope.account == null ||
+        scope.generation != session.activeGeneration) {
+      return;
+    }
+    final target = (scope.identity, appAway!.value);
+    if (_reportedActivity == target) return;
+    if (_reportingActivity) {
+      _activityDirty = true;
+      return;
+    }
+    _reportingActivity = true;
+    unawaited(_sendActivity(scope, target));
+  }
+
+  Future<void> _sendActivity(
+    PresenceAccountScope scope,
+    (Object, bool) target,
+  ) async {
+    try {
+      await session.request(
+        'presence.activity',
+        payload: {'schemaVersion': 1, 'away': target.$2},
+        accountContext: scope.account,
+        timeout: const Duration(seconds: 5),
+      );
+      if (!_disposed &&
+          scope.identity == _account.value.identity &&
+          scope.generation == session.activeGeneration) {
+        _reportedActivity = target;
+      }
+    } on Object {
+      // An uncertain observation is not an offline intent. Retry only on a
+      // subsequent activity/account transition, never as a hidden poller.
+    } finally {
+      _reportingActivity = false;
+      if (_activityDirty && !_disposed) {
+        _activityDirty = false;
+        _reportActivity();
+      }
+    }
+  }
+
   void _chromeChanged() {
     final current = _account.value;
     _account.value = PresenceAccountScope(
@@ -95,6 +151,8 @@ class ConnectedManualPresence {
     _epoch++;
     unawaited(_events.cancel());
     chrome.removeListener(_chromeChanged);
+    _account.removeListener(_reportActivity);
+    appAway?.removeListener(_reportActivity);
     source.dispose();
     _account.dispose();
   }

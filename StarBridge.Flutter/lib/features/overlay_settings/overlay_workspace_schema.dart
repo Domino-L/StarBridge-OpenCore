@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+enum OverlayWorkspaceUnit { seconds, percent, pixels, count, none }
+
 enum OverlayWorkspaceFieldKind {
   toggle,
   choice,
@@ -25,6 +27,7 @@ final class OverlayWorkspaceFieldSpec {
     this.maximum = 1,
     this.divisions,
     this.userVisible = true,
+    this.unit = OverlayWorkspaceUnit.none,
   });
 
   final String field;
@@ -38,6 +41,7 @@ final class OverlayWorkspaceFieldSpec {
   final double maximum;
   final int? divisions;
   final bool userVisible;
+  final OverlayWorkspaceUnit unit;
 }
 
 const overlayWorkspaceGroupOrder = <String>[
@@ -88,6 +92,8 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'startup',
     OverlayWorkspaceFieldKind.toggle,
     '启用托盘模式',
+    // Compatibility-only: minimizing the main window never hides the overlay.
+    userVisible: false,
   ),
   OverlayWorkspaceFieldSpec(
     'opacity',
@@ -97,6 +103,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     minimum: 0.15,
     maximum: 1,
     userVisible: false,
+    unit: OverlayWorkspaceUnit.percent,
   ),
   OverlayWorkspaceFieldSpec(
     'showNotice',
@@ -160,6 +167,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     minimum: 0.18,
     maximum: 0.82,
     divisions: 64,
+    unit: OverlayWorkspaceUnit.percent,
   ),
   OverlayWorkspaceFieldSpec(
     'scenePreference',
@@ -277,6 +285,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     '准星尺寸',
     minimum: 8,
     maximum: 240,
+    unit: OverlayWorkspaceUnit.pixels,
   ),
   OverlayWorkspaceFieldSpec(
     'crosshairThickness',
@@ -285,6 +294,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     '准星线宽',
     minimum: 1,
     maximum: 8,
+    unit: OverlayWorkspaceUnit.pixels,
   ),
   OverlayWorkspaceFieldSpec(
     'crosshairOpacity',
@@ -293,6 +303,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     '准星透明度',
     minimum: 0.2,
     maximum: 1,
+    unit: OverlayWorkspaceUnit.percent,
   ),
   OverlayWorkspaceFieldSpec(
     'crosshairShowCenterMark',
@@ -306,6 +317,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     OverlayWorkspaceFieldKind.number,
     '中心点尺寸',
     maximum: 18,
+    unit: OverlayWorkspaceUnit.pixels,
   ),
   OverlayWorkspaceFieldSpec(
     'crosshairGap',
@@ -314,6 +326,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     '准星中心间距',
     minimum: 6,
     maximum: 28,
+    unit: OverlayWorkspaceUnit.pixels,
   ),
   OverlayWorkspaceFieldSpec(
     'crosshairOutlineOpacity',
@@ -321,6 +334,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     OverlayWorkspaceFieldKind.number,
     '准星描边透明度',
     maximum: 0.8,
+    unit: OverlayWorkspaceUnit.percent,
   ),
 
   OverlayWorkspaceFieldSpec(
@@ -410,6 +424,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     '默认通知时长',
     minimum: 1,
     maximum: 12,
+    unit: OverlayWorkspaceUnit.seconds,
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationY',
@@ -432,6 +447,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     numberOptions: [1, 2, 3, 4, 5],
     minimum: 1,
     maximum: 5,
+    unit: OverlayWorkspaceUnit.count,
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationPinImportant',
@@ -461,6 +477,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     maximum: 1,
     divisions: 85,
     userVisible: false,
+    unit: OverlayWorkspaceUnit.percent,
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationBackgroundOpacity',
@@ -468,6 +485,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     OverlayWorkspaceFieldKind.number,
     '通知背景透明度',
     userVisible: false,
+    unit: OverlayWorkspaceUnit.percent,
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationDecorationOpacity',
@@ -475,6 +493,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     OverlayWorkspaceFieldKind.number,
     '外观装饰透明度',
     userVisible: false,
+    unit: OverlayWorkspaceUnit.percent,
   ),
 
   OverlayWorkspaceFieldSpec(
@@ -507,6 +526,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     maximum: 8,
     divisions: 7,
     userVisible: false,
+    unit: OverlayWorkspaceUnit.count,
   ),
   OverlayWorkspaceFieldSpec(
     'chatDurationSeconds',
@@ -598,6 +618,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     minimum: 2,
     maximum: 12,
     divisions: 40,
+    unit: OverlayWorkspaceUnit.seconds,
   ),
   OverlayWorkspaceFieldSpec(
     'fleetChatScope',

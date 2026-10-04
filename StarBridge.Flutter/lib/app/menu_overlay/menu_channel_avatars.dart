@@ -50,6 +50,7 @@ final class MenuChannelAvatars {
             if (epoch != _epoch || media.avatar == null) return null;
             final photo = await _images.logo(
               'data:image/png;base64,${base64Encode(media.avatar!)}',
+              background: true,
             );
             if (epoch != _epoch) return null;
             return photo;

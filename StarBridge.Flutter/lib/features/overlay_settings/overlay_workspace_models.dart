@@ -3,10 +3,15 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'overlay_settings_models.dart';
+import 'overlay_preset_sources.dart';
 import 'overlay_workspace_layout_item.dart';
 import 'overlay_workspace_schema.dart';
+import 'overlay_workspace_appearance.dart';
+
+export 'overlay_workspace_appearance.dart';
 
 export 'overlay_workspace_layout_item.dart';
+export 'overlay_preset_sources.dart';
 
 enum OverlayWorkspaceAvailability { unavailable, available }
 
@@ -21,18 +26,21 @@ final class OverlayWorkspaceRuntimeDraft {
     required this.settings,
     required this.layout,
     required this.hotkey,
+    this.sources,
   });
 
   final int expectedRevision;
   final OverlayWorkspaceSettings settings;
   final List<OverlayWorkspaceLayoutItem> layout;
   final OverlayWorkspaceHotkey hotkey;
+  final OverlayPresetSources? sources;
 
   Map<String, Object?> toMap() => <String, Object?>{
     'expectedRevision': expectedRevision,
     'settings': settings.toMap(),
     'layout': layout.map((item) => item.toMap()).toList(growable: false),
     'hotkey': hotkey.toUpdateMap(),
+    if (sources != null) 'sources': sources!.toMap(),
   };
 }
 
@@ -109,6 +117,7 @@ final class OverlayRuntimeSnapshot {
         !const {
           'unavailable',
           'closed',
+          'opening',
           'open',
           'failed',
         }.contains(windowState) ||
@@ -157,173 +166,6 @@ final class OverlayRuntimeSnapshot {
       retryable: retryable,
     );
   }
-}
-
-@immutable
-final class OverlayWorkspaceAppearance {
-  const OverlayWorkspaceAppearance({
-    required this.id,
-    required this.displayNameZh,
-    required this.displayNameEn,
-    required this.summaryZh,
-    required this.summaryEn,
-    required this.traitsZh,
-    required this.traitsEn,
-    required this.previewSurface,
-    required this.previewPrimary,
-    required this.previewSecondary,
-    required this.locksTheme,
-    required this.supportsBloom,
-    required this.startupTransition,
-    required this.requiresEntitlement,
-    required this.isReleased,
-    required this.isAvailable,
-    bool? isPreviewAvailable,
-  }) : _previewAvailable = isPreviewAvailable;
-
-  final String id;
-  final String displayNameZh;
-  final String displayNameEn;
-  final String summaryZh;
-  final String summaryEn;
-  final List<String> traitsZh;
-  final List<String> traitsEn;
-  final String previewSurface;
-  final String previewPrimary;
-  final String previewSecondary;
-  final bool locksTheme;
-  final bool supportsBloom;
-  final String startupTransition;
-  final bool requiresEntitlement;
-  final bool isReleased;
-  final bool isAvailable;
-  final bool? _previewAvailable;
-
-  bool get isPreviewAvailable => _previewAvailable ?? isReleased;
-
-  factory OverlayWorkspaceAppearance.fromMap(Map<String, Object?> source) {
-    const fields = <String>{
-      'id',
-      'displayNameZh',
-      'displayNameEn',
-      'summaryZh',
-      'summaryEn',
-      'traitsZh',
-      'traitsEn',
-      'previewSurface',
-      'previewPrimary',
-      'previewSecondary',
-      'locksTheme',
-      'supportsBloom',
-      'startupTransition',
-      'requiresEntitlement',
-      'isReleased',
-      'isAvailable',
-    };
-    if (!setEquals(source.keys.toSet(), fields) &&
-        !setEquals(source.keys.toSet(), {...fields, 'isPreviewAvailable'})) {
-      throw const FormatException('Invalid overlay appearance fields.');
-    }
-    final id = source['id'];
-    final displayNameZh = source['displayNameZh'];
-    final displayNameEn = source['displayNameEn'];
-    final summaryZh = source['summaryZh'];
-    final summaryEn = source['summaryEn'];
-    final traitsZh = _appearanceStrings(source['traitsZh']);
-    final traitsEn = _appearanceStrings(source['traitsEn']);
-    final previewSurface = source['previewSurface'];
-    final previewPrimary = source['previewPrimary'];
-    final previewSecondary = source['previewSecondary'];
-    final locksTheme = source['locksTheme'];
-    final supportsBloom = source['supportsBloom'];
-    final startupTransition = source['startupTransition'];
-    final requiresEntitlement = source['requiresEntitlement'];
-    final isReleased = source['isReleased'];
-    final isAvailable = source['isAvailable'];
-    final isPreviewAvailable = source['isPreviewAvailable'];
-    final color = RegExp(r'^#[0-9A-Fa-f]{6}$');
-    if (id is! String ||
-        id.isEmpty ||
-        displayNameZh is! String ||
-        displayNameZh.isEmpty ||
-        displayNameEn is! String ||
-        displayNameEn.isEmpty ||
-        summaryZh is! String ||
-        summaryEn is! String ||
-        traitsZh.isEmpty ||
-        traitsEn.isEmpty ||
-        previewSurface is! String ||
-        !color.hasMatch(previewSurface) ||
-        previewPrimary is! String ||
-        !color.hasMatch(previewPrimary) ||
-        previewSecondary is! String ||
-        !color.hasMatch(previewSecondary) ||
-        locksTheme is! bool ||
-        supportsBloom is! bool ||
-        startupTransition is! String ||
-        startupTransition.isEmpty ||
-        requiresEntitlement is! bool ||
-        isReleased is! bool ||
-        isAvailable is! bool ||
-        (source.containsKey('isPreviewAvailable') &&
-            isPreviewAvailable is! bool) ||
-        (isAvailable && !isReleased) ||
-        (isReleased && !requiresEntitlement && !isAvailable)) {
-      throw const FormatException('Invalid overlay appearance values.');
-    }
-    return OverlayWorkspaceAppearance(
-      id: id,
-      displayNameZh: displayNameZh,
-      displayNameEn: displayNameEn,
-      summaryZh: summaryZh,
-      summaryEn: summaryEn,
-      traitsZh: traitsZh,
-      traitsEn: traitsEn,
-      previewSurface: previewSurface.toUpperCase(),
-      previewPrimary: previewPrimary.toUpperCase(),
-      previewSecondary: previewSecondary.toUpperCase(),
-      locksTheme: locksTheme,
-      supportsBloom: supportsBloom,
-      startupTransition: startupTransition,
-      requiresEntitlement: requiresEntitlement,
-      isReleased: isReleased,
-      isAvailable: isAvailable,
-      isPreviewAvailable: isPreviewAvailable as bool?,
-    );
-  }
-
-  OverlayWorkspaceAppearance copyWith({
-    bool? isReleased,
-    bool? isAvailable,
-    bool? isPreviewAvailable,
-  }) => OverlayWorkspaceAppearance(
-    id: id,
-    displayNameZh: displayNameZh,
-    displayNameEn: displayNameEn,
-    summaryZh: summaryZh,
-    summaryEn: summaryEn,
-    traitsZh: traitsZh,
-    traitsEn: traitsEn,
-    previewSurface: previewSurface,
-    previewPrimary: previewPrimary,
-    previewSecondary: previewSecondary,
-    locksTheme: locksTheme,
-    supportsBloom: supportsBloom,
-    startupTransition: startupTransition,
-    requiresEntitlement: requiresEntitlement,
-    isReleased: isReleased ?? this.isReleased,
-    isAvailable: isAvailable ?? this.isAvailable,
-    isPreviewAvailable: isPreviewAvailable ?? _previewAvailable,
-  );
-}
-
-List<String> _appearanceStrings(Object? source) {
-  if (source is! List ||
-      source.isEmpty ||
-      source.any((value) => value is! String)) {
-    throw const FormatException('Invalid overlay appearance text.');
-  }
-  return List<String>.unmodifiable(source.cast<String>());
 }
 
 @immutable
@@ -507,6 +349,7 @@ final class OverlayWorkspacePreset {
     required this.storageState,
     required this.settings,
     required this.layout,
+    this.sources,
   });
 
   final String id;
@@ -515,6 +358,7 @@ final class OverlayWorkspacePreset {
   final String storageState;
   final OverlayWorkspaceSettings settings;
   final List<OverlayWorkspaceLayoutItem> layout;
+  final OverlayPresetSources? sources;
 
   factory OverlayWorkspacePreset.fromMap(Map<String, Object?> source) {
     final id = source['id'];
@@ -534,6 +378,9 @@ final class OverlayWorkspacePreset {
       name: name,
       isActive: isActive,
       storageState: storageState,
+      sources: source['sources'] == null
+          ? null
+          : OverlayPresetSources.fromMap(stringMap(source['sources'])),
       settings: OverlayWorkspaceSettings.fromMap(stringMap(source['settings'])),
       layout: objectList(source['layout'])
           .map((item) => OverlayWorkspaceLayoutItem.fromMap(stringMap(item)))
@@ -589,6 +436,8 @@ enum OverlayWorkspaceMutationKind {
   deletePreset,
   resetPreset,
   importPreset,
+  configurePresetSources,
+  temporarySource,
 }
 
 @immutable
@@ -601,6 +450,11 @@ final class OverlayWorkspaceMutation {
     this.layout,
     this.renderMode,
     this.hotkey,
+    this.sources,
+    this.replaceAutoSwitchPresetId,
+    this.automaticSource,
+    this.temporaryOwnerKey,
+    this.runtimeDraft,
   });
 
   const OverlayWorkspaceMutation.saveActive({
@@ -608,12 +462,14 @@ final class OverlayWorkspaceMutation {
     required List<OverlayWorkspaceLayoutItem> layout,
     required String renderMode,
     required OverlayWorkspaceHotkey hotkey,
+    OverlayPresetSources? sources,
   }) : this._(
          kind: OverlayWorkspaceMutationKind.saveActive,
          settings: settings,
          layout: layout,
          renderMode: renderMode,
          hotkey: hotkey,
+         sources: sources,
        );
 
   const OverlayWorkspaceMutation.activatePreset(String presetId)
@@ -621,6 +477,32 @@ final class OverlayWorkspaceMutation {
         kind: OverlayWorkspaceMutationKind.activatePreset,
         presetId: presetId,
       );
+
+  const OverlayWorkspaceMutation.temporarySource({
+    required String ownerKey,
+    required OverlayPresetSources sources,
+    required OverlayWorkspaceRuntimeDraft draft,
+  }) : this._(
+         kind: OverlayWorkspaceMutationKind.temporarySource,
+         temporaryOwnerKey: ownerKey,
+         sources: sources,
+         runtimeDraft: draft,
+       );
+
+  const OverlayWorkspaceMutation.activatePresetAutomatically(
+    String presetId, {
+    required String ownerKey,
+    required int generation,
+    required String source,
+  }) : this._(
+         kind: OverlayWorkspaceMutationKind.activatePreset,
+         presetId: presetId,
+         automaticSource: (
+           ownerKey: ownerKey,
+           generation: generation,
+           source: source,
+         ),
+       );
 
   const OverlayWorkspaceMutation.createPreset(String name)
     : this._(kind: OverlayWorkspaceMutationKind.createPreset, name: name);
@@ -655,11 +537,26 @@ final class OverlayWorkspaceMutation {
     required String name,
     required OverlayWorkspaceSettings settings,
     required List<OverlayWorkspaceLayoutItem> layout,
+    OverlayPresetSources? sources,
   }) : this._(
          kind: OverlayWorkspaceMutationKind.importPreset,
          name: name,
          settings: settings,
          layout: layout,
+         sources: sources,
+       );
+
+  const OverlayWorkspaceMutation.configurePresetSources(
+    String presetId,
+    OverlayPresetSources sources, {
+    String? replaceAutoSwitchPresetId,
+    String? name,
+  }) : this._(
+         kind: OverlayWorkspaceMutationKind.configurePresetSources,
+         presetId: presetId,
+         sources: sources,
+         replaceAutoSwitchPresetId: replaceAutoSwitchPresetId,
+         name: name,
        );
 
   final OverlayWorkspaceMutationKind kind;
@@ -669,12 +566,19 @@ final class OverlayWorkspaceMutation {
   final List<OverlayWorkspaceLayoutItem>? layout;
   final String? renderMode;
   final OverlayWorkspaceHotkey? hotkey;
+  final OverlayPresetSources? sources;
+  final String? replaceAutoSwitchPresetId;
+  final ({String ownerKey, int generation, String source})? automaticSource;
+  final String? temporaryOwnerKey;
+  final OverlayWorkspaceRuntimeDraft? runtimeDraft;
 
   Map<String, Object?> toPayload(int expectedRevision) {
     return <String, Object?>{
       'schemaVersion': 1,
       'expectedRevision': expectedRevision,
       'action': kind.name,
+      if (temporaryOwnerKey != null) 'ownerKey': temporaryOwnerKey,
+      if (runtimeDraft != null) 'workspace': runtimeDraft!.toMap(),
       if (presetId != null) 'presetId': presetId,
       if (name != null) 'name': name,
       if (settings != null) 'settings': settings!.toMap(),
@@ -682,6 +586,15 @@ final class OverlayWorkspaceMutation {
         'layout': layout!.map((item) => item.toMap()).toList(growable: false),
       if (renderMode != null) 'renderMode': renderMode,
       if (hotkey != null) 'hotkey': hotkey!.toUpdateMap(),
+      if (sources != null) 'sources': sources!.toMap(),
+      if (replaceAutoSwitchPresetId != null)
+        'replaceAutoSwitchPresetId': replaceAutoSwitchPresetId,
+      if (automaticSource case final trigger?)
+        'automaticSource': {
+          'ownerKey': trigger.ownerKey,
+          'generation': trigger.generation,
+          'source': trigger.source,
+        },
     };
   }
 }
@@ -710,6 +623,8 @@ final class OverlayWorkspaceSnapshot {
     this.layout = const [],
     this.presets = const [],
     this.failure,
+    this.sourcePresetsEnabled = false,
+    this.removedOrganizationBindings = false,
   });
 
   const OverlayWorkspaceSnapshot.unavailable({
@@ -729,6 +644,8 @@ final class OverlayWorkspaceSnapshot {
     required OverlayWorkspaceSettings settings,
     required List<OverlayWorkspaceLayoutItem> layout,
     required List<OverlayWorkspacePreset> presets,
+    bool sourcePresetsEnabled = false,
+    bool removedOrganizationBindings = false,
   }) : this._(
          availability: OverlayWorkspaceAvailability.available,
          revision: revision,
@@ -740,6 +657,8 @@ final class OverlayWorkspaceSnapshot {
          settings: settings,
          layout: layout,
          presets: presets,
+         sourcePresetsEnabled: sourcePresetsEnabled,
+         removedOrganizationBindings: removedOrganizationBindings,
        );
 
   final OverlayWorkspaceAvailability availability;
@@ -753,6 +672,8 @@ final class OverlayWorkspaceSnapshot {
   final List<OverlayWorkspaceLayoutItem> layout;
   final List<OverlayWorkspacePreset> presets;
   final OverlaySettingsFailure? failure;
+  final bool sourcePresetsEnabled;
+  final bool removedOrganizationBindings;
 }
 
 Map<String, Object?> stringMap(Object? value) {

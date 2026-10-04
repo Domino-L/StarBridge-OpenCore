@@ -9,17 +9,18 @@ import 'package:starbridge_flutter/app/menu_overlay/menu_channel_avatars.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_friends_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_friends_view.dart';
+import 'package:starbridge_flutter/features/friends/friends_module.dart';
 
 import 'menu_chat_media_test.dart' show photo;
 import 'menu_comms_channels_test.dart' show channel;
-import 'menu_friends_session_test.dart' show Port, ready;
+import 'menu_friends_session_test.dart' show Port;
 import '../../features/communities/community_chat_media_cache_test.dart'
     show MediaPort, message;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'friends keeps a legal account photo larger than the wire limit',
+    'friends keeps legal own and peer photos larger than the wire limit',
     () async {
       late String large;
       final pixels = Uint8List(256 * 256 * 4);
@@ -52,11 +53,19 @@ void main() {
         }
       }, identity: () => (name: 'Self', handle: 'fixture', avatar: large));
       session.show(true);
-      port.reads.last.complete(ready('Peer'));
+      port.reads.last.complete(FriendsReadResult(FriendsReadState.ready,
+        snapshot: FriendsSnapshot(groups: {FriendsSection.friends: [
+          FriendRow('Peer', 'peer', 'friend', DateTime(2026),
+            targetRef: 'fixture-peer', avatar: large, shared: {'presence': 'AppOnline'}),
+        ]}, results: [])));
       await changed.future.timeout(const Duration(seconds: 5));
       final own = MenuFriendsView.parse(jsonEncode(views.last)).identity!;
       expect(own.avatar, startsWith('data:image/png;base64,'));
       expect(own.avatar!.length, lessThan(28000));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final peer = MenuFriendsView.parse(jsonEncode(views.last)).rows.single;
+      expect(peer.avatar, startsWith('data:image/png;base64,'));
+      expect(peer.avatar!.length, lessThan(28000));
       session.dispose();
     },
   );

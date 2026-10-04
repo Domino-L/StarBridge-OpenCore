@@ -10,7 +10,7 @@ internal static class PartyRoomDisplayTests
         const string png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
         RoomView Read(string? avatar, string presence = "游戏中 · EPTU", bool host = true)
         {
-            var wire = JsonNode.Parse(PartyRoomReaderTests.Wire(null, PartyRoomReaderTests.Room("one")))!;
+            var wire = JsonNode.Parse(PartyRoomReaderTests.Wire("one", PartyRoomReaderTests.Room("one")))!;
             var member = wire["rooms"]![0]!["members"]![0]!;
             member["avatarImageData"] = avatar;
             member["presenceText"] = presence;
@@ -25,6 +25,17 @@ internal static class PartyRoomDisplayTests
             Check(Read(null, pair.Item1).Members.Single().PresenceKey == pair.Item2, "Known viewer-scoped presence has an explicit semantic key.");
         var valid = Read(png);
         Check(valid.Members.Single().AvatarImageData == "data:image/png;base64," + png, "Bounded actual avatar is normalized.");
+        // Account/profile avatars permit 512 KiB. Exercise the actual remote
+        // member reader (not the viewer's separate current-account override).
+        var accountAvatar = new byte[128 * 1024];
+        Convert.FromBase64String(png).CopyTo(accountAvatar, 0);
+        var largePng = Convert.ToBase64String(accountAvatar);
+        Check(Read(largePng).Members.Single().AvatarImageData == "data:image/png;base64," + largePng,
+            "An authorized remote member's valid account avatar must not disappear above 96 KiB.");
+        var oversizeAvatar = new byte[512 * 1024 + 1];
+        Convert.FromBase64String(png).CopyTo(oversizeAvatar, 0);
+        Check(Read(Convert.ToBase64String(oversizeAvatar)).Members.Single().AvatarImageData is null,
+            "Remote avatars above the account contract still fail closed.");
         Check(valid.LeaderGameVersion == "EPTU", "Only explicit leader presence supplies the game version.");
         Check(Read("data:image/png;base64," + png).Members.Single().AvatarImageData != null, "Existing data URI accepted.");
         foreach (var value in new[] { "private-avatar", "https://example.test/avatar.png", "C:/private/avatar.png", "data:image/svg+xml;base64,PHN2Zz4=", new string('A', 128 * 1024 + 1) })

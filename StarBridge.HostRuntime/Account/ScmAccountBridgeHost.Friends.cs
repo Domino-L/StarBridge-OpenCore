@@ -7,6 +7,29 @@ using StarBridge.NativeBridge;
 
 internal sealed partial class ScmAccountBridgeHost
 {
+    public async Task<object> WaitSocialActivityAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
+        => await WaitActivityAsync(context, payload, token, false);
+
+    public async Task<object> WaitCommunityActivityAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
+        => await WaitActivityAsync(context, payload, token, true);
+
+    private async Task<object> WaitActivityAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token, bool community)
+    {
+        FriendsReader.ParseActivity(payload);
+        var session = RequireRelaySession(context);
+        var generation = Generation;
+        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
+        var reader = _friends ?? throw new AccountBridgeHostException("friends.read_unavailable");
+        // Waits never refresh credentials or mutate session state, so they can
+        // run outside the account write barrier without delaying send/logout.
+        var result = await reader.WaitActivityAsync(session.AccessToken, payload, token, community);
+        if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
+        RequireSameRelaySession(RequireRelaySession(context), session);
+        if (!community) QueueBackgroundFriendActivity(context, generation, session.AccessToken);
+        return result;
+    }
+
     public async Task<FriendsView> ReadFriendsAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
     {
         var query = FriendsReader.ParseQuery(payload);

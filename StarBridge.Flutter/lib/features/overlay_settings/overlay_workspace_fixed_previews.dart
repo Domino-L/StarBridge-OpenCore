@@ -8,6 +8,7 @@ import '../../design_system/styles/overlay_preview_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_layout_geometry.dart';
 import 'overlay_workspace_preview_content.dart';
+import 'overlay_preview_sources.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_runtime_projection.dart';
 
@@ -16,6 +17,7 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
   const OverlayWorkspaceFixedPreviews({
     required this.settings,
     this.onSelected,
+    this.selectionOnly = false,
     this.onEventNotificationPlacement,
     this.onEventNotificationGestureStart,
     this.onEventNotificationGestureEnd,
@@ -30,6 +32,7 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
   final bool simulate;
   final Size surfaceSize;
   final ValueChanged<String>? onSelected;
+  final bool selectionOnly;
   final void Function(String side, double normalizedY)?
   onEventNotificationPlacement;
   final VoidCallback? onEventNotificationGestureStart;
@@ -73,6 +76,8 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
           children: [
             if (simulate &&
                 visible.showChat &&
+                OverlayPreviewSourceScope.of(context, 'Chat')?.unavailable !=
+                    true &&
                 settings['chatDisplayMode'] == 'FullScreenBarrage')
               Positioned(
                 left: surfaceOffset.dx,
@@ -80,6 +85,7 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
                 width: scaledSurface.width,
                 height: scaledSurface.height,
                 child: IgnorePointer(
+                  ignoring: !selectionOnly,
                   child: FittedBox(
                     fit: BoxFit.fill,
                     alignment: Alignment.topLeft,
@@ -89,6 +95,9 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
                       child: _BarragePreview(
                         settings: settings,
                         textOpacity: chatTextOpacity,
+                        onSelected: selectionOnly && onSelected != null
+                            ? () => onSelected!('chat')
+                            : null,
                       ),
                     ),
                   ),
@@ -96,17 +105,29 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
               ),
             if (visible.showCrosshair)
               Center(
-                child: GestureDetector(
+                child: Semantics(
+                  container: true,
+                  label: AppStrings.of(context)
+                      .text('overlay.workspace.group.crosshair'),
+                  button: onSelected != null,
+                  image: onSelected == null,
                   onTap: onSelected == null
                       ? null
                       : () => onSelected!('crosshair'),
-                  behavior: HitTestBehavior.opaque,
-                  child: Opacity(
-                    opacity: (settings['crosshairOpacity']! as num).toDouble(),
-                    child: CustomPaint(
-                      key: const Key('overlay-runtime-preview-crosshair'),
-                      size: Size.square(size * scale),
-                      painter: OverlayCrosshairPainter(settings),
+                  child: GestureDetector(
+                    excludeFromSemantics: true,
+                    onTap: onSelected == null
+                        ? null
+                        : () => onSelected!('crosshair'),
+                    behavior: HitTestBehavior.opaque,
+                    child: Opacity(
+                      opacity: (settings['crosshairOpacity']! as num)
+                          .toDouble(),
+                      child: CustomPaint(
+                        key: const Key('overlay-runtime-preview-crosshair'),
+                        size: Size.square(size * scale),
+                        painter: OverlayCrosshairPainter(settings),
+                      ),
                     ),
                   ),
                 ),
@@ -243,10 +264,14 @@ class _EventNotificationPreviewState extends State<_EventNotificationPreview> {
 
   @override
   Widget build(BuildContext context) => Tooltip(
-    message: AppStrings.of(context).text('overlay.preview.eventDrag'),
+    message: widget.onPlacementChanged == null
+        ? ''
+        : AppStrings.of(context).text('overlay.preview.eventDrag'),
     child: MouseRegion(
       cursor: widget.onPlacementChanged == null
-          ? SystemMouseCursors.basic
+          ? widget.onSelected == null
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click
           : SystemMouseCursors.move,
       child: Listener(
         key: const Key('overlay-runtime-preview-event'),
@@ -294,10 +319,15 @@ class _EventNotificationPreviewState extends State<_EventNotificationPreview> {
 }
 
 class _BarragePreview extends StatelessWidget {
-  const _BarragePreview({required this.settings, required this.textOpacity});
+  const _BarragePreview({
+    required this.settings,
+    required this.textOpacity,
+    this.onSelected,
+  });
 
   final OverlayWorkspaceSettings settings;
   final double textOpacity;
+  final VoidCallback? onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -328,9 +358,16 @@ class _BarragePreview extends StatelessWidget {
             final sample = samples[index % samples.length];
             final showSender = settings['chatShowSender'] == true;
             final showTime = settings['chatShowTimestamp'] == true;
-            final sender = showSender
+            final senderName = showSender
                 ? strings.text('overlay.sample.sender')
                 : strings.text('overlay.sample.communicationMessage');
+            final sourceLabel = OverlayPreviewSourceScope.of(
+              context,
+              'Chat',
+            )?.labelId;
+            final sender = sourceLabel == null
+                ? senderName
+                : '[${OverlayPreviewSourceScope.label(context, sourceLabel)}] $senderName';
             final senderStyle = _barrageStyle(
               color: tokens.colors.accent,
               fontSize: fontSize,
@@ -353,14 +390,24 @@ class _BarragePreview extends StatelessWidget {
             final laneWidth =
                 3 +
                 8 +
-                _measureTextWidth(sender, senderStyle, direction, scaler) +
+                _measureTextWidth(
+                  sender,
+                  DefaultTextStyle.of(context).style.merge(senderStyle),
+                  direction,
+                  scaler,
+                ) +
                 9 +
-                _measureTextWidth(sample.$1, messageStyle, direction, scaler) +
+                _measureTextWidth(
+                  sample.$1,
+                  DefaultTextStyle.of(context).style.merge(messageStyle),
+                  direction,
+                  scaler,
+                ) +
                 (showTime
                     ? 9 +
                           _measureTextWidth(
                             sample.$2,
-                            timeStyle,
+                            DefaultTextStyle.of(context).style.merge(timeStyle),
                             direction,
                             scaler,
                           )
@@ -379,45 +426,49 @@ class _BarragePreview extends StatelessWidget {
               left: left,
               top: positions[index],
               width: laneWidth,
-              child: Opacity(
-                opacity: textOpacity.clamp(0.0, 1.0),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 3,
-                      height: fontSize * 1.2,
-                      color: tokens.colors.accent,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      sender,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.visible,
-                      style: senderStyle,
-                    ),
-                    const SizedBox(width: 9),
-                    Text(
-                      sample.$1,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.visible,
-                      style: messageStyle,
-                    ),
-                    if (showTime) ...[
-                      const SizedBox(width: 9),
-                      Opacity(
-                        opacity: 0.72,
-                        child: Text(
-                          sample.$2,
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.visible,
-                          style: timeStyle,
-                        ),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onSelected,
+                child: Opacity(
+                  opacity: textOpacity.clamp(0.0, 1.0),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 3,
+                        height: fontSize * 1.2,
+                        color: tokens.colors.accent,
                       ),
+                      const SizedBox(width: 8),
+                      Text(
+                        sender,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                        style: senderStyle,
+                      ),
+                      const SizedBox(width: 9),
+                      Text(
+                        sample.$1,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                        style: messageStyle,
+                      ),
+                      if (showTime) ...[
+                        const SizedBox(width: 9),
+                        Opacity(
+                          opacity: 0.72,
+                          child: Text(
+                            sample.$2,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.visible,
+                            style: timeStyle,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             );
@@ -459,7 +510,9 @@ class _BarragePreview extends StatelessWidget {
       textScaler: scaler,
       maxLines: 1,
     )..layout();
-    return painter.width;
+    final width = painter.width;
+    painter.dispose();
+    return width;
   }
 }
 

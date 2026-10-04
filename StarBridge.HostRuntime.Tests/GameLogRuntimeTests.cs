@@ -39,6 +39,31 @@ internal static class GameLogRuntimeTests
     private static string Line(string body, string stamp = "2026-09-04T12:00:20Z") =>
         $"<{stamp}> {body}\n";
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+    internal static Task PublicationWake()
+    {
+        using var h = new Harness();
+        var changes = 0;
+        h.Runtime.PublicationChanged += () => changes++;
+        h.Call("select", h.Log);
+        Require(changes == 1, "Recognized game start must signal publication without waiting for a separate heartbeat.");
+        h.Runtime.PublicationChanged += () => throw new IOException("synthetic wake failure");
+        h.Time.Now = h.Time.Now.AddSeconds(3);
+        h.Runtime.Sample();
+        Require(changes == 1, "Timestamp-only sampling must not emit another publication change.");
+        File.AppendAllText(h.Log, Line("<Join PU> connected to shard[pub_sc_alpha_apse1_123]"));
+        h.Runtime.Sample();
+        Require(changes == 2 && h.Runtime.CurrentSession.Server.State == "connected", "New server evidence wakes publication.");
+        h.Process = new("notRunning");
+        h.Runtime.Sample();
+        Require(changes == 3 && h.Runtime.ConfirmedVersion is null, "Game exit wakes clearing of live fields.");
+        h.Runtime.Sample();
+        Require(changes == 3, "Repeated stopped state does not replay a change.");
+        h.Runtime.Suspend();
+        Require(changes == 4, "Identity suspension invalidates the publication source immediately.");
+        h.Runtime.Suspend();
+        Require(changes == 4, "Repeated suspension is not another source change.");
+        return Task.CompletedTask;
+    }
     internal static Task DiagnosticsSelection()
     {
         using var h = new Harness();
@@ -55,6 +80,66 @@ internal static class GameLogRuntimeTests
         return Task.CompletedTask;
     }
 
+    internal static Task OfflineRecentIdentity()
+    {
+        using var h = new Harness();
+        h.Process = new("notRunning");
+        File.AppendAllText(h.Log, Line("SystemQuit CSystem::Quit"));
+        var result = h.Call("select", h.Log);
+        Require(result.Status == "ok", "Existing log selection is readable without the game.");
+        Require(h.Runtime.RecentDetectedHandle == "Pilot_A",
+            "Existing completed game log must provide the recent Handle without starting the game.");
+        Require(h.Runtime.DetectedHandle is null && h.Runtime.ConfirmedVersion is null &&
+            h.Runtime.CurrentSession == GameLogSessionSnapshot.Empty,
+            "Historical identity must not manufacture live game, version, server or location evidence.");
+        h.Runtime.Dispose(); h.Runtime = h.Create(); h.Call();
+        Require(h.Runtime.RecentDetectedHandle == "Pilot_A", "Existing log reopens after client restart without a game process.");
+        File.WriteAllText(h.Log, Identity("Pilot_A", stamp: "2026-09-03T12:00:00Z") +
+            Identity("Pilot-B") + Line("SystemQuit CSystem::Quit"));
+        h.Call();
+        Require(h.Runtime.RecentDetectedHandle == "Pilot-B", "Most recent valid identity, not first identity, wins.");
+        File.AppendAllText(h.Log, Identity("Pilot-C")); h.Call();
+        Require(h.Runtime.RecentDetectedHandle is null, "Conflicting identities at the same time remain ambiguous.");
+        File.WriteAllText(h.Log, Identity("Pilot_A")); h.Call();
+        Require(h.Runtime.RecentDetectedHandle == "Pilot_A", "Rotation establishes new evidence.");
+        File.AppendAllText(h.Log, Identity("Pilot-B", stamp: "2026-09-04T12:00:15Z").TrimEnd('\n')); h.Call();
+        Require(h.Runtime.RecentDetectedHandle is null, "Incomplete tail cannot expose stale identity for confirmation.");
+        File.AppendAllText(h.Log, "\n"); h.Call();
+        Require(h.Runtime.RecentDetectedHandle == "Pilot-B", "Completed latest record becomes available.");
+        h.Process = new("unknown"); h.Call();
+        Require(h.Runtime.RecentDetectedHandle is null, "Unknown process state does not fall back around a live identity failure.");
+        h.Process = new("notRunning"); h.Call();
+        h.Time.Now = h.Time.Now.AddSeconds(11);
+        Require(h.Runtime.RecentDetectedHandle is null, "Unrefreshed file observation expires even for old log content.");
+        h.Call(); h.Call("stop");
+        Require(h.Runtime.RecentDetectedHandle is null, "Explicit stop still stops reading.");
+        h.Call("resume");
+        Require(h.Runtime.RecentDetectedHandle == "Pilot-B", "Resume reads without launching game.");
+        h.Current = (Owner with { Subject = "another-owner" }, 2);
+        Require(h.Runtime.RecentDetectedHandle is null, "Account change immediately invalidates cached recent identity.");
+        h.Current = (Owner, 3); h.Call();
+        File.WriteAllText(h.Log, "log replaced without identity\n"); h.Call();
+        Require(h.Runtime.RecentDetectedHandle is null, "Do not keep a previous file's Handle after replacement.");
+        foreach (var invalid in new[] {
+            Identity("Pilot_A") + Identity("Pilot-B", id: "0"),
+            Identity("Pilot_A") + Identity("Pilot-B", stamp: "2099-09-04T12:00:15Z"),
+            Identity("Pilot_A") + "nickname=\"Pilot-B\" playerGEID=12345\n",
+            Identity("Pilot_A") + new string('x', 65537) + "\n" }) {
+            File.WriteAllText(h.Log, invalid); h.Call();
+            Require(h.Runtime.RecentDetectedHandle is null, "Untrusted or skipped possible identity cannot authorize correction.");
+        }
+        File.WriteAllBytes(h.Log, System.Text.Encoding.UTF8.GetBytes(Identity("Pilot_A") + "nickname=")
+            .Concat(new byte[] { 0xFF, 0x0A }).ToArray()); h.Call();
+        Require(h.Runtime.RecentDetectedHandle is null, "Damaged identity bytes cannot preserve old authority.");
+        // An unchanged suffix must not hide an in-place, same-length identity rewrite.
+        var suffix = new string('x', 256) + "\n";
+        File.WriteAllText(h.Log, Identity("Pilot_A") + suffix); h.Call();
+        var priorWrite = File.GetLastWriteTimeUtc(h.Log);
+        File.WriteAllText(h.Log, Identity("Pilot-B") + suffix);
+        File.SetLastWriteTimeUtc(h.Log, priorWrite.AddSeconds(1)); h.Call();
+        Require(h.Runtime.RecentDetectedHandle == "Pilot-B", "Write stamp invalidates same-length identity cache.");
+        return Task.CompletedTask;
+    }
     internal static Task Recognition()
     {
         using var h = new Harness();

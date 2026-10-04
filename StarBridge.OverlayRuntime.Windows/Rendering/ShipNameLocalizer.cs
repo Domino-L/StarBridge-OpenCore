@@ -7,6 +7,11 @@ public static class ShipNameLocalizer
 
     public static string DisplayName(string? shipCode, string language)
     {
+        if (StarBridge.HostRuntime.Presence.GameShipNames.Find(shipCode) is { } name)
+            return language.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                ? (language.Equals("zh-Hant", StringComparison.OrdinalIgnoreCase) ? name.TraditionalChineseName : null)
+                    ?? (string.IsNullOrWhiteSpace(name.ChineseName) ? name.EnglishName : name.ChineseName)
+                : name.EnglishName;
         return Catalog.Value.DisplayName(shipCode, language);
     }
 
@@ -18,6 +23,7 @@ public static class ShipNameLocalizer
 
     public static string ResolveCode(string? shipCodeOrName)
     {
+        if (StarBridge.HostRuntime.Presence.GameShipNames.Find(shipCodeOrName)?.RuntimeId is { } id) return id;
         return Catalog.Value.ResolveCode(shipCodeOrName);
     }
 

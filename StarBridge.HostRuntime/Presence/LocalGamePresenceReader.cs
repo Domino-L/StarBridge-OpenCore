@@ -34,6 +34,18 @@ public sealed class LocalGamePresenceReader : IDisposable
         _journal = journal;
     }
 
+    /// <summary>One-shot notification gate. Does not advance session debounce or
+    /// write the event journal: sparse notification reads are not a polling clock.</summary>
+    public string ReadCurrentState()
+    {
+        lock (_sync)
+        {
+            if (_disposed) return "unknown";
+            try { return _probe() is { } observed ? observed.Running ? "running" : "notRunning" : "unknown"; }
+            catch { return "unknown"; }
+        }
+    }
+
     public LocalGamePresenceSnapshot Read()
     {
         lock (_sync)

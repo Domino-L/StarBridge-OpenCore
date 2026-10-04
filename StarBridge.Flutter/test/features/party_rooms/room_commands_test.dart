@@ -8,6 +8,88 @@ import 'party_rooms_test.dart' show TestRoomsPort, ready, wire, room;
 
 void main() {
   test(
+    'successful room recovery clears the stale accepted-read warning',
+    () async {
+      final port = CommandPort();
+      final module = PartyRoomsModule(port);
+      addTearDown(module.dispose);
+      await module.refresh();
+      final request = module.execute(
+        RoomCommand(RoomOperation.create, {'title': 'Fixture room'}),
+      );
+      port.pendingCommand.complete(
+        const RoomCommandResult('joined', error: 'refreshRequired'),
+      );
+      await request;
+      expect(module.commandMessage, 'refreshRequired');
+      expect(module.canCommand, isFalse);
+      port.result = ready(wire(current: 'a', rooms: [room('a')]));
+      await module.refresh();
+      expect(module.directory!.currentRoomId, 'a');
+      expect(module.commandNeedsRefresh, isFalse);
+      expect(
+        module.commandMessage,
+        isNull,
+        reason: 'Confirmed membership must not retain a failed-read warning.',
+      );
+      expect(port.calls, 1, reason: 'Recovery must not repeat creation.');
+    },
+  );
+  test(
+    'invalid or failed recovery cannot clear an unresolved room operation',
+    () async {
+      final port = CommandPort();
+      final module = PartyRoomsModule(port);
+      addTearDown(module.dispose);
+      await module.refresh();
+      final request = module.execute(
+        RoomCommand(RoomOperation.create, {'title': 'Fixture room'}),
+      );
+      port.pendingCommand.complete(
+        const RoomCommandResult('joined', error: 'refreshRequired'),
+      );
+      await request;
+      for (final result in const [
+        RoomReadResult(RoomReadState.unavailable),
+        RoomReadResult(RoomReadState.ready),
+      ]) {
+        port.result = result;
+        await module.refresh();
+        expect(module.commandNeedsRefresh, isTrue);
+        expect(module.commandMessage, 'refreshRequired');
+        expect(module.canCommand, isFalse);
+      }
+      expect(port.calls, 1);
+    },
+  );
+  test('authoritative pending application removal clears feedback, missing field does not', () async {
+    final port = CommandPort();
+    final module = PartyRoomsModule(port);
+    addTearDown(module.dispose);
+    await module.refresh();
+    final request = module.execute(
+      RoomCommand(RoomOperation.join, {'roomId': 'a', 'password': ''}),
+    );
+    port.pendingCommand.complete(
+      RoomCommandResult(
+        'pending',
+        directory: ready(wire()..['viewerPendingRoomIds'] = ['a']).directory,
+      ),
+    );
+    await request;
+    expect(module.commandMessage, 'pending');
+    // Legacy/unknown and transient failures are not evidence of rejection.
+    port.result = ready(wire());
+    await module.refresh();
+    expect(module.commandMessage, 'pending');
+    port.result = const RoomReadResult(RoomReadState.unavailable);
+    await module.refresh();
+    expect(module.commandMessage, 'pending');
+    port.result = ready(wire()..['viewerPendingRoomIds'] = <String>[]);
+    await module.refresh();
+    expect(module.commandMessage, isNull);
+  });
+  test(
     'pending application stays in discovery and suppresses duplicate clicks',
     () async {
       final port = CommandPort();
@@ -28,6 +110,27 @@ void main() {
       expect(module.directory!.currentRoomId, isNull);
       expect(module.commandMessage, 'pending');
       module.dispose();
+    },
+  );
+  test(
+    'pending feedback clears when a later authoritative read shows membership',
+    () async {
+      final port = CommandPort();
+      final module = PartyRoomsModule(port);
+      addTearDown(module.dispose);
+      await module.refresh();
+      final request = module.execute(
+        RoomCommand(RoomOperation.join, {'roomId': 'a', 'password': ''}),
+      );
+      port.pendingCommand.complete(
+        RoomCommandResult('pending', directory: ready(wire()).directory),
+      );
+      await request;
+      expect(module.commandMessage, 'pending');
+      port.result = ready(wire(current: 'a', rooms: [room('a')]));
+      await module.refresh();
+      expect(module.directory!.currentRoomId, 'a');
+      expect(module.commandMessage, isNull);
     },
   );
   test('unknown outcome requires refresh before a new command', () async {

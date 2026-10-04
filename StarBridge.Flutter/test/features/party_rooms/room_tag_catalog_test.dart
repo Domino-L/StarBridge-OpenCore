@@ -6,6 +6,10 @@ import 'package:starbridge_flutter/features/party_rooms/room_tag_definitions.dar
 import 'package:starbridge_flutter/features/party_rooms/example_party_rooms_adapter.dart';
 
 void main() {
+  test('Siege of Orison label has no obsolete availability suffix', () {
+    expect(roomGameplayDefinitions.singleWhere((row) =>
+      row.$1 == 'special_stanton_siege_orison').$2, '奥里森之围');
+  });
   test(
     'catalog matches every current WPF v3 node, label, parent and alias',
     () {

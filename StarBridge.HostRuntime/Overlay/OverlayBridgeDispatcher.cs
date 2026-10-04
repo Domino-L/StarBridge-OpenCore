@@ -1,13 +1,14 @@
 namespace StarBridge.HostRuntime.Overlay;
 
 using System.Text.Json;
+using StarBridge.Core.Overlay;
 using StarBridge.HostRuntime.Presence;
 using StarBridge.NativeBridge;
 
 public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } =
-        ["overlay.settings", "overlay.workspace", "overlay.runtime", "overlay.presetSharing"];
+        ["overlay.settings", "overlay.workspace", "overlay.runtime", "overlay.presetSharing", "overlay.presetInspection"];
 
     private readonly IOverlaySettingsStore _store;
     private readonly IOverlayWorkspaceStore _workspaceStore;
@@ -15,6 +16,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
     private readonly Func<GameLogSessionSnapshot> _currentSession;
     private readonly IInformationOverlayRuntime _runtime;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Func<OverlayPresetTrigger?> _presetTrigger;
+    private readonly Func<(string? OwnerKey, long Generation)> _sourceScope;
     private OverlaySettingsReadResult? _current;
     private bool _disposed;
 
@@ -22,26 +25,32 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         string dataRoot,
         Func<long> generation,
         Func<GameLogSessionSnapshot> currentSession,
-        IInformationOverlayRuntime? runtime = null)
+        IInformationOverlayRuntime? runtime = null,
+        Func<OverlayPresetTrigger?>? presetTrigger = null,
+        Func<(string? OwnerKey, long Generation)>? sourceScope = null)
         : this(
             new OverlaySettingsStore(dataRoot),
-            new OverlayWorkspaceStore(dataRoot, Path.Combine(AppContext.BaseDirectory, "config")),
+            new OverlayWorkspaceStore(dataRoot, Path.Combine(AppContext.BaseDirectory, "config"), OverlaySourcePresetBuild.Enabled),
             generation,
             currentSession,
-            runtime) { }
+            runtime, presetTrigger, sourceScope) { }
 
     internal OverlayBridgeDispatcher(
         IOverlaySettingsStore store,
         IOverlayWorkspaceStore workspaceStore,
         Func<long> generation,
         Func<GameLogSessionSnapshot> currentSession,
-        IInformationOverlayRuntime? runtime = null)
+        IInformationOverlayRuntime? runtime = null,
+        Func<OverlayPresetTrigger?>? presetTrigger = null,
+        Func<(string? OwnerKey, long Generation)>? sourceScope = null)
     {
         _store = store;
         _workspaceStore = workspaceStore;
         _generation = generation;
         _currentSession = currentSession;
         _runtime = runtime ?? new UnavailableInformationOverlayRuntime();
+        _presetTrigger = presetTrigger ?? (() => null);
+        _sourceScope = sourceScope ?? (() => (null, _generation()));
     }
 
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
@@ -128,10 +137,22 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 
     public async Task InitializeRuntimeAsync(CancellationToken cancellationToken = default)
     {
-        var workspace = _workspaceStore.Load();
+        cancellationToken.ThrowIfCancellationRequested();
+        OverlayWorkspaceReadResult workspace;
+        try
+        {
+            workspace = _workspaceStore.Load();
+        }
+        catch (OverlaySettingsException)
+        {
+            // An unsupported workspace must not abort the whole NativeHost before
+            // its bridge starts. Keep the runtime untouched; workspace/open requests
+            // still return the original error instead of reading stale v1 state.
+            return;
+        }
         await _runtime.ExecuteAsync(
             InformationOverlayRuntimeCommand.Sync,
-            ToRuntimeWorkspace(workspace, ResolveLanguage(null)),
+            ToRuntimeWorkspace(workspace, ResolveLanguage(null), allowUnavailable: workspace.SourcePresetsEnabled),
             cancellationToken);
     }
 
@@ -148,7 +169,9 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         }
 
         var action = actionValue.GetString();
-        if (action is "exportSharedPreset" or "importSharedPreset")
+        if (action == "temporarySource")
+            return await SelectTemporarySourceAsync(request, expectedRevision, cancellationToken);
+        if (action is "exportSharedPreset" or "importSharedPreset" or "inspectSharedPreset")
             return SharePreset(request, action, expectedRevision);
         var kind = action switch
         {
@@ -160,6 +183,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             "deletePreset" => OverlayWorkspaceMutationKind.DeletePreset,
             "resetPreset" => OverlayWorkspaceMutationKind.ResetPreset,
             "importPreset" => OverlayWorkspaceMutationKind.ImportPreset,
+            "configurePresetSources" => OverlayWorkspaceMutationKind.ConfigurePresetSources,
             _ => throw new OverlaySettingsException("overlay.workspace_invalid_action")
         };
 
@@ -182,11 +206,37 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             settings,
             layout,
             OptionalString(request.Payload, "renderMode"),
-            hotkey);
-        var workspace = _workspaceStore.Apply(mutation);
+            hotkey,
+            request.Payload.TryGetProperty("sources", out var sourcePolicy) ? ParseSources(sourcePolicy) : null,
+            OptionalString(request.Payload, "replaceAutoSwitchPresetId"));
+        Func<bool>? activationCurrent = null;
+        if (request.Payload.TryGetProperty("automaticSource", out var automatic))
+        {
+            if (automatic.ValueKind != JsonValueKind.Object)
+                throw new OverlaySettingsException("overlay.workspace_invalid_value");
+            RejectUnknown(automatic, "ownerKey", "generation", "source");
+            RequireWorkspaceFields(automatic, ["ownerKey", "generation", "source"]);
+            if (automatic.GetProperty("generation").ValueKind != JsonValueKind.Number ||
+                automatic.GetProperty("ownerKey").ValueKind != JsonValueKind.String ||
+                automatic.GetProperty("source").ValueKind != JsonValueKind.String)
+                throw new OverlaySettingsException("overlay.workspace_invalid_value");
+            var trigger = _presetTrigger();
+            if (kind != OverlayWorkspaceMutationKind.ActivatePreset || !_workspaceStore.Load().SourcePresetsEnabled ||
+                trigger is null || !automatic.GetProperty("generation").TryGetInt64(out var generation) ||
+                trigger.Generation != generation || generation != _generation() ||
+                automatic.GetProperty("ownerKey").GetString() != trigger.OwnerKey ||
+                automatic.GetProperty("source").GetString() != trigger.Source)
+                throw new OverlaySettingsException("overlay.workspace_revision_conflict", true);
+            activationCurrent = () => _generation() == generation && _presetTrigger() == trigger;
+        }
+        var workspace = _workspaceStore.Apply(mutation, activationCurrent);
+        if (kind == OverlayWorkspaceMutationKind.ActivatePreset) _temporarySelection = null;
+        // Metadata changes can legitimately leave a damaged active v2 preset
+        // quarantined. Synchronize its unavailable state rather than reporting
+        // a failed save after the metadata transaction has already committed.
         await _runtime.ExecuteAsync(
             InformationOverlayRuntimeCommand.Sync,
-            ToRuntimeWorkspace(workspace, ResolveLanguage(null)),
+            ToRuntimeWorkspace(workspace, ResolveLanguage(null), allowUnavailable: workspace.SourcePresetsEnabled),
             cancellationToken);
         return WorkspaceResponse(request, workspace);
     }
@@ -199,9 +249,13 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         RejectUnknown(request.Payload, "schemaVersion", "language", "workspace");
         var language = OptionalString(request.Payload, "language");
         var workspace = _workspaceStore.Load();
-        var runtimeWorkspace = request.Payload.TryGetProperty("workspace", out var draft)
-            ? ParseRuntimeDraft(draft, workspace, ResolveLanguage(language))
-            : ToRuntimeWorkspace(workspace, ResolveLanguage(language));
+        // Closing is always available, including the ordinary Flutter request
+        // carrying an old draft. It does not apply draft settings or authority.
+        var runtimeWorkspace = command == InformationOverlayRuntimeCommand.Close
+            ? ToRuntimeWorkspace(workspace, ResolveLanguage(language), allowUnavailable: true)
+            : request.Payload.TryGetProperty("workspace", out var draft)
+                ? ParseRuntimeDraft(draft, workspace, ResolveLanguage(language))
+                : ToRuntimeWorkspace(workspace, ResolveLanguage(language));
         var snapshot = await _runtime.ExecuteAsync(
             command,
             runtimeWorkspace,
@@ -224,27 +278,41 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 
     private InformationOverlayRuntimeWorkspace ToRuntimeWorkspace(
         OverlayWorkspaceReadResult workspace,
-        string language) => new(
+        string language,
+        bool allowUnavailable = false)
+    {
+        if (!allowUnavailable) RequireUsablePreset(workspace);
+        return new(
             workspace.Revision,
             workspace.Settings,
             workspace.Layout,
             workspace.Hotkey.Binding,
             workspace.Hotkey.Enabled,
             _currentSession(),
-            language);
+            language,
+            workspace.SourcePresetsEnabled ? workspace.Presets.First(preset => preset.IsActive).Sources : null,
+            workspace.SourcePresetsEnabled, CurrentTemporarySource(workspace));
+    }
+
+    private static void RequireUsablePreset(OverlayWorkspaceReadResult workspace)
+    {
+        if (workspace.Presets.First(preset => preset.IsActive).StorageState == "corrupt")
+            throw new OverlaySettingsException("overlay.workspace_invalid_preset");
+    }
 
     private InformationOverlayRuntimeWorkspace ParseRuntimeDraft(
         JsonElement value,
         OverlayWorkspaceReadResult persisted,
         string language)
     {
+        RequireUsablePreset(persisted);
         if (value.ValueKind != JsonValueKind.Object)
         {
             throw new BridgeProtocolException(
                 BridgeErrorCodes.InvalidEnvelope,
                 "Overlay runtime workspace draft is invalid.");
         }
-        RejectUnknown(value, "expectedRevision", "settings", "layout", "hotkey");
+        RejectUnknown(value, "expectedRevision", "settings", "layout", "hotkey", "sources");
         RequireWorkspaceFields(value, ["expectedRevision", "settings", "layout", "hotkey"]);
         if (!value.GetProperty("expectedRevision").TryGetInt64(out var expectedRevision) ||
             expectedRevision < 0)
@@ -264,6 +332,12 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             OverlayWorkspaceWireProjection.ParseLayout(value.GetProperty("layout")));
         var hotkey = OverlayWorkspaceStore.NormalizeHotkey(
             ParseHotkey(value.GetProperty("hotkey")));
+        var sources = persisted.SourcePresetsEnabled ? persisted.Presets.First(preset => preset.IsActive).Sources : null;
+        if (value.TryGetProperty("sources", out var sourceDraft))
+        {
+            if (!persisted.SourcePresetsEnabled) throw new OverlaySettingsException("overlay.workspace_invalid_value");
+            sources = ParseSources(sourceDraft);
+        }
         return new InformationOverlayRuntimeWorkspace(
             persisted.Revision,
             settings,
@@ -271,7 +345,9 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             hotkey.Binding,
             hotkey.Enabled,
             _currentSession(),
-            language);
+            language,
+            sources,
+            persisted.SourcePresetsEnabled, CurrentTemporarySource(persisted));
     }
 
     private static string ResolveLanguage(string? value)
@@ -291,6 +367,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             storageState = workspace.StorageState,
             activePresetId = workspace.ActivePresetId,
             renderMode = workspace.RenderMode,
+            sourcePresetsEnabled = workspace.SourcePresetsEnabled,
+            removedOrganizationBindings = workspace.RemovedOrganizationBindings,
             appearances = appearances.Select(appearance => new
             {
                 id = appearance.Id,
@@ -326,7 +404,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
                 isActive = preset.IsActive,
                 storageState = preset.StorageState,
                 settings = OverlayWorkspaceWireProjection.Settings(preset.Settings),
-                layout = preset.Layout.Select(OverlayWorkspaceWireProjection.Layout).ToArray()
+                layout = preset.Layout.Select(OverlayWorkspaceWireProjection.Layout).ToArray(),
+                sources = preset.Sources is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(OverlayPresetSourcesCodec.Serialize(preset.Sources))
             }).ToArray()
         }, preserveRequestAccountContext: false);
     }
@@ -366,8 +445,9 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
     private static string[] AllowedWorkspaceFields(OverlayWorkspaceMutationKind kind) => kind switch
     {
         OverlayWorkspaceMutationKind.SaveActive =>
-            ["schemaVersion", "expectedRevision", "action", "settings", "layout", "renderMode", "hotkey"],
-        OverlayWorkspaceMutationKind.ActivatePreset or
+            ["schemaVersion", "expectedRevision", "action", "settings", "layout", "renderMode", "hotkey", "sources"],
+        OverlayWorkspaceMutationKind.ActivatePreset =>
+            ["schemaVersion", "expectedRevision", "action", "presetId", "automaticSource"],
         OverlayWorkspaceMutationKind.DeletePreset or
         OverlayWorkspaceMutationKind.ResetPreset =>
             ["schemaVersion", "expectedRevision", "action", "presetId"],
@@ -377,12 +457,22 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         OverlayWorkspaceMutationKind.RenamePreset =>
             ["schemaVersion", "expectedRevision", "action", "presetId", "name"],
         OverlayWorkspaceMutationKind.ImportPreset =>
-            ["schemaVersion", "expectedRevision", "action", "name", "settings", "layout"],
+            ["schemaVersion", "expectedRevision", "action", "name", "settings", "layout", "sources"],
+        OverlayWorkspaceMutationKind.ConfigurePresetSources =>
+            ["schemaVersion", "expectedRevision", "action", "presetId", "sources", "replaceAutoSwitchPresetId", "name"],
         _ => []
     };
 
     private static string[] RequiredWorkspaceFields(OverlayWorkspaceMutationKind kind) =>
-        AllowedWorkspaceFields(kind);
+        AllowedWorkspaceFields(kind).Where(field => field != "replaceAutoSwitchPresetId" && field != "automaticSource" &&
+            (field != "name" || kind != OverlayWorkspaceMutationKind.ConfigurePresetSources) &&
+            (field != "sources" || kind == OverlayWorkspaceMutationKind.ConfigurePresetSources)).ToArray();
+
+    private static OverlayPresetSources ParseSources(JsonElement value)
+    {
+        try { return OverlayPresetSourcesCodec.Parse(value.GetRawText()); }
+        catch (FormatException error) { throw new OverlaySettingsException("overlay.workspace_invalid_value", false, error); }
+    }
 
     private static void RequireWorkspaceFields(JsonElement value, IEnumerable<string> required)
     {

@@ -5,6 +5,15 @@ import 'package:starbridge_flutter/app/feature_registry.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
 
 void main() {
+  test('messages and friends have distinct destinations and attention sources', () {
+    final app = AppComposition.forShellReview(windowChrome: InMemoryWindowChrome());
+    final messages = app.features.byRoute('/messages');
+    final friends = app.features.byRoute('/friends');
+    expect(messages.icon, StarBridgeIconSemantic.messages);
+    expect(messages.navigationRegion, NavigationRegion.topBar);
+    expect(friends.icon, StarBridgeIconSemantic.friends);
+    expect(identical(messages.attentionCount, friends.attentionCount), isFalse);
+  });
   const builder = _emptyBuilder;
 
   test('registry rejects duplicate routes', () {

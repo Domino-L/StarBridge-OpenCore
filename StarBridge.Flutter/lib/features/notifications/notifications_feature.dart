@@ -1,5 +1,4 @@
 import '../../app/feature_registry.dart';
-import '../../app/routing/empty_destination.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -17,7 +16,8 @@ FeatureDescriptor createNotificationsFeature({
   navigationRegion: NavigationRegion.topBar,
   order: 20,
   attentionCount: attentionCount,
-  buildDestination:
-      buildContent ??
-      (_) => const EmptyDestination(semanticLabel: 'notifications placeholder'),
+  availability: buildContent == null
+      ? FeatureAvailability.comingSoon
+      : FeatureAvailability.available,
+  buildDestination: buildContent,
 );

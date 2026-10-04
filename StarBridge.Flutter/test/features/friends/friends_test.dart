@@ -70,6 +70,81 @@ class PendingPort implements FriendsPort {
 }
 
 void main() {
+  test('friend chat carries only explicitly shared coarse presence', () {
+    for (final entry in <String, String>{
+      'AppOnline': 'online',
+      'Away': 'away',
+      'InGame': 'inGame',
+      'Offline': 'offline',
+    }.entries) {
+      final friend = FriendRow(
+        'Fixture',
+        'Fixture',
+        'friend',
+        DateTime(2026),
+        shared: {'presence': entry.key, 'serverId': 'private-server'},
+      );
+      expect(friendSharedConversationPresence(friend), entry.value);
+      final request = FriendRow(
+        'Fixture',
+        'Fixture',
+        'incoming',
+        DateTime(2026),
+        shared: {'presence': entry.key},
+      );
+      expect(friendSharedConversationPresence(request), isNull);
+    }
+    expect(
+      friendSharedConversationPresence(
+        FriendRow('Fixture', 'Fixture', 'friend', DateTime(2026)),
+      ),
+      isNull,
+    );
+  });
+  testWidgets(
+    'friend presence distinguishes absent state and localizes region',
+    (tester) async {
+      final port = PendingPort();
+      await tester.pumpWidget(page(const Locale('zh', 'CN'), () => port));
+      await tester.pump();
+      port.requests.first.complete(
+        FriendsReadResult(
+          FriendsReadState.ready,
+          snapshot: parseFriendsSnapshot(
+            directory()
+              ..['friends'] = [
+                row('Unknown friend'),
+                {
+                  ...row('Offline friend'),
+                  'shared': {'presence': 'Offline'},
+                },
+                {
+                  ...row('Playing friend'),
+                  'shared': {
+                    'presence': 'InGame',
+                    'serverRegion': 'US',
+                    'ship': 'Fixture Ship',
+                    'location': 'Fixture Port',
+                  },
+                  'sharedLabels': {
+                    'ship': {'en': 'Fixture Ship', 'zhHans': '测试飞船'},
+                    'location': {'en': 'Fixture Port', 'zhHans': '测试港口'},
+                  },
+                },
+              ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('状态未知'), findsOneWidget);
+      expect(find.textContaining('离线'), findsOneWidget);
+      expect(find.textContaining('美服'), findsOneWidget);
+      expect(find.textContaining('测试飞船'), findsOneWidget);
+      expect(find.textContaining('测试港口'), findsOneWidget);
+      expect(find.textContaining('US'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   test('silent refresh does not cancel an unfinished directory read', () async {
     final port = PendingPort();
     final module = FriendsModule(port);
@@ -256,10 +331,10 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(page(locale, ExampleFriendsAdapter.new));
       await tester.pumpAndSettle();
-      expect(find.text('示例好友 (Example)'), findsOneWidget);
+      expect(find.text('示例好友  @Example'), findsOneWidget);
       await tester.tap(find.byKey(const Key('friends-nav-incoming')));
       await tester.pumpAndSettle();
-      expect(find.text('示例申请 (Example)'), findsOneWidget);
+      expect(find.text('示例申请'), findsOneWidget);
       await tester.enterText(find.byType(TextField), 'no-match');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
@@ -338,7 +413,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(FriendsPage), findsOneWidget);
         expect(
-          find.text('示例好友 (Example)'),
+          find.text('示例好友  @Example'),
           example ? findsOneWidget : findsNothing,
         );
         if (!example) {
@@ -350,7 +425,7 @@ void main() {
         await tester.tap(find.byKey(const Key('friends-recent')));
         await tester.pumpAndSettle();
         expect(
-          find.text('示例好友 (Example)'),
+          find.text('示例好友  @Example'),
           example ? findsOneWidget : findsNothing,
         );
         if (!example) {

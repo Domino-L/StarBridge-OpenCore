@@ -19,27 +19,295 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
 
 void main() {
+  test(
+    'legacy save synchronizes only background after local persistence',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.state = 'legacySignedIn';
+      h.connection.authority = 'starbridge-relay-test';
+      h.connection.background = 'other';
+      final result = await h.port.save(edit(await h.port.read()));
+      expect(result.outcome, PersonalProfileActionOutcome.completed);
+      expect(h.connection.background, 'none');
+      final saves = h.connection.requests
+          .where((r) => r.name == 'personalProfile.saveBackground')
+          .toList();
+      expect(saves, hasLength(1));
+      expect(saves.single.payload, {
+        'schemaVersion': 1,
+        'expectedRevision': 4,
+        'wallpaperId': 'none',
+      });
+      expect(
+        h.connection.requests.indexOf(saves.single),
+        greaterThan(
+          h.connection.requests.indexWhere(
+            (r) => r.name == 'personalProfile.localSave',
+          ),
+        ),
+      );
+      expect(h.connection.content!['introduction'], 'Local introduction');
+      expect(h.remote.writes, 0);
+    },
+  );
+  test(
+    'background sync failure retains local save and reports partial result',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.state = 'legacySignedIn';
+      h.connection.authority = 'starbridge-relay-test';
+      h.connection.background = 'other';
+      h.connection.backgroundError = 'profile.background_conflict';
+      final result = await h.port.save(edit(await h.port.read()));
+      expect(result.outcome, PersonalProfileActionOutcome.failed);
+      expect(result.failureKey, 'profile.local.backgroundPending');
+      expect(h.connection.content!['wallpaperId'], 'none');
+      expect(h.connection.revision, 1);
+      expect(
+        h.connection.requests.where(
+          (r) => r.name == 'personalProfile.saveBackground',
+        ),
+        isEmpty,
+      );
+      expect(h.remote.writes, 0);
+    },
+  );
+  test('failed local save never publishes background', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.connection.state = 'legacySignedIn';
+    h.connection.authority = 'starbridge-relay-test';
+    h.connection.failSave = true;
+    await h.port.save(edit(await h.port.read()));
+    expect(
+      h.connection.requests.where(
+        (r) => r.name == 'personalProfile.saveBackground',
+      ),
+      isEmpty,
+    );
+  });
+  test(
+    'background conflict never repeats publication and local content survives',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.state = 'legacySignedIn';
+      h.connection.authority = 'starbridge-relay-test';
+      h.connection.background = 'other';
+      h.connection.backgroundWriteError = 'profile.background_conflict';
+      final result = await h.port.save(edit(await h.port.read()));
+      expect(result.failureKey, 'profile.local.backgroundPending');
+      expect(
+        h.connection.requests.where(
+          (r) => r.name == 'personalProfile.saveBackground',
+        ),
+        hasLength(1),
+      );
+      expect(h.connection.background, 'other');
+      expect(h.connection.revision, 1);
+      expect((await h.port.read()).wallpaperId, 'none');
+    },
+  );
+  test(
+    'account invalidation while checking background cannot save either target',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.state = 'legacySignedIn';
+      h.connection.authority = 'starbridge-relay-test';
+      h.connection.invalidateBackgroundRead = true;
+      final result = await h.port.save(edit(await h.port.read()));
+      expect(result.outcome, PersonalProfileActionOutcome.rejected);
+      expect(
+        h.connection.requests.where(
+          (r) =>
+              r.name == 'personalProfile.localSave' ||
+              r.name == 'personalProfile.saveBackground',
+        ),
+        isEmpty,
+      );
+    },
+  );
+  test(
+    'SCM local editor does not fall back to legacy background writes',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      await h.port.save(edit(await h.port.read()));
+      expect(
+        h.connection.requests.where((r) => r.name.endsWith('Background')),
+        isEmpty,
+      );
+      expect(h.remote.writes, 0);
+    },
+  );
   test('visibility saves only audience and rejects a lease after account invalidation', () async {
     final h = Harness();
     addTearDown(h.close);
     await h.port.read();
     final state = await h.port.readVisibility();
-    final result = await h.port.saveVisibility(state, PersonalProfileVisibility.friendsFleetAndOrganizations);
-    expect(result.visibility, PersonalProfileVisibility.friendsFleetAndOrganizations);
+    final result = await h.port.saveVisibility(
+      state,
+      PersonalProfileVisibility.friendsFleetAndOrganizations,
+    );
+    expect(
+      result.visibility,
+      PersonalProfileVisibility.friendsFleetAndOrganizations,
+    );
     expect(h.connection.content, isNull);
     expect(h.remote.writes, 0);
     final save = h.connection.requests.last;
     expect(save.name, 'personalProfile.saveVisibility');
-    expect(save.payload.keys.toSet(), {'schemaVersion', 'expectedRevision', 'visibility'});
-    h.connection.stream.add(BridgeEnvelope.fromJson({
-      'protocolVersion': 1, 'messageType': 'event', 'name': 'personalProfile.changed',
-      'sessionGeneration': 7, 'sequence': 1, 'payload': {'schemaVersion': 1}}));
+    expect(save.payload.keys.toSet(), {
+      'schemaVersion',
+      'expectedRevision',
+      'visibility',
+    });
+    h.connection.stream.add(
+      BridgeEnvelope.fromJson({
+        'protocolVersion': 1,
+        'messageType': 'event',
+        'name': 'personalProfile.changed',
+        'sessionGeneration': 7,
+        'sequence': 1,
+        'payload': {'schemaVersion': 1},
+      }),
+    );
     await Future<void>.delayed(Duration.zero);
     await h.port.read();
     final count = h.connection.requests.length;
-    await expectLater(h.port.saveVisibility(result, PersonalProfileVisibility.everyone), throwsStateError);
+    await expectLater(
+      h.port.saveVisibility(result, PersonalProfileVisibility.everyone),
+      throwsStateError,
+    );
     expect(h.connection.requests.length, count);
   });
+  test('local profile projects the most recently added current ship', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    final older = DateTime.utc(2026, 1, 1);
+    final newer = DateTime.utc(2026, 2, 1);
+    h.hangar.snapshot = LocalHangarSnapshot(
+      revision: 2,
+      savedAt: DateTime.utc(2026, 3, 1),
+      ships: [
+        LocalHangarShip(id: shipA, title: 'Older ship', addedAt: older),
+        LocalHangarShip(
+          id: shipB,
+          title: 'Newer ship',
+          addedAt: newer,
+          imageAsset: 'assets/ships/catalog-carrack.jpg',
+        ),
+        const LocalHangarShip(id: 'unknown-date', title: 'Undated ship'),
+      ],
+      formerShips: [
+        LocalHangarShip(
+          id: 'former',
+          title: 'Former ship',
+          addedAt: DateTime.utc(2026, 4, 1),
+        ),
+      ],
+    );
+    final actual = (await h.port.read()).hangarSummary;
+    expect(actual.recentlyAddedShip?.runtimeId, shipB);
+    expect(
+      actual.recentlyAddedShipImageAsset,
+      'assets/ships/catalog-carrack.jpg',
+    );
+    expect(
+      actual.recentlyAddedAtLabel,
+      newer.toLocal().toString().split(' ').first,
+    );
+    expect(actual.shipCount, 3);
+    expect(h.remote.writes, 0);
+    expect(h.connection.content, isNull);
+  });
+  test(
+    'local recent ship never borrows remote history or the save time',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.hangar.snapshot = LocalHangarSnapshot(
+        revision: 2,
+        savedAt: DateTime.utc(2026, 3, 1),
+        ships: const [LocalHangarShip(id: shipA, title: 'Undated ship')],
+      );
+      var actual = (await h.port.read()).hangarSummary;
+      expect(actual.recentlyAddedShip, isNull);
+      expect(actual.recentlyAddedAtLabel, isEmpty);
+      h.hangar.snapshot = LocalHangarSnapshot(
+        revision: 3,
+        ships: [
+          LocalHangarShip(
+            id: shipA,
+            title: 'Unknown legacy time',
+            addedAt: DateTime.utc(1),
+          ),
+        ],
+      );
+      actual = (await h.port.read()).hangarSummary;
+      expect(actual.shipCount, 1);
+      expect(actual.recentlyAddedShip, isNull);
+      expect(actual.recentlyAddedAtLabel, isEmpty);
+      h.hangar.snapshot = const LocalHangarSnapshot(revision: 3, ships: []);
+      actual = (await h.port.read()).hangarSummary;
+      expect(actual.recentlyAddedShip, isNull);
+      expect(actual.shipCount, 0);
+    },
+  );
+  testWidgets(
+    'owner three-cell overview renders recent inventory without saving',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1600, 1200);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final h = Harness();
+      h.hangar.snapshot = LocalHangarSnapshot(
+        revision: 2,
+        ships: [
+          LocalHangarShip(
+            id: shipA,
+            title: 'Recently admitted fixture',
+            addedAt: DateTime.utc(2026, 2, 1),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        StarBridgeApp(
+          composition: AppComposition.forTest(
+            windowChrome: InMemoryWindowChrome(),
+            accountPort: InMemoryAccountAdapter.forReview(
+              AccountReviewState.signedIn,
+            ),
+            personalProfilePort: h.port,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-command')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-menu-personal-profile')));
+      await tester.pumpAndSettle();
+      final panel = find.byKey(const Key('profile-hangar-recent-ship-panel'));
+      await tester.ensureVisible(panel);
+      expect(panel, findsOneWidget);
+      expect(
+        find.descendant(
+          of: panel,
+          matching: find.text('Recently admitted fixture'),
+        ),
+        findsOneWidget,
+      );
+      expect(h.connection.content, isNull);
+      expect(h.remote.writes, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(h.close);
+    },
+  );
   test('former ownership is model-based while favorites retain instance references', () async {
     final h = Harness();
     addTearDown(h.close);
@@ -511,7 +779,7 @@ void main() {
         find.byKey(const Key('profile-visibility-selector')),
         findsNothing,
       );
-      expect(find.text('保存到本机'), findsOneWidget);
+      expect(find.text('保存页面'), findsOneWidget);
       final picker = find.byKey(
         const Key('profile-module-edit-favorite-ships'),
       );
@@ -646,6 +914,11 @@ class SavedHangar implements LocalHangarPort {
 }
 
 class LocalProfileConnection implements BridgeConnection {
+  int backgroundRevision = 4;
+  String background = 'none';
+  String? backgroundError;
+  String? backgroundWriteError;
+  bool invalidateBackgroundRead = false;
   int visibilityRevision = 1;
   String visibility = 'private';
   final stream = StreamController<BridgeEnvelope>.broadcast();
@@ -669,12 +942,35 @@ class LocalProfileConnection implements BridgeConnection {
   Future<void> send(BridgeEnvelope request) async {
     if (request.messageType != 'request') return;
     requests.add(request);
+    if (request.name == 'personalProfile.readBackground' &&
+        invalidateBackgroundRead) {
+      stream.add(
+        BridgeEnvelope.fromJson({
+          'protocolVersion': 1,
+          'messageType': 'event',
+          'name': 'account.changed',
+          'sessionGeneration': generation,
+          'sequence': 1,
+          'payload': {'schemaVersion': 1},
+        }),
+      );
+    }
+    if (request.name == 'personalProfile.saveBackground' &&
+        backgroundError == null &&
+        backgroundWriteError == null) {
+      background = request.payload['wallpaperId'] as String;
+      backgroundRevision++;
+    }
     if (request.name == 'personalProfile.saveVisibility') {
       visibility = request.payload['visibility'] as String;
       visibilityRevision++;
     }
     final save = request.name == 'personalProfile.localSave';
-    final errorCode = save && failSave
+    final errorCode = request.name == 'personalProfile.saveBackground'
+        ? backgroundWriteError ?? backgroundError
+        : request.name.endsWith('Background')
+        ? backgroundError
+        : save && failSave
         ? 'profile_local.write_failed'
         : request.name == 'personalProfile.localRead'
         ? localReadError
@@ -706,9 +1002,19 @@ class LocalProfileConnection implements BridgeConnection {
                 'displayName': displayName,
                 'avatarImageData': avatarImageData,
               }
-            : request.name.endsWith('Visibility') ? {
-                'schemaVersion': 1, 'revision': visibilityRevision, 'visibility': visibility,
-              } : {
+            : request.name.endsWith('Background')
+            ? {
+                'schemaVersion': 1,
+                'revision': backgroundRevision,
+                'wallpaperId': background,
+              }
+            : request.name.endsWith('Visibility')
+            ? {
+                'schemaVersion': 1,
+                'revision': visibilityRevision,
+                'visibility': visibility,
+              }
+            : {
                 'schemaVersion': 1,
                 'revision': revision,
                 'operationId': operation,

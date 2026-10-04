@@ -15,12 +15,14 @@ class LocalNotificationListener extends StatefulWidget {
     required this.settings,
     required this.child,
     this.desktop,
+    this.visibleConversationKey,
     super.key,
   });
   final Stream<LocalRoomReminder?> events;
   final NotificationSettingsModule settings;
   final Widget child;
   final DesktopNotificationPort? desktop;
+  final String? Function()? visibleConversationKey;
   @override
   State<LocalNotificationListener> createState() =>
       _LocalNotificationListenerState();
@@ -64,21 +66,47 @@ class _LocalNotificationListenerState extends State<LocalNotificationListener>
     final strings = AppStrings.of(context);
     final hidden = value.previewMode == NotificationPreviewMode.hiddenDetails;
     final full = value.previewMode == NotificationPreviewMode.fullContent;
-    final title = strings.text(
+    final genericTitle = strings.text(
       hidden
           ? 'settings.notification.local.genericTitle'
+          : event.kind == 'direct'
+          ? 'settings.notification.local.directTitle'
+          : event.kind == 'friend'
+          ? 'settings.notification.local.friendTitle'
           : 'settings.notification.local.roomTitle',
     );
+    final title =
+        event.kind == 'direct' &&
+            !hidden &&
+            event.senderName?.isNotEmpty == true
+        ? strings
+              .text('settings.notification.local.directFrom')
+              .replaceAll('{sender}', event.senderName!)
+        : genericTitle;
     final message = strings
         .text(
           hidden
               ? 'settings.notification.local.hiddenBody'
+              : event.kind == 'direct' &&
+                    full &&
+                    event.messagePreview?.isNotEmpty == true
+              ? 'settings.notification.local.directPreview'
+              : event.kind != 'room'
+              ? 'settings.notification.local.socialBody'
               : full
               ? 'settings.notification.local.fullBody'
               : 'settings.notification.local.sourceBody',
         )
         .replaceAll('{invitations}', '${event.invitations}')
-        .replaceAll('{applications}', '${event.applications}');
+        .replaceAll('{applications}', '${event.applications}')
+        .replaceAll('{message}', event.messagePreview ?? '');
+    final activeKey = widget.visibleConversationKey?.call();
+    if (event.kind == 'direct' &&
+        activeKey != null &&
+        event.conversationKeys.isNotEmpty &&
+        event.conversationKeys.every((key) => key == activeKey)) {
+      return;
+    }
     if (lifecycle != null && lifecycle != AppLifecycleState.resumed) {
       if (event.desktopEligible &&
           value.desktopDeliveryAvailable &&

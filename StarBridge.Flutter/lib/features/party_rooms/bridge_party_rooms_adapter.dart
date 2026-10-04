@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../common/runtime_name_labels.dart';
+
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../../platform/bridge/bridge_account_access.dart';
@@ -53,6 +55,8 @@ final class BridgePartyRoomsAdapter
               RoomOperation.update,
               RoomOperation.close,
               RoomOperation.decide,
+              RoomOperation.remove,
+              RoomOperation.transferHost,
             ].contains(command.operation))) {
       return const RoomCommandResult('rejected', error: 'hostUnavailable');
     }
@@ -90,6 +94,8 @@ final class BridgePartyRoomsAdapter
             RoomOperation.leave => status == 'left' || status == 'closed',
             RoomOperation.update => status == 'updated',
             RoomOperation.close => status == 'closed',
+            RoomOperation.remove => status == 'removed',
+            RoomOperation.transferHost => status == 'hostTransferred',
             RoomOperation.decide =>
               status == 'approved' || status == 'declined',
             RoomOperation.inviteTargets => status == 'targets',
@@ -234,6 +240,15 @@ RoomDirectory parseRoomDirectory(Map<String, Object?> value) {
       final member = raw as Map;
       return RoomMember(
         userRef: member['userRef'] as String?,
+        removalToken:
+            room['roomId'] == value['currentRoomId'] &&
+                room['viewerIsHost'] == true &&
+                member['isHost'] != true &&
+                member['removalToken'] is String &&
+                RegExp(r'^[a-fA-F0-9]{32}$')
+                    .hasMatch(member['removalToken'] as String)
+            ? member['removalToken'] as String
+            : null,
         isSelf: member['isSelf'] == true,
         callsign: _text(member, 'callsign'),
         gameId: _text(member, 'gameId'),
@@ -241,14 +256,26 @@ RoomDirectory parseRoomDirectory(Map<String, Object?> value) {
         presence: _text(member, 'presenceText'),
         presenceKey: member['presenceKey'] as String? ?? 'presence.unknown',
         location: _text(member, 'locationText'),
+        locationLabels: _locationLabels(member['locationLabels']),
+        arrivalPendingConfirmation:
+            member['arrivalPendingConfirmation'] == true,
+        arrivalTargetCode: member['arrivalTargetCode'] as String?,
+        arrivalTargetLabels: parseRuntimeNameLabels(
+          member['arrivalTargetLabels'],
+        ),
+        locationHiddenReason: member['locationHiddenReason'] == 'lowConfidence'
+            ? 'lowConfidence'
+            : null,
         ship: _text(member, 'shipText'),
+        shipLabels: parseRuntimeNameLabels(member['shipLabels']),
         shard: _text(member, 'shardText'),
         serverRegion: member.containsKey('serverRegion')
             ? _text(member, 'serverRegion')
             : '',
         avatarData:
             member['avatarImageData'] is String &&
-                (member['avatarImageData'] as String).length <= 128 * 1024
+                (member['avatarImageData'] as String).length <=
+                    ((512 * 1024 + 2) ~/ 3 * 4) + 24
             ? member['avatarImageData'] as String
             : null,
       );
@@ -269,6 +296,11 @@ RoomDirectory parseRoomDirectory(Map<String, Object?> value) {
               room.containsKey('roomCode')
           ? _text(room, 'roomCode')
           : '',
+      canPreviewMemberProfiles:
+          room['canPreviewMemberProfiles'] == true &&
+          room['passwordRequired'] == false &&
+          const {'direct', 'approval'}.contains(room['admissionMode']) &&
+          const {'everyone', 'friends', 'fleet'}.contains(room['eligibility']),
       pendingApplications:
           value['currentRoomId'] == room['roomId'] &&
               room['viewerIsHost'] == true
@@ -294,6 +326,8 @@ RoomDirectory parseRoomDirectory(Map<String, Object?> value) {
     );
   }).toList();
   return RoomDirectory(
+    supportsHostTransfer: value['supportsHostTransfer'] == true,
+    viewerPendingRoomIds: _pendingRoomIds(value['viewerPendingRoomIds']),
     receivedInvitations: parseInvitations(value['receivedInvitations']),
     sentInvitations:
         rooms.any(
@@ -310,12 +344,41 @@ RoomDirectory parseRoomDirectory(Map<String, Object?> value) {
   );
 }
 
+List<String>? _pendingRoomIds(Object? value) {
+  if (value == null) return null;
+  if (value is! List ||
+      value.length > 2000 ||
+      value.any(
+        (id) =>
+            id is! String ||
+            id.trim().isEmpty ||
+            id.length > 128 ||
+            RegExp(r'[\x00-\x1f\x7f]').hasMatch(id),
+      ) ||
+      value.toSet().length != value.length) {
+    throw const FormatException('Invalid pending application projection');
+  }
+  return List<String>.from(value);
+}
+
 String _text(Map value, String key, {bool required = false}) {
   final text = value[key] as String;
   if (text.length > 4096 || (required && text.trim().isEmpty)) {
     throw const FormatException();
   }
   return text;
+}
+
+Map<String, String> _locationLabels(Object? raw) {
+  if (raw is! Map) return const {};
+  final labels = <String, String>{};
+  for (final key in const ['en', 'zhHans', 'zhHant']) {
+    final value = raw[key];
+    if (value is String && value.isNotEmpty && value.length <= 256) {
+      labels[key] = value;
+    }
+  }
+  return labels;
 }
 
 List<RoomApplication> _applications(Map room) {
@@ -332,6 +395,17 @@ List<RoomApplication> _applications(Map room) {
       callsign: _text(item, 'callsign'),
       gameId: _text(item, 'gameId'),
       createdAt: DateTime.parse(item['createdAt'] as String),
+      avatarData:
+          item['avatarImageData'] is String &&
+              (item['avatarImageData'] as String).length <=
+                  ((512 * 1024 + 2) ~/ 3 * 4) + 24
+          ? item['avatarImageData'] as String
+          : null,
+      userRef:
+          item['userRef'] is String &&
+              RegExp(r'^[a-f0-9]{32}$').hasMatch(item['userRef'] as String)
+          ? item['userRef'] as String
+          : null,
     );
   }).toList();
 }

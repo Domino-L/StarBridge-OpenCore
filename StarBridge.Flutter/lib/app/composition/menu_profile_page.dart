@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/inline_image_cache.dart';
+
 import '../../features/personal_profile/personal_profile_module.dart';
 import '../../features/personal_profile/personal_profile_models.dart';
 import '../../features/personal_profile/personal_profile_page.dart';
@@ -20,30 +22,38 @@ class MenuProfileWindowPage extends StatefulWidget {
 }
 
 class _MenuProfileWindowPageState extends State<MenuProfileWindowPage> {
+  final _images = InlineImageCache();
   late final _DisplayProfile module = _DisplayProfile(() => widget.onRefresh())
     ..update(widget.view);
   @override
   void didUpdateWidget(MenuProfileWindowPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.view.state != 'ready' && widget.view.state != 'loading') {
+      _images.clear();
+    }
     if (!identical(oldWidget.view, widget.view)) module.update(widget.view);
   }
 
   @override
   void dispose() {
     module.dispose();
+    _images.clear();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => PersonalProfilePage(
-    module: module,
-    isVisitor: true,
-    pageToolbar: TextButton(
-      onPressed:
-          widget.view.state == 'loading' || widget.view.state == 'revoked'
-          ? null
-          : widget.onRefresh,
-      child: Text(AppStrings.of(context).text('profile.refresh')),
+  Widget build(BuildContext context) => InlineImageCacheScope(
+    cache: _images,
+    child: PersonalProfilePage(
+      module: module,
+      isVisitor: true,
+      pageToolbar: TextButton(
+        onPressed:
+            widget.view.state == 'loading' || widget.view.state == 'revoked'
+            ? null
+            : widget.onRefresh,
+        child: Text(AppStrings.of(context).text('profile.refresh')),
+      ),
     ),
   );
 }

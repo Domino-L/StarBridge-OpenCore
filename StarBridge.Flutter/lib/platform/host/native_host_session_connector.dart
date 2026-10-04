@@ -89,6 +89,7 @@ final class NativeHostSessionConnector implements NativeHostConnector {
             'communities.logo',
             'friends.commands',
             'directMessages.read',
+            'social.wait',
             'directMessages.send',
             'directMessages.markRead',
             'directMessages.privacyRead',

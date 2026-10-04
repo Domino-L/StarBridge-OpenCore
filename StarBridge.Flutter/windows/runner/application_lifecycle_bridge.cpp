@@ -72,6 +72,8 @@ class ApplicationLifecycleBridge::Impl {
     tray_surface_ = std::make_unique<TraySurfaceBridge>(window_, messenger,
         [this]() { ShowMainWindow(); }, [this]() { ExitApplication(); },
         [this]() { ShowSystemTrayMenu(); });
+    native_preparing_ = false;
+    if (deferred_show_) ShowMainWindow();
   }
 
   ~Impl() { Shutdown(); }
@@ -265,6 +267,7 @@ class ApplicationLifecycleBridge::Impl {
   }
 
   void HideToTray(bool show_hint) {
+    deferred_show_ = false;
     EnsureTrayIcon();
     hidden_ = true;
     close_request_pending_ = false;
@@ -284,6 +287,11 @@ class ApplicationLifecycleBridge::Impl {
   }
 
   void ShowMainWindow() {
+    // Auxiliary Flutter construction can pump shared engine messages. Preserve
+    // an early lifecycle request, but do not expose an interactive main window
+    // while its tray engine is still doing synchronous startup work.
+    if (native_preparing_) { deferred_show_ = true; return; }
+    deferred_show_ = false;
     if (tray_surface_) tray_surface_->Hide();
     ClearDesktopNotification();
     KillTimer(window_, kStartupFallbackTimer);
@@ -413,6 +421,8 @@ class ApplicationLifecycleBridge::Impl {
   }
 
   HWND window_ = nullptr;
+  bool native_preparing_ = true;
+  bool deferred_show_ = false;
   bool startup_launch_ = false;
   bool configured_ = false;
   bool startup_resolved_ = false;

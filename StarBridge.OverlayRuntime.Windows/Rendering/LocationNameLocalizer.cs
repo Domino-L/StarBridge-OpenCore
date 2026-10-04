@@ -40,9 +40,17 @@ public static partial class LocationNameLocalizer
             return normalized;
         }
 
-        if (Catalog.Value.TryResolve(normalized, out var match))
+        if ((StarBridge.Core.Locations.NavigationStationDisplay.TryGetStationCode(normalized, out var station) ||
+             StarBridge.Core.Locations.NavigationStationDisplay.TryGetStationCodeFromDisplayName(normalized, out station)) &&
+            Catalog.Value.TryResolve(station, out var stationMatch))
+            return StationDisplayName(stationMatch, language);
+
+        if (Catalog.Value.TryResolve(normalized, out var match) ||
+            Catalog.Value.TryResolveEnglishDisplayName(normalized, out match))
         {
-            if (!language.Equals("zh", StringComparison.OrdinalIgnoreCase))
+            if (StarBridge.Core.Locations.NavigationStationDisplay.PreferCatalogStationName(match.CanonicalCode))
+                return StationDisplayName(match, language);
+            if (!language.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
             {
                 return match.NameEn;
             }
@@ -52,7 +60,7 @@ public static partial class LocationNameLocalizer
                 : match.NameZh;
         }
 
-        if (language.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
+        if (language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) &&
             LegacyChineseNames.Value.TryGetValue(normalized, out var localized))
         {
             return localized;
@@ -60,6 +68,14 @@ public static partial class LocationNameLocalizer
 
         ObserveUnknownLocation(normalized);
         return SimplifyHumanReadableLocation(normalized);
+    }
+
+    private static string StationDisplayName(LocationCatalogMatch station, string language)
+    {
+        var chinese = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        if (StarBridge.Core.Locations.NavigationStationDisplay.TryGetStationName(station.CanonicalCode, out var name))
+            return chinese ? name.ChineseName : name.EnglishName;
+        return chinese ? station.NameZh : station.NameEn;
     }
 
     public static IReadOnlyDictionary<string, string> KnownChineseNames => ChineseNames.Value;

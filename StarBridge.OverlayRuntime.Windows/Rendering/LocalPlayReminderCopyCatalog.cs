@@ -27,6 +27,26 @@ internal static class LocalPlayReminderCopyCatalog
 
     public static int Count => DefaultCopies.Length;
 
+    internal static LocalPlayReminderCopy ToTraditional(LocalPlayReminderCopy copy, DateTimeOffset localNow) => copy.Index switch
+    {
+        0 => new(0, "喝口水吧", "渴死了可沒復活床。"),
+        1 => new(1, "稍微歇一下", "坐了這麼久，起來走兩步、伸個懶腰再回來吧。"),
+        2 => new(2, "眼睛也該休息了", "看一會兒遠處，讓眼睛緩一緩。"),
+        3 => new(3, "動一動吧", "肩膀是不是有點緊了？放鬆一下肩頸和手腕吧。"),
+        4 => new(4, "這一小時辛苦了", "先喝口水，換個舒服點的姿勢，再繼續也不遲。"),
+        5 => new(5, "休息不會掉隊", "離開座位幾分鐘沒關係，照顧好自己更重要。"),
+        6 => new(6, "別忘了自己", "手腕和肩頸也陪你忙了很久，給它們一點休息時間吧。"),
+        7 => new(7, "下一段航程之前", "先補充一點水分，慢慢來，我們不趕這一分鐘。"),
+        8 => new(8, "上個廁所", "隊友和任務可以等，廁所不能。"),
+        9 => new(9, "肩膀放下來", "對，就是剛才不知不覺抬起來的那兩個。"),
+        100 => new(100, "凌晨電台", "張雪峰老師~ 我還記得你~"),
+        101 => new(101, "凌晨航行", $"你見過凌晨 {localNow.Hour} 點的斯坦頓嗎？"),
+        102 => new(102, "早啊，老斯坦頓人", "嘿，咱這老斯坦頓人早上起來就得玩星際公民，那叫一個地道。"),
+        103 => new(103, "到飯點了", "點個外賣吃吃？"),
+        104 => new(104, "你簡直是超人", "已經連續玩了 10 個小時以上，真該休息一下了。"),
+        _ => copy
+    };
+
     public static string FormatDisplayTitle(string? copyTitle, TimeSpan continuousPlayTime, bool useChinese)
     {
         var hours = Math.Max(0, (int)Math.Floor(continuousPlayTime.TotalHours));

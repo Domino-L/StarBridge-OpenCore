@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'community_ship_statistics.dart';
+import 'community_fleet_summary.dart';
 import 'community_ships_copy.dart';
 
 /// Two independent dimensions, one count scale. Loaners never enter the matrix.
 class CommunityShipDistributionChart extends StatefulWidget {
   const CommunityShipDistributionChart({required this.statistics, super.key});
-  final CommunityShipStatistics statistics;
+  final CommunityFleetSummary statistics;
   @override
   State<CommunityShipDistributionChart> createState() => _ChartState();
 }
@@ -55,10 +56,10 @@ class _ChartState extends State<CommunityShipDistributionChart> {
       final subtotal = stats.sizes[size] ?? 0;
       String percent(int total) =>
           total == 0 ? '0%' : '${(count * 100 / total).toStringAsFixed(1)}%';
-      return '${t(size)} · ${t(role)} · $count ${t('shipsUnit')} · ${t('ofSize')} ${percent(subtotal)} · ${t('ofFleet')} ${percent(stats.ships.length)}';
+      return '${t(size)} · ${t(role)} · $count ${t('shipsUnit')} · ${t('ofSize')} ${percent(subtotal)} · ${t('ofFleet')} ${percent(stats.shipCount)}';
     }
 
-    if (stats.ships.isEmpty) {
+    if (stats.shipCount == 0) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 28),
         child: Text(t('noSharedShips')),
@@ -257,7 +258,7 @@ class _ChartState extends State<CommunityShipDistributionChart> {
                       DataCell(Text(t('total'))),
                       for (final role in roles)
                         DataCell(Text('${stats.roles[role]}')),
-                      DataCell(Text('${stats.ships.length}')),
+                      DataCell(Text('${stats.shipCount}')),
                     ],
                   ),
                 ],

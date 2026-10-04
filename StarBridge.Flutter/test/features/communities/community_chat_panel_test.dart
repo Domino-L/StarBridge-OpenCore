@@ -1,3 +1,5 @@
+import 'package:starbridge_flutter/design_system/icons/standard_icon.dart';
+
 import 'dart:io';
 import 'dart:async';
 import 'dart:ui' as ui;
@@ -12,6 +14,7 @@ import 'package:starbridge_flutter/design_system/styles/future_restraint_style.d
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_panel.dart';
+import 'package:starbridge_flutter/features/communities/community_chat_controller.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_port.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_send_port.dart';
 import 'package:starbridge_flutter/features/communities/example_communities.dart';
@@ -31,6 +34,7 @@ Future<void> showChat(
   double width = 1000,
   bool visible = true,
   VoidCallback? onBack,
+  CommunityChatController? controller,
 }) async {
   tester.view.physicalSize = Size(width, 760);
   tester.view.devicePixelRatio = 1;
@@ -55,6 +59,7 @@ Future<void> showChat(
             key: const ValueKey('chat-capture'),
             child: CommunityChatPanel(
               port: port,
+              controller: controller,
               targetRef: targetRef ?? 'a' * 32,
               name: 'Northwind 联合组织',
               onBack: onBack ?? () {},
@@ -85,7 +90,11 @@ void main() {
     port.heldRead!.complete(page([], latest: 0, unread: 0, older: false));
     await tester.pumpAndSettle();
     port.heldRead = Completer();
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(
+      find.byWidgetPredicate(
+        (w) => w is StandardIcon && w.semantic == StandardIconSemantic.refresh,
+      ),
+    );
     await tester.pump();
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     port.heldRead!.complete(page([], latest: 0, unread: 0, older: false));
@@ -244,7 +253,7 @@ void main() {
         )).messages.single.hasAttachment,
         isTrue,
       );
-      await tester.tap(find.widgetWithText(TextButton, '导入为新预设'));
+      await tester.tap(find.widgetWithText(TextButton, '查看详情并导入'));
       await tester.pumpAndSettle();
       expect((await example.readCommunityPresets()).presets, hasLength(1));
       await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
@@ -256,7 +265,7 @@ void main() {
   );
 
   testWidgets(
-    'Enter sends once; Shift+Enter does not send; rejection keeps draft',
+    'Enter sends once; Shift+Enter does not send; rejection keeps bubble',
     (tester) async {
       await showChat(tester, port);
       await tester.enterText(input, 'hello');
@@ -271,15 +280,33 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       expect(port.sends, hasLength(1));
-      expect(
-        tester.widget<TextField>(input).controller!.text,
-        contains('hello'),
-      );
+      expect(tester.widget<TextField>(input).controller!.text, isEmpty);
+      expect(find.textContaining('hello'), findsOneWidget);
       expect(find.textContaining('发送过于频繁'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('IME confirmation does not submit an optimistic message', (
+    tester,
+  ) async {
+    await showChat(tester, port);
+    await tester.showKeyboard(input);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ceshi',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(port.sends, isEmpty);
+    expect(tester.widget<TextField>(input).controller!.text, contains('ceshi'));
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('uncertain send cannot be duplicated and back protects draft', (
     tester,
@@ -300,7 +327,8 @@ void main() {
     expect(returned, false);
     await tester.tap(find.text('继续编辑'));
     await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(input).controller!.text, 'uncertain');
+    expect(tester.widget<TextField>(input).controller!.text, isEmpty);
+    expect(find.text('uncertain'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -336,6 +364,52 @@ void main() {
     const Locale('zh', 'TW'),
     const Locale('en'),
   ]) {
+    testWidgets('local sending bubble remains usable at 420px $locale', (
+      tester,
+    ) async {
+      port.next = page([], latest: 0, unread: 0, older: false);
+      await showChat(tester, port, locale: locale, width: 420);
+      final held = port.heldSend = Completer();
+      await tester.enterText(input, 'A new message');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(tester.widget<TextField>(input).controller!.text, isEmpty);
+      expect(find.text('A new message'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ChatMessageBubble),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        port.receipts,
+        isEmpty,
+        reason: 'Local messages never create read receipts.',
+      );
+      await tester.enterText(input, 'Next draft');
+      held.complete(
+        const CommunityChatSendOutcome('rejected', error: 'rateLimited'),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(input).controller!.text, 'Next draft');
+      expect(find.byType(ChatMessageBubble), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      if (locale.countryCode == 'CN') {
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(const ValueKey('chat-capture')),
+        );
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await Directory('build').create(recursive: true);
+          await File('build/community-local-send-ui.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
     testWidgets(
       'own message uses right bubble and avatar; compact $locale has no overflow',
       (tester) async {

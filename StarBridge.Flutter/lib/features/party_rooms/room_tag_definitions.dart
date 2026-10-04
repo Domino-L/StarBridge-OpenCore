@@ -133,7 +133,7 @@ const roomGameplayDefinitions = <(String, String, String?)>[
   ("special_stanton", "斯坦顿星系", "special"),
   ("special_stanton_asd_onyx", "ASD玛瑙设施", "special_stanton"),
   ("special_stanton_laser_mining_station", "激光采矿站", "special_stanton"),
-  ("special_stanton_siege_orison", "奥里森之围（尚未开始）", "special_stanton"),
+  ("special_stanton_siege_orison", "奥里森之围", "special_stanton"),
   ("special_pyro", "派罗星系", "special"),
   ("special_pyro_asd_stormbreaker", "ASD风暴突破者", "special_pyro"),
   ("special_nyx", "尼克斯星系", "special"),

@@ -9,6 +9,7 @@ import 'community_announcements_controller.dart';
 import 'community_announcements_port.dart';
 import 'community_chat_controller.dart';
 import 'community_chat_port.dart';
+import 'community_chat_attention.dart';
 import 'community_ships_controller.dart';
 import 'community_ships_port.dart';
 
@@ -17,10 +18,38 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     this.port,
     this._targetRef, {
     DateTime Function()? now,
+    this.readWorkspace,
+    this.attention,
   }) : _now = now ?? DateTime.now {
     _subscription = port.invalidations.listen((_) => invalidate());
+    attention?.addListener(_attentionChanged);
   }
+  final CommunityChatAttention? attention;
+  int get chatUnreadCount =>
+      attention?.count(targetRef) ?? _chat?.unreadCount ?? 0;
+  void _attentionChanged() {
+    if (!_closed) notifyListeners();
+  }
+
+  void _chatChanged() {
+    final current = _chat;
+    if (_closed || current == null) return;
+    attention?.observe(current);
+    // The panel starts reads while mounting. Only publish unread changes, not
+    // its loading/draft notifications back into the building parent.
+    if (attention == null && _lastChatUnread != current.unreadCount) {
+      _lastChatUnread = current.unreadCount;
+      scheduleMicrotask(() {
+        if (!_closed && identical(_chat, current)) notifyListeners();
+      });
+    }
+  }
+
+  int _lastChatUnread = 0;
+  bool get hasLocalDelivery => _chat?.hasLocalDelivery ?? false;
   final CommunityWorkspacePort port;
+  final Future<CommunityWorkspace> Function(String, String, int, bool)?
+  readWorkspace;
   final DateTime Function() _now;
   DateTime? _lastSuccessfulRead;
   String _targetRef;
@@ -96,14 +125,16 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     }
     if (_chat != null && _chat!.targetRef != targetRef) {
       final previous = _chat!;
+      previous.removeListener(_chatChanged);
       _chat = null;
       scheduleMicrotask(previous.dispose);
     }
-    return _chat ??= CommunityChatController(
+    return _chat ??= (CommunityChatController(
       source as CommunityChatPort,
       targetRef,
       now: _now,
-    );
+      localEcho: true,
+    )..addListener(_chatChanged));
   }
 
   CommunityShipsController? get ships {
@@ -182,13 +213,28 @@ final class CommunityWorkspaceController extends ChangeNotifier {
   bool get showProgress => busy && !_silentRead;
   int _epoch = 0, _mediaEpoch = 0;
   bool _closed = false;
+  bool _activityPending = false;
+
+  Future<void> refreshFromActivity() async {
+    if (_closed || error == 'identityUnavailable' || error == 'notAllowed') {
+      return;
+    }
+    if (busy) {
+      _activityPending = true;
+      return;
+    }
+    _activityPending = false;
+    await load(silent: true);
+  }
 
   void _clear() {
+    _activityPending = false;
     _preparedSections.clear();
     _preparationTarget = null;
     selectedSection = 'members';
     _clearAnnouncements();
     final previousChat = _chat, previousShips = _ships;
+    previousChat?.removeListener(_chatChanged);
     _chat = null;
     _ships = null;
     if (previousChat != null) scheduleMicrotask(previousChat.dispose);
@@ -302,7 +348,14 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     busy = true;
     notifyListeners();
     try {
-      final result = await port.readWorkspace(requestedTarget, query, page);
+      final result =
+          await (readWorkspace?.call(
+                requestedTarget,
+                query,
+                page,
+                prepareMediaOnly,
+              ) ??
+              port.readWorkspace(requestedTarget, query, page));
       if (!_current(epoch)) return;
       final previousVersions = {
         for (final member in workspace?.members ?? <CommunityWorkspaceMember>[])
@@ -371,6 +424,11 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       }
       busy = false;
       notifyListeners();
+    } finally {
+      if (_current(epoch) && !busy && _activityPending) {
+        _activityPending = false;
+        unawaited(refreshFromActivity());
+      }
     }
   }
 
@@ -508,6 +566,7 @@ final class CommunityWorkspaceController extends ChangeNotifier {
 
   @override
   void dispose() {
+    attention?.removeListener(_attentionChanged);
     _closed = true;
     avatars.dispose();
     _epoch++;

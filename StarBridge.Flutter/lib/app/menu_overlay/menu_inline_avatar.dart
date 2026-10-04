@@ -86,11 +86,11 @@ class _MenuInlineAvatarState extends State<MenuInlineAvatar> {
 
   Widget _fallback() => widget.name?.trim().isNotEmpty == true
       ? ColoredBox(
-          color: BridgeInk.selected,
+          color: MenuBridgeColors.of(context).selected,
           child: Center(
             child: Text(
               widget.name!.trim().characters.first,
-              style: const TextStyle(color: BridgeInk.text, fontSize: 20),
+              style: TextStyle(color: MenuBridgeColors.of(context).text, fontSize: 20),
             ),
           ),
         )

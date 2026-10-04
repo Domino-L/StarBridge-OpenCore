@@ -69,7 +69,7 @@ internal static class CompositeBridgeDispatcherTests
                      "eventSharing.read", "eventSharing.save", "friendSharing.read", "friendSharing.save",
                      "gameIdVisibility.read", "gameIdVisibility.save", "friendRequests.privacyRead", "friendRequests.privacyWrite",
                      "recentlyPlayed.privacyRead", "recentlyPlayed.privacyWrite",
-                     "presence.read", "presence.set",
+                     "presence.read", "presence.set", "overlayRoster.read", "overlayRoster.update",
                      "accountSafety.read", "accountSafety.appeal", "friends.read", "friends.execute", "directMessages.read", "directMessages.send", "directMessages.markRead" })
         {
             var request = BridgeEnvelope.Request(
@@ -82,7 +82,7 @@ internal static class CompositeBridgeDispatcherTests
                 "Routing must preserve account context, generation and payload.");
             Require(account.LastToken == cancellation.Token, "Cancellation must be forwarded.");
         }
-        Require(account.Requests.Count == 35, "All profile, social, gameplay, presence and privacy requests must reach account dispatch.");
+        Require(account.Requests.Count == 37, "All profile, social, gameplay, presence, overlay roster and privacy requests must reach account dispatch.");
         foreach (var name in new[] { "notificationInbox.read", "notificationInbox.markRead" }) {
             var request = BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 7, new { schemaVersion = 1 }, context);
             var response = await dispatcher.DispatchAsync(request, cancellation.Token);

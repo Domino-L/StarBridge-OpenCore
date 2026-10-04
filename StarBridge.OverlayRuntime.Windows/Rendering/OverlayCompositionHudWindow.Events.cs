@@ -6,6 +6,21 @@ internal sealed partial class OverlayCompositionHudWindow
 {
     private void DrawEventNotifications(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
+        // Local device notifications may still be valid. Show those normally;
+        // once they finish, retain a stationary remote-source status panel.
+        if (state.EventRows.Count == 0)
+        {
+            if (state.EmptyStates.Events is null) return;
+            var emptyRect = state.EventRect;
+            var opacity = state.Opacity * state.EventStyle.TextOpacity;
+            DrawPanelFrame(target, emptyRect, state, 24, 100, 20, 48,
+                state.EventStyle.BackgroundOpacity, state.EventStyle.DecorationOpacity, moduleKey: "Events");
+            DrawSourceHeader(target, state.EmptyEventsTitle, state.SourceLabels.Events, _eventTitleFormat,
+                (float)emptyRect.X + 20, (float)emptyRect.Y + 12, Math.Max(1, (float)emptyRect.Width - 40), state, opacity);
+            DrawModuleEmptyMessage(target, state.EmptyStates.Events, (float)emptyRect.X + 20, (float)emptyRect.Y + 38,
+                Math.Max(1, (float)emptyRect.Width - 40), (float)emptyRect.Height - 46, state, opacity);
+            return;
+        }
         if (state.LagrangeWeaveStyle)
         {
             DrawLagrangeEventNotifications(target, state);

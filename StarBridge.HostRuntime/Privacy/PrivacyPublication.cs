@@ -7,7 +7,8 @@ namespace StarBridge.HostRuntime.Privacy;
 
 /// <summary>Real-time fields only. Inventory and event feeds keep their own consent/contracts.</summary>
 internal sealed record PrivacyPublicationInput(BridgeAccountContext Owner, long Generation,
-    string Handle, bool IdentityConfirmed, string? GameVersion, GameLogSessionSnapshot Game);
+    string Handle, bool IdentityConfirmed, string? GameVersion, GameLogSessionSnapshot Game,
+    bool AppAway = false);
 
 internal sealed record PrivacyPublicationStatus(string State, long? AppliedRevision = null,
     DateTimeOffset? AppliedAt = null, string? ErrorCode = null, bool? FirstUseRequired = null)
@@ -43,16 +44,19 @@ internal static class PrivacyPublicationPayload
         var locationConfidence = input.Game.Location.State switch {
             "confirmed" => "High", "likely" => "Medium", "possible" => "Low", _ => "None"
         };
-        var location = connected && Has(PlayerSharedStateFields.Location) && input.Game.Location.CanSynchronize &&
-            locationConfidence != "None" &&
-            (!(settings.HideLowConfidenceLocation ?? true) || locationConfidence == "High") &&
-            !string.IsNullOrWhiteSpace(input.Game.Location.EnglishName)
+        var locationAvailable = connected && Has(PlayerSharedStateFields.Location) && input.Game.Location.CanSynchronize &&
+            locationConfidence != "None" && !string.IsNullOrWhiteSpace(input.Game.Location.EnglishName);
+        var locationHiddenByConfidence = locationAvailable && (settings.HideLowConfidenceLocation ?? true) &&
+            locationConfidence is "Medium" or "Low";
+        var location = locationAvailable && !locationHiddenByConfidence
             ? input.Game.Location.EnglishName : null;
         var online = enabled && fields != PlayerSharedStateFields.None;
         var payload = JsonSerializer.SerializeToElement(new {
             name = input.Handle, callsign = input.Handle, fleet = "No Fleet",
             online, ship = ship ?? "Unknown", shipConfidence = ship is null ? "None" : "High",
             location = location ?? "Unknown", locationConfidence = location is null ? "None" : locationConfidence,
+            locationHiddenReason = locationHiddenByConfidence && !input.Game.Location.ArrivalPendingConfirmation ? "lowConfidence" : null,
+            gameVersion = playing ? input.GameVersion : null,
             lastUpdated = DateTimeOffset.UtcNow,
             visibilityScope = "Private", roomVisibilityScope = "Private",
             fleetSharedStateFields = (int)fleet, roomSharedStateFields = (int)room,
@@ -64,7 +68,7 @@ internal static class PrivacyPublicationPayload
             friendsCanViewPresence = false,
             serverShard = connected && Has(PlayerSharedStateFields.Server) ? input.Game.Server.Shard : null,
             serverRegion = connected && Has(PlayerSharedStateFields.Server) ? input.Game.Server.Region : null,
-            liveStatus = !online ? "Offline" : visibility == PlayerPresenceVisibilityMode.InGame || playing ? "InGame" : "AppOnline",
+            liveStatus = !online ? "Offline" : visibility == PlayerPresenceVisibilityMode.InGame || playing ? "InGame" : input.AppAway ? "Away" : "AppOnline",
             arrivalPendingConfirmation = false, arrivalTargetCode = (string?)null
             // Only the scoped realtime route may consume this payload. Inventory,
             // its consent/audience and event feeds belong to separate publications.
@@ -82,8 +86,15 @@ internal static class PrivacyPublicationPayload
 /// </summary>
 internal sealed class PrivacyPublication : IDisposable
 {
-    internal PrivacyPublicationStatus StatusFor(BridgeAccountContext owner) =>
-        Status with { FirstUseRequired = _store.NeedsFirstChoice(owner) };
+    internal PrivacyPublicationStatus StatusFor(BridgeAccountContext owner)
+    {
+        var status = Status with { FirstUseRequired = _store.NeedsFirstChoice(owner) };
+        if (status.State == "inactive" && _store.Read(owner).Settings?.PublicationEnabled == true)
+            status = status with { ErrorCode = !_store.HasPublicationConsent(owner)
+                ? "privacy_publication.consent_required" : _current() is null
+                    ? "privacy_publication.identity_pending" : status.ErrorCode };
+        return status;
+    }
 
     private readonly LocalPrivacyStore _store;
     private readonly Func<PlayerPresenceVisibilityMode> _visibility;
@@ -92,6 +103,10 @@ internal sealed class PrivacyPublication : IDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ITimer? _timer;
+    private readonly TimeProvider _clock;
+    private int _retryFailures;
+    private DateTimeOffset _retryAfter;
+    private long? _retryRevision;
     private PrivacyPublicationInput? _active;
     private bool _withdrawOnly;
     private PrivacyPublicationInput? _visibilitySuspended;
@@ -101,17 +116,20 @@ internal sealed class PrivacyPublication : IDisposable
     private bool _restoreBlocked;
     private PrivacyPublicationStatus _status = new("inactive");
     private bool _disposed;
+    private int _tickPending;
 
     internal PrivacyPublication(LocalPrivacyStore store, Func<PrivacyPublicationInput?> current,
         Func<PrivacyPublicationInput, JsonElement, CancellationToken, Task> send, bool startTimer = true,
-        Func<PlayerPresenceVisibilityMode>? visibility = null)
+        Func<PlayerPresenceVisibilityMode>? visibility = null, TimeProvider? timeProvider = null)
     {
         _store = store; _current = current; _send = send;
         _visibility = visibility ?? (() => PlayerPresenceVisibilityMode.Online);
-        if (startTimer) _timer = TimeProvider.System.CreateTimer(_ => _ = TickAsync(), null,
+        _clock = timeProvider ?? TimeProvider.System;
+        if (startTimer) _timer = _clock.CreateTimer(_ => _ = TickAsync(), null,
             TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
     internal PrivacyPublicationStatus Status => Volatile.Read(ref _status);
+    internal Action<string, string?>? Diagnostic { get; set; }
     internal void Invalidate()
     {
         _active = null;
@@ -119,6 +137,7 @@ internal sealed class PrivacyPublication : IDisposable
         _recovery = null;
         _restoreBlocked = false;
         _withdrawOnly = true;
+        ResetRetry();
         Set(new("inactive"));
     }
     private bool Same(PrivacyPublicationInput a, PrivacyPublicationInput? b) =>
@@ -140,6 +159,7 @@ internal sealed class PrivacyPublication : IDisposable
                 () => !_disposed && Same(input, _current()));
             _recovery = null;
             _restoreBlocked = false;
+            ResetRetry();
             // Remember the authenticated account's explicit choice, but wait for
             // verified game identity before starting any positive publication.
             if (!input.IdentityConfirmed && saved.Settings.PublicationEnabled)
@@ -149,12 +169,37 @@ internal sealed class PrivacyPublication : IDisposable
             await SendCurrentAsync(input, saved, cancellation).ConfigureAwait(false);
             return Status;
         }
-        finally { _gate.Release(); }
+        finally { ReleaseGate(); }
     }
 
     internal async Task TickAsync()
     {
-        if (_disposed || !await _gate.WaitAsync(0).ConfigureAwait(false)) return;
+        if (_disposed) return;
+        Interlocked.Exchange(ref _tickPending, 1);
+        if (!await _gate.WaitAsync(0).ConfigureAwait(false)) return;
+        try
+        {
+            var passes = 0;
+            do
+            {
+                Interlocked.Exchange(ref _tickPending, 0);
+                await TickCoreAsync().ConfigureAwait(false);
+                // Coalesce bursts, but yield to queued stop/save/visibility work.
+            } while (++passes < 2 && !_disposed && Volatile.Read(ref _tickPending) != 0);
+        }
+        finally { ReleaseGate(); }
+    }
+
+    private void ReleaseGate()
+    {
+        _gate.Release();
+        // Explicit apply/visibility changes must also drain pending input wakes.
+        // Every pass rechecks current ownership, consent and game evidence.
+        if (!_disposed && Volatile.Read(ref _tickPending) != 0) _ = TickAsync();
+    }
+
+    private async Task TickCoreAsync()
+    {
         try
         {
             var active = _active;
@@ -188,44 +233,63 @@ internal sealed class PrivacyPublication : IDisposable
                 await WithdrawAsync(active, _lifetime.Token).ConfigureAwait(false);
             if (Status.State != "withdrawalPending") Set(new("failed", ErrorCode: StableError(error)));
         }
-        finally { _gate.Release(); }
     }
 
     private async Task SendCurrentAsync(PrivacyPublicationInput input, LocalPrivacySnapshot saved, CancellationToken cancellation,
         bool background = false)
     {
         var canResume = false;
+        var acknowledged = Status;
+        var stableHeartbeat = false;
+        var sentVisibility = PlayerPresenceVisibilityMode.Online;
         try
         {
             var settings = saved.Settings ?? throw new LocalPrivacyException("privacy_publication.refresh_required");
             var consent = _store.HasPublicationConsent(input.Owner);
             var visibility = _visibility();
+            sentVisibility = visibility;
             var invisible = visibility is not (PlayerPresenceVisibilityMode.Online or PlayerPresenceVisibilityMode.InGame);
             var clear = !consent || !settings.PublicationEnabled || !input.IdentityConfirmed || invisible;
+            // Input wakes cannot bypass transport backoff. Authority is checked
+            // first: privacy clears and explicit actions are never delayed.
+            if (background && !clear && _retryRevision == saved.Revision && _clock.GetUtcNow() < _retryAfter) return;
             canResume = consent && settings.PublicationEnabled && !invisible;
             if (clear) _recovery = null;
             // A heartbeat renews an acknowledged policy, not a user apply action.
-            // Keep its receipt while sending; actual failures still take the
-            // withdrawal/recovery path below. New policies and explicit applies
-            // must never inherit this indication of success.
-            var acknowledged = Status;
-            if (!background || clear || acknowledged.State != "applied" ||
-                acknowledged.AppliedRevision != saved.Revision)
+            // Same-policy transport failures must not manufacture an Offline
+            // write. Authority changes and explicit applies still fail closed.
+            stableHeartbeat = background && !clear && acknowledged.AppliedAt is not null &&
+                (acknowledged.State is "applied" or "reconnecting") && acknowledged.AppliedRevision == saved.Revision;
+            if (!background || clear || acknowledged.State is not ("applied" or "reconnecting") ||
+                acknowledged.State == "applied" && acknowledged.AppliedRevision != saved.Revision)
                 Set(new("publishing"));
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _lifetime.Token);
             deadline.CancelAfter(TimeSpan.FromSeconds(12));
-            // Values are built from current Host evidence, never from a Flutter payload.
+            // Game and identity fields come from Host evidence. The only UI
+            // observation is the account-scoped, boolean app inactivity state.
             await _send(input, PrivacyPublicationPayload.Build(input, settings, clear, visibility), deadline.Token).ConfigureAwait(false);
             if (!Same(input, _current())) { _active = null; Set(new("inactive")); return; }
             if (_store.Read(input.Owner).Revision != saved.Revision)
             { Set(new("pending")); return; }
-            Set(new(clear ? "withdrawn" : "applied", saved.Revision, DateTimeOffset.UtcNow));
+            ResetRetry();
+            Set(new(clear ? "withdrawn" : "applied", saved.Revision, _clock.GetUtcNow()));
             // Successful invisible clear stops even empty periodic snapshots.
             if (invisible || !consent || !settings.PublicationEnabled)
             { _active = null; _restoreBlocked = true; }
         }
         catch (Exception error)
         {
+            if (Recoverable(error)) ScheduleRetry(saved.Revision);
+            if (stableHeartbeat && Recoverable(error) && !cancellation.IsCancellationRequested &&
+                !_lifetime.IsCancellationRequested && CanRetainHeartbeat(input, saved.Revision, sentVisibility))
+            {
+                // No lease renewal is fabricated: the server's existing timeout
+                // still expires a sustained outage. Next tick rebuilds live data.
+                _recovery = null;
+                _withdrawOnly = false;
+                Set(acknowledged with { State = "reconnecting", ErrorCode = StableError(error) });
+                return;
+            }
             // Clear first after an uncertain update. Transport outages retain only
             // the already authorized session; permission/protocol failures do not.
             if (Same(input, _current()))
@@ -245,10 +309,23 @@ internal sealed class PrivacyPublication : IDisposable
                 }
                 _withdrawOnly = true;
                 await WithdrawAsync(input, cancellation).ConfigureAwait(false);
-                if (Status.State == "withdrawn") Set(new("failed", ErrorCode: StableError(error)));
+                if (_recovery is not null || Status.State == "withdrawn")
+                    Set(new("failed", ErrorCode: StableError(error)));
             }
             else { _active = null; Set(new("inactive")); }
         }
+    }
+
+    private bool CanRetainHeartbeat(PrivacyPublicationInput input, long revision, PlayerPresenceVisibilityMode visibility)
+    {
+        try {
+            var current = _current();
+            var saved = _store.Read(input.Owner);
+            return !_disposed && Same(input, current) && current!.IdentityConfirmed &&
+                _visibility() == visibility && saved.Revision == revision &&
+                saved.Settings?.PublicationEnabled == true && _store.HasPublicationConsent(input.Owner);
+        }
+        catch { return false; }
     }
 
 
@@ -265,6 +342,7 @@ internal sealed class PrivacyPublication : IDisposable
                 throw new LocalPrivacyException("presence.account_changed");
             // A retry-only clear is an obligation, never publication consent.
             var resume = (!_withdrawOnly ? _active : null) ?? _visibilitySuspended ?? _recovery;
+            ResetRetry();
             _recovery = null;
             _visibilitySuspended = Same(input, resume) ? resume : null;
             // New positive sends cannot run while authority/storage is changing.
@@ -297,7 +375,7 @@ internal sealed class PrivacyPublication : IDisposable
             Set(new("inactive"));
             return true;
         }
-        finally { _gate.Release(); }
+        finally { ReleaseGate(); }
     }
 
     internal async Task<bool> StopAsync(CancellationToken cancellation, bool explicitRequest = false)
@@ -308,6 +386,7 @@ internal sealed class PrivacyPublication : IDisposable
             _visibilitySuspended = null;
             _recovery = null;
             _restoreBlocked = true;
+            ResetRetry();
             var active = _active ?? (explicitRequest ? _current() : null);
             if (active is null) return true;
             _active = active;
@@ -326,7 +405,7 @@ internal sealed class PrivacyPublication : IDisposable
             }
             return await WithdrawAsync(active, cancellation).ConfigureAwait(false);
         }
-        finally { _gate.Release(); }
+        finally { ReleaseGate(); }
     }
 
     private async Task<bool> WithdrawAsync(PrivacyPublicationInput active, CancellationToken cancellation)
@@ -352,15 +431,33 @@ internal sealed class PrivacyPublication : IDisposable
     {
         if (_recovery is not null && status.State is "withdrawn" or "withdrawalPending" or "failed")
             status = status with { State = "reconnecting" };
+        var previous = Status;
         Volatile.Write(ref _status, status);
+        if (previous.State != status.State || previous.ErrorCode != status.ErrorCode)
+            try { Diagnostic?.Invoke(status.State, status.ErrorCode); } catch { /* Evidence cannot change sharing. */ }
         return status;
     }
     private static bool Recoverable(Exception error) => error is HttpRequestException { StatusCode: null } or
-        TaskCanceledException or Account.AccountBridgeHostException { Code: "privacy_publication.temporarily_unavailable" };
+        // SemaphoreSlim and cancellationToken.ThrowIfCancellationRequested use
+        // the base type, unlike HttpClient's TaskCanceledException. The callers
+        // separately exclude user/lifetime cancellation before resuming consent.
+        OperationCanceledException or Account.AccountBridgeHostException { Code: "privacy_publication.temporarily_unavailable" };
     private static string StableError(Exception error) => error switch {
         LocalPrivacyException e => e.Code,
+        Account.AccountBridgeHostException { HttpStatus: System.Net.HttpStatusCode.RequestTimeout } => "privacy_publication.timeout",
+        Account.AccountBridgeHostException { HttpStatus: System.Net.HttpStatusCode.TooManyRequests } => "privacy_publication.rate_limited",
+        Account.AccountBridgeHostException { HttpStatus: { } status } when (int)status >= 500 => "privacy_publication.server_error",
         Account.AccountBridgeHostException e => e.Code,
+        HttpRequestException { StatusCode: null } => "privacy_publication.network_unavailable",
+        OperationCanceledException => "privacy_publication.timeout",
         _ => "privacy_publication.unavailable"
     };
+    private void ResetRetry() { _retryFailures = 0; _retryAfter = default; _retryRevision = null; }
+    private void ScheduleRetry(long revision)
+    {
+        _retryRevision = revision;
+        var seconds = Math.Min(60, 5 * (1 << Math.Min(_retryFailures++, 4)));
+        _retryAfter = _clock.GetUtcNow().AddSeconds(seconds);
+    }
     public void Dispose() { _disposed = true; _timer?.Dispose(); _lifetime.Cancel(); _active = null; _recovery = null; }
 }

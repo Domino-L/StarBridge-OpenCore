@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../common/runtime_name_labels.dart';
+
 import 'package:crypto/crypto.dart';
 
 /// All targets are short-lived Host-issued references, never account IDs.
@@ -80,8 +82,14 @@ final class CommunityWorkspaceMember {
       avatarVersion = _optional(m, 'avatarVersion'),
       liveStatus = _text(m, 'liveStatus', 64),
       ship = _optional(m, 'ship'),
+      shipLabels = parseRuntimeNameLabels(m['shipLabels']),
       location = _optional(m, 'location'),
+      locationLabels = parseRuntimeNameLabels(m['locationLabels']),
+      arrivalTargetLabels = parseRuntimeNameLabels(m['arrivalTargetLabels']),
       locationConfidence = _optional(m, 'locationConfidence'),
+      locationHiddenReason = m['locationHiddenReason'] == 'lowConfidence'
+          ? 'lowConfidence'
+          : null,
       serverRegion = _optional(m, 'serverRegion'),
       hasServerSession = m['hasServerSession'] == null
           ? null
@@ -106,9 +114,11 @@ final class CommunityWorkspaceMember {
   final String? ship,
       location,
       locationConfidence,
+      locationHiddenReason,
       serverRegion,
       arrivalTargetCode;
   final DateTime? joinedAt, lastUpdated;
+  final Map<String, String> shipLabels, locationLabels, arrivalTargetLabels;
   String get displayName => callsign.isEmpty ? gameName : callsign;
 }
 

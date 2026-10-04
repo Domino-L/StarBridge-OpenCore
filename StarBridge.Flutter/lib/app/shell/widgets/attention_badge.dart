@@ -4,6 +4,29 @@ import '../../../design_system/styles/attention_badge_palette.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
 
 /// Place inside a button's content, never around its hit target.
+class AttentionIconBadge extends StatelessWidget {
+  const AttentionIconBadge({
+    required this.count,
+    required this.child,
+    super.key,
+  });
+  final int count;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Stack(
+    clipBehavior: Clip.none,
+    children: [
+      child,
+      if (count > 0)
+        PositionedDirectional(
+          top: -4,
+          end: -6,
+          child: IgnorePointer(child: AttentionCount(count: count)),
+        ),
+    ],
+  );
+}
+
 class AttentionBadge extends StatelessWidget {
   const AttentionBadge({required this.count, required this.child, super.key});
   final int count;

@@ -6,7 +6,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 public sealed record LocalEventEntry(string Id, DateTimeOffset OccurredAt,
-    string Category, string EventType, string Title, string Detail);
+    string Category, string EventType, string Title, string Detail)
+{
+    // Live parser context only; preserve the existing on-disk journal format.
+    [JsonIgnore] public StarBridge.Core.Events.LifeEventContext LifeContext { get; init; }
+    [JsonIgnore] public string? DisplayValue { get; init; }
+    [JsonIgnore] public string? DisplayPlayer { get; init; }
+}
 
 public sealed record LocalEventJournalSnapshot(string State, IReadOnlyList<LocalEventEntry> Entries,
     string? ContentRevision = null)

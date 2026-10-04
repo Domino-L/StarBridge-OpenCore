@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -159,29 +160,8 @@ final class CommunityWorkspaceMembers {
             (port as CommunityMemberRemovalPort).memberRemovalAvailable);
   }
 
-  Widget _box(Widget child, {Color? status}) => Container(
-    decoration: BoxDecoration(
-      color: context.tokens.surfaces.raised.fill,
-      border: Border.all(color: context.tokens.surfaces.panel.border),
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: Stack(
-      children: [
-        if (status != null)
-          PositionedDirectional(
-            start: 0,
-            top: 8,
-            bottom: 8,
-            width: 3,
-            child: ColoredBox(color: status),
-          ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Material(color: Colors.transparent, child: child),
-        ),
-      ],
-    ),
-  );
+  Widget _box(Widget child, {Color? status}) =>
+      CommunityMemberCard(status: status, child: child);
 
   Widget _member(CommunityWorkspaceMember member) {
     final transferPort = port is CommunityOwnershipTransferPort
@@ -327,6 +307,7 @@ final class CommunityWorkspaceMembers {
       member,
       text: t,
       regionText: (region) => roomServerRegion(context, region),
+      locale: AppStrings.of(context).locale,
     );
     final identity = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -392,26 +373,13 @@ final class CommunityWorkspaceMembers {
     final roleColor = Color(
       int.parse('ff${member.roleColor.substring(1)}', radix: 16),
     );
-    final role = Align(
-      alignment: AlignmentDirectional.centerStart,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: roleColor.withValues(alpha: 0.08),
-          border: Border.all(color: roleColor.withValues(alpha: 0.6)),
-        ),
-        child: Text(
-          member.roleTitle.isNotEmpty
-              ? member.roleTitle
-              : member.isOwner
-              ? t('owner')
-              : t('member'),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: roleColor),
-        ),
-      ),
+    final role = CommunityRoleBadge(
+      color: roleColor,
+      label: member.roleTitle.isNotEmpty
+          ? member.roleTitle
+          : member.isOwner
+          ? t('owner')
+          : t('member'),
     );
     final status = Text(
       key == 'paused' ? t('paused') : AppStrings.of(context).text(key),

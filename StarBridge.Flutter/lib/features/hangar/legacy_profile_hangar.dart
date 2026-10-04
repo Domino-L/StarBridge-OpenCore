@@ -24,9 +24,19 @@ LocalHangarShip profileHangarShip(Map value, String id) {
   );
 }
 
-LocalHangarSnapshot legacyProfileHangar(Map<String, Object?> payload) {
-  final profile = payload['profile'] as Map;
-  final rows = (profile['hangar'] as Map?)?['ships'];
+/// A profile may omit its optional hangar display (also when the owner hides
+/// those profile modules). Absence says nothing about inventory saved elsewhere.
+LocalHangarSnapshot? legacyProfileHangar(Map<String, Object?> payload) {
+  final profile = payload['profile'];
+  if (profile is! Map) {
+    throw const LocalHangarFailure('hangar.legacy_unavailable');
+  }
+  final hangar = profile['hangar'];
+  if (hangar == null) return null;
+  if (hangar is! Map) {
+    throw const LocalHangarFailure('hangar.legacy_unavailable');
+  }
+  final rows = hangar['ships'];
   if (rows is! List || rows.length > 20000) {
     throw const LocalHangarFailure('hangar.legacy_unavailable');
   }
@@ -35,7 +45,8 @@ LocalHangarSnapshot legacyProfileHangar(Map<String, Object?> payload) {
     fromLegacyProfile: true,
     ships: List.unmodifiable([
       for (var i = 0; i < rows.length; i++)
-        profileHangarShip(rows[i] as Map, 'legacy-display-$i'),
+        if ((rows[i] as Map)['isInventoryEntry'] != false)
+          profileHangarShip(rows[i] as Map, 'legacy-display-$i'),
     ]),
   );
 }

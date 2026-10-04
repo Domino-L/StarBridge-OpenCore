@@ -74,6 +74,11 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private void ResolveDpiScale()
     {
+        if (_targetDpiScale is double scale && double.IsFinite(scale) && scale > 0)
+        {
+            _dpiScaleX = _dpiScaleY = scale;
+            return;
+        }
         var visual = System.Windows.Application.Current?.MainWindow;
         var dpi = visual is null ? new DpiScale(1, 1) : VisualTreeHelper.GetDpi(visual);
         _dpiScaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1;
@@ -139,11 +144,12 @@ internal sealed partial class OverlayCompositionHudWindow
             .ToArray();
     }
 
-    private static IReadOnlyList<OverlayCompositionEventRow> SnapshotEvents(ObservableCollection<OverlayEventNotificationRow> rows)
+    private static IReadOnlyList<OverlayCompositionEventRow> SnapshotEvents(ObservableCollection<OverlayEventNotificationRow> rows,
+        string? sourceLabel = null)
     {
         return rows
             .Select(row => new OverlayCompositionEventRow(
-                row.Title,
+                OverlayModuleSourceLabels.Prefix(row.Title, sourceLabel, row.IsDeviceLocal),
                 row.Detail,
                 row.Timestamp,
                 (float)row.SlideOffsetX,

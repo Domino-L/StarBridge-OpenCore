@@ -19,6 +19,8 @@ ActionTone roomFeedbackTone(String code) => switch (code) {
   'declined' ||
   'invited' ||
   'revoked' ||
+  'removed' ||
+  'hostTransferred' ||
   'invitationDeclined' => ActionTone.success,
   'pending' => ActionTone.info,
   'outcomeUnknown' ||

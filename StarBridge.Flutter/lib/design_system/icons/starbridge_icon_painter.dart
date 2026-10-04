@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'icon_semantic.dart';
 import 'starbridge_icon_geometry.dart';
-import 'starbridge_identity_icon_geometry.dart';
-import 'starbridge_profile_icon_geometry.dart';
-import 'starbridge_system_icon_geometry.dart';
+import 'starbridge_icons_v2.dart';
 
 final class StarBridgeIconPainter extends CustomPainter {
   const StarBridgeIconPainter({
@@ -33,12 +31,8 @@ final class StarBridgeIconPainter extends CustomPainter {
       canvas.scale(-1, 1);
     }
 
-    final geometry = StarBridgeIconCanvas(canvas, color, opticalSize);
-    final painted =
-        StarBridgeIdentityIconGeometry.paint(semantic, geometry) ||
-        StarBridgeProfileIconGeometry.paint(semantic, geometry) ||
-        StarBridgeSystemIconGeometry.paint(semantic, geometry);
-    assert(painted, 'No StarBridge geometry registered for $semantic.');
+    final spec = catalogBySemantic['SB.${semantic.name}']!;
+    spec.paint(IconPen(canvas, color, IconOptic.values[opticalSize.index]));
     canvas.restore();
   }
 

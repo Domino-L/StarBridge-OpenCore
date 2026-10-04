@@ -165,13 +165,19 @@ internal sealed partial class ScmAccountBridgeHost
         _session = result.ActiveSession.Scm;
         return result.Result;
     }
-    private async Task<object> ReadCommunitySurfaceAsync(BridgeAccountContext context, JsonElement payload, string surface, CancellationToken token)
+    private async Task<object> ReadCommunitySurfaceAsync(BridgeAccountContext context, JsonElement payload, string surface, CancellationToken token,
+        bool backgroundActivity = false, bool includeManagement = true,
+        Action<Overlay.InformationOverlayCommunityContent>? rosterReady = null)
     {
         var session = RequireRelaySession(context);
         var generation = Generation;
         var sequence = Interlocked.Increment(ref _playerActivitySequence);
+        var rosterSequence = Interlocked.Increment(ref _workspaceRosterSequence);
+        var rosterStartedAt = DateTimeOffset.UtcNow;
+        Overlay.InformationOverlayCommunityContent? workspaceRoster = null;
         Notifications.PlayerActivitySourceSnapshot? activity = null;
-        Action<Notifications.PlayerActivitySourceSnapshot>? observed = ObservePlayerActivity() ? value => activity = value : null;
+        Action<Notifications.PlayerActivitySourceSnapshot>? observed = ObservePlayerActivity() ? value =>
+        { if (backgroundActivity) PublishPlayerActivity(context, generation, sequence, value); else activity = value; } : null;
         if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
@@ -180,24 +186,48 @@ internal sealed partial class ScmAccountBridgeHost
             if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
             RequireSameRelaySession(RequireRelaySession(context), session);
         }
-        var result = await SendRelayRequestAsync(session,
-            (active, ct) => surface switch
+        Overlay.OverlayCommunityTarget? rosterTarget = null;
+        if (surface == "workspace" && !backgroundActivity && payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("targetRef", out var rosterReference) && rosterReference.ValueKind == JsonValueKind.String)
+        {
+            try { rosterTarget = client.OverlayTarget(rosterReference.GetString()!, FriendScope(context, generation)); }
+            catch (AccountBridgeHostException) { } // The normal reader owns request validation/errors.
+        }
+        try
+        {
+            var result = await SendRelayRequestAsync(session,
+                (active, ct) => surface switch
+                {
+                    "media" => client.ReadMediaAsync(active.AccessToken, payload, FriendScope(context, generation), ct),
+                    "logs" => active.Legacy is not null
+                        ? client.ReadWpfS2LogsAsync(active.AccessToken, payload, FriendScope(context, generation), Current, ct)
+                        : client.ReadLogsAsync(active.AccessToken, payload, FriendScope(context, generation), ct),
+                    "profile" => active.Legacy is { } legacy
+                        ? client.ReadWpfS2ProfileAsync(active.AccessToken, payload, FriendScope(context, generation),
+                            legacy.AccountId, ct)
+                        : client.ReadProfileAsync(active.AccessToken, payload, FriendScope(context, generation), ct),
+                    _ => client.ReadWorkspaceAsync(active.AccessToken, payload, FriendScope(context, generation), ct, observed, backgroundActivity,
+                        !backgroundActivity || rosterReady is not null ? value => workspaceRoster = value : null, includeManagement)
+                }, token);
+            if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
+            RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
+            _session = result.ActiveSession.Scm;
+            token.ThrowIfCancellationRequested();
+            if (workspaceRoster is not null)
             {
-                "media" => client.ReadMediaAsync(active.AccessToken, payload, FriendScope(context, generation), ct),
-                "logs" => active.Legacy is not null
-                    ? client.ReadWpfS2LogsAsync(active.AccessToken, payload, FriendScope(context, generation), Current, ct)
-                    : client.ReadLogsAsync(active.AccessToken, payload, FriendScope(context, generation), ct),
-                "profile" => active.Legacy is { } legacy
-                    ? client.ReadWpfS2ProfileAsync(active.AccessToken, payload, FriendScope(context, generation),
-                        legacy.AccountId, ct)
-                    : client.ReadProfileAsync(active.AccessToken, payload, FriendScope(context, generation), ct),
-                _ => client.ReadWorkspaceAsync(active.AccessToken, payload, FriendScope(context, generation), ct, observed)
-            }, token);
-        if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
-        RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
-        _session = result.ActiveSession.Scm;
-        PublishPlayerActivity(context, generation, sequence, activity);
-        return result.Result;
+                if (!backgroundActivity) CommunityRosterObserved?.Invoke(context, generation, rosterSequence, rosterStartedAt, workspaceRoster);
+                rosterReady?.Invoke(workspaceRoster);
+            }
+            PublishPlayerActivity(context, generation, sequence, activity);
+            return result.Result;
+        }
+        catch (AccountBridgeHostException error) when (rosterTarget is not null &&
+            error.Code is "communities.notAllowed" or "communities.notFound" or "communities.identityUnavailable")
+        {
+            if (!_disposed && generation == Generation && context == GameplayTimeContext)
+                CommunityRosterRevoked?.Invoke(context, generation, rosterSequence, rosterTarget.Code);
+            throw;
+        }
     }
 
     public Task<object> GetCommunityCreationOptionsAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
@@ -271,24 +301,36 @@ internal sealed partial class ScmAccountBridgeHost
         return result.Result;
     }
 
-    public async Task<object> ReadCommunitiesAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
+    public Task<object> ReadCommunitiesAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token) =>
+        ReadCommunitiesCoreAsync(context, payload, token);
+
+    private async Task<object> ReadCommunitiesCoreAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token,
+        bool backgroundActivity = false, bool includeManagement = true)
     {
         var query = CommunityClient.ParseQuery(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
+        var rosterSequence = Interlocked.Increment(ref _workspaceRosterSequence);
+        var rosterStartedAt = DateTimeOffset.UtcNow;
+        IReadOnlyList<Overlay.InformationOverlayCommunityContent>? directoryRosters = null;
         var sequence = Interlocked.Increment(ref _playerActivitySequence);
         Notifications.PlayerActivitySourceSnapshot? activity = null;
-        Action<Notifications.PlayerActivitySourceSnapshot>? observed = ObservePlayerActivity() ? value => activity = value : null;
+        Action<Notifications.PlayerActivitySourceSnapshot>? observed = ObservePlayerActivity() ? value =>
+        { if (backgroundActivity) PublishPlayerActivity(context, generation, sequence, value); else activity = value; } : null;
         if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         var result = await SendRelayRequestAsync(session,
             (active, ct) => active.Legacy is { } legacy
-                ? client.ReadWpfS2Async(active.AccessToken, query, FriendScope(context, generation), legacy.AccountId, ct, observed)
+                ? client.ReadWpfS2Async(active.AccessToken, query, FriendScope(context, generation), legacy.AccountId, ct, observed, backgroundActivity, includeManagement,
+                    !backgroundActivity && CommunityDirectoryObserved is not null ? value => directoryRosters = value : null)
                 : client.ReadAsync(active.AccessToken, query, FriendScope(context, generation), ct), token);
         if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
         RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
         _session = result.ActiveSession.Scm;
+        token.ThrowIfCancellationRequested();
+        if (directoryRosters is not null)
+            CommunityDirectoryObserved?.Invoke(context, generation, rosterSequence, rosterStartedAt, directoryRosters);
         PublishPlayerActivity(context, generation, sequence, activity);
         return result.Result;
     }

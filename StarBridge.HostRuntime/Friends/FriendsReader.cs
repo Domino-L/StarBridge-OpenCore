@@ -19,6 +19,20 @@ internal sealed record FriendView(string Callsign, string GameId, string Relatio
     public string? ChatTargetRef { get; init; }
     public string[] Actions { get; init; } = [];
     public FriendSharedView? Shared { get; init; }
+    public FriendSharedLabels? SharedLabels => FriendSharedLabels.From(Shared);
+}
+internal sealed record FriendDisplayNames(string En, string? ZhHans, string? ZhHant = null);
+internal sealed record FriendSharedLabels(FriendDisplayNames? Ship, FriendDisplayNames? Location)
+{
+    internal static FriendSharedLabels? From(FriendSharedView? shared)
+    {
+        if (shared is null) return null;
+        var ship = string.IsNullOrWhiteSpace(shared.Ship) ? null : Presence.GameLogSessionTracker.FindSharedShipName(shared.Ship);
+        var location = string.IsNullOrWhiteSpace(shared.Location) ? null : Presence.GameLogSessionTracker.FindSharedLocationName(shared.Location);
+        return ship is null && location is null ? null : new(
+            ship is null ? null : new(ship.EnglishName, ship.ChineseName, ship.TraditionalChineseName),
+            location is null ? null : new(location.EnglishName, location.ChineseName));
+    }
 }
 internal sealed record FriendsView(string? Query, DateTimeOffset? RefreshedAt,
     FriendView[] Friends, FriendView[] Incoming, FriendView[] Outgoing, FriendView[] Blocked,
@@ -62,7 +76,8 @@ internal sealed partial class FriendsReader : IDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
         // Only the enabled authenticated activity observer may request friend presence. Search never does.
-        var path = query is null ? "/api/friends?includePresence=" + (observePresence ? "true" : sharing ? "false&includeSharing=true" : "false") :
+        var path = query is null ? "/api/friends?includePresence=" + (observePresence ? "true" : "false") +
+            (sharing ? "&includeSharing=true" : "") :
             "/api/friends/search?includePresence=false&q=" + Uri.EscapeDataString(query);
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
@@ -115,13 +130,12 @@ internal sealed partial class FriendsReader : IDisposable
                     if (expected is not null && relation != expected && relation != "unknown") throw Invalid();
                     return new FriendView(Text(user, "callsign", 512), Text(user, "gameId", 512), relation,
                         user.TryGetProperty("avatarImageData", out var avatar) && avatar.ValueKind == JsonValueKind.String
-                            ? RoomAvatarProjection.Normalize(avatar.GetString()) : null,
+                            ? RoomAvatarProjection.Normalize(avatar.GetString(), 512 * 1024) : null,
                         wrapped ? entry.GetProperty("relationshipUpdatedAt").GetDateTimeOffset() : user.GetProperty("lastUpdated").GetDateTimeOffset()) {
                             AccountId = id,
                             Shared = sharing && query is null && expected == "friend" ? ParseShared(user) : null,
-                            ObservedPresence = observePresence && query is null && expected == "friend" &&
-                                user.TryGetProperty("presence", out var presence) && presence.ValueKind == JsonValueKind.String
-                                    ? Text(user, "presence", 64) : null
+                            ObservedPresence = observePresence && query is null && expected == "friend"
+                                ? ReadObservedPresence(user) : null
                         };
                 }).ToArray();
             }
@@ -140,6 +154,17 @@ internal sealed partial class FriendsReader : IDisposable
         if (text.Length > max || text.Any(char.IsControl)) throw Invalid();
         return text;
     }
+    private static string? ReadObservedPresence(JsonElement user)
+    {
+        // The explicit six-field projection supersedes the old UI fallback.
+        // Empty/redacted shared presence is unknown, not a real offline event.
+        if (user.TryGetProperty("shared", out var shared) && shared.ValueKind != JsonValueKind.Null)
+            return ParseShared(user)?.Presence;
+        return user.TryGetProperty("presence", out var presence) && presence.ValueKind == JsonValueKind.String &&
+            user.TryGetProperty("lastUpdated", out var updated) && updated.TryGetDateTimeOffset(out var at) && at != default
+                ? Text(user, "presence", 64) : null;
+    }
+
     private static FriendSharedView? ParseShared(JsonElement user)
     {
         if (!user.TryGetProperty("shared", out var value) || value.ValueKind == JsonValueKind.Null) return null;

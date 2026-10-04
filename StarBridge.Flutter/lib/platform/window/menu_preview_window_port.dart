@@ -40,9 +40,11 @@ final class MenuChatTarget {
     this.name, {
     this.avatar,
     this.stableKey,
+    this.presence,
+    this.gameId,
   });
   final String reference, name;
-  final String? avatar, stableKey;
+  final String? avatar, stableKey, presence, gameId;
 }
 
 abstract interface class MenuChatTargets {

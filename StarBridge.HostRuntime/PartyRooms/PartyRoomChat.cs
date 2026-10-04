@@ -66,11 +66,13 @@ internal sealed partial class PartyRoomReader
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
         RoomDirectoryView directory;
         try { directory = await ReadAsync(bearer, deadline.Token); }
+        catch (AccountBridgeHostException error) when (operation == "chatRead" && error.Code == "party_rooms.read_unavailable" && error.Retryable)
+        { throw; }
         catch (AccountBridgeHostException error) when (error.Code is not ("party_rooms.identity_unavailable" or "party_rooms.forbidden"))
         { throw new AccountBridgeHostException("party_rooms.command_unavailable"); }
         if (directory.CurrentRoomId != roomId) return new("rejected", "notMember", directory, null);
         if (operation == "chatRead") {
-            using var result = await ReadRoomJsonAsync(bearer, $"/api/party-rooms/chat?roomId={Uri.EscapeDataString(roomId)}&after={after}&before={before}&limit=50", deadline.Token);
+            using var result = await ReadRoomJsonAsync(bearer, $"/api/party-rooms/chat?roomId={Uri.EscapeDataString(roomId)}&after={after}&before={before}&limit=50", deadline.Token, transientOverlayRead: true);
             try {
                 var root = result.RootElement;
                 if (root.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null) throw Invalid();

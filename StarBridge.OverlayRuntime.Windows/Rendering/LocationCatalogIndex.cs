@@ -40,6 +40,7 @@ internal sealed class LocationCatalogIndex
     private static readonly TimeSpan PatternTimeout = TimeSpan.FromMilliseconds(100);
     private readonly IReadOnlyDictionary<string, LocationCatalogMatch> _canonical;
     private readonly IReadOnlyDictionary<string, LocationCatalogMatch> _lookup;
+    private readonly IReadOnlyDictionary<string, LocationCatalogMatch> _englishDisplayNames;
     private readonly DynamicLocationPattern[] _dynamicPatterns;
     private readonly string _optionalQuantumPrefix;
     private readonly Regex _instanceSuffixPattern;
@@ -56,6 +57,13 @@ internal sealed class LocationCatalogIndex
     {
         _canonical = canonical;
         _lookup = lookup;
+        // Presence projections may already contain an English display name.
+        // Resolve it for display only, and never choose between different places
+        // with the same name. Code/alias identity resolution remains unchanged.
+        _englishDisplayNames = canonical.Values
+            .GroupBy(entry => entry.NameEn, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.OrdinalIgnoreCase);
         _dynamicPatterns = dynamicPatterns;
         Metadata = metadata;
         _optionalQuantumPrefix = optionalQuantumPrefix;
@@ -263,6 +271,9 @@ internal sealed class LocationCatalogIndex
             return Empty(exception.Message);
         }
     }
+
+    internal bool TryResolveEnglishDisplayName(string name, out LocationCatalogMatch match) =>
+        _englishDisplayNames.TryGetValue(name.Trim(), out match!);
 
     internal bool TryResolve(string code, out LocationCatalogMatch match)
     {

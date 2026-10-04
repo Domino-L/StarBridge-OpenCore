@@ -18,6 +18,8 @@ class ChatMessageBubble extends StatelessWidget {
     this.avatarWidget,
     this.userTarget,
     this.compact = false,
+    this.onViewProfile,
+    this.privateConversation = false,
   });
   final bool incoming, allowProfileUrl;
   final String sender, time;
@@ -26,6 +28,8 @@ class ChatMessageBubble extends StatelessWidget {
   final Widget? avatarWidget;
   final UserTarget? userTarget;
   final bool compact;
+  final VoidCallback? onViewProfile;
+  final bool privateConversation;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +42,7 @@ class ChatMessageBubble extends StatelessWidget {
       child:
           avatarWidget ??
           ChatAvatar(
+            onViewProfile: onViewProfile,
             label: sender,
             isSelf: !incoming,
             target: userTarget,
@@ -60,6 +65,11 @@ class ChatMessageBubble extends StatelessWidget {
               decoration: BoxDecoration(
                 color: incoming
                     ? context.tokens.surfaces.panel.fill
+                    : privateConversation
+                    ? Color.alphaBlend(
+                        context.tokens.colors.accent.withValues(alpha: .14),
+                        context.tokens.surfaces.raised.fill,
+                      )
                     : context.tokens.surfaces.raised.fill,
                 border: Border.all(color: context.tokens.surfaces.panel.border),
                 borderRadius: BorderRadius.circular(6),
@@ -68,7 +78,7 @@ class ChatMessageBubble extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$sender · $time',
+                    privateConversation ? time : '$sender · $time',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),

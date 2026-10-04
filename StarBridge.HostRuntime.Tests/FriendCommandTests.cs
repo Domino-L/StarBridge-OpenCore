@@ -105,6 +105,12 @@ internal static class FriendCommandTests
             Check(!JsonSerializer.Serialize(result).Contains("private detail"), "No raw error exposure");
             await reader.ExecuteAsync("token", Command("remove", row.TargetRef!), default);
             Check(writes == 1, "Uncertain write never replays");
+            var fresh = First(await reader.ReadAsync("token", null, default));
+            Check(fresh.TargetRef != row.TargetRef,
+                "Refreshing an unchanged friend after a consumed operation must issue a fresh command target");
+            var oldReplay = await reader.ExecuteAsync("token", Command("remove", row.TargetRef!), default);
+            Check(oldReplay.Error == "targetChanged" && writes == 1,
+                "Avatar aliases cannot resurrect a consumed write after a directory refresh");
         }
         var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

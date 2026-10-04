@@ -15,6 +15,12 @@ final class OverlaySceneState {
     this.mode = 'auto',
     this.code,
     this.actualId,
+    this.sourceOwnerKey,
+    this.automaticPresetSourceId,
+    this.contextGeneration,
+    this.presetBindingId,
+    this.temporarySourceId,
+    this.resolvedSourceIds,
     this.status = 'loading',
     this.targets = const [],
     this.available = false,
@@ -24,15 +30,29 @@ final class OverlaySceneState {
   final int revision;
   final String mode, status;
   final String? code, actualId;
+  final String? sourceOwnerKey;
+  final String? automaticPresetSourceId;
+  final int? contextGeneration;
+  final String? presetBindingId, temporarySourceId;
+  // Host-resolved preview metadata, not a grant to display remote content.
+  final Map<String, String?>? resolvedSourceIds;
   final List<OverlaySceneTarget> targets;
   final bool available, busy, failure;
-  String get preferredId => mode == 'community' ? 'org:$code' : mode;
+  String get accountPreferredId => mode == 'community' ? 'org:$code' : mode;
+  String get preferredId =>
+      temporarySourceId ?? presetBindingId ?? accountPreferredId;
   OverlaySceneState renamed(String targetCode, String name) =>
       OverlaySceneState(
         revision: revision,
         mode: mode,
         code: code,
         actualId: actualId,
+        sourceOwnerKey: sourceOwnerKey,
+        automaticPresetSourceId: automaticPresetSourceId,
+        contextGeneration: contextGeneration,
+        presetBindingId: presetBindingId,
+        temporarySourceId: temporarySourceId,
+        resolvedSourceIds: resolvedSourceIds,
         status: status,
         targets: List.unmodifiable(
           targets.map(
@@ -50,6 +70,12 @@ final class OverlaySceneState {
     mode: mode,
     code: code,
     actualId: failed ? null : actualId,
+    sourceOwnerKey: sourceOwnerKey,
+    automaticPresetSourceId: failed ? null : automaticPresetSourceId,
+    contextGeneration: contextGeneration,
+    presetBindingId: presetBindingId,
+    temporarySourceId: temporarySourceId,
+    resolvedSourceIds: failed ? null : resolvedSourceIds,
     status: failed ? 'unavailable' : status,
     targets: targets,
     available: available,
@@ -86,6 +112,7 @@ final class OverlaySceneController {
     }
   }
   final OverlayScenePort _port;
+  Future<bool> Function(String id)? selectTemporary;
   final _view = ValueNotifier(const OverlaySceneState());
   ValueListenable<OverlaySceneState> get projection => _view;
   late final StreamSubscription<void> _events;
@@ -144,26 +171,44 @@ final class OverlaySceneController {
   }
 
   Future<bool> select(String id) async {
-    if (_closed || _busy || !_view.value.available || id == 'fleet') {
+    if (_closed ||
+        _view.value.busy ||
+        !_view.value.available ||
+        id == 'fleet') {
       return false;
     }
     final mode = id.startsWith('org:') ? 'community' : id;
     final code = mode == 'community' ? id.substring(4) : null;
-    if (!['auto', 'room', 'community'].contains(mode) ||
-        mode == 'community' &&
-            !_view.value.targets.any((x) => x.code == code)) {
+    if (!(id == 'resumeBinding' && _view.value.presetBindingId != null) &&
+        (!['auto', 'room', 'community'].contains(mode) ||
+            mode == 'community' &&
+                !_view.value.targets.any((x) => x.code == code))) {
       return false;
     }
     final before = _view.value;
     _pendingNames.clear();
     _busy = true;
-    final epoch = _epoch;
+    // A visible picker must not silently discard clicks during a background
+    // read. A manual selection supersedes that read; late results stay stale.
+    final epoch = ++_epoch;
     _view.value = before.pending();
     try {
-      final result = await _port.select(before.revision, mode, code);
+      final temporary = before.presetBindingId != null;
+      if (temporary &&
+          (selectTemporary == null || !await selectTemporary!(id))) {
+        throw StateError('Temporary source not applied');
+      }
+      if (_closed || epoch != _epoch) return false;
+      final result = temporary
+          ? await _port.read()
+          : await _port.select(before.revision, mode, code);
       if (_closed || epoch != _epoch) return false;
       _view.value = _mergeNames(result);
-      return result.mode == mode && result.code == code;
+      return temporary
+          ? (id == 'resumeBinding'
+                ? result.temporarySourceId == null
+                : result.temporarySourceId == id)
+          : result.mode == mode && result.code == code;
     } catch (_) {
       if (!_closed && epoch == _epoch) {
         _view.value = _mergeNames(before.pending(failed: true));

@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -140,6 +141,7 @@ class _TraySurfaceAppState extends State<TraySurfaceApp> {
         )
         .tokens;
     return MaterialApp(
+      scrollBehavior: const StarBridgeScrollBehavior(),
       debugShowCheckedModeBanner: false,
       locale: locale,
       supportedLocales: AppStrings.supportedLocales,

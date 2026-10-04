@@ -20,7 +20,9 @@ internal sealed partial class CommunityClient
     // server remains responsible for membership and field-level visibility.
     // Only ordinary-member exit is exposed here; management remains separate.
     internal async Task<CommunityPage> ReadWpfS2Async(string bearer, CommunityQuery query,
-        string scope, string viewerId, CancellationToken token, Action<Notifications.PlayerActivitySourceSnapshot>? observed = null)
+        string scope, string viewerId, CancellationToken token, Action<Notifications.PlayerActivitySourceSnapshot>? observed = null,
+        bool backgroundActivity = false, bool includeManagement = true,
+        Action<IReadOnlyList<Overlay.InformationOverlayCommunityContent>>? rostersReady = null)
     {
         if (query.View == "discover") return await ReadWpfS2Discovery(bearer, query, scope, viewerId, token);
         if (query.View != "mine") throw Invalid();
@@ -37,9 +39,12 @@ internal sealed partial class CommunityClient
                 var code = Text(fleet, "code", 256);
                 var name = Text(fleet, "name", 512);
                 if (q.Length > 0 && !name.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
-                var ownership = await ReadWpfS2Ownership(bearer, fleet, viewerId, token,
-                    () => ownershipSession ??= WorkspaceJson(bearer, "/api/auth/session", token, 2 * 1024 * 1024));
-                var canLeave = WpfS2CanLeave(fleet, viewerId, ownership);
+                // The HUD needs membership and privacy-filtered rows, not owner
+                // action grants. A separate session lookup must not block it.
+                // Normal UI reads keep the full ownership/action checks.
+                var ownership = includeManagement ? await ReadWpfS2Ownership(bearer, fleet, viewerId, token,
+                    () => ownershipSession ??= WorkspaceJson(bearer, "/api/auth/session", token, 2 * 1024 * 1024)) : WpfS2Ownership.Unknown;
+                var canLeave = includeManagement && WpfS2CanLeave(fleet, viewerId, ownership);
                 var reference = Guid.NewGuid().ToString("N");
                 var count = Number(fleet, "totalMembers", 0, 1000000);
                 _targets[reference] = new(code, scope, _targetClock.GetUtcNow().AddMinutes(5), name, viewerId);
@@ -56,7 +61,17 @@ internal sealed partial class CommunityClient
             TrimTargets();
             if (_targets.Count > 4000 || _organizationRefs.Count > 10000) throw Invalid();
             token.ThrowIfCancellationRequested();
-            await ObserveWpfS2Players(bearer, fleets, observed, token, viewerId);
+            if (backgroundActivity) QueueWpfS2PlayerObservation(bearer, fleets, observed, viewerId);
+            else await ObserveWpfS2Players(bearer, fleets, observed, token, viewerId);
+            // The joined directory already fetched the same complete, server-
+            // filtered rosters as the workspace. Do not make opening the HUD
+            // download them again. A search/discovery page is not a directory.
+            if (rostersReady is not null && q.Length == 0)
+                rostersReady(fleets.Select(fleet => new Overlay.InformationOverlayCommunityContent(
+                    Text(fleet, "code", 256), Text(fleet, "name", 512),
+                    Array.AsReadOnly(ProjectWpfS2Roster(fleet, viewerId).Select(row =>
+                        ScmAccountBridgeHost.ProjectOverlayMember(row) with
+                        { PreferenceKey = Overlay.OverlayMemberIdentity.FromAccountId(Text(row, "memberId", 512)) }).ToArray()))).ToArray());
             return new(query.View, q, null, items.ToArray()) { TotalCount = items.Count };
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
@@ -154,15 +169,57 @@ internal sealed partial class CommunityClient
     }
 
     private async Task<JsonElement> WpfS2Workspace(string bearer, Target target, string query, int offset, CancellationToken token,
-        Action<Notifications.PlayerActivitySourceSnapshot>? observed = null)
+        Action<Notifications.PlayerActivitySourceSnapshot>? observed = null, Action<JsonElement[]>? deferredActivity = null,
+        Action<JsonElement>? completeRoster = null, bool includeManagement = true)
     {
         var membership = await ReadWpfS2MembershipShared(bearer, target.Scope, token);
         var fleet = membership.SingleOrDefault(row =>
             string.Equals(Text(row, "code", 256), target.Code, StringComparison.OrdinalIgnoreCase));
         if (fleet.ValueKind == JsonValueKind.Undefined) throw new AccountBridgeHostException("communities.notAllowed");
-        var ownership = await ReadWpfS2Ownership(bearer, fleet, target.WpfS2ViewerId!, token);
+        var ownership = includeManagement ? await ReadWpfS2Ownership(bearer, fleet, target.WpfS2ViewerId!, token) : WpfS2Ownership.Unknown;
         var canEditProfile = ownership == WpfS2Ownership.Self ||
                              WpfS2HasPermission(fleet, target.WpfS2ViewerId!, "canManageFleetInfo");
+        var members = ProjectWpfS2Roster(fleet, target.WpfS2ViewerId!);
+        var matched = members.Where(row => query.Length == 0 || WpfText(row, "callsign", 512).Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            WpfText(row, "gameName", 512).Contains(query, StringComparison.OrdinalIgnoreCase) || WpfText(row, "roleTitle", 128).Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (offset > matched.Length) throw Invalid();
+        var page = matched.Skip(offset).Take(20).ToArray();
+        object[] contacts = fleet.TryGetProperty("externalContacts", out var contactRows) && contactRows.ValueKind == JsonValueKind.Array
+            ? Rows(fleet, "externalContacts", 100).Select(row => (object)new { platform = Text(row, "platform", 128), value = Text(row, "value", 2048) }).ToArray() : [];
+        object[] windows = fleet.TryGetProperty("activityWindows", out var windowRows) && windowRows.ValueKind == JsonValueKind.Array
+            ? Rows(fleet, "activityWindows", 3).Select(row => (object)new { days = ParseSystems(row.GetProperty("days")),
+                startTime = Text(row, "startTime", 5), endTime = Text(row, "endTime", 5),
+                endsNextDay = row.TryGetProperty("endsNextDay", out var ends) && ends.GetBoolean() }).ToArray() : [];
+        if (deferredActivity is not null) deferredActivity(membership);
+        else await ObserveWpfS2Players(bearer, membership, observed, token, target.WpfS2ViewerId!);
+        var result = JsonSerializer.SerializeToElement(new
+        {
+            schemaVersion = 1, membershipModelVersion = 1,
+            code = target.Code, name = Text(fleet, "name", 512), description = WpfText(fleet, "description", 8192, true),
+            tags = WpfText(fleet, "type", 2048), language = WpfText(fleet, "language", 512), activeTime = WpfText(fleet, "activeTime", 1024),
+            timeZoneId = Optional(fleet, "timeZoneId", 128), websiteUrl = Optional(fleet, "websiteUrl", 2048),
+            activeSystemIds = fleet.TryGetProperty("activeSystemIds", out var systems) && systems.ValueKind != JsonValueKind.Null ? ParseSystems(systems) : [],
+            externalContacts = contacts, activityWindows = windows,
+            hasLogo = !string.IsNullOrEmpty(Optional(fleet, "logoImageData", 1024 * 1024)),
+            hasBanner = !string.IsNullOrEmpty(Optional(fleet, "bannerImageData", 3 * 1024 * 1024)),
+            query, offset, next = offset + page.Length < matched.Length ? (int?)(offset + page.Length) : null,
+            totalCount = members.Length, matchedCount = matched.Length, members = page, fetchedAt = DateTimeOffset.UtcNow,
+            // Expose only the management slice with a completed WPF adapter.
+            // Never infer an action grant from a display role.
+            access = new { isOwner = ownership == WpfS2Ownership.Self, canEditProfile,
+                canReviewApplications = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "members.review", ownership),
+                canRemoveMembers = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "members.remove", ownership),
+                canCreateInvite = WpfS2CanCreateInvite(fleet, target.WpfS2ViewerId!, ownership),
+                canManageAnnouncements = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "announcements.manage", ownership),
+                canEditLogo = canEditProfile, canEditBanner = canEditProfile,
+                canViewLogs = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "audit.view", ownership) }
+        });
+        completeRoster?.Invoke(JsonSerializer.SerializeToElement(members));
+        return result;
+    }
+
+    private static JsonElement[] ProjectWpfS2Roster(JsonElement fleet, string viewerId)
+    {
         // Preserve only the roster returned by Relay. No reconstruction from local
         // game handles, profile affiliation, public counts, or unrelated players.
         // Match WPF FleetMemberRosterOrderPolicy before filtering/paging. Use
@@ -202,12 +259,13 @@ internal sealed partial class CommunityClient
             {
                 memberId, gameName = WpfText(row, "gameName", 512), callsign = WpfText(row, "callsign", 512),
                 roleTitle = role, roleColor = color,
-                isSelf = string.Equals(accountId, target.WpfS2ViewerId, StringComparison.OrdinalIgnoreCase),
+                isSelf = string.Equals(accountId, viewerId, StringComparison.OrdinalIgnoreCase),
                 isOwner = WpfMemberIsOwner(fleet, row),
                 online = row.GetProperty("online").GetBoolean(), liveStatus = WpfText(row, "liveStatus", 64, fallback: "Offline"),
                 hasAvatar = mediaId is not null && !string.IsNullOrEmpty(Optional(row, "avatarImageData", 1024 * 1024)),
                 avatarVersion = mediaId is null ? null : AvatarContentVersion(Optional(row, "avatarImageData", 1024 * 1024)),
                 ship = Optional(row, "ship", 512), location = Optional(row, "location", 512),
+                locationHiddenReason = Optional(row, "locationHiddenReason", 32),
                 hasServerSession = OptionalServerSession(row),
                 locationConfidence = Optional(row, "locationConfidence", 512), serverRegion = Optional(row, "serverRegion", 512),
                 serverShard = Optional(row, "serverShard", 512), lastUpdated = Timestamp(row, "lastUpdated"), joinedAt = Timestamp(row, "joinedAt"),
@@ -215,39 +273,7 @@ internal sealed partial class CommunityClient
                 arrivalTargetCode = Optional(row, "arrivalTargetCode", 512)
             };
         }).ToArray();
-        var matched = members.Where(row => query.Length == 0 || row.callsign.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-            row.gameName.Contains(query, StringComparison.OrdinalIgnoreCase) || row.roleTitle.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (offset > matched.Length) throw Invalid();
-        var page = matched.Skip(offset).Take(20).ToArray();
-        object[] contacts = fleet.TryGetProperty("externalContacts", out var contactRows) && contactRows.ValueKind == JsonValueKind.Array
-            ? Rows(fleet, "externalContacts", 100).Select(row => (object)new { platform = Text(row, "platform", 128), value = Text(row, "value", 2048) }).ToArray() : [];
-        object[] windows = fleet.TryGetProperty("activityWindows", out var windowRows) && windowRows.ValueKind == JsonValueKind.Array
-            ? Rows(fleet, "activityWindows", 3).Select(row => (object)new { days = ParseSystems(row.GetProperty("days")),
-                startTime = Text(row, "startTime", 5), endTime = Text(row, "endTime", 5),
-                endsNextDay = row.TryGetProperty("endsNextDay", out var ends) && ends.GetBoolean() }).ToArray() : [];
-        await ObserveWpfS2Players(bearer, membership, observed, token, target.WpfS2ViewerId!);
-        return JsonSerializer.SerializeToElement(new
-        {
-            schemaVersion = 1, membershipModelVersion = 1,
-            code = target.Code, name = Text(fleet, "name", 512), description = WpfText(fleet, "description", 8192, true),
-            tags = WpfText(fleet, "type", 2048), language = WpfText(fleet, "language", 512), activeTime = WpfText(fleet, "activeTime", 1024),
-            timeZoneId = Optional(fleet, "timeZoneId", 128), websiteUrl = Optional(fleet, "websiteUrl", 2048),
-            activeSystemIds = fleet.TryGetProperty("activeSystemIds", out var systems) && systems.ValueKind != JsonValueKind.Null ? ParseSystems(systems) : [],
-            externalContacts = contacts, activityWindows = windows,
-            hasLogo = !string.IsNullOrEmpty(Optional(fleet, "logoImageData", 1024 * 1024)),
-            hasBanner = !string.IsNullOrEmpty(Optional(fleet, "bannerImageData", 3 * 1024 * 1024)),
-            query, offset, next = offset + page.Length < matched.Length ? (int?)(offset + page.Length) : null,
-            totalCount = members.Length, matchedCount = matched.Length, members = page, fetchedAt = DateTimeOffset.UtcNow,
-            // Expose only the management slice with a completed WPF adapter.
-            // Never infer an action grant from a display role.
-            access = new { isOwner = ownership == WpfS2Ownership.Self, canEditProfile,
-                canReviewApplications = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "members.review", ownership),
-                canRemoveMembers = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "members.remove", ownership),
-                canCreateInvite = WpfS2CanCreateInvite(fleet, target.WpfS2ViewerId!, ownership),
-                canManageAnnouncements = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "announcements.manage", ownership),
-                canEditLogo = canEditProfile, canEditBanner = canEditProfile,
-                canViewLogs = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "audit.view", ownership) }
-        });
+        return JsonSerializer.SerializeToElement(members).EnumerateArray().ToArray();
     }
 
     private static string WpfText(JsonElement row, string key, int max, bool multiline = false, string fallback = "") =>

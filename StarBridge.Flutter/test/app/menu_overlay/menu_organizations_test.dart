@@ -2,6 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/features/communities/community_announcement_card.dart';
+import 'package:starbridge_flutter/features/communities/community_ship_banner.dart';
+import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_panel.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
@@ -25,6 +28,12 @@ Map<String, Object?> fixture({String tab = 'members'}) => {
   ],
   'organization': {
     'tab': tab,
+    'sections': {
+      'members': 'a2',
+      'ships': 'a3',
+      'announcements': 'a4',
+      'chat': 'a5',
+    },
     'code': 'VOYAGER',
     'description': '一起探索、护航与远征。',
     'total': 24,
@@ -54,6 +63,72 @@ Map<String, Object?> fixture({String tab = 'members'}) => {
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets('menu ships reuse client banner at wide and narrow widths', (
+    tester,
+  ) async {
+    for (final width in [1400.0, 360.0]) {
+      size(tester, Size(width, 900));
+      final data = fixture(tab: 'ships');
+      await tester.pumpWidget(
+        app(
+          MenuOrganizationsPanel(
+            view: MenuFeatureView.parse(data),
+            onAction: (_, _) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(CommunityShipBanner), findsNWidgets(4));
+      expect(
+        find.byKey(const ValueKey('menu-org-filter-online')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    }
+  });
+  testWidgets(
+    'menu announcements reuse client cards without mutation controls',
+    (tester) async {
+      size(tester, const Size(1000, 900));
+      final data = fixture(tab: 'announcements');
+      final org = data['organization']! as Map<String, Object?>;
+      org['rows'] = [
+        for (var i = 0; i < 4; i++)
+          {
+            'announcementState': i == 0 ? 'published' : 'archived',
+            'announcementTime': '2026-09-01T12:00:00Z',
+            'currentAnnouncement': i == 0,
+          },
+      ];
+      await tester.pumpWidget(
+        app(
+          MenuOrganizationsPanel(
+            view: MenuFeatureView.parse(data),
+            onAction: (_, _) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(CommunityAnnouncementCard), findsNWidgets(4));
+      expect(find.text('撤回'), findsNothing);
+      expect(find.text('编辑'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets('menu members reuse client member layout', (tester) async {
+    size(tester, const Size(1400, 900));
+    await tester.pumpWidget(
+      app(
+        MenuOrganizationsPanel(
+          view: MenuFeatureView.parse(fixture()),
+          onAction: (_, _) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CommunityMemberBanner), findsNWidgets(4));
+    expect(find.byType(CommunityMemberHeader), findsOneWidget);
+  });
   Map<String, Object?> directory({bool busy = false}) => {
     'state': 'ready',
     'scope': 's2',
@@ -205,18 +280,11 @@ void main() {
       await tester.pump();
       var view = MenuFeatureView.parse(views.last);
       expect(view.state, 'ready');
-      expect(view.organization!.tab, 'directory');
+      expect(view.organization!.tab, 'chat');
       expect(view.rows, isNotEmpty);
-      final directoryQuery = view.rows.first.title;
-      session.act(
-        view.buttons.singleWhere((a) => a.label == '搜索组织').key,
-        directoryQuery,
-      );
-      await tester.pump();
-      view = MenuFeatureView.parse(views.last);
-      expect(view.organization!.query, directoryQuery);
-      expect(view.organization!.rows.first.memberCount, isNotNull);
-      session.act(view.rows.first.buttons.single.key, '');
+      expect(view.organization!.navigation, isNotEmpty);
+      expect(view.organization!.navigation.first.selected, isTrue);
+      session.act(view.buttons.singleWhere((a) => a.label == '成员').key, '');
       await tester.pump();
       view = MenuFeatureView.parse(views.last);
       expect(view.state, 'ready');
@@ -256,11 +324,12 @@ void main() {
         expect(view.state, 'ready', reason: label);
         expect(view.organization!.tab, tab);
       }
-      session.act(view.buttons.singleWhere((a) => a.label == '返回组织列表').key, '');
+      session.show(false);
+      session.show(true);
       await tester.pump();
       view = MenuFeatureView.parse(views.last);
-      expect(view.organization!.tab, 'directory');
-      expect(view.organization!.query, directoryQuery);
+      expect(view.organization!.tab, 'chat');
+      expect(view.organization!.navigation, isNotEmpty);
       session.show(false);
       expect(target.isCurrent(), isFalse);
       session.dispose();
@@ -288,7 +357,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('状态统计 · 当前页'), findsOneWidget);
+    expect(find.byTooltip('本页在线 2\n在线与游戏人数仅统计当前页'), findsOneWidget);
+    expect(find.text('本页在线'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(
+      tester.getCenter(find.text('美服')).dy,
+      tester.getCenter(find.bySemanticsLabel('远航者 · 头像菜单').first).dy,
+    );
     expect(find.text('服务器'), findsOneWidget);
     expect(find.text('位置'), findsOneWidget);
     await capture(tester, boundary, 'menu-organizations-wpf-structure');

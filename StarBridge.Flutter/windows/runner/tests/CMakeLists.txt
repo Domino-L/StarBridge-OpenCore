@@ -1,6 +1,26 @@
 cmake_minimum_required(VERSION 3.14)
 project(small_icon_dpi_tests LANGUAGES CXX RC)
 enable_testing()
+option(STARBRIDGE_FRIENDS_TESTS "Compile independent friends engine fixture" OFF)
+if(STARBRIDGE_FRIENDS_TESTS)
+  get_filename_component(FRIENDS_FLUTTER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+  set(FRIENDS_EPHEMERAL "${FRIENDS_FLUTTER_ROOT}/windows/flutter/ephemeral")
+  add_executable(friends_window_bridge_test friends_window_bridge_test.cpp ../friends_window_bridge.cpp)
+  target_include_directories(friends_window_bridge_test PRIVATE .. "${FRIENDS_EPHEMERAL}" "${FRIENDS_EPHEMERAL}/cpp_client_wrapper/include")
+  target_compile_features(friends_window_bridge_test PRIVATE cxx_std_17)
+  target_compile_definitions(friends_window_bridge_test PRIVATE NOMINMAX UNICODE _UNICODE STARBRIDGE_FRIENDS_TEST)
+  target_compile_options(friends_window_bridge_test PRIVATE /W4 /WX /wd4100 /utf-8 /EHsc)
+  target_link_libraries(friends_window_bridge_test PRIVATE
+    "${FRIENDS_FLUTTER_ROOT}/build/windows/x64/flutter/Release/flutter_wrapper_app.lib"
+    "${FRIENDS_EPHEMERAL}/flutter_windows.dll.lib" dwmapi user32 gdi32 ole32)
+  add_custom_command(TARGET friends_window_bridge_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FRIENDS_EPHEMERAL}/flutter_windows.dll" "$<TARGET_FILE_DIR:friends_window_bridge_test>")
+  add_test(NAME friends_window_hidden COMMAND friends_window_bridge_test "${FRIENDS_FLUTTER_ROOT}/build/windows/x64/runner/Release/data")
+  set_tests_properties(friends_window_hidden PROPERTIES TIMEOUT 30)
+  add_test(NAME messages_window_hidden COMMAND friends_window_bridge_test "${FRIENDS_FLUTTER_ROOT}/build/windows/x64/runner/Release/data" messages)
+  add_test(NAME notifications_window_hidden COMMAND friends_window_bridge_test "${FRIENDS_FLUTTER_ROOT}/build/windows/x64/runner/Release/data" notifications)
+  set_tests_properties(messages_window_hidden notifications_window_hidden PROPERTIES TIMEOUT 30)
+endif()
 add_executable(menu_overlay_session_test menu_overlay_session_test.cpp)
 target_include_directories(menu_overlay_session_test PRIVATE ..)
 target_compile_features(menu_overlay_session_test PRIVATE cxx_std_17)
@@ -50,6 +70,7 @@ if(STARBRIDGE_MENU_BRIDGE_TESTS)
     set_tests_properties(menu_overlay_hidden_engine PROPERTIES TIMEOUT 30)
   endif()
 endif()
+
 add_executable(small_icon_dpi_test small_icon_dpi_test.cpp ../win32_window.cpp ../Runner.rc)
 target_include_directories(small_icon_dpi_test PRIVATE stubs ..)
 target_compile_features(small_icon_dpi_test PRIVATE cxx_std_17)
@@ -81,3 +102,12 @@ if(DEFINED STARBRIDGE_TRAY_PAYLOAD)
     "${EPHEMERAL}/flutter_windows.dll.lib" dwmapi user32 gdi32 advapi32 shell32 ole32)
   set_target_properties(tray_surface_runtime_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${STARBRIDGE_TRAY_PAYLOAD}")
 endif()
+
+# Isolated probes are not release executables and do not borrow package identity.
+foreach(fixture small_icon_dpi_test installer_shutdown_test tray_surface_runtime_test)
+  if(TARGET ${fixture})
+    target_compile_definitions(${fixture} PRIVATE
+      "STARBRIDGE_PRODUCT_VERSION=\"0.0.0.0\""
+      "STARBRIDGE_PRODUCT_VERSION_NUMBER=0,0,0,0")
+  endif()
+endforeach()

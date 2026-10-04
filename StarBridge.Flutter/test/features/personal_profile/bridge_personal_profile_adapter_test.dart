@@ -6,6 +6,7 @@ import 'package:starbridge_flutter/features/personal_profile/bridge_personal_pro
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_local_projection.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
+import 'package:starbridge_flutter/features/hangar/legacy_profile_hangar.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_connection.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
@@ -86,6 +87,111 @@ void main() {
         ]).favoriteShips.single.formerlyOwned,
         isTrue,
       );
+    },
+  );
+  test(
+    'favorite display placeholders never inflate current inventory overview',
+    () async {
+      final h = _PersonalProfileHostHarness()..legacy = true;
+      addTearDown(h.close);
+      final profile = _profilePayload['profile']! as Map<String, Object?>;
+      Map<String, Object?> ship(
+        String code, {
+        required String role,
+        num? price,
+        bool? inventory,
+        String imported = '2026-01-01T12:00:00Z',
+        String synced = '2026-01-02T12:00:00Z',
+      }) => {
+        'code': code,
+        'displayName': code,
+        'importedAt': imported,
+        'syncedAt': synced,
+        'isInventoryEntry': ?inventory,
+        'roleCategory': role,
+        'presentation': {'title': code, 'category': role, 'priceUsd': price},
+      };
+      h.profileOverrides = {
+        'content': {
+          ...(profile['content']! as Map<String, Object?>),
+          'favoriteShipCodes': ['fighter-runtime-alias', 'former-favorite'],
+        },
+        'hangar': {
+          'ships': [
+            ship(
+              'fighter-model',
+              role: 'combat',
+              price: 100,
+              imported: '0001-01-01T00:00:00Z',
+            ),
+            ship('fighter-model', role: 'combat', price: 100, inventory: true),
+            ship(
+              'industrial-model',
+              role: 'industry',
+              imported: '2026-04-01T12:00:00Z',
+            ),
+            ship(
+              'fighter-runtime-alias',
+              role: 'combat',
+              price: 100,
+              inventory: false,
+              synced: '2026-12-01T00:00:00Z',
+            ),
+            ship(
+              'former-favorite',
+              role: 'exploration',
+              price: 5000,
+              inventory: false,
+              imported: '2026-12-01T00:00:00Z',
+            ),
+          ],
+        },
+      };
+      final snapshot = await h.adapter.read();
+      final summary = snapshot.hangarSummary;
+      expect(summary.shipCount, 3);
+      expect(summary.estimatedValueLabel, r'$200 USD');
+      expect(summary.unpricedCount, 1);
+      expect(summary.categories.map((c) => c.count), [2, 1]);
+      expect(summary.recentlyAddedShip?.englishName, 'industrial-model');
+      expect(summary.recentlyAddedAtLabel, '2026-04-01');
+      expect(summary.syncedAtLabel, '2026-01-02');
+      expect(snapshot.favoriteShips.map((s) => s.identity.englishName), [
+        'fighter-runtime-alias',
+        'former-favorite',
+      ]);
+      final legacy = legacyProfileHangar({'profile': h.profileOverrides})!;
+      expect(legacy.ships.length, 3);
+      expect(legacy.ships.where((s) => s.title == 'fighter-model').length, 2);
+    },
+  );
+  test(
+    'unknown inventory import dates never fabricate a recent ship',
+    () async {
+      final h = _PersonalProfileHostHarness()..legacy = true;
+      addTearDown(h.close);
+      h.profileOverrides = {
+        'hangar': {
+          'ships': [
+            {'code': 'unknown-date', 'displayName': 'Unknown date'},
+            {
+              'code': 'legacy-min-date',
+              'displayName': 'Legacy unknown',
+              'importedAt': '0001-01-01T00:00:00Z',
+            },
+            {
+              'code': 'display-only',
+              'displayName': 'Display only',
+              'isInventoryEntry': false,
+              'importedAt': '2026-12-01T12:00:00Z',
+            },
+          ],
+        },
+      };
+      final summary = (await h.adapter.read()).hangarSummary;
+      expect(summary.shipCount, 2);
+      expect(summary.recentlyAddedShip, isNull);
+      expect(summary.recentlyAddedAtLabel, isEmpty);
     },
   );
   test(

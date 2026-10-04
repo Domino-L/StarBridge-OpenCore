@@ -21,6 +21,7 @@ class ChatAvatar extends StatefulWidget {
     this.actions = const [],
     this.target,
     this.includeSocialActions = true,
+    this.onViewProfile,
     super.key,
   });
   final String label;
@@ -31,6 +32,7 @@ class ChatAvatar extends StatefulWidget {
   final List<AvatarMenuAction> actions;
   final UserTarget? target;
   final bool includeSocialActions;
+  final VoidCallback? onViewProfile;
   @override
   State<ChatAvatar> createState() => _ChatAvatarState();
 }
@@ -55,7 +57,7 @@ class _ChatAvatarState extends State<ChatAvatar> {
     _bytes = null;
     final value = widget.source;
     if (value == null ||
-        value.length > 128 * 1024 ||
+        value.length > ((512 * 1024 + 2) ~/ 3 * 4) + 24 ||
         !(value.startsWith('data:image/png;base64,') ||
             value.startsWith('data:image/jpeg;base64,'))) {
       return;
@@ -137,6 +139,7 @@ class _ChatAvatarState extends State<ChatAvatar> {
       }
     }
     return UserAvatarMenu(
+      onViewProfile: widget.onViewProfile,
       name: label,
       avatarImageData: widget.source,
       isSelf: isSelf,

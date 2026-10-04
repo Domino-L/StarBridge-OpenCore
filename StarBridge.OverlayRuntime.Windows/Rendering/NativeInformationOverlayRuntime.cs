@@ -18,6 +18,7 @@ using WinForms = System.Windows.Forms;
 /// </summary>
 public sealed partial class NativeInformationOverlayRuntime :
     IInformationOverlayRuntime,
+    IInformationOverlayLiveUpdateSink,
     IInformationOverlayAppearanceCatalog,
     IInformationOverlayReminderSink
 {
@@ -31,14 +32,26 @@ public sealed partial class NativeInformationOverlayRuntime :
     private const int WsExNoActivate = 0x08000000;
 
     private readonly Func<GameLogSessionSnapshot> _sessionProvider;
+    private readonly Func<LocalGamePresenceSnapshot>? _localPresenceProvider;
+    private PlayerPresenceKind? _confirmedLocalPresence;
+    private PlayerPresenceKind? _lastRenderedLocalPresence;
     private readonly Func<IReadOnlyList<string>> _entitlementProvider;
     private readonly Func<InformationOverlayRoomContent?> _roomProvider;
     private readonly Func<InformationOverlayCommunityContent?> _communityProvider;
+    private readonly Func<CancellationToken, Task>? _prepareCommunity;
+    private CancellationTokenSource? _openingCancellation;
+    internal Action<OverlaySceneSnapshot>? BeforeWindowCreation;
+    // Regression harness only: exercise the real HWND/render lifecycle outside
+    // every desktop surface, without replacing the maintainer's visible client.
+    internal Rect? TestSurfaceBounds;
     private readonly Func<string?> _sceneModeProvider;
     private readonly Func<string?>? _languageProvider;
+    private readonly Func<InformationOverlayRosterPreferences> _rosterPreferences;
+    private InformationOverlayRosterPreferences? _lastRosterPreferences;
     private string? _lastRenderedSourceMode;
     private InformationOverlayRoomContent? _lastRenderedRoom;
     private InformationOverlayCommunityContent? _lastRenderedCommunity;
+    private int _contentRefreshQueued;
     private Guid? _lastRenderedSourceContinuity;
     private OverlaySceneKind? _lastRenderedSceneKind;
     private readonly ManualResetEventSlim _started = new(false);
@@ -62,9 +75,11 @@ public sealed partial class NativeInformationOverlayRuntime :
     private bool? _previousGameForeground;
 
     private InformationOverlayRuntimeWorkspace? _workspace;
+    private InformationOverlayModuleDemand? _moduleDemand;
     private OverlayCompositionHudWindow? _window;
     private Rect _surfaceBounds;
     private Rect? _lastRenderedBounds;
+    private double _lastRenderedDpiScale;
     private GameLogSessionSnapshot? _lastRenderedSession;
     private string[] _lastRenderedEntitlements = [];
     private InformationOverlayRuntimeSnapshot _snapshot =
@@ -76,14 +91,22 @@ public sealed partial class NativeInformationOverlayRuntime :
         Func<InformationOverlayRoomContent?>? roomProvider = null,
         Func<InformationOverlayCommunityContent?>? communityProvider = null,
         Func<string?>? sceneModeProvider = null,
-        Func<string?>? languageProvider = null)
+        Func<string?>? languageProvider = null,
+        Func<InformationOverlayRosterPreferences>? rosterPreferences = null,
+        Func<LocalGamePresenceSnapshot>? localPresenceProvider = null,
+        Func<CancellationToken, Task>? prepareCommunity = null,
+        Func<InformationOverlayRuntimeWorkspace, InformationOverlayModuleReadResult>? moduleProvider = null)
     {
         _sessionProvider = sessionProvider ?? (() => GameLogSessionSnapshot.Empty);
+        _localPresenceProvider = localPresenceProvider;
         _entitlementProvider = entitlementProvider ?? (() => []);
         _roomProvider = roomProvider ?? (() => null);
         _communityProvider = communityProvider ?? (() => null);
+        _prepareCommunity = prepareCommunity;
+        _moduleProvider = moduleProvider;
         _sceneModeProvider = sceneModeProvider ?? (() => null);
         _languageProvider = languageProvider;
+        _rosterPreferences = rosterPreferences ?? (() => InformationOverlayRosterPreferences.Empty);
         _thread = new Thread(RunControlThread)
         {
             IsBackground = true,
@@ -181,7 +204,19 @@ public sealed partial class NativeInformationOverlayRuntime :
     {
         var session = SafeReadSession();
         _workspace = workspace with { Session = session };
+        Volatile.Write(ref _moduleDemand, workspace.UsesModuleSources
+            ? new InformationOverlayModuleDemand(workspace.Sources, OverlayModuleSourceResolver.VisibleModules(workspace.Settings), workspace.TemporarySource)
+            : null);
         RefreshPresentationLanguage();
+        if (workspace.HasInvalidSourceConfiguration)
+        {
+            // Close must work for a damaged preset, but must not first refresh
+            // the old HWND or leave hotkey/game-follow able to read legacy data.
+            TryCloseWindow();
+            ConfigureHotkey(workspace.HotkeyBinding, false);
+            _snapshot = FailedSnapshot(workspace, "overlay.workspace_invalid_preset", retryable: false);
+            return;
+        }
         ConfigureHotkey(workspace.HotkeyBinding, workspace.HotkeyEnabled);
         UpdateFollowGameState();
         if (_window is { IsVisible: true })
@@ -212,6 +247,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         {
             return SetHealthySnapshot("open", isVisible: true);
         }
+        if (_openingCancellation is not null) return _snapshot;
         if (_snapshot.WindowState != "failed")
         {
             return SetHealthySnapshot("closed", isVisible: false);
@@ -219,10 +255,15 @@ public sealed partial class NativeInformationOverlayRuntime :
         return _snapshot;
     }
 
-    private InformationOverlayRuntimeSnapshot OpenCore(bool retry)
+    private InformationOverlayRuntimeSnapshot OpenCore(bool retry, bool prepared = false)
     {
         RefreshPresentationLanguage();
         var workspace = _workspace ?? throw new InvalidOperationException("Overlay workspace is unavailable.");
+        if (workspace.HasInvalidSourceConfiguration)
+        {
+            TryCloseWindow();
+            return _snapshot = FailedSnapshot(workspace, "overlay.workspace_invalid_preset", retryable: false);
+        }
         if (retry)
         {
             TryCloseWindow();
@@ -233,32 +274,50 @@ public sealed partial class NativeInformationOverlayRuntime :
             return SetHealthySnapshot("open", isVisible: true);
         }
 
+        if (_openingCancellation is not null) return _snapshot;
         var entitlements = SafeReadEntitlements();
         var resolution = OverlaySkinCatalog.Resolve(workspace.Settings, entitlements);
         var settings = OverlayStartupTransitionPolicy.ResolveForOpen(
             resolution.Settings,
             StarCitizenProcessProbe.IsForeground());
-        _surfaceBounds = ResolveTargetSurfaceBounds();
-        var room = SafeReadRoom();
+        _surfaceBounds = ResolveTargetSurfaceBounds(out var targetDpiScale);
+        var room = !workspace.UsesModuleSources ? SafeReadRoom() : null;
         var sourceMode = SafeReadSourceMode();
         var preference = SourcePreference(sourceMode, settings.ScenePreference);
-        var community = sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null ? SafeReadCommunity() : null;
-        var content = ProjectSource(room, community, preference, workspace.Language, sourceMode == "community");
+        var community = !workspace.UsesModuleSources && (sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null) ? SafeReadCommunity() : null;
+        if (!workspace.UsesModuleSources && !prepared && _prepareCommunity is not null && community is null &&
+            (sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null))
+        {
+            var pending = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            _openingCancellation = pending;
+            SetHealthySnapshot("opening", isVisible: false);
+            _ = PrepareOpenAsync(pending);
+            return _snapshot;
+        }
+        if (!workspace.UsesModuleSources && prepared && sourceMode == "community" && community is null)
+            return _snapshot = FailedSnapshot(workspace, "overlay.runtime_unavailable", retryable: true);
+        var localSession = SafeReadSession();
+        var localPresence = ReadLocalDisplayPresence();
+        var modules = ReadModules(workspace, localSession, localPresence);
+        var content = modules is null
+            ? ProjectSource(room, community, preference, workspace.Language, sourceMode == "community", localSession, localPresence)
+            : (Scene: modules.Members.Scene, Command: modules.Notice.Command, Chat: modules.Chat.Chat.ToArray());
         _lastRenderedSourceMode = sourceMode;
+        BeforeWindowCreation?.Invoke(content.Scene);
         var overlay = new OverlayCompositionHudWindow(
             new OverlayAuthorizedRoster(content.Scene.Players),
             content.Chat,
             ToDesktopLayout(workspace.Layout),
             settings,
-            new OverlayRosterSelectionSettings(),
+            ReadRosterSettings(),
             workspace.Language,
             hasFleet: content.Scene.HasContent,
             content.Command,
-            StarCitizenProcessProbe.IsRunning() ? PlayerPresenceKind.InGame : PlayerPresenceKind.AppOnline,
-            workspace.Session.Server.Shard ?? string.Empty,
+            localPresence ?? PlayerPresenceKind.AppOnline,
+            localSession.Server.Shard ?? string.Empty,
             _surfaceBounds,
             OverlayStartupTransitionContext.ForLanguage(workspace.Language),
-            content.Scene.Context);
+            content.Scene.Context, targetDpiScale, modules);
         overlay.Closed += OverlayClosed;
         _window = overlay;
         Exception? failure = null;
@@ -276,13 +335,18 @@ public sealed partial class NativeInformationOverlayRuntime :
             throw failure ?? new InvalidOperationException("Information overlay did not open.");
         }
 
-        _lastRenderedSession = workspace.Session;
+        _lastRenderedSession = localSession;
+        _lastRenderedLocalPresence = localPresence;
         _lastRenderedRoom = room;
         _lastRenderedCommunity = community;
         _lastRenderedSceneKind = content.Scene.Context.Kind;
         _lastRenderedSourceContinuity = SourceContinuity(content.Scene.Context.Kind, room, community);
         _lastRenderedBounds = _surfaceBounds;
+        _lastRenderedDpiScale = targetDpiScale;
         _lastRenderedEntitlements = entitlements;
+        _lastRenderedModules = modules;
+        ScheduleModuleValidation(modules);
+        if (modules is not null) ModulesPresented?.Invoke(modules, overlay.ObserveModules());
 
         if (settings.AutoFocusGameWindowOnOpen)
         {
@@ -295,6 +359,51 @@ public sealed partial class NativeInformationOverlayRuntime :
     {
         TryCloseWindow();
         return SetHealthySnapshot("closed", isVisible: false);
+    }
+
+    private async Task PrepareOpenAsync(CancellationTokenSource pending)
+    {
+        try
+        {
+            var token = pending.Token;
+            try { await Task.Run(() => _prepareCommunity!(token), token).WaitAsync(token).ConfigureAwait(false); }
+            catch (Exception) { /* Re-read authority on the STA; failure never supplies display data. */ }
+            var dispatcher = _dispatcher;
+            if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+            await dispatcher.InvokeAsync(() =>
+            {
+                if (_disposed || !ReferenceEquals(_openingCancellation, pending)) return;
+                _openingCancellation = null;
+                try { _ = OpenCore(retry: false, prepared: true); }
+                catch (Exception error)
+                {
+                    TryCloseWindow();
+                    _snapshot = FailedSnapshot(_workspace!, ResolveFailureCode(error), retryable: true);
+                }
+            }).Task.ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is OperationCanceledException or InvalidOperationException)
+        { /* The dispatcher may shut down after the pending open was canceled. */ }
+        finally { pending.Dispose(); }
+    }
+
+    private bool FinishPreparedOpenIfReady()
+    {
+        if (_openingCancellation is not { } pending) return false;
+        var mode = SafeReadSourceMode();
+        var room = SafeReadRoom();
+        var ready = _workspace?.UsesModuleSources == true || (mode == "community" ? SafeReadCommunity() is not null :
+            room is not null || SafeReadCommunity() is not null);
+        if (!ready) return false;
+        _openingCancellation = null;
+        pending.Cancel();
+        try { _ = OpenCore(retry: false, prepared: true); }
+        catch (Exception error)
+        {
+            TryCloseWindow();
+            _snapshot = FailedSnapshot(_workspace!, ResolveFailureCode(error), retryable: true);
+        }
+        return true;
     }
 
     private void ScheduleAppearanceFocus(OverlayCompositionHudWindow overlay, OverlayDisplaySettings settings)
@@ -339,16 +448,24 @@ public sealed partial class NativeInformationOverlayRuntime :
         }
 
         var session = SafeReadSession();
+        var localPresence = ReadLocalDisplayPresence();
         _workspace = _workspace with { Session = session };
         var entitlements = SafeReadEntitlements();
         var resolution = OverlaySkinCatalog.Resolve(_workspace.Settings, entitlements);
         var settings = resolution.Settings;
-        var bounds = ResolveTargetSurfaceBounds();
-        var room = SafeReadRoom();
+        var bounds = ResolveTargetSurfaceBounds(out var targetDpiScale);
+        var rosterPreferences = SafeReadRosterPreferences();
+        var rosterSettings = new OverlayRosterSelectionSettings(rosterPreferences.Pinned, rosterPreferences.Excluded);
+        var rosterChanged = !Equals(_lastRosterPreferences, rosterPreferences);
+        var room = !_workspace.UsesModuleSources ? SafeReadRoom() : null;
         var sourceMode = SafeReadSourceMode();
         var preference = SourcePreference(sourceMode, settings.ScenePreference);
-        var community = sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null ? SafeReadCommunity() : null;
-        if (!force &&
+        var community = !_workspace.UsesModuleSources && (sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null) ? SafeReadCommunity() : null;
+        var modules = ReadModules(_workspace, session, localPresence);
+        ScheduleModuleValidation(modules);
+        _snapshot = _snapshot with { FailureCode = _moduleFailure, Retryable = ModuleFailureRetryable };
+        if (!force && !rosterChanged && _lastRenderedLocalPresence == localPresence && _lastRenderedDpiScale == targetDpiScale &&
+            (modules is null ? _lastRenderedModules is null : modules.HasSameContent(_lastRenderedModules)) &&
             _lastRenderedSourceMode == sourceMode &&
             ReferenceEquals(_lastRenderedRoom, room) &&
             ReferenceEquals(_lastRenderedCommunity, community) &&
@@ -362,33 +479,40 @@ public sealed partial class NativeInformationOverlayRuntime :
             return;
         }
         _surfaceBounds = bounds;
-        var content = ProjectSource(room, community, preference, _workspace.Language, sourceMode == "community");
+        var content = modules is null
+            ? ProjectSource(room, community, preference, _workspace.Language, sourceMode == "community", session, localPresence)
+            : (Scene: modules.Members.Scene, Command: modules.Notice.Command, Chat: modules.Chat.Chat.ToArray());
         _lastRenderedSourceMode = sourceMode;
         var continuity = SourceContinuity(content.Scene.Context.Kind, room, community);
-        if (_lastRenderedSourceContinuity != continuity ||
-            _lastRenderedSceneKind != content.Scene.Context.Kind)
-            window.ClearAuthorizedContent();
-        window.Refresh(
+        if (modules is null && (_lastRenderedSourceContinuity != continuity ||
+            _lastRenderedSceneKind != content.Scene.Context.Kind))
+            window.ClearAuthorizedContent(preserveDeviceLocalEvents: true, preserveAnnouncementReceipt: true);
+        window.RefreshWithDpi(
             new OverlayAuthorizedRoster(content.Scene.Players),
             content.Chat,
             ToDesktopLayout(_workspace.Layout),
             settings,
-            new OverlayRosterSelectionSettings(),
+            rosterSettings,
             _workspace.Language,
             hasFleet: content.Scene.HasContent,
             content.Command,
-            StarCitizenProcessProbe.IsRunning() ? PlayerPresenceKind.InGame : PlayerPresenceKind.AppOnline,
+            localPresence ?? PlayerPresenceKind.AppOnline,
             session.Server.Shard ?? string.Empty,
             bounds,
             OverlayStartupTransitionContext.ForLanguage(_workspace.Language),
-            content.Scene.Context);
+            content.Scene.Context, targetDpiScale, modules);
         _lastRenderedSession = session;
+        _lastRenderedLocalPresence = localPresence;
         _lastRenderedRoom = room;
         _lastRenderedCommunity = community;
         _lastRenderedSceneKind = content.Scene.Context.Kind;
         _lastRenderedSourceContinuity = continuity;
         _lastRenderedBounds = bounds;
+        _lastRenderedDpiScale = targetDpiScale;
+        _lastRosterPreferences = rosterPreferences;
         _lastRenderedEntitlements = entitlements;
+        _lastRenderedModules = modules;
+        if (modules is not null) ModulesPresented?.Invoke(modules, window.ObserveModules());
     }
 
     private void EvaluateGameWindowRules(bool initialSync = false)
@@ -418,7 +542,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             return;
         }
 
-        if (_window is { IsVisible: true } &&
+        if ((_window is { IsVisible: true } || _openingCancellation is not null) &&
             settings.AutoCloseOverlayOnGameBackground &&
             wasForeground == true && !foreground)
         {
@@ -432,6 +556,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         }
         else
         {
+            if (FinishPreparedOpenIfReady()) return;
             _snapshot = _snapshot with
             {
                 HotkeyState = _hotkeyState,
@@ -523,6 +648,25 @@ public sealed partial class NativeInformationOverlayRuntime :
         DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-overlay-hotkey-registration-recovered");
     }
 
+    public bool IsVisible => !_disposed && Volatile.Read(ref _snapshot).IsVisible;
+    public InformationOverlayModuleDemand? ModuleDemand => Volatile.Read(ref _moduleDemand);
+
+    public void RequestContentRefresh()
+    {
+        var dispatcher = _dispatcher;
+        if ((!IsVisible && _snapshot.WindowState != "opening") || dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished ||
+            Interlocked.CompareExchange(ref _contentRefreshQueued, 1, 0) != 0) return;
+        try
+        {
+            dispatcher.BeginInvoke(() =>
+            {
+                Interlocked.Exchange(ref _contentRefreshQueued, 0);
+                if (!_disposed && !FinishPreparedOpenIfReady() && IsVisible) RefreshWindow();
+            }, DispatcherPriority.DataBind);
+        }
+        catch (InvalidOperationException) { Interlocked.Exchange(ref _contentRefreshQueued, 0); }
+    }
+
     private void UnregisterHotkey()
     {
         _gameCompatibleHotkey.Stop();
@@ -568,7 +712,7 @@ public sealed partial class NativeInformationOverlayRuntime :
 
         try
         {
-            _ = _window is { IsVisible: true } ? CloseCore() : OpenCore(retry: false);
+            _ = _window is { IsVisible: true } || _openingCancellation is not null ? CloseCore() : OpenCore(retry: false);
         }
         catch (Exception exception)
         {
@@ -658,12 +802,18 @@ public sealed partial class NativeInformationOverlayRuntime :
             _appearanceFocusTimer?.Stop();
             _appearanceFocusTimer = null;
             _window = null;
+            _lastRenderedModules = null;
+            _moduleFailure = null;
+            ScheduleModuleValidation(null);
         }
         _snapshot = SetHealthySnapshot("closed", isVisible: false);
     }
 
     private void TryCloseWindow()
     {
+        var pending = _openingCancellation;
+        _openingCancellation = null;
+        pending?.Cancel();
         _appearanceFocusTimer?.Stop();
         _appearanceFocusTimer = null;
         var window = _window;
@@ -671,6 +821,9 @@ public sealed partial class NativeInformationOverlayRuntime :
         _lastRenderedSession = null;
         _lastRenderedBounds = null;
         _lastRenderedEntitlements = [];
+        _lastRenderedModules = null;
+        _moduleFailure = null;
+        ScheduleModuleValidation(null);
         if (window is null)
         {
             return;
@@ -700,7 +853,9 @@ public sealed partial class NativeInformationOverlayRuntime :
             _followGameState,
             resolution.RequestedSkin.ToString(),
             resolution.EffectiveSkin.ToString(),
-            !resolution.IsAvailable);
+            !resolution.IsAvailable,
+            isVisible ? _moduleFailure : null,
+            Retryable: isVisible && ModuleFailureRetryable);
         return _snapshot;
     }
 
@@ -768,6 +923,19 @@ public sealed partial class NativeInformationOverlayRuntime :
         }
     }
 
+    private OverlayRosterSelectionSettings ReadRosterSettings()
+    {
+        var prefs = SafeReadRosterPreferences();
+        _lastRosterPreferences = prefs;
+        return new(prefs.Pinned, prefs.Excluded);
+    }
+
+    private InformationOverlayRosterPreferences SafeReadRosterPreferences()
+    {
+        try { return _rosterPreferences() ?? InformationOverlayRosterPreferences.Empty; }
+        catch { return InformationOverlayRosterPreferences.Empty; }
+    }
+
     private string[] SafeReadEntitlements()
     {
         try
@@ -787,10 +955,12 @@ public sealed partial class NativeInformationOverlayRuntime :
         }
     }
 
-    private static Rect ResolveTargetSurfaceBounds()
+    private Rect ResolveTargetSurfaceBounds(out double targetDpiScale)
     {
+        targetDpiScale = 1;
+        if (TestSurfaceBounds is { } testBounds) return testBounds;
         var gameWindow = StarCitizenProcessProbe.FindMainWindow();
-        if (TryResolveScreenBounds(gameWindow, out var gameBounds))
+        if (TryResolveScreenBounds(gameWindow, out var gameBounds, out targetDpiScale))
         {
             return gameBounds;
         }
@@ -799,6 +969,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         {
             var dpi = GetDpiForSystem();
             var scale = dpi > 0 ? dpi / 96d : 1d;
+            targetDpiScale = scale;
             return new Rect(
                 primary.Bounds.Left / scale,
                 primary.Bounds.Top / scale,
@@ -812,9 +983,10 @@ public sealed partial class NativeInformationOverlayRuntime :
             Math.Max(1, SystemParameters.VirtualScreenHeight));
     }
 
-    private static bool TryResolveScreenBounds(IntPtr handle, out Rect bounds)
+    private static bool TryResolveScreenBounds(IntPtr handle, out Rect bounds, out double targetDpiScale)
     {
         bounds = default;
+        targetDpiScale = 1;
         if (handle == IntPtr.Zero)
         {
             return false;
@@ -824,6 +996,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             var screen = WinForms.Screen.FromHandle(handle);
             var dpi = GetDpiForWindow(handle);
             var scale = dpi > 0 ? dpi / 96d : 1d;
+            targetDpiScale = scale;
             bounds = new Rect(
                 screen.Bounds.Left / scale,
                 screen.Bounds.Top / scale,

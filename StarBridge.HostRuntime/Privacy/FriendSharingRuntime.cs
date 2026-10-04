@@ -12,6 +12,7 @@ internal sealed class FriendSharingRuntime : IDisposable
     private readonly Func<PrivacyPublicationInput?> _current;
     private readonly Func<bool> _allowed;
     private readonly Func<PlayerPresenceVisibilityMode> _visibility;
+    private readonly TimeProvider _time;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ITimer? _timer;
@@ -20,28 +21,51 @@ internal sealed class FriendSharingRuntime : IDisposable
     private PrivacyPublicationInput? _owner;
     private DateTimeOffset _lastRead;
     private int _paused;
+    private int _tickPending;
     private bool _shutdown, _disposed;
     internal string State { get; private set; } = "inactive";
+    internal Action<string, string>? Diagnostic { get; set; }
 
     internal FriendSharingRuntime(IFriendSharingRemote remote, Func<PrivacyPublicationInput?> current,
-        Func<bool> allowed, Func<PlayerPresenceVisibilityMode> visibility, bool startTimer = true)
+        Func<bool> allowed, Func<PlayerPresenceVisibilityMode> visibility, bool startTimer = true,
+        TimeProvider? timeProvider = null)
     {
         _remote = remote; _current = current; _allowed = allowed; _visibility = visibility;
+        _time = timeProvider ?? TimeProvider.System;
         _publisher = CreatePublisher();
-        if (startTimer) _timer = TimeProvider.System.CreateTimer(_ => _ = TickAsync(), null,
+        if (startTimer) _timer = _time.CreateTimer(_ => _ = TickAsync(), null,
             TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
     private FriendSharingPublication CreatePublisher() => new(Snapshot,
-        (value, ct) => _remote.WriteFriendLiveAsync(value.Input, "start", value.Revision, null, 0, null, ct),
-        async (value, session, sequence, source, ct) => { await _remote.WriteFriendLiveAsync(value.Input, "publish", value.Revision, session, sequence, source, ct); },
-        async (value, session, ct) => { await _remote.WriteFriendLiveAsync(value.Input, _shutdown ? "offline" : "stop", value.Revision, session, 0, null, ct); });
+        (value, ct) => Observe("start", () => _remote.WriteFriendLiveAsync(value.Input, "start", value.Revision, null, 0, null, ct)),
+        async (value, session, sequence, source, ct) => { await Observe("publish", () => _remote.WriteFriendLiveAsync(value.Input, "publish", value.Revision, session, sequence, source, ct)); },
+        async (value, session, ct) => {
+            var action = _shutdown ? "offline" : "stop";
+            await Observe(action, () => _remote.WriteFriendLiveAsync(value.Input, action, value.Revision, session, 0, null, ct));
+        });
+    private async Task<T> Observe<T>(string action, Func<Task<T>> operation)
+    {
+        void Record(string outcome) { try { Diagnostic?.Invoke(action, outcome); } catch { /* Evidence cannot alter publication. */ } }
+        Record("started");
+        try { var value = await operation(); Record("succeeded"); return value; }
+        catch (Exception error) {
+            Record(error switch {
+                OperationCanceledException => "cancelled",
+                HttpRequestException => "transportFailed",
+                JsonException => "invalidResponse",
+                AccountBridgeHostException => "accountOrServiceRejected",
+                _ => "failed"
+            });
+            throw;
+        }
+    }
     private FriendSharingPublicationSnapshot? Snapshot()
     {
         var input = _current();
         if (_disposed || input is null || _saved?.Fields is not { } fields || _owner is null ||
             input.Owner != _owner.Owner || input.Generation != _owner.Generation) return null;
         return new(input, _saved.Revision, fields, !_shutdown && _paused == 0 && _allowed() &&
-            DateTimeOffset.UtcNow - _lastRead < TimeSpan.FromSeconds(20), _visibility());
+            _lastRead != default, _visibility());
     }
     internal void Pause() => Interlocked.Increment(ref _paused);
     internal void Resume() => Interlocked.Decrement(ref _paused);
@@ -55,7 +79,25 @@ internal sealed class FriendSharingRuntime : IDisposable
     }
     internal async Task TickAsync()
     {
-        if (_disposed || !await _gate.WaitAsync(0)) return;
+        if (_disposed) return;
+        Interlocked.Exchange(ref _tickPending, 1);
+        if (!await _gate.WaitAsync(0)) return;
+        try {
+            var passes = 0;
+            do {
+                Interlocked.Exchange(ref _tickPending, 0);
+                await TickCoreAsync();
+                // Yield the gate after one trailing pass so a slow endpoint
+                // cannot starve an explicit stop/save waiting behind heartbeats.
+            } while (++passes < 2 && !_disposed && Volatile.Read(ref _tickPending) != 0);
+        } finally {
+            _gate.Release();
+            // Close the wake/release race without a second concurrent publisher.
+            if (!_disposed && Volatile.Read(ref _tickPending) != 0) _ = TickAsync();
+        }
+    }
+    private async Task TickCoreAsync()
+    {
         try
         {
             var input = _current();
@@ -67,27 +109,39 @@ internal sealed class FriendSharingRuntime : IDisposable
             }
             _owner = input;
             if (input is null) { State = "inactive"; return; }
-            if (_paused != 0 || _shutdown || !_allowed() || !input.IdentityConfirmed)
+            if (_paused != 0 || _shutdown || !_allowed() || !input.IdentityConfirmed ||
+                _visibility() is not (PlayerPresenceVisibilityMode.Online or PlayerPresenceVisibilityMode.InGame))
             { await _publisher.StopAsync(_lifetime.Token); State = "inactive"; return; }
-            if (_saved is null || DateTimeOffset.UtcNow - _lastRead >= TimeSpan.FromSeconds(15))
+            if (_saved is null || _time.GetUtcNow() - _lastRead >= TimeSpan.FromSeconds(15))
             {
-                _saved = null;
-                var value = await _remote.ReadFriendSharingAsync(input.Owner, input.Generation, _lifetime.Token);
-                if (_current() is not { } current || current.Owner != input.Owner || current.Generation != input.Generation) return;
-                _saved = value; _lastRead = DateTimeOffset.UtcNow;
+                try {
+                    var value = await Observe("read", () => _remote.ReadFriendSharingAsync(input.Owner, input.Generation, _lifetime.Token));
+                    if (_current() is not { } current || current.Owner != input.Owner || current.Generation != input.Generation) return;
+                    _saved = value; _lastRead = _time.GetUtcNow();
+                }
+                catch (Exception error) when (_saved is not null && FriendSharingPublication.IsTransient(error, _lifetime.Token)) {
+                    // The server checks this cached revision on every publish.
+                    // A transient policy read must not break an already authorized
+                    // live session; remote revocation still rejects the write.
+                }
             }
             await _publisher.TickAsync(_lifetime.Token);
             State = Snapshot()?.Enabled == true ? "active" : "inactive";
         }
-        catch
+        catch (Exception error)
         {
-            _saved = null; _lastRead = default; State = "unconfirmed";
-            try { await _publisher.StopAsync(_lifetime.Token); } catch { }
+            State = "unconfirmed";
+            // Transport uncertainty is not an intentional Offline event. Keep
+            // the bounded session and last verified revision; a later tick can
+            // renew it, and the server rejects a revoked or superseded policy.
+            if (!FriendSharingPublication.IsTransient(error, _lifetime.Token)) {
+                _saved = null; _lastRead = default;
+                try { await _publisher.StopAsync(_lifetime.Token); } catch { }
+            }
         }
-        finally { _gate.Release(); }
     }
     internal async Task<FriendSharingRemoteSnapshot> ReadAsync(BridgeAccountContext owner, long generation, CancellationToken token) =>
-        await _remote.ReadFriendSharingAsync(owner, generation, token);
+        await Observe("read", () => _remote.ReadFriendSharingAsync(owner, generation, token));
     internal async Task<FriendSharingRemoteSnapshot> SaveAsync(BridgeAccountContext owner, long generation,
         long revision, string operation, FriendSharedFields fields, CancellationToken token)
     {
@@ -100,7 +154,7 @@ internal sealed class FriendSharingRuntime : IDisposable
             _saved = null; _lastRead = default;
             // Remote narrowing must remain possible even when withdrawal failed.
             try { await _publisher.StopAsync(token); } catch (Exception e) when (e is not OperationCanceledException) { }
-            var result = await _remote.SaveFriendSharingAsync(owner, generation, revision, operation, fields, token);
+            var result = await Observe("save", () => _remote.SaveFriendSharingAsync(owner, generation, revision, operation, fields, token));
             State = "inactive";
             return result;
             }

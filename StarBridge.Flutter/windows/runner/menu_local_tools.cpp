@@ -140,19 +140,26 @@ class MenuLocalTools::Impl {
     : owner_(owner), current_(std::move(current)), modal_(std::move(modal)), dismiss_(std::move(dismiss)), alive_(std::make_shared<std::atomic_bool>(true)) {
     Gdiplus::GdiplusStartupInput input; Gdiplus::GdiplusStartup(&gdiplus_, &input, nullptr);
   }
-  ~Impl() { *alive_ = false; Hide();
+  ~Impl() { *alive_ = false; Reset();
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
-    if (controller_) controller_->Close(); browser_.Reset(); controller_.Reset();
+    environment_.Reset();
 #endif
     if (gdiplus_) Gdiplus::GdiplusShutdown(gdiplus_);
   }
   void Hide() {
     browser_visible_ = false;
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
-    if (controller_) controller_->put_IsVisible(FALSE);
-    ComPtr<ICoreWebView2_3> suspending;
-    if (browser_ && SUCCEEDED(browser_.As(&suspending))) suspending->TrySuspend(Microsoft::WRL::Callback<ICoreWebView2TrySuspendCompletedHandler>([](HRESULT, BOOL) { return S_OK; }).Get());
+    SyncBrowser();
 #endif
+  }
+  void Reset() {
+    Hide();
+#ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
+    for (const auto& tab : tabs_) CloseController(tab);
+    tabs_.clear(); active_tab_.clear();
+    if (viewport_) { DestroyWindow(viewport_); viewport_ = nullptr; }
+#endif
+    screenshot_.clear();
   }
   void Handle(const Map& args, MenuLocalTools::Result result) {
     const auto action = Text(args, "action");
@@ -194,23 +201,93 @@ class MenuLocalTools::Impl {
       result->Success(); return;
     }
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
-    if (action == "browserOpen") { OpenBrowser(std::move(result)); return; }
-    if (action == "browserState") {
-      if (!browser_) { result->Error("menu.browser_unavailable", "Browser not ready"); return; }
-      PWSTR source = nullptr; BOOL back = FALSE, forward = FALSE;
-      browser_->get_Source(&source); browser_->get_CanGoBack(&back); browser_->get_CanGoForward(&forward);
-      const auto url = Utf8(source); CoTaskMemFree(source);
-      result->Success(Value(Map{{Value("url"), Value(url)}, {Value("back"), Value(back != FALSE)},
-        {Value("forward"), Value(forward != FALSE)}, {Value("loading"), Value(navigating_)}, {Value("failed"), Value(navigation_failed_)}})); return;
+#ifdef STARBRIDGE_MENU_BROWSER_TEST
+    if (action == "browserTestVisualState") {
+      flutter::EncodableList visual;
+      for (const auto& tab : tabs_) {
+        RECT bounds{}; BOOL visible = FALSE, suspended = FALSE;
+        if (tab->controller) { tab->controller->get_Bounds(&bounds); tab->controller->get_IsVisible(&visible); }
+        ComPtr<ICoreWebView2_3> suspension;
+        if (tab->browser && SUCCEEDED(tab->browser.As(&suspension))) suspension->get_IsSuspended(&suspended);
+        visual.emplace_back(Map{{Value("id"), Value(tab->id)}, {Value("visible"), Value(visible != FALSE)},
+          {Value("suspended"), Value(suspended != FALSE)}, {Value("left"), Value(static_cast<int32_t>(bounds.left))},
+          {Value("top"), Value(static_cast<int32_t>(bounds.top))}, {Value("right"), Value(static_cast<int32_t>(bounds.right))}, {Value("bottom"), Value(static_cast<int32_t>(bounds.bottom))}});
+      }
+      flutter::EncodableList children;
+      for (HWND child = GetWindow(owner_, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+        wchar_t name[256]{}; GetClassNameW(child, name, 256);
+        RECT bounds{}; GetWindowRect(child, &bounds);
+        MapWindowPoints(nullptr, owner_, reinterpret_cast<POINT*>(&bounds), 2);
+        children.emplace_back(Map{{Value("class"), Value(Utf8(name))},
+          {Value("browserViewport"), Value(child == viewport_)},
+          {Value("visibleStyle"), Value((GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE) != 0)},
+          {Value("left"), Value(static_cast<int32_t>(bounds.left))}, {Value("top"), Value(static_cast<int32_t>(bounds.top))},
+          {Value("right"), Value(static_cast<int32_t>(bounds.right))}, {Value("bottom"), Value(static_cast<int32_t>(bounds.bottom))}});
+      }
+      result->Success(Value(Map{{Value("requestedVisible"), Value(browser_visible_)},
+        {Value("controllers"), Value(visual)}, {Value("children"), Value(children)}})); return;
     }
-    if (action == "browserNavigate" || action == "browserBack" || action == "browserForward" || action == "browserReload" || action == "browserFocus") {
-      if (!browser_ || !controller_) { result->Error("menu.browser_unavailable", "Browser not ready"); return; }
+    // Exercise NavigationStarting itself, rather than only command validation.
+    // The fixture can request one fixed inert URL; no script or arbitrary URI.
+    if (action == "browserTestRejectedNavigation") {
+      const auto tab = FindTab(active_tab_);
+      if (tab && tab->browser) {
+        tab->browser->Navigate(L"data:text/plain,blocked"); result->Success();
+      } else result->Error("menu.browser_unavailable", "Browser not ready");
+      return;
+    }
+#endif
+    if (action == "browserOpen") {
+      if (tabs_.empty()) NewTab(L"about:blank");
+      SyncBrowser(); result->Success(); return;
+    }
+    if (action == "browserNewTab") {
+      if (tabs_.size() >= kTabLimit) { result->Error("menu.browser_tab_limit", "Tab limit reached"); return; }
+      NewTab(L"about:blank"); result->Success(); return;
+    }
+    if (action == "browserSelectTab" || action == "browserCloseTab") {
+      const auto tab = FindTab(Text(args, "tabId"));
+      if (!tab) { result->Error("menu.browser_tab_stale", "Tab no longer exists"); return; }
+      if (action == "browserSelectTab") active_tab_ = tab->id;
+      else {
+        const auto index = static_cast<size_t>(std::find(tabs_.begin(), tabs_.end(), tab) - tabs_.begin());
+        const bool active = active_tab_ == tab->id;
+        CloseController(tab); tabs_.erase(tabs_.begin() + index);
+        if (tabs_.empty()) NewTab(L"about:blank");
+        else if (active) active_tab_ = tabs_[std::min(index, tabs_.size() - 1)]->id;
+      }
+      SyncBrowser(); result->Success(); return;
+    }
+    if (action == "browserState") {
+      const auto active = FindTab(active_tab_);
+      if (!active) { result->Error("menu.browser_unavailable", "Browser not ready"); return; }
+      SyncBrowser();
+      flutter::EncodableList entries;
+      for (const auto& tab : tabs_) entries.emplace_back(TabState(tab));
+      auto state = TabState(active);
+      state.emplace(Value("tabs"), Value(entries));
+      state.emplace(Value("activeTabId"), Value(active_tab_));
+      state.emplace(Value("tabLimit"), Value(static_cast<int32_t>(kTabLimit)));
+      result->Success(Value(state)); return;
+    }
+    if (action == "browserNavigate" || action == "browserBack" || action == "browserForward" || action == "browserReload" || action == "browserStop" || action == "browserFocus") {
+      const auto tab = FindTab(Text(args, "tabId"));
+      if (!tab || tab->id != active_tab_) { result->Error("menu.browser_tab_stale", "Active tab changed"); return; }
+      if (action == "browserReload" && (!tab->browser || tab->broken) && !tab->opening) {
+        if (tab->broken) CloseController(tab);
+        StartTab(tab); result->Success(); return;
+      }
+      if (!tab->browser || !tab->controller || tab->broken) { result->Error("menu.browser_unavailable", "Browser not ready"); return; }
       HRESULT hr = E_INVALIDARG;
-      if (action == "browserNavigate") { const auto url = Wide(Text(args,"url")); if (WebUrl(url)) hr = browser_->Navigate(url.c_str()); }
-      if (action == "browserBack") hr = browser_->GoBack();
-      if (action == "browserForward") hr = browser_->GoForward();
-      if (action == "browserReload") hr = browser_->Reload();
-      if (action == "browserFocus") hr = controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+      if (action == "browserNavigate") { const auto url = Wide(Text(args,"url")); if (WebUrl(url)) hr = tab->browser->Navigate(url.c_str()); }
+      if (action == "browserBack") hr = tab->browser->GoBack();
+      if (action == "browserForward") hr = tab->browser->GoForward();
+      if (action == "browserReload") hr = tab->browser->Reload();
+      if (action == "browserStop") {
+        hr = tab->browser->Stop();
+        if (SUCCEEDED(hr)) { tab->stopped_navigation = tab->navigation; tab->navigating = false; tab->failed = false; }
+      }
+      if (action == "browserFocus" && browser_visible_) hr = tab->controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
       if (FAILED(hr)) result->Error("menu.browser_failed", "Browser action failed"); else result->Success();
       return;
     }
@@ -219,86 +296,256 @@ class MenuLocalTools::Impl {
   }
  private:
 #ifdef STARBRIDGE_HAS_HANGAR_WEBVIEW
+  // Match the existing WPF default; tab identities and controller ownership
+  // remain native. Neither URLs nor the open-page collection are persisted.
+  static constexpr size_t kTabLimit = 8;
+  struct BrowserTab {
+    std::string id;
+    std::wstring resume_url;
+    ComPtr<ICoreWebView2Controller> controller;
+    ComPtr<ICoreWebView2> browser;
+    bool opening = false, navigating = false, failed = false, broken = false;
+    bool suspend_pending = false;
+    uint64_t attempt = 0, navigation = 0, stopped_navigation = 0;
+#ifdef STARBRIDGE_MENU_BROWSER_TEST
+    int32_t rejected_navigation_count = 0;
+#endif
+  };
+  std::shared_ptr<BrowserTab> FindTab(const std::string& id) const {
+    const auto found = std::find_if(tabs_.begin(), tabs_.end(), [&id](const auto& tab) { return tab->id == id; });
+    return found == tabs_.end() ? nullptr : *found;
+  }
+  bool Current(const std::shared_ptr<BrowserTab>& tab, uint64_t attempt) const {
+    return tab && FindTab(tab->id) == tab && tab->attempt == attempt;
+  }
+  bool Visible(const std::shared_ptr<BrowserTab>& tab) const {
+    return !tab->broken && tab->id == active_tab_ && browser_visible_ && current_();
+  }
+  static void RecordRejectedNavigation(const std::shared_ptr<BrowserTab>& tab) {
+#ifdef STARBRIDGE_MENU_BROWSER_TEST
+    ++tab->rejected_navigation_count;
+#else
+    (void)tab;
+#endif
+  }
+  static void CloseController(const std::shared_ptr<BrowserTab>& tab) {
+    ++tab->attempt;
+    tab->opening = false; tab->suspend_pending = false;
+    if (tab->controller) { tab->controller->put_IsVisible(FALSE); tab->controller->Close(); }
+    tab->browser.Reset(); tab->controller.Reset();
+  }
+  Map TabState(const std::shared_ptr<BrowserTab>& tab) const {
+    PWSTR source = nullptr, title = nullptr; BOOL back = FALSE, forward = FALSE;
+    if (tab->browser) {
+      tab->browser->get_Source(&source); tab->browser->get_DocumentTitle(&title);
+      tab->browser->get_CanGoBack(&back); tab->browser->get_CanGoForward(&forward);
+    }
+    const auto url = source ? Utf8(source) : Utf8(tab->resume_url.c_str());
+    if (source && WebUrl(source)) tab->resume_url = source;
+    auto caption = Utf8(title);
+    if (caption.size() > 1024) caption.clear();
+    CoTaskMemFree(source); CoTaskMemFree(title);
+    Map state{{Value("id"), Value(tab->id)}, {Value("title"), Value(caption)},
+      {Value("url"), Value(url)}, {Value("back"), Value(back != FALSE)},
+      {Value("forward"), Value(forward != FALSE)},
+      {Value("loading"), Value(tab->opening || tab->navigating)}, {Value("failed"), Value(tab->failed)},
+      {Value("unavailable"), Value(tab->failed && (!tab->browser || tab->broken))}};
+#ifdef STARBRIDGE_MENU_BROWSER_TEST
+    state.emplace(Value("rejectedNavigationCount"), Value(tab->rejected_navigation_count));
+#endif
+    return state;
+  }
   void SyncBrowser() {
-    if (!controller_) return;
-    controller_->put_Bounds(bounds_);
-    controller_->put_IsVisible(browser_visible_ && current_());
-    ComPtr<ICoreWebView2_3> suspension;
-    if (browser_ && SUCCEEDED(browser_.As(&suspension))) {
-      if (browser_visible_ && current_()) suspension->Resume();
-      else suspension->TrySuspend(Microsoft::WRL::Callback<ICoreWebView2TrySuspendCompletedHandler>([](HRESULT, BOOL) { return S_OK; }).Get());
+    const auto active = FindTab(active_tab_);
+    const bool show = active && active->controller && Visible(active);
+    const LONG width = std::max(0L, bounds_.right - bounds_.left);
+    const LONG height = std::max(0L, bounds_.bottom - bounds_.top);
+    if (viewport_) {
+      // Reuse the hangar reader's bounded child viewport pattern. Only our
+      // explicit child is raised: Flutter chrome and other panels keep their
+      // own ordering, and the browser cannot cover outside its content rect.
+      if (show) SetWindowPos(viewport_, HWND_TOP, bounds_.left, bounds_.top, width, height,
+          SWP_NOACTIVATE | SWP_SHOWWINDOW);
+      else ShowWindow(viewport_, SW_HIDE);
+    }
+    const RECT child_bounds{0, 0, width, height};
+    for (const auto& tab : tabs_) {
+      if (!tab->controller) continue;
+      const bool visible = Visible(tab);
+      tab->controller->put_Bounds(child_bounds);
+      tab->controller->put_IsVisible(visible ? TRUE : FALSE);
+      tab->controller->NotifyParentWindowPositionChanged();
+      ComPtr<ICoreWebView2_3> suspension;
+      if (!tab->browser || FAILED(tab->browser.As(&suspension))) continue;
+      if (visible) { suspension->Resume(); continue; }
+      if (tab->suspend_pending) continue;
+      BOOL suspended = FALSE; suspension->get_IsSuspended(&suspended);
+      if (suspended) continue;
+      tab->suspend_pending = true;
+      const auto life = alive_; const auto attempt = tab->attempt;
+      const std::weak_ptr<BrowserTab> weak = tab;
+      const HRESULT hr = suspension->TrySuspend(Microsoft::WRL::Callback<ICoreWebView2TrySuspendCompletedHandler>(
+        [this, life, weak, attempt](HRESULT, BOOL) -> HRESULT {
+          if (!*life) return S_OK;
+          const auto live = weak.lock();
+          if (!Current(live, attempt)) return S_OK;
+          live->suspend_pending = false;
+          // A tab can become active while TrySuspend is outstanding. Resume
+          // after completion too, so a late suspension cannot freeze it.
+          ComPtr<ICoreWebView2_3> resume;
+          if (Visible(live) && SUCCEEDED(live->browser.As(&resume))) resume->Resume();
+          return S_OK;
+        }).Get());
+      if (FAILED(hr)) tab->suspend_pending = false;
     }
   }
-  void OpenBrowser(MenuLocalTools::Result result) {
-    if (browser_) { SyncBrowser(); result->Success(); return; }
-    if (opening_) { result->Error("menu.browser_busy", "Browser starting"); return; }
+  void NewTab(const std::wstring& url) {
+    if (tabs_.size() >= kTabLimit) return;
+    auto tab = std::make_shared<BrowserTab>();
+    tab->id = "t" + std::to_string(++next_tab_); tab->resume_url = url;
+    tabs_.push_back(tab); active_tab_ = tab->id;
+    // Hide the old page before beginning asynchronous controller creation.
+    SyncBrowser(); StartTab(tab);
+  }
+  void StartTab(const std::shared_ptr<BrowserTab>& tab) {
+    if (tab->opening || tab->browser) return;
+    tab->opening = true; tab->failed = false; tab->broken = false;
+    if (environment_) { CreateController(tab); return; }
+    if (environment_opening_) return;
     PWSTR local = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) { result->Error("menu.browser_unavailable", "Profile unavailable"); return; }
-    const std::wstring profile = std::wstring(local) + L"\\StarBridge\\MenuBrowser"; CoTaskMemFree(local);
-    opening_ = true;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) { tab->opening = false; tab->failed = true; return; }
+#ifdef STARBRIDGE_MENU_BROWSER_TEST
+    // Hidden native fixtures use their own disposable profile, never the
+    // running acceptance browser's cookies or storage.
+    const std::wstring profile = std::filesystem::absolute(L".artifacts/menu-browser-native-profile").wstring();
+#else
+    const std::wstring profile = std::wstring(local) + L"\\StarBridge\\MenuBrowser";
+#endif
+    CoTaskMemFree(local);
+    environment_opening_ = true;
     const auto life = alive_;
-    auto reply = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
-    const auto failed = [this, life, reply]() {
-      if (*life) opening_ = false;
-      reply->Error("menu.browser_unavailable", "WebView2 unavailable");
+    const auto failed = [this, life]() {
+      if (!*life) return;
+      environment_opening_ = false;
+      for (const auto& pending : tabs_) if (pending->opening && !pending->controller) {
+        pending->opening = false; pending->failed = true;
+      }
     };
     const HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, profile.c_str(), nullptr,
       Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [this, life, reply, failed](HRESULT status, ICoreWebView2Environment* environment) -> HRESULT {
+        [this, life, failed](HRESULT status, ICoreWebView2Environment* environment) -> HRESULT {
           if (!*life || FAILED(status) || !environment) { failed(); return S_OK; }
-          const HRESULT created = environment->CreateCoreWebView2Controller(owner_,
-            Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-              [this, life, reply, failed](HRESULT status2, ICoreWebView2Controller* controller) -> HRESULT {
-                if (!*life || FAILED(status2) || !controller) { failed(); return S_OK; }
-                opening_ = false; controller_ = controller; controller_->get_CoreWebView2(&browser_);
-                if (!browser_) { controller_->Close(); controller_.Reset(); failed(); return S_OK; }
-                ComPtr<ICoreWebView2Settings> settings; browser_->get_Settings(&settings);
-                settings->put_IsWebMessageEnabled(FALSE); settings->put_AreHostObjectsAllowed(FALSE);
-                settings->put_AreDevToolsEnabled(FALSE); settings->put_IsStatusBarEnabled(FALSE);
-                settings->put_AreDefaultContextMenusEnabled(FALSE);
-                EventRegistrationToken token{};
-                browser_->add_NavigationStarting(Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
-                  [this, life](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
-                    PWSTR uri = nullptr; args->get_Uri(&uri); const bool allowed = uri && WebUrl(uri); CoTaskMemFree(uri);
-                    if (!allowed) args->put_Cancel(TRUE);
-                    if (*life) { navigating_ = allowed; navigation_failed_ = !allowed; }
-                    return S_OK;
-                  }).Get(), &token);
-                browser_->add_NavigationCompleted(Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                  [this, life](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
-                    BOOL success = FALSE; args->get_IsSuccess(&success);
-                    if (*life) { navigating_ = false; navigation_failed_ = !success; }
-                    return S_OK;
-                  }).Get(), &token);
-                browser_->add_NewWindowRequested(Microsoft::WRL::Callback<ICoreWebView2NewWindowRequestedEventHandler>(
-                  [](ICoreWebView2* sender, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
-                    args->put_Handled(TRUE); BOOL initiated = FALSE; args->get_IsUserInitiated(&initiated);
-                    PWSTR uri = nullptr; args->get_Uri(&uri); if (initiated && uri && WebUrl(uri)) sender->Navigate(uri);
-                    CoTaskMemFree(uri); return S_OK;
-                  }).Get(), &token);
-                browser_->add_PermissionRequested(Microsoft::WRL::Callback<ICoreWebView2PermissionRequestedEventHandler>(
-                  [](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT {
-                    args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY); return S_OK;
-                  }).Get(), &token);
-                ComPtr<ICoreWebView2_4> downloads;
-                if (SUCCEEDED(browser_.As(&downloads))) downloads->add_DownloadStarting(Microsoft::WRL::Callback<ICoreWebView2DownloadStartingEventHandler>(
-                  [](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT { args->put_Cancel(TRUE); return S_OK; }).Get(), &token);
-                controller_->add_AcceleratorKeyPressed(Microsoft::WRL::Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
-                  [this, life](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* args) -> HRESULT {
-                    UINT key = 0; COREWEBVIEW2_KEY_EVENT_KIND kind{}; args->get_VirtualKey(&key); args->get_KeyEventKind(&kind);
-                    if (*life && key == VK_ESCAPE && kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN) { args->put_Handled(TRUE); dismiss_(); }
-                    return S_OK;
-                  }).Get(), &token);
-                browser_->Navigate(L"about:blank"); SyncBrowser(); reply->Success(); return S_OK;
-              }).Get());
-          if (FAILED(created)) failed(); return S_OK;
+          environment_opening_ = false; environment_ = environment;
+          for (const auto& pending : tabs_) if (pending->opening && !pending->controller) CreateController(pending);
+          return S_OK;
         }).Get());
     if (FAILED(hr)) failed();
   }
-  ComPtr<ICoreWebView2Controller> controller_;
-  ComPtr<ICoreWebView2> browser_;
-  bool opening_ = false;
-  bool navigating_ = false, navigation_failed_ = false;
+  void CreateController(const std::shared_ptr<BrowserTab>& tab) {
+    if (!viewport_) {
+      viewport_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+          0, 0, 0, 0, owner_, nullptr, GetModuleHandleW(nullptr), nullptr);
+      if (!viewport_) { tab->opening = false; tab->failed = true; return; }
+    }
+    const auto life = alive_; const auto attempt = ++tab->attempt;
+    const std::weak_ptr<BrowserTab> weak = tab;
+    const HRESULT hr = environment_->CreateCoreWebView2Controller(viewport_,
+      Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+        [this, life, weak, attempt](HRESULT status, ICoreWebView2Controller* controller) -> HRESULT {
+          const auto live = weak.lock();
+          if (!*life || !Current(live, attempt)) { if (controller) controller->Close(); return S_OK; }
+          live->opening = false;
+          if (FAILED(status) || !controller) { live->failed = true; return S_OK; }
+          live->controller = controller; controller->put_IsVisible(FALSE);
+          controller->get_CoreWebView2(&live->browser);
+          if (!live->browser || !ConfigureTab(live, attempt)) {
+            CloseController(live); live->failed = true; return S_OK;
+          }
+          if (FAILED(live->browser->Navigate(live->resume_url.c_str()))) live->failed = true;
+          SyncBrowser(); return S_OK;
+        }).Get());
+    if (FAILED(hr) && Current(tab, attempt)) { tab->opening = false; tab->failed = true; }
+  }
+  bool ConfigureTab(const std::shared_ptr<BrowserTab>& tab, uint64_t attempt) {
+    const auto life = alive_; const std::weak_ptr<BrowserTab> weak = tab;
+    ComPtr<ICoreWebView2Settings> settings;
+    if (FAILED(tab->browser->get_Settings(&settings)) || !settings) return false;
+    if (FAILED(settings->put_IsWebMessageEnabled(FALSE)) || FAILED(settings->put_AreHostObjectsAllowed(FALSE)) ||
+        FAILED(settings->put_AreDevToolsEnabled(FALSE)) || FAILED(settings->put_IsStatusBarEnabled(FALSE)) ||
+        FAILED(settings->put_AreDefaultContextMenusEnabled(FALSE))) return false;
+    ComPtr<ICoreWebView2Settings4> form_settings;
+    if (FAILED(settings.As(&form_settings)) || FAILED(form_settings->put_IsPasswordAutosaveEnabled(FALSE)) ||
+        FAILED(form_settings->put_IsGeneralAutofillEnabled(FALSE))) return false;
+    EventRegistrationToken token{};
+    if (FAILED(tab->browser->add_NavigationStarting(Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
+      [this, life, weak, attempt](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+        PWSTR uri = nullptr; args->get_Uri(&uri);
+        const std::wstring url = uri ? uri : L""; const bool allowed = WebUrl(url); CoTaskMemFree(uri);
+        const auto live = weak.lock();
+        if (!*life || !Current(live, attempt)) { args->put_Cancel(TRUE); return S_OK; }
+        // Rejecting an external protocol does not make the current web page
+        // unavailable or stop a different, already-running navigation.
+        if (!allowed) {
+          args->put_Cancel(TRUE);
+          RecordRejectedNavigation(live);
+          return S_OK;
+        }
+        live->resume_url = url; args->get_NavigationId(&live->navigation);
+        live->stopped_navigation = 0; live->navigating = true; live->failed = false; return S_OK;
+      }).Get(), &token))) return false;
+    if (FAILED(tab->browser->add_NavigationCompleted(Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
+      [this, life, weak, attempt](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+        if (!*life) return S_OK;
+        const auto live = weak.lock(); if (!Current(live, attempt)) return S_OK;
+        UINT64 navigation = 0; args->get_NavigationId(&navigation);
+        if (navigation != live->navigation) return S_OK;
+        BOOL success = FALSE; args->get_IsSuccess(&success);
+        live->navigating = false; live->failed = !success && navigation != live->stopped_navigation; return S_OK;
+      }).Get(), &token))) return false;
+    if (FAILED(tab->browser->add_NewWindowRequested(Microsoft::WRL::Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+      [this, life, weak, attempt](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
+        args->put_Handled(TRUE);
+        if (!*life) return S_OK;
+        const auto live = weak.lock(); if (!Current(live, attempt) || !Visible(live)) return S_OK;
+        BOOL initiated = FALSE; args->get_IsUserInitiated(&initiated);
+        PWSTR uri = nullptr; args->get_Uri(&uri);
+        const std::wstring url = uri ? uri : L""; CoTaskMemFree(uri);
+        if (initiated && WebUrl(url) && url != L"about:blank") NewTab(url);
+        return S_OK;
+      }).Get(), &token))) return false;
+    if (FAILED(tab->browser->add_PermissionRequested(Microsoft::WRL::Callback<ICoreWebView2PermissionRequestedEventHandler>(
+      [](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT {
+        args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY); return S_OK;
+      }).Get(), &token))) return false;
+    if (FAILED(tab->browser->add_ProcessFailed(Microsoft::WRL::Callback<ICoreWebView2ProcessFailedEventHandler>(
+      [this, life, weak, attempt](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs*) -> HRESULT {
+        if (!*life) return S_OK;
+        const auto live = weak.lock(); if (!Current(live, attempt)) return S_OK;
+        // Keep the native identity and let explicit Reload replace this failed
+        // controller. Other pages and their history are not reset.
+        live->broken = true; live->failed = true; live->navigating = false;
+        if (live->controller) live->controller->put_IsVisible(FALSE);
+        return S_OK;
+      }).Get(), &token))) return false;
+    ComPtr<ICoreWebView2_4> downloads;
+    if (FAILED(tab->browser.As(&downloads)) || FAILED(downloads->add_DownloadStarting(Microsoft::WRL::Callback<ICoreWebView2DownloadStartingEventHandler>(
+      [](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT { args->put_Cancel(TRUE); return S_OK; }).Get(), &token))) return false;
+    if (FAILED(tab->controller->add_AcceleratorKeyPressed(Microsoft::WRL::Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
+      [this, life, weak, attempt](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* args) -> HRESULT {
+        if (!*life) return S_OK;
+        const auto live = weak.lock(); if (!Current(live, attempt) || !Visible(live)) return S_OK;
+        UINT key = 0; COREWEBVIEW2_KEY_EVENT_KIND kind{}; args->get_VirtualKey(&key); args->get_KeyEventKind(&kind);
+        if (key == VK_ESCAPE && kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN) { args->put_Handled(TRUE); dismiss_(); }
+        return S_OK;
+      }).Get(), &token))) return false;
+    return true;
+  }
+  ComPtr<ICoreWebView2Environment> environment_;
+  HWND viewport_ = nullptr;
+  std::vector<std::shared_ptr<BrowserTab>> tabs_;
+  std::string active_tab_;
+  uint64_t next_tab_ = 0;
+  bool environment_opening_ = false;
 #endif
   HWND owner_;
   std::function<bool()> current_;
@@ -316,3 +563,4 @@ MenuLocalTools::MenuLocalTools(HWND owner, std::function<bool()> current, std::f
 MenuLocalTools::~MenuLocalTools() = default;
 void MenuLocalTools::Handle(const Map& args, Result result) { impl_->Handle(args, std::move(result)); }
 void MenuLocalTools::Hide() { impl_->Hide(); }
+void MenuLocalTools::Reset() { impl_->Reset(); }

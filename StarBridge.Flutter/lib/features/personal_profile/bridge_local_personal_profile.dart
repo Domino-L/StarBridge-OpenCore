@@ -12,7 +12,8 @@ import 'personal_profile_favorite_modules.dart';
 import 'personal_profile_port.dart';
 import 'personal_profile_visibility.dart';
 
-/// Explicit local presentation writer; the remote port remains read-only here.
+/// Local presentation writer. Legacy background publication is a separate,
+/// narrow bridge contract; the whole-profile remote port remains read-only.
 final class BridgeLocalPersonalProfile implements PersonalProfilePort, ProfileVisibilityAccess {
   BridgeLocalPersonalProfile(
     this._session, {
@@ -212,6 +213,18 @@ final class BridgeLocalPersonalProfile implements PersonalProfilePort, ProfileVi
           !_current(lease.epoch, lease.generation)) {
         return _stale;
       }
+      final syncBackground = account.payload['state'] == 'legacySignedIn';
+      ({int revision, String wallpaper})? background;
+      if (syncBackground) {
+        try {
+          background = await _backgroundRequest(lease);
+        } on Object {
+          // Online failure must not prevent the explicitly requested local save.
+        }
+        if (!identical(_lease, lease) || !_current(lease.epoch, lease.generation)) {
+          return _stale;
+        }
+      }
       final content = <String, Object?>{
         'callSign': edit.callSign.trim(),
         'introduction': edit.about.trim(),
@@ -274,6 +287,21 @@ final class BridgeLocalPersonalProfile implements PersonalProfilePort, ProfileVi
       }
       _lease = null;
       _pending = null;
+      if (syncBackground) {
+        if (background == null) return _backgroundPending;
+        try {
+          if (background.wallpaper != edit.wallpaperId) {
+            // A lost write response may still have advanced the server revision.
+            _visibilityLease = null;
+            await _backgroundRequest(lease,
+              revision: background.revision, wallpaper: edit.wallpaperId);
+          }
+        } on Object {
+          if (!_current(lease.epoch, lease.generation)) return _stale;
+          return _backgroundPending;
+        }
+        if (!_current(lease.epoch, lease.generation)) return _stale;
+      }
       return const PersonalProfileActionResult(
         PersonalProfileActionOutcome.completed,
       );
@@ -284,6 +312,35 @@ final class BridgeLocalPersonalProfile implements PersonalProfilePort, ProfileVi
       );
     }
   }
+
+  Future<({int revision, String wallpaper})> _backgroundRequest(
+    _LocalLease lease, {int? revision, String? wallpaper}) async {
+    if (!_current(lease.epoch, lease.generation)) throw StateError('stale');
+    final response = await _session.request(
+      revision == null ? 'personalProfile.readBackground' : 'personalProfile.saveBackground',
+      accountContext: lease.owner,
+      timeout: _timeout,
+      payload: {'schemaVersion': 1,
+        'expectedRevision': ?revision,
+        'wallpaperId': ?wallpaper},
+    );
+    _validate(response, lease.owner);
+    if (!_current(lease.epoch, lease.generation)) throw StateError('stale');
+    final receivedRevision = response.payload['revision'];
+    final receivedWallpaper = response.payload['wallpaperId'];
+    if (receivedRevision is! int || receivedRevision < 0 ||
+        receivedWallpaper is! String ||
+        !RegExp(r'^[a-zA-Z0-9-]{1,100}$').hasMatch(receivedWallpaper) ||
+        revision != null && (receivedRevision != revision + 1 || receivedWallpaper != wallpaper)) {
+      throw const FormatException();
+    }
+    return (revision: receivedRevision, wallpaper: receivedWallpaper);
+  }
+
+  static const _backgroundPending = PersonalProfileActionResult(
+    PersonalProfileActionOutcome.failed,
+    failureKey: 'profile.local.backgroundPending',
+  );
 
   bool _current(int epoch, int generation) =>
       !_closed && _epoch == epoch && _session.activeGeneration == generation;

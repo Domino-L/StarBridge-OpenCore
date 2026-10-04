@@ -9,13 +9,22 @@ import '../../localization/app_strings.dart';
 
 /// Repeated status reads update one persistent strip, never a toast queue.
 class SharingStatusNotice extends StatelessWidget {
+  static const _recoveringIssues = {
+    'reconnecting',
+    'network',
+    'timeout',
+    'server',
+    'rateLimited',
+  };
   const SharingStatusNotice({
     required this.status,
     required this.onOpenSettings,
+    this.onRetry,
     super.key,
   });
   final ValueListenable<String?> status;
   final VoidCallback onOpenSettings;
+  final VoidCallback? Function()? onRetry;
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<String?>(
@@ -27,14 +36,32 @@ class SharingStatusNotice extends StatelessWidget {
   Widget _buildNotice(BuildContext context, String issue) {
     final tokens = context.tokens;
     final strings = AppStrings.of(context);
-    final informational = issue == 'identity' || issue == 'paused';
+    final informational =
+        issue == 'identity' ||
+        issue == 'paused' ||
+        issue == 'identityPending' ||
+        _recoveringIssues.contains(issue);
     final foreground = informational
         ? tokens.colors.info
         : tokens.colors.warning;
-    final action = TextButton(
+    final settingsAction = TextButton(
       key: const Key('sharing-status-settings'),
       onPressed: onOpenSettings,
       child: Text(strings.text('privacy.notice.settings')),
+    );
+    final action = Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (onRetry != null &&
+            (_recoveringIssues.contains(issue) ||
+                const {'waiting', 'failed', 'statusRead'}.contains(issue)))
+          TextButton(
+            key: const Key('sharing-status-retry'),
+            onPressed: onRetry!(),
+            child: Text(strings.text('privacy.notice.retry')),
+          ),
+        settingsAction,
+      ],
     );
     return Semantics(
       container: true,

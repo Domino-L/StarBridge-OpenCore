@@ -12,6 +12,7 @@ import 'local_hangar_presentation.dart';
 import 'local_hangar_ship_row.dart';
 import 'local_hangar_summary.dart';
 import 'cached_local_hangar.dart';
+import 'hangar_read_diagnostics.dart';
 
 /// The caller mounts this only while signed in and recreates it per generation.
 class LocalHangarPage extends StatefulWidget {
@@ -95,7 +96,10 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
       _failed = false;
     });
     try {
-      final snapshot = await widget.port.read();
+      final snapshot = await HangarReadDiagnostics.capture(
+        HangarReadStage.pageRead,
+        () async => widget.port.read(),
+      );
       if (!mounted || epoch != _epoch) return;
       setState(() {
         _snapshot = snapshot;
@@ -368,6 +372,12 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
                               onPressed: _refresh,
                               child: Text(c.retry),
                             ),
+                            if (HangarReadDiagnostics.enabled)
+                              SelectableText(
+                                'DIAGNOSTIC BUILD — NOT FOR RELEASE\n'
+                                '${HangarReadDiagnostics.entries.join('\n')}',
+                                key: const Key('hangar-read-diagnostics'),
+                              ),
                           ],
                         ),
                       ),

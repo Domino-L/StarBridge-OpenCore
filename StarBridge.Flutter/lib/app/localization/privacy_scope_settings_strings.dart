@@ -1,6 +1,42 @@
 const simplifiedPrivacyScopeSettingsStrings = <String, String>{
+  'privacy.notice.network.title': '实时共享连接中断',
+  'privacy.notice.network.body':
+      '未能建立或维持与服务的连接，暂时无法确认同步。正在后台自动重试；若持续出现，请检查网络或代理。',
+  'privacy.notice.timeout.title': '实时共享请求超时',
+  'privacy.notice.timeout.body':
+      '在规定时间内未收到确认，可能与网络或服务响应较慢有关。正在自动重试，暂时无法确认最新状态已同步。',
+  'privacy.notice.server.title': '实时共享服务暂时异常',
+  'privacy.notice.server.body': '服务返回了错误，暂时无法确认同步。正在后台自动重试；共享范围保持不变，无需反复开关。',
+  'privacy.notice.rateLimited.title': '实时共享请求过于频繁',
+  'privacy.notice.rateLimited.body':
+      '服务暂时限制了请求，客户端会稍后自动重试。请勿连续点击重试；最新状态尚未确认同步。',
+  'privacy.notice.consent.title': '实时共享需要确认',
+  'privacy.notice.consent.body': '共享范围已保存，但当前没有有效的共享授权。请到设置中确认并重新应用；不会自动替你开启。',
+  'privacy.notice.identityPending.title': '正在等待游戏身份',
+  'privacy.notice.identityPending.body':
+      '尚未取得共享所需的游戏身份，当前不会发送实时状态。身份就绪后会再次检查，请在账号与识别中查看。',
+  'privacy.notice.signIn.title': '实时共享需要重新登录',
+  'privacy.notice.signIn.body': '服务未接受当前登录凭据，已停止继续共享。请检查登录状态，再到共享设置中确认恢复。',
+  'privacy.notice.permission.title': '实时共享未获允许',
+  'privacy.notice.permission.body':
+      '服务拒绝了此次共享，已停止继续发送。请确认账号权限并重新确认共享，不会自动扩大共享范围。',
+  'privacy.notice.contract.title': '实时共享确认异常',
+  'privacy.notice.contract.body':
+      '服务未返回可验证的共享确认，已停止继续发送以保护隐私。请检查客户端与服务版本，再确认共享。',
+  'privacy.notice.local.title': '无法读取或保存共享设置',
+  'privacy.notice.local.body': '本机共享设置读取或保存失败，无法确认共享状态。请在设置中重新读取；已有共享范围不会被覆盖。',
+  'privacy.notice.statusRead.title': '暂时无法读取共享状态',
+  'privacy.notice.statusRead.body':
+      '客户端未能从后台服务读取最新结果，不能据此判断网络或服务器故障。正在自动重试读取，暂时无法确认同步。',
+  'privacy.notice.withdrawal.title': '正在确认停止共享',
+  'privacy.notice.withdrawal.body':
+      '停止请求尚未获得服务确认，正在自动重试撤回。服务仍可能短暂显示之前的状态；不会重新开启共享。',
+  'privacy.notice.reconnecting.title': '正在恢复实时共享',
+  'privacy.notice.reconnecting.body': '连接暂时中断，正在自动重试。已保存的共享范围不变。',
+  'privacy.notice.retry': '立即重试',
   'privacy.notice.waiting.title': '实时共享未生效',
-  'privacy.notice.waiting.body': '同步已开启，但尚未确认生效。请查看共享状态。',
+  'privacy.notice.waiting.body':
+      '尚未获得当前共享设置的有效确认，暂不能确定原因。正在继续检查；请查看共享设置，勿反复切换开关。',
   'privacy.notice.failed.title': '实时共享异常',
   'privacy.notice.failed.body': '无法确认实时状态已同步。共享范围未改变，请查看原因并处理。',
   'privacy.notice.identity.title': '实时共享等待身份确认',
@@ -45,8 +81,9 @@ const simplifiedPrivacyScopeSettingsStrings = <String, String>{
   'privacy.scope.live.identityRequired': '等待游戏身份确认',
   'privacy.scope.live.publishing': '正在应用…',
   'privacy.scope.live.pending': '等待服务器确认',
-  'privacy.scope.live.reconnecting': '正在恢复连接',
+  'privacy.scope.live.reconnecting': '连接暂时中断，正在自动重试。也可立即重试。',
   'privacy.scope.live.applied': '共享已生效',
+  'privacy.scope.live.organizationPending': '已按保存的范围共享，组织范围待确认',
   'privacy.scope.live.legacyApplied': '已有共享仍在生效，逐组织设置暂不可用。',
   'privacy.scope.live.withdrawn': '共享已停止',
   'privacy.scope.live.failed': '未能确认状态',
@@ -123,8 +160,41 @@ const simplifiedPrivacyScopeSettingsStrings = <String, String>{
 };
 
 const traditionalPrivacyScopeSettingsStrings = <String, String>{
+  'privacy.notice.network.title': '即時分享連線中斷',
+  'privacy.notice.network.body':
+      '未能建立或維持與服務的連線，暫時無法確認同步。正在背景自動重試；若持續出現，請檢查網路或代理。',
+  'privacy.notice.timeout.title': '即時分享請求逾時',
+  'privacy.notice.timeout.body': '未在時限內收到確認，可能與網路或服務回應較慢有關。正在自動重試，尚未確認最新狀態已同步。',
+  'privacy.notice.server.title': '即時分享服務暫時異常',
+  'privacy.notice.server.body': '服務傳回錯誤，暫時無法確認同步。正在背景自動重試；分享範圍不變，無須反覆切換開關。',
+  'privacy.notice.rateLimited.title': '即時分享請求過於頻繁',
+  'privacy.notice.rateLimited.body': '服務暫時限制請求，稍後會自動重試。請勿連續點擊重試；最新狀態尚未確認同步。',
+  'privacy.notice.consent.title': '即時分享需要確認',
+  'privacy.notice.consent.body': '分享範圍已儲存，但目前沒有有效授權。請到設定中確認並重新套用；不會自動替你開啟。',
+  'privacy.notice.identityPending.title': '正在等待遊戲身分',
+  'privacy.notice.identityPending.body':
+      '尚未取得分享所需的遊戲身分，目前不會傳送即時狀態。身分就緒後會再次檢查，請到帳號與識別查看。',
+  'privacy.notice.signIn.title': '即時分享需要重新登入',
+  'privacy.notice.signIn.body': '服務未接受目前的登入憑證，已停止繼續分享。請檢查登入狀態，再到分享設定確認恢復。',
+  'privacy.notice.permission.title': '即時分享未獲允許',
+  'privacy.notice.permission.body': '服務拒絕此次分享，已停止傳送。請確認帳號權限並重新確認分享，不會自動擴大分享範圍。',
+  'privacy.notice.contract.title': '即時分享確認異常',
+  'privacy.notice.contract.body':
+      '服務未傳回可驗證的分享確認，已停止繼續傳送以保護隱私。請檢查用戶端與服務版本，再確認分享。',
+  'privacy.notice.local.title': '無法讀取或儲存分享設定',
+  'privacy.notice.local.body': '本機分享設定讀取或儲存失敗，無法確認分享狀態。請在設定中重新讀取；已有範圍不會被覆寫。',
+  'privacy.notice.statusRead.title': '暫時無法讀取分享狀態',
+  'privacy.notice.statusRead.body':
+      '未能從背景服務讀取最新結果，不能據此判斷網路或伺服器故障。正在自動重試讀取，暫時無法確認同步。',
+  'privacy.notice.withdrawal.title': '正在確認停止分享',
+  'privacy.notice.withdrawal.body':
+      '停止請求尚未獲得服務確認，正在自動重試撤回。服務可能短暫顯示之前的狀態；不會重新開啟分享。',
+  'privacy.notice.reconnecting.title': '正在恢復即時共享',
+  'privacy.notice.reconnecting.body': '連線暫時中斷，正在自動重試。已儲存的共享範圍不變。',
+  'privacy.notice.retry': '立即重試',
   'privacy.notice.waiting.title': '即時共享未生效',
-  'privacy.notice.waiting.body': '同步已開啟，但尚未確認生效。請查看共享狀態。',
+  'privacy.notice.waiting.body':
+      '尚未取得目前分享設定的有效確認，暫不能確定原因。正在繼續檢查；請查看分享設定，勿反覆切換開關。',
   'privacy.notice.failed.title': '即時共享異常',
   'privacy.notice.failed.body': '無法確認即時狀態已同步。共享範圍未變更，請查看原因並處理。',
   'privacy.notice.identity.title': '即時共享等待身分確認',
@@ -169,8 +239,9 @@ const traditionalPrivacyScopeSettingsStrings = <String, String>{
   'privacy.scope.live.identityRequired': '等待遊戲身分確認',
   'privacy.scope.live.publishing': '正在套用…',
   'privacy.scope.live.pending': '等待伺服器確認',
-  'privacy.scope.live.reconnecting': '正在恢復連線',
+  'privacy.scope.live.reconnecting': '連線暫時中斷，正在自動重試。也可立即重試。',
   'privacy.scope.live.applied': '共享已生效',
+  'privacy.scope.live.organizationPending': '已按儲存的範圍共享，組織範圍待確認',
   'privacy.scope.live.legacyApplied': '既有共享仍在生效，逐組織設定暫不可用。',
   'privacy.scope.live.withdrawn': '共享已停止',
   'privacy.scope.live.failed': '未能確認狀態',
@@ -247,9 +318,36 @@ const traditionalPrivacyScopeSettingsStrings = <String, String>{
 };
 
 const englishPrivacyScopeSettingsStrings = <String, String>{
+  'privacy.notice.network.title': 'Live sharing connection interrupted',
+  'privacy.notice.network.body': 'The connection could not be established or maintained. Sync is unconfirmed; retrying automatically. If this persists, check your network or proxy.',
+  'privacy.notice.timeout.title': 'Live sharing request timed out',
+  'privacy.notice.timeout.body': 'Confirmation did not arrive in time. The network or service may be slow. Retrying automatically; the latest state is not confirmed as synced.',
+  'privacy.notice.server.title': 'Live sharing service error',
+  'privacy.notice.server.body': 'The service returned an error. Sync is unconfirmed; retrying automatically. Your sharing scope is unchanged. There is no need to toggle sharing.',
+  'privacy.notice.rateLimited.title': 'Live sharing requests limited',
+  'privacy.notice.rateLimited.body': 'The service is limiting requests. The app will retry later. Avoid repeated retries; the latest state is not confirmed as synced.',
+  'privacy.notice.consent.title': 'Confirm live sharing',
+  'privacy.notice.consent.body': 'Your scope is saved, but sharing does not currently have valid consent. Review and reapply it in settings. It will not be enabled automatically.',
+  'privacy.notice.identityPending.title': 'Waiting for game identity',
+  'privacy.notice.identityPending.body': 'The game identity needed for sharing is not ready. No live state is being sent. It will be checked again when ready; review Account and identity.',
+  'privacy.notice.signIn.title': 'Sign in again for live sharing',
+  'privacy.notice.signIn.body': 'The service did not accept the current credentials. Sharing has stopped. Check your sign-in, then confirm sharing again in settings.',
+  'privacy.notice.permission.title': 'Live sharing was not permitted',
+  'privacy.notice.permission.body': 'The service refused sharing, so sending has stopped. Check account permissions and confirm sharing again. Your scope will not be expanded automatically.',
+  'privacy.notice.contract.title': 'Live sharing confirmation invalid',
+  'privacy.notice.contract.body': 'The service did not return a verifiable confirmation. Sending has stopped to protect privacy. Check client and service versions, then confirm sharing again.',
+  'privacy.notice.local.title': 'Cannot read or save sharing settings',
+  'privacy.notice.local.body': 'Local settings could not be read or saved. Sharing status is unconfirmed. Reload settings; your existing scope will not be overwritten.',
+  'privacy.notice.statusRead.title': 'Sharing status is unavailable',
+  'privacy.notice.statusRead.body': 'The latest result could not be read from the background service. This does not establish a network or server fault. Retrying reads automatically; sync is unconfirmed.',
+  'privacy.notice.withdrawal.title': 'Confirming sharing has stopped',
+  'privacy.notice.withdrawal.body': 'The service has not confirmed the stop request. Retrying withdrawal automatically. Previous state may remain visible briefly; sharing will not be re-enabled.',
+  'privacy.notice.reconnecting.title': 'Restoring live sharing',
+  'privacy.notice.reconnecting.body': 'The connection was interrupted. Retrying automatically with your saved sharing scope.',
+  'privacy.notice.retry': 'Retry now',
   'privacy.notice.waiting.title': 'Live sharing is not confirmed',
   'privacy.notice.waiting.body':
-      'Sync is enabled but has not taken effect. Check sharing status.',
+      'The current sharing settings have not been confirmed; the cause is not yet known. Checks are continuing. Review sharing settings rather than repeatedly toggling the switch.',
   'privacy.notice.failed.title': 'Live sharing needs attention',
   'privacy.notice.failed.body': 'Live status sync could not be confirmed. Your sharing scope is unchanged. Check the issue in settings.',
   'privacy.notice.identity.title': 'Live sharing needs identity confirmation',
@@ -301,8 +399,11 @@ const englishPrivacyScopeSettingsStrings = <String, String>{
   'privacy.scope.live.identityRequired': 'Waiting for game identity',
   'privacy.scope.live.publishing': 'Applying…',
   'privacy.scope.live.pending': 'Waiting for server confirmation',
-  'privacy.scope.live.reconnecting': 'Reconnecting',
+  'privacy.scope.live.reconnecting':
+      'Connection interrupted. Retrying automatically; you can also retry now.',
   'privacy.scope.live.applied': 'Sharing is active',
+  'privacy.scope.live.organizationPending':
+      'Sharing uses your saved scopes. Organization scopes need confirmation.',
   'privacy.scope.live.legacyApplied':
       'Existing sharing is active. Per-organization settings are unavailable.',
   'privacy.scope.live.withdrawn': 'Sharing is stopped',
