@@ -23,7 +23,7 @@
 | --- | --- |
 | [官网下载](https://scstarbridge.com/) | 查看当前版本、更新公告和文件校验信息。 |
 | [0.7.0.5 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.5-20261004-01-win-x64-setup.exe) | 下载后校验文件身份，可离线安装。 |
-| [0.7.0.3 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe) | 上一已发布版本，下载后可离线安装。 |
+| [0.7.0.4 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.0.4-20261003-03-win-x64-setup.exe) | 上一已发布版本，下载后可离线安装。 |
 | [查看全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases) | 查看更新说明、历史版本和 SHA-256 校验文件。 |
 
 版本发布状态以官网公告和正式 GitHub Release 为准；源码更新不等于更新渠道已切换。
