@@ -33,6 +33,14 @@ internal static class DesktopNotificationCardTests
     // a compact click-through card in game. Renders every kind in both themes for review.
     private static void VerifyTradeCardLook()
     {
+        var clientAreaAnimation = SystemParameters.ClientAreaAnimation;
+        var renderingTier = RenderCapability.Tier >> 16;
+        var motionAvailable = clientAreaAnimation && renderingTier > 0;
+        if (UiMotion.IsEnabled != motionAvailable ||
+            DesktopNotificationMotion.Enabled(false) != motionAvailable ||
+            DesktopNotificationMotion.Enabled(true))
+            throw new Exception("Trade motion must respect both the system capability and reduced-motion preference.");
+        VerifyTradeStampMotionBranches();
         var output = Path.Combine(AppContext.BaseDirectory, "trade-cards");
         Directory.CreateDirectory(output);
         var kinds = new (string Kind, string Title, int Quantity, string Amount)[] {
@@ -40,6 +48,8 @@ internal static class DesktopNotificationCardTests
             ("receipt", "收货提醒", 0, ""), ("completed", "对方已确认收货", 10, "6,500"), ("cancelled", "交易已取消", 1, ""),
             ("review", "收到交易评价", 0, ""), ("update", "交易提醒", 0, ""), ("message", "新的交易私信 · Kestrel", 0, "") };
         var count = 0;
+        var animatedStamps = 0;
+        var staticStamps = 0;
         foreach (var appearance in new[] { "dark", "light" })
         foreach (var reduce in new[] { true, false })
         foreach (var (kind, title, quantity, amount) in kinds)
@@ -66,10 +76,11 @@ internal static class DesktopNotificationCardTests
                 var stamp = parts.First(p => p.Name == "TradeStamp");
                 if (stamp.IsHitTestVisible || stamp.Focusable)
                     throw new Exception("Stamp is decoration only.");
-                if (reduce && (stamp.Opacity != 1 || stamp.HasAnimatedProperties))
-                    throw new Exception("Reduced motion: the stamp is static.");
-                if (!reduce && !stamp.HasAnimatedProperties)
-                    throw new Exception("Normal motion: the stamp settles in.");
+                // Exercise the real card constructors, not just the motion helper.
+                // Capability-disabled motion is a required static branch, never a skip.
+                var shouldAnimate = !reduce && motionAvailable;
+                AssertTradeStampMotion(stamp, shouldAnimate, ReferenceEquals(root, big) ? -14 : -12);
+                if (shouldAnimate) animatedStamps++; else staticStamps++;
                 var text = string.Join("|", parts.OfType<TextBlock>().Select(t => t.Text));
                 if (hidden && (text.Contains("P4-AR") || text.Contains("Kestrel") || text.Contains("18,000") || !text.Contains("你有新的交易提醒")))
                     throw new Exception("Hidden details show only the generic trade line.");
@@ -97,6 +108,7 @@ internal static class DesktopNotificationCardTests
             count++;
         }
         Console.WriteLine($"PASS trade card look: {count} kind/theme/motion/privacy combinations, big + compact; renders in trade-cards/");
+        Console.WriteLine($"PASS trade card motion routing: clientAreaAnimation={clientAreaAnimation}, renderingTier={renderingTier}, animated={animatedStamps}, static={staticStamps}; no skipped branch assertions");
         // User 10-29: only the app's switches decide. Windows DND / quiet time never block a trade alert;
         // locked or screen-saver (1), presentation (4), unknown shell states and an inactive desktop do.
         var combinations = 0;
@@ -116,6 +128,40 @@ internal static class DesktopNotificationCardTests
             NativeDesktopNotificationRuntime.WithTradePresentation(plain with { Trade = null }, true).Trade is not null)
             throw new Exception("Trade presentation must be prepared without changing content.");
         Console.WriteLine($"PASS trade gate: {combinations} shell/desktop combinations (Windows DND and quiet time never block); compact flag set without changing content");
+    }
+
+    private static void VerifyTradeStampMotionBranches()
+    {
+        // Test both rendering branches even on a CI worker without hardware motion.
+        // The real cards above still have to choose the branch using the actual capability.
+        foreach (var angle in new[] { -14d, -12d })
+        foreach (var animate in new[] { false, true }) {
+            var stamp = new Border();
+            TradeLook.Press(stamp, angle, animate);
+            AssertTradeStampMotion(stamp, animate, angle);
+        }
+        Console.WriteLine("PASS trade stamp motion: explicit animated/static branches at both card angles (4 cases)");
+    }
+
+    private static void AssertTradeStampMotion(FrameworkElement stamp, bool shouldAnimate, double angle)
+    {
+        if (stamp.RenderTransformOrigin != new Point(0.5, 0.5) ||
+            stamp.RenderTransform is not TransformGroup { Children.Count: 2 } group ||
+            group.Children[0] is not ScaleTransform scale ||
+            group.Children[1] is not RotateTransform rotation || rotation.Angle != angle)
+            throw new Exception("Trade stamp motion must preserve its centered scale and card-specific angle.");
+        if (rotation.HasAnimatedProperties)
+            throw new Exception("Trade stamp rotation must stay fixed in either motion branch.");
+        if (shouldAnimate) {
+            // Press delays its animations by 120 ms. HasAnimatedProperties includes
+            // pending clocks; GetValueSource(...).IsAnimated does not, until they start.
+            // Do not turn this routing check into a wall-clock/frame-timing test.
+            if (!stamp.HasAnimatedProperties || !scale.HasAnimatedProperties)
+                throw new Exception("Available normal motion: the stamp must queue opacity and scale animations.");
+        } else if (stamp.HasAnimatedProperties || scale.HasAnimatedProperties || rotation.HasAnimatedProperties ||
+                   stamp.Opacity != 1 || scale.ScaleX != 1 || scale.ScaleY != 1) {
+            throw new Exception("Reduced or unavailable motion: the stamp must be fully visible and static at its final scale.");
+        }
     }
 
     internal static void RunAll()
